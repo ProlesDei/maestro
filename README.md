@@ -11,7 +11,7 @@ maestro bundles a full suite of agent roles, skills, and tools. Install it, give
 | Roles | Agent definitions. Each role owns one part of the delivery process. |
 | Skills | Reusable instructions agents load for specific tasks. |
 | Tools | Scripts and commands the agents call to do the work. |
-| Bot profiles | Bot definitions in `bot-profiles/` that outside tools, such as Grok, read and copy to create bots. |
+| Bot profiles | One folder per bot in `bot-profiles/<name>/`, with the profile and any supporting files. Outside tools, such as Grok, read a folder and copy it to create the bot. |
 
 ## How it works
 
