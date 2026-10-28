@@ -10,7 +10,7 @@ Stack: TBD.
 
 Layout:
 - `docs/agent-team.mermaid`: diagram of the agent roles and how work flows between them. README.md embeds a copy; update both together.
-- `bot-profiles/`: one folder per bot (`bot-profiles/<name>/`) that outside tools (e.g. Grok) read and copy to create bots. Each folder holds `profile.md` and any supporting files for that persona. Not loaded by this repo. Format in `bot-profiles/README.md`.
+- `bot-profiles/`: one folder per bot (`bot-profiles/<name>/persona.md`) that outside tools (e.g. Grok) read and copy to create bots. Each folder holds the persona and any supporting files for it. Not loaded by this repo. Format in `bot-profiles/README.md`.
 
 ## Commands
 
