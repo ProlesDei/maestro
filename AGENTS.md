@@ -6,7 +6,10 @@ Instructions for coding agents (Claude Code, Codex, Grok Build). This file is th
 
 maestro: an installable, automated agentic workflow that takes products from plan to ship. It packages agent roles, skills, and tools so a user can install it, add project context, and run the workflow. See README.md.
 
-Stack and layout: TBD.
+Stack: TBD.
+
+Layout:
+- `bot-profiles/`: bot definitions that outside tools (e.g. Grok) read and copy to create bots. Not loaded by this repo. Format in `bot-profiles/README.md`.
 
 ## Commands
 
