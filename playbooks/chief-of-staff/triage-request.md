@@ -1,63 +1,71 @@
 ---
 name: triage-request
-description: Turn a user request into the right work, a ticket for a small task or a planning ticket for a big project, and tell the user what happens next.
+description: Turn a user request into a direct answer or a workstream for the Planner, and tell the user what happens next.
 role: chief-of-staff
 trigger: request
 claims: none
+types: none
 ---
 
 # Triage a request
 
 ## Goal
 
-Every user request ends up as exactly one clear piece of work on the board, or a direct answer, without the user having to explain it twice.
+Every user request ends up as a direct answer or as clear work for one workstream's Planner, without the user having to explain it twice. You manage goals and workstreams, never individual tickets.
 
 ## When to use
 
-A request from the user arrives in the prompt. Not for escalations or approval answers on an existing ticket: use `handle-escalation`.
+A request from the user arrives in the prompt. Not for answers to an open escalation (use `handle-escalation`), or for a digest or recap (use `digest` or `recap`).
 
 ## Steps
 
-### 1. Understand the request
+### 1. Read the summaries
 
-- **Goal:** Know what the user wants, whether it's already on the board, and how big it is.
-- **Skill:** none
-- **Tier:** Frontier
-- **Done when:** The request is classed as one of: answer only, small task, big project, infrastructure request. Related tickets are listed.
-  - Small task: one ticket, one role, done is easy to test.
-  - Big project: needs a spec or several tickets.
-- **Evidence:** `maestro-ticket list --json` exit code; ids of related or duplicate tickets; `.maestro/Backlog.md` read.
+- **Goal:** Know what's already under way.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `summary`
+- **Done when:** Exit `0` with the active goals, workstreams and spend.
+- **Evidence:** exit code; the workstream ids read.
 
-Read summaries only: the backlog, tickets, `.maestro/project-setup.md`. Don't read code. If the request is unclear in a way that changes the work, stop and ask the user one short question with a recommended answer.
+### 2. Understand the request
 
-### 2. Write the ticket
+- **Goal:** Know what the user wants, which goal it serves, and whether a workstream already covers it.
+- **Role:** bot
+- **Skill:** `none`
+- **Model:** Bot
+- **Done when:** The request is classed as one of: answer only; new work for an existing workstream (including `small-tasks` for a small ask that fits no goal); a new workstream. The goal it serves is named, or it is flagged as outside the active bets.
+- **Evidence:** the class; the goal and workstream ids.
 
-- **Goal:** Put the work on the board for the right role.
-- **Skill:** none
-- **Tier:** Mid-tier
-- **Done when:** One ticket exists, created with `maestro-ticket create --title ... --body ... --role <R> --priority <0-3> --idempotency-key <session-id>:create`.
-  - Small task: role `senior-software-engineer` if complex or risky, `junior-software-engineer` if routine. Body: goal, testable acceptance criteria, pointers, constraints.
-  - Big project: role `planner`, title `Plan: <goal>`. Body: the goal, constraints, deadlines, what the Planner may decide on its own.
-  - Infrastructure request: role `operations-manager`. Body: what's needed and why.
-  - Duplicate: no new ticket; comment on the existing one instead.
+Unclear in a way that changes the work, or outside the active bets: ask the user one short question with a recommended answer (`talk-to-user`) and stop until they answer.
+
+### 3. Hand it to a Planner
+
+- **Goal:** The work is with the Planner who owns the workstream.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `ticket create --type scout --owner planner --role planner --title "Plan: <workstream>" --body "Type: investigation. <goal, constraints, deadlines, what the Planner may decide alone>" --idempotency-key <session-id>:plan`
+- **Skip when:** the request is answer only.
+- **Done when:** Exit `0` with the new ticket id. For an existing workstream, the body names it; a small ask that fits no goal names `small-tasks`. This `Plan:` ticket is the only ticket you write: it stands in for the workstream (decision 0504).
 - **Evidence:** the new ticket id and version.
 
-Skip this step for answer only.
-
-### 3. Tell the user
+### 4. Tell the user
 
 - **Goal:** The user knows what happens next.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** You've sent the user the ticket id, the role it went to and one line on what's next. No harness prompt.
-- **Evidence:** the ticket id from step 2.
+- **Role:** bot
+- **Skill:** `talk-to-user`
+- **Model:** Bot
+- **Done when:** You've sent the answer, or the workstream and one line on what's next.
+- **Evidence:** the message sent; the ticket id from step 3, if any.
 
 ## Stop and block when
 
-- The request needs a decision only the user can make: ask, and write no ticket until they answer.
-- The request goes against `.maestro/rules.md` or the trust level: tell the user why, and write no ticket.
+- The request needs a decision only the user can make: ask, and create nothing until they answer.
+- The request goes against `.maestro/rules.md` or the trust level: tell the user why, and create nothing.
 
 ## Wrap-up
 
-- Status: no change (nothing claimed). Log the created ticket id.
-- Handoff note: none. The ticket body is the handoff.
+- Skill: `maestro-log-entry` (nothing claimed, no status change). Log the class, the ticket id if any, and any `Skipped:` steps.
+- Handoff note: none. The planning ticket's body is the handoff.

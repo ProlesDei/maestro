@@ -1,0 +1,6 @@
+# 0222 An outbox row for every event, in the same transaction
+
+- **Context:** A later wake hook needs to push events to bots without a lost or phantom delivery. The user asked for an outbox table now, delivery later.
+- **Choice:** Schema v3 adds `outbox (id, event_id UNIQUE → events.seq, kind, payload, attempts, next_attempt_at, delivered_at)`. `appendEvent` writes the event and its outbox row in the caller's transaction: `kind` is the event type, `payload` is the event exactly as `events --json` prints it, `attempts` 0, `next_attempt_at` the event time, `delivered_at` NULL. A partial index covers pending rows. Migrating an older store backfills one row per existing event, already delivered, so a new hook doesn't replay history. Outbox rows aren't append-only: a hook may update and prune them. `doctor` fails if any event lacks an outbox row. No delivery code or CLI yet.
+- **Alternatives:** Leave old events out of the outbox (breaks "one row per event", which doctor can check); backfill them as pending (a new hook would wake every bot for months of history); fill the outbox from a trigger (keeps the payload format in SQL, away from `ticket.Event`).
+- **Why:** The transactional outbox is the standard way to deliver at least once without two-phase commit. `events --since` stays the source of truth; the outbox only tracks delivery.

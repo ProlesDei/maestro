@@ -1,20 +1,22 @@
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. a Grok or Claude bot<br/>Thinks, decides and prompts. Never touches files itself<br/><i>How it's started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. a Grok or Claude bot<br/>Thinks, decides and prompts. Never touches files or runs commands<br/><i>How it's started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
-        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P3["<b>Bot skills</b><br/>How to prompt and<br/>judge each step"] ~~~ P4["<b>optimizations.md</b><br/>General role tuning,<br/>improved upstream"] ~~~ P5["<b>Shared bot skills</b><br/>harness CLI · prompt contract ·<br/>choosing a model per step"]
+        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"] ~~~ P3["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P5["<b>Bot skills</b><br/>runner · prompt contract ·<br/>choosing a model per step"]
     end
 
+    Runner["<b>Runner</b> · no tokens<br/>The bot's only way into their repo<br/>Named requests, allowed by role and trust level<br/>Stop file checked first · usage recorded"]
+
     subgraph Loop ["Session loop: identical for every role"]
-        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, maestro-ticket doctor passes, git clean<br/>Read .maestro/environment.md and the trust level"]
-        B1["<b>Start a harness session with launch flags</b><br/>Team rules · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
+        B0["<b>Preflight</b>, through the runner<br/>Stop file set? Stop<br/>Health check: harness logged in, maestro-ticket doctor passes, git clean<br/>Environment, trust level, budgets"]
+        B1["<b>Start a harness session with launch flags</b><br/>.maestro/rules.md · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
         B2["<b>Prompt: check intake</b> · maestro-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
-        B3["<b>Pick the playbook</b><br/>Prompt: claim the work · maestro-claim"]
-        B4["<b>Next step</b><br/>Pick the model tier for this step<br/>Write the prompt, naming the harness skill"]
+        B3["<b>Pick the playbook</b><br/>Prompt: claim the work · maestro-claim<br/>The claim keeps the lease alive in the background"]
+        B4["<b>Next step</b><br/>Pick the model tier for this step<br/>No tokens: a runner request<br/>Otherwise a prompt naming the harness skill"]
         B5["<b>Check the structured reply</b><br/>Goal met? Evidence included?"]
         B6{"Result?"}
-        B7["<b>Prompt: wrap up</b>, batched · maestro-wrap-up<br/>Status · handoff note · memory proposals ·<br/>one-line retro: what slowed me down? · log"]
+        B7["<b>Prompt: wrap up</b>, batched<br/>maestro-propose-memory, to the inbox ·<br/>maestro-handoff-note or maestro-escalate ·<br/>maestro-log-entry: retro, what slowed me down?"]
         B8["<b>Clean up</b> · hook if available, else maestro-clean-up<br/>Scratchpad · temp files · processes · worktree · claim<br/>Then close the harness session"]
         B9{"More in intake?"}
         B10(["Session ends"])
@@ -24,15 +26,15 @@ flowchart TD
 
     subgraph HarnessSide ["Their repo · the harness does all the work"]
         H["<b>Harness session</b>, headless<br/>Claude Code · Codex · Grok Build"]
-        Loads["<b>Uses our footprint only</b><br/>.maestro/ rules, project-setup.md and memory<br/>maestro-* skills, loaded only when named"]
-        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: maestro-ticket · files and code ·<br/>git on maestro/ branches · tests and commands"]
+        Loads["<b>Uses our footprint only</b><br/>.maestro/rules.md · project/ setup and memory<br/>maestro-* skills, loaded only when named"]
+        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: maestro-ticket · files and code ·<br/>commits on maestro/ branches · tests and the running app"]
     end
 
-    Guard["<b>Guardrails</b><br/>Trust levels: propose-only at first · kill switch ·<br/>role permissions · budgets and retry limits ·<br/>approval gates · secrets never in prompts, replies or logs"]
+    Guard["<b>Guardrails</b><br/>Trust levels: propose-only at first · stop file ·<br/>role permissions · budgets and retry limits ·<br/>approval gates · secrets never in prompts, replies or logs"]
 
     subgraph Roles ["Same anatomy, different profiles: what each role lets the harness do"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Read summaries ·<br/>write its own tickets"] ~~~ E2["<b>Planner</b><br/>Full ticket system ·<br/>read-only code"] ~~~ E3["<b>Engineers</b><br/>Edit code on<br/>maestro/ branches"] ~~~ E4["<b>Code Reviewer</b><br/>Read-only code<br/>and diffs"] ~~~ E5["<b>QA Lead</b><br/>Run tests and the app ·<br/>read-only code"] ~~~ E6["<b>Operations</b><br/>Merge · deploy ·<br/>run the improvement loop"]
+        E1["<b>Chief of Staff</b><br/>Read summaries ·<br/>goals and workstreams"] ~~~ E2["<b>Planner</b><br/>One workstream's tickets ·<br/>read-only code"] ~~~ E3["<b>Engineers</b><br/>Edit and commit on<br/>maestro/ branches"] ~~~ E4["<b>Code Reviewer</b><br/>Read-only code<br/>and diffs"] ~~~ E5["<b>QA Lead</b><br/>Run tests and the app ·<br/>read-only code"] ~~~ E6["<b>Operations</b><br/>PRs, merges, deploys by trust level ·<br/>memory · improvement loop"]
     end
 
     Runtime -->|"loads the profile it's configured for"| Profile
@@ -40,12 +42,15 @@ flowchart TD
     Guard -.-> B0
     B0 --> B1 --> B2 --> B3 --> B4
     Contract -.->|"shapes every prompt"| B4
+    B0 -.->|"requests"| Runner
+    B4 -.->|"no-token steps"| Runner
+    Runner ==>|"launches with flags"| H
     B4 ==>|"prompt"| H
     H ==>|"structured reply"| B5
     B5 --> B6
     B6 -->|"step done, more to do"| B4
     B6 -->|"not right, within budget:<br/>sharper prompt"| B4
-    B6 -->|"stuck or over budget:<br/>set Blocked"| B7
+    B6 -->|"stuck or over budget:<br/>escalate"| B7
     B6 -->|"playbook done"| B7
     B7 --> B8 --> B9
     B9 -->|"yes: new session"| B0
@@ -64,10 +69,10 @@ flowchart TD
     classDef note fill:#ffe0b2,stroke:#e65100,color:#1a1a1a
 
     class Runtime,B10 runtime
-    class P1,P2,P3,P4 profile
+    class P1,P2,P3 profile
     class P5,Contract shared
     class B0,B1,B2,B3,B4,B5,B6,B7,B8,B9 step
     class H,Work harness
-    class Loads ours
+    class Loads,Runner ours
     class E1,E2,E3,E4,E5,E6 role
     class Guard note

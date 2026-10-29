@@ -21,7 +21,7 @@ func claimSuffix(c *ticket.Claim) string {
 	if c.Expired {
 		return fmt.Sprintf(" (claim by %s expired)", c.Holder)
 	}
-	return fmt.Sprintf(" (claimed by %s until %s)", c.Holder, c.ExpiresAt.Format(time.RFC3339))
+	return fmt.Sprintf(" (claimed by %s, token %d, until %s)", c.Holder, c.Token, c.ExpiresAt.Format(time.RFC3339))
 }
 
 func claimText(c *ticket.Claim) string {
@@ -44,8 +44,21 @@ func dash(s string) string {
 
 func printDetail(w io.Writer, d ticket.Detail) {
 	fmt.Fprintf(w, "%s  %s\n", d.ID, d.Title)
-	fmt.Fprintf(w, "status:   %s\n", d.Status)
+	fmt.Fprintf(w, "type:     %s\n", d.Type)
+	fmt.Fprintf(w, "status:   %s%s\n", d.Status, blockedText(d.Ticket))
 	fmt.Fprintf(w, "role:     %s\n", dash(d.Role))
+	fmt.Fprintf(w, "owner:    %s\n", dash(d.Owner))
+	fmt.Fprintf(w, "tries:    %d\n", d.Tries)
+	if len(d.DependsOn) > 0 {
+		ids := make([]string, len(d.DependsOn))
+		for i, id := range d.DependsOn {
+			ids[i] = id.String()
+		}
+		fmt.Fprintf(w, "deps:     %s\n", strings.Join(ids, " "))
+	}
+	if len(d.Areas) > 0 {
+		fmt.Fprintf(w, "areas:    %s\n", strings.Join(d.Areas, " "))
+	}
 	fmt.Fprintf(w, "priority: P%d\n", d.Priority)
 	fmt.Fprintf(w, "version:  %d\n", d.Version)
 	fmt.Fprintf(w, "claim:    %s%s\n", claimText(d.Claim), expiresText(d.Claim))
@@ -59,11 +72,18 @@ func printDetail(w io.Writer, d ticket.Detail) {
 	}
 }
 
+func blockedText(t ticket.Ticket) string {
+	if t.Status != ticket.StatusBlocked || t.BlockedFrom == "" {
+		return ""
+	}
+	return " (from " + string(t.BlockedFrom) + ")"
+}
+
 func expiresText(c *ticket.Claim) string {
 	if c == nil || c.Expired {
 		return ""
 	}
-	return " until " + c.ExpiresAt.Format(time.RFC3339)
+	return fmt.Sprintf(" token %d until %s", c.Token, c.ExpiresAt.Format(time.RFC3339))
 }
 
 func printList(w io.Writer, list []ticket.Ticket) {
@@ -72,9 +92,10 @@ func printList(w io.Writer, list []ticket.Ticket) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tP\tROLE\tCLAIM\tV\tTITLE")
+	fmt.Fprintln(tw, "ID\tTYPE\tSTATUS\tP\tROLE\tCLAIM\tTRIES\tV\tTITLE")
 	for _, t := range list {
-		fmt.Fprintf(tw, "%s\t%s\tP%d\t%s\t%s\t%d\t%s\n", t.ID, t.Status, t.Priority, dash(t.Role), claimText(t.Claim), t.Version, t.Title)
+		fmt.Fprintf(tw, "%s\t%s\t%s\tP%d\t%s\t%s\t%d\t%d\t%s\n",
+			t.ID, t.Type, t.Status, t.Priority, dash(t.Role), claimText(t.Claim), t.Tries, t.Version, t.Title)
 	}
 	tw.Flush()
 }
@@ -99,4 +120,16 @@ func printDoctor(w io.Writer, rep ticket.DoctorReport) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", mark, c.Name, c.Detail)
 	}
 	tw.Flush()
+}
+
+func printReap(w io.Writer, r ticket.ReapResult) {
+	if len(r.Reaped) == 0 {
+		fmt.Fprintln(w, "reaped 0 expired leases")
+		return
+	}
+	ids := make([]string, len(r.Reaped))
+	for i, id := range r.Reaped {
+		ids[i] = id.String()
+	}
+	fmt.Fprintf(w, "reaped %d expired leases: %s\n", len(r.Reaped), strings.Join(ids, " "))
 }

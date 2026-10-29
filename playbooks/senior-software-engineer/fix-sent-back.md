@@ -1,9 +1,10 @@
 ---
 name: fix-sent-back
-description: Fix a ticket sent back by failed checks, a code review or QA, address each item, and resubmit.
+description: Fix a ticket the Code Reviewer or QA sent back, address each item, and resubmit, blocking it once Tries is 3 above where you took it over.
 role: senior-software-engineer
 trigger: sent-back
 claims: in_progress
+types: feature, bug, chore, docs
 ---
 
 # Fix work sent back
@@ -14,54 +15,79 @@ Every item that came back is fixed, or answered with evidence, and the ticket is
 
 ## When to use
 
-An `in_progress` ticket for role `senior-software-engineer` with no live lease, whose latest `Handoff:` is one of:
-
-- checks failed
-- changes requested by the Code Reviewer
-- QA failed
+An `in_progress` ticket for role `senior-software-engineer` with no live lease, whose latest `Handoff:` is `changes requested` from the Code Reviewer or `QA failed`.
 
 ## Steps
 
-### 1. Read what came back
+### 1. Check the tries
+
+- **Goal:** Know whether this ticket gets another try.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `ticket get <id> --json`
+- **Done when:** You have `Tries` and the `tries-at-takeover` from your takeover note (0 if you built it from the start). `Tries` is 3 or more above `tries-at-takeover`: skip to Stop and block.
+- **Evidence:** version; `Tries`; `tries-at-takeover` and the comment it's from.
+
+### 2. Read what came back
 
 - **Goal:** A numbered list of what must change.
-- **Skill:** none
-- **Tier:** Frontier
-- **Done when:** Each item has its source (reviewer, QA, checks), the file or acceptance criterion, and the fix you plan. Items you disagree with are marked, with the reason.
-- **Evidence:** `maestro-ticket get <id> --json` version; the comment the items came from.
+- **Role:** harness
+- **Skill:** `maestro-read-feedback`
+- **Model:** Frontier
+- **Done when:** Each item has its source (reviewer or QA), the file or acceptance criterion, and the planned fix. Items you disagree with are marked, with the reason.
+- **Evidence:** the comment the items came from; the list.
 
-### 2. Set up the worktree
+### 3. Set up the worktree
 
 - **Goal:** A worktree on the ticket's existing branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** `$(git rev-parse --git-common-dir)/maestro/worktrees/<id>` exists on `maestro/<id>-<slug>`. If it's missing, `git worktree add <path> maestro/<id>-<slug>` exits `0`.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `worktree add <id>`
+- **Done when:** Exit `0`, on `maestro/<id>-<slug>`.
 - **Evidence:** exit code; branch and path.
 
-### 3. Fix
+### 4. Fix
 
 - **Goal:** Each item addressed, nothing else changed.
-- **Skill:** none
-- **Tier:** Frontier
-- **Done when:** Fixes and any new tests are committed; `git -C <worktree> status --porcelain` is empty. Branch and worktree are in the scratchpad.
+- **Role:** harness
+- **Skill:** `maestro-build-change`
+- **Model:** Frontier
+- **Done when:** Fixes and any new tests are committed and the worktree is clean.
 - **Evidence:** commit sha; for each item, the files changed or the reason it wasn't.
 
-### 4. Run the checks
+### 5. Run the checks
 
 - **Goal:** The project's checks pass on the branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
-- **Evidence:** each command, exit code and test counts.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `check all`
+- **Done when:** Every check exits `0`.
+- **Evidence:** each check, exit code and test counts.
 
-On a failure, go back to step 3. That counts as a retry.
+On a failure, go back to step 4. Failing checks are not a try.
+
+### 6. Verify
+
+- **Goal:** Evidence from the running app that each acceptance criterion is met.
+- **Role:** harness
+- **Skill:** `maestro-verify`
+- **Model:** Mid-tier
+- **Done when:** Every acceptance criterion passes, and every definition-of-done row a later gate doesn't own, with its evidence saved. Anything started is stopped, or listed in the scratchpad for clean-up.
+- **Evidence:** per criterion: pass or fail, and the evidence path.
+
+A failure: go back to step 4. It isn't a try.
 
 ## Stop and block when
 
-- A requested change conflicts with the ticket or another reviewer's ask: block with an `Escalation:` note that states both sides and your recommendation.
-- Retries or budget run out. Commit work in progress first.
+- `Tries` is 3 or more above `tries-at-takeover`: block with an `Escalation:` note to the owner (`maestro-escalate`): what each try changed, what keeps failing, and your recommendation.
+- A requested change conflicts with the ticket or another reviewer's ask: block with an `Escalation:` note to the owner stating both sides and your recommendation.
+- The step budget runs out: commit work in progress, then block with an `Escalation:` note to the owner.
 
 ## Wrap-up
 
+- Skill: `maestro-handoff-note` (`maestro-escalate` when blocking).
 - Status: `in_review` (resubmit).
-- Handoff note: each item and how it was fixed, or why not with evidence; commit sha; check results; `author-family: <family>`.
+- Handoff note: each item and how it was fixed, or why not with evidence; commit sha; check results; verification evidence paths; `Tries`; any `Skipped:` steps; `author-family: <family>`.

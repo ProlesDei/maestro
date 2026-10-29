@@ -1,0 +1,6 @@
+# 0404 Split wrap-up into four skills; memory goes to an inbox
+
+- **Context:** G4.4: escalate and verify didn't exist, and `maestro-wrap-up` bundled the handoff note, memory proposals, the status change, the retro and the log. It committed proposals on the ticket branch, which skips curation, and it rendered `Backlog.md` from whatever worktree ran it (F8).
+- **Choice:** Delete `maestro-wrap-up`. Wrap-up stays one batched prompt (`prompt-contract`) that names, in order: `maestro-propose-memory` (if anything), then `maestro-handoff-note` or `maestro-escalate` (each does its own lease check, comment and transition with `--release`), then `maestro-log-entry`. Proposals go to `$(git rev-parse --git-common-dir)/maestro/memory-inbox/`, shared by every worktree and never committed; the Operations Manager curates them into `.maestro/project/memory/`. The log line drops tokens and cost (the runner records usage) and adds `tries` and `failure`. No harness skill renders `Backlog.md`. Add `maestro-verify` for evidence from the running app, saved under `…/maestro/evidence/<ticket-id>/`.
+- **Alternatives:** Keep `maestro-wrap-up` as a wrapper that calls the others (skills must stand alone, so it would copy them); put the inbox in `.maestro/local/` (each worktree would have its own).
+- **Why:** One skill per job, the brief's list, and memory only lands after curation.

@@ -1,0 +1,6 @@
+# 0407 Chief of Staff works on goals and workstreams; one Planner session per workstream
+
+- **Context:** G4.5: the Chief of Staff wrote small-task tickets and owned them, watched Blocked tickets and stepped in on engineers, and one Planner owned the whole board. The brief says the Chief of Staff never manages individual tickets and each workstream gets its own Planner session.
+- **Choice:** The Chief of Staff keeps the active-bets list, splits goals into workstreams with a brief each, reads computed workstream summaries, answers Planners' escalations with `Approved:` or `Declined:`, and pauses a looping workstream through its Planner. Small requests with no goal go to a standing `small-tasks` workstream, so even one-ticket work has a Planner as owner. Each Planner session owns one workstream's tickets, closes its scout tickets (0009) and adds risks and next steps to the computed summary. The digest and recap are in the Chief of Staff's persona; their playbooks are Phase 5.
+- **Alternatives:** Let the Chief of Staff keep writing small-task tickets (breaks the settled rule, and its context is the most expensive); one Planner pool shared across workstreams (no single owner per workstream).
+- **Why:** Each layer reads only summaries from the one below, and every ticket has exactly one owner to escalate to.

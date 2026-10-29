@@ -1,28 +1,28 @@
 flowchart TD
-    Source["<b>Our repo: the source, written once</b><br/><b>bot/</b> profiles, playbooks, bot skills<br/><b>harness/</b> rules.md and harness skills<br/><b>targets/</b> one file per harness: skill paths, launch flags, permission syntax<br/><b>templates/</b> project-setup.md and environment.md<br/><b>evals/</b> golden tasks per role"]
+    Source["<b>Our repo: the source, written once</b><br/><b>bot-profiles/ · playbooks/ · skills/bot/</b> the bot side<br/><b>skills/harness/</b> rules.md and maestro-* harness skills<br/><b>docs/runner.md</b> per harness: skill paths, launch flags, permission syntax<br/><b>docs/design/project-setup.md</b> the setup template<br/><b>evals/</b> golden tasks per role, Phase 5"]
 
-    BotRuntime["<b>Bot runtime</b><br/>Gets bot/ only<br/>Nothing bot-side goes into their repo"]
+    BotRuntime["<b>Bot runtime</b><br/>Gets the bot side only<br/>Nothing bot-side goes into their repo"]
 
-    Install["<b>Install</b><br/>1 Detect which harnesses are installed and logged in<br/>2 Write environment.md<br/>3 Generate at-* skills for those harnesses only, using targets/<br/>4 Onboarding playbook drafts project-setup.md<br/>5 Start at the cautious, propose-only trust level<br/><i>Stops and reports if any target file already exists</i>"]
+    Install["<b>Install</b><br/>1 Detect which harnesses are installed and logged in<br/>2 Write environment.md<br/>3 Generate maestro-* skills for those harnesses only<br/>4 Onboarding playbook drafts project-setup.md<br/>5 Start at the cautious, propose-only trust level<br/><i>Stops and reports if any target file already exists</i>"]
 
     subgraph Repo ["Their repo after install"]
         subgraph Ours ["Our footprint: namespaced and removable"]
             direction LR
-            O1["<b>.agent-team/rules.md</b><br/>Team rules<br/>Read-only, versioned<br/>Passed to bot sessions<br/>via launch flags"] ~~~ O2["<b>.agent-team/project/</b><br/>project-setup.md · memory<br/><i>Committed. Theirs to keep</i>"] ~~~ O3["<b>.agent-team/local/</b><br/>environment.md · logs ·<br/>scratchpads · worktrees<br/><i>Ignored by our own<br/>.gitignore inside the folder</i>"] ~~~ O4["<b>at-* harness skills</b><br/>.claude/skills/at-*<br/>.agents/skills/at-*<br/>Only trigger when named"] ~~~ O5["<b>.agent-team/manifest.json</b><br/>Every file we created,<br/>with checksums"]
+            O1["<b>.maestro/rules.md</b><br/>Session rules<br/>Read-only, versioned<br/>Passed to harness sessions<br/>via launch flags"] ~~~ O2["<b>.maestro/project/</b><br/>project-setup.md · memory<br/><i>Committed. Theirs to keep</i>"] ~~~ O3["<b>.maestro/local/</b> environment.md<br/><b>.git/maestro/</b> tickets, usage, logs,<br/>scratchpads, worktrees, memory inbox, STOP<br/><i>Never committed</i>"] ~~~ O4["<b>maestro-* harness skills</b><br/>.claude/skills/maestro-*<br/>.agents/skills/maestro-*<br/>Hidden by .git/info/exclude<br/>Only trigger when named"] ~~~ O5["<b>.maestro/manifest.json</b><br/>Every file we created,<br/>with checksums"]
         end
 
-        Theirs["<b>Their own setup: never edited</b><br/>AGENTS.md · CLAUDE.md · harness settings · root .gitignore ·<br/>ticket workflow and statuses · branches without the at/ prefix<br/><i>Their own harness sessions never see our rules</i>"]
+        Theirs["<b>Their own setup: never edited</b><br/>AGENTS.md · CLAUDE.md · harness settings · root .gitignore ·<br/>ticket workflow and statuses · branches without the maestro/ prefix<br/><i>Their own harness sessions never see our rules</i>"]
     end
 
-    Plugin["<b>Where a harness supports plugins</b><br/>Ship the at-* skills as a plugin instead of copies:<br/>native install, update and removal"]
+    Plugin["<b>Where a harness supports plugins</b><br/>Ship the maestro-* skills as a plugin instead of copies:<br/>native install, update and removal"]
 
     subgraph Later ["Later"]
         direction LR
-        U1["<b>Update</b><br/>Replace rules.md and at-* skills<br/>Never touch project/ or local/"] ~~~ U2["<b>Uninstall</b><br/>Remove exactly what the manifest lists<br/>If a file's checksum changed, ask first<br/>Offer project/ memory as keep-or-delete"]
+        U1["<b>Update</b><br/>Replace rules.md and maestro-* skills<br/>Never touch project/ or local/"] ~~~ U2["<b>Uninstall</b><br/>Remove exactly what the manifest lists<br/>If a file's checksum changed, ask first<br/>Offer project/ memory as keep-or-delete"]
     end
 
-    Source -->|"bot/"| BotRuntime
-    Source -->|"harness/, targets/, templates/"| Install
+    Source -->|"bot side"| BotRuntime
+    Source -->|"harness side and templates"| Install
     Install --> Ours
     Plugin -.->|"alternative to copying skills"| Ours
     Ours ~~~ Theirs

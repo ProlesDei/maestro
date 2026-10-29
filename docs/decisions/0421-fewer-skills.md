@@ -1,0 +1,6 @@
+# 0421 The playbooks' 30 missing skills become 15, plus one bot skill
+
+- **Context:** `evals/skills-needed.md` listed 32 skills the playbooks named but nobody had written. Several did nearly the same job.
+- **Choice:** Merge where the procedure is the same: `maestro-plan-change` also finds the example to follow and plans infrastructure; `maestro-capture-baseline` covers the repro, captured behaviour and trace; `maestro-write-report` also writes the spec; `maestro-analyse-logs` both measures adopted changes and finds patterns; `maestro-draft-setup` also drafts the definition of done and `verify.md`; grooming applies its fixes with `maestro-write-tickets`. The wrap-up skills already existed (0404). `talk-to-user` is a new bot skill. `approval-by-risk` is dropped: that list is "Changing Maestro" in `team-rules.md`, so the step is a plain decision (`none`). `maestro-change-infrastructure` is dropped (0423). `evals/skills-needed.md` is deleted, and the check fails on any named skill that doesn't exist.
+- **Alternatives:** Write all 30 (many near-copies to keep in step); one skill per playbook (long skills that load steps the session doesn't need).
+- **Why:** Each skill holds one procedure, and harness skill lists stay short enough to scan.

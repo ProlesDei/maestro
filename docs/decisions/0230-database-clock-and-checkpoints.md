@@ -1,0 +1,6 @@
+# 0230 The database's clock for leases, and checkpoints from the reaper
+
+- **Context:** The audit found lease expiry on Go's clock and no checkpointing beyond SQLite's automatic one. The brief asks for the database's clock and regular checkpoints.
+- **Choice:** Without an injected clock, every transaction reads `unixepoch('subsec')` from SQLite once, at its start (under the write lock for writes), and uses it for every time in that transaction. Tests still inject a fake clock through `Options.Now`. `Store.Checkpoint` runs `PRAGMA wal_checkpoint(PASSIVE)`, and `reap --every` calls it after each pass; failures are reported on stderr and don't stop reaping. Checkpointing is SQLite-only, so it isn't part of `ticket.Store`; the CLI uses it when the driver has it.
+- **Alternatives:** Keep Go's clock (same OS clock on one host, so no behaviour changes today, but a Postgres driver must use `now()` and the contract should already say so); `TRUNCATE` or `RESTART` checkpoints (wait on readers, so a busy watcher could stall the reaper); a separate checkpoint command (one more process to supervise).
+- **Why:** One clock per store is the rule that survives a move to multiple hosts. PASSIVE never blocks anyone. Note: on one host this changes no observable behaviour, so its test only checks that lease times are sane without a fake clock.

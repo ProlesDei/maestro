@@ -36,44 +36,86 @@ func TestIDJSONRoundTrip(t *testing.T) {
 }
 
 func TestTransitions(t *testing.T) {
-	allowed := [][2]Status{
-		{StatusTodo, StatusInProgress}, {StatusInProgress, StatusInReview}, {StatusInReview, StatusInQA},
-		{StatusInQA, StatusReadyToRelease}, {StatusReadyToRelease, StatusDone},
-		{StatusInReview, StatusInProgress}, {StatusInQA, StatusInProgress}, {StatusBlocked, StatusTodo},
-		{StatusInProgress, StatusTodo}, {StatusTodo, StatusCancelled}, {StatusInProgress, StatusDone},
+	ship := func(s Status) Ticket { return Ticket{Type: TypeShip, Status: s} }
+	scout := func(s Status) Ticket { return Ticket{Type: TypeScout, Status: s} }
+	blocked := func(typ Type, from Status) Ticket { return Ticket{Type: typ, Status: StatusBlocked, BlockedFrom: from} }
+	allowed := []struct {
+		t  Ticket
+		to Status
+	}{
+		{ship(StatusTodo), StatusInProgress}, {ship(StatusInProgress), StatusInReview}, {ship(StatusInReview), StatusInQA},
+		{ship(StatusInQA), StatusReadyToRelease}, {ship(StatusReadyToRelease), StatusDone},
+		{ship(StatusInReview), StatusInProgress}, {ship(StatusInQA), StatusInProgress}, {blocked(TypeShip, StatusTodo), StatusTodo},
+		{ship(StatusInProgress), StatusTodo}, {ship(StatusTodo), StatusCancelled},
+		{ship(StatusBacklog), StatusTodo}, {ship(StatusTodo), StatusBacklog},
+		{blocked(TypeShip, StatusInReview), StatusInReview}, {blocked(TypeShip, StatusInQA), StatusCancelled},
+		{scout(StatusInProgress), StatusInReview}, {scout(StatusInReview), StatusDone}, {scout(StatusInReview), StatusInProgress},
+		{blocked(TypeScout, StatusInReview), StatusInReview},
+		{blocked(TypeShip, ""), StatusTodo}, // a blocked ticket with no origin returns to todo
 	}
 	for _, p := range allowed {
-		if !CanTransition(p[0], p[1]) {
-			t.Errorf("%s -> %s should be allowed", p[0], p[1])
+		if !p.t.CanMove(p.to) {
+			t.Errorf("%s %s (from %q) -> %s should be allowed", p.t.Type, p.t.Status, p.t.BlockedFrom, p.to)
 		}
 	}
-	denied := [][2]Status{
-		{StatusTodo, StatusDone}, {StatusInReview, StatusDone}, {StatusInQA, StatusDone}, {StatusTodo, StatusInReview},
-		{StatusDone, StatusTodo}, {StatusCancelled, StatusTodo}, {StatusTodo, StatusTodo},
-		{StatusBlocked, StatusDone},
+	denied := []struct {
+		t  Ticket
+		to Status
+	}{
+		{ship(StatusTodo), StatusDone}, {ship(StatusInReview), StatusDone}, {ship(StatusInQA), StatusDone}, {ship(StatusTodo), StatusInReview},
+		{ship(StatusDone), StatusTodo}, {ship(StatusCancelled), StatusTodo}, {ship(StatusTodo), StatusTodo},
+		{ship(StatusInProgress), StatusDone}, // ship tickets reach done only through release
+		{ship(StatusBacklog), StatusInProgress},
+		{blocked(TypeShip, StatusTodo), StatusDone},
+		// F1: blocked returns only to where it came from.
+		{blocked(TypeShip, StatusInProgress), StatusReadyToRelease}, {blocked(TypeShip, StatusInProgress), StatusInQA},
+		{blocked(TypeShip, StatusInProgress), StatusTodo}, {blocked(TypeShip, StatusInReview), StatusInProgress},
+		// Scouts have no QA or release.
+		{scout(StatusInReview), StatusInQA}, {scout(StatusInProgress), StatusDone}, {blocked(TypeScout, StatusInReview), StatusDone},
+		{Ticket{Status: StatusTodo}, StatusInProgress}, // unknown type has no moves
 	}
 	for _, p := range denied {
-		if CanTransition(p[0], p[1]) {
-			t.Errorf("%s -> %s should be denied", p[0], p[1])
+		if p.t.CanMove(p.to) {
+			t.Errorf("%s %s (from %q) -> %s should be denied", p.t.Type, p.t.Status, p.t.BlockedFrom, p.to)
 		}
 	}
-	// Every active status can be blocked and cancelled; terminals are terminal.
-	for _, s := range Statuses {
-		if s.Terminal() {
-			if len(NextStatuses(s)) != 0 {
-				t.Errorf("%s is terminal but has exits", s)
+	// Every active status can be blocked and cancelled, blocked returns to
+	// its origin, and terminals are terminal.
+	for _, typ := range []Type{TypeShip, TypeScout} {
+		for _, s := range Statuses {
+			tk := Ticket{Type: typ, Status: s}
+			if s.Terminal() {
+				if len(tk.NextStatuses()) != 0 {
+					t.Errorf("%s %s is terminal but has exits", typ, s)
+				}
+				continue
 			}
-			continue
-		}
-		if s != StatusBlocked && !CanTransition(s, StatusBlocked) {
-			t.Errorf("%s cannot be blocked", s)
-		}
-		if !CanTransition(s, StatusCancelled) {
-			t.Errorf("%s cannot be cancelled", s)
+			if s == StatusBlocked {
+				continue
+			}
+			if typ == TypeScout && (s == StatusInQA || s == StatusReadyToRelease) {
+				if len(tk.NextStatuses()) != 0 {
+					t.Errorf("scout tickets never reach %s", s)
+				}
+				continue
+			}
+			if !tk.CanMove(StatusBlocked) {
+				t.Errorf("%s %s cannot be blocked", typ, s)
+			}
+			if !tk.CanMove(StatusCancelled) {
+				t.Errorf("%s %s cannot be cancelled", typ, s)
+			}
+			if b := blocked(typ, s); len(b.NextStatuses()) != 2 || !b.CanMove(s) {
+				t.Errorf("%s blocked from %s: next %v", typ, s, b.NextStatuses())
+			}
 		}
 	}
-	if !StatusDone.Terminal() || !StatusCancelled.Terminal() || StatusBlocked.Terminal() {
+	if !StatusDone.Terminal() || !StatusCancelled.Terminal() || StatusBlocked.Terminal() || StatusBacklog.Terminal() {
 		t.Error("terminal set wrong")
+	}
+	if !IsSendBack(StatusInReview, StatusInProgress) || !IsSendBack(StatusInQA, StatusInProgress) ||
+		IsSendBack(StatusReadyToRelease, StatusInProgress) || IsSendBack(StatusBlocked, StatusInProgress) {
+		t.Error("send-back set wrong")
 	}
 }
 
@@ -109,12 +151,19 @@ func TestCreateValidate(t *testing.T) {
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if r.Title != "x" || *r.Priority != DefaultPriority || r.Status != StatusTodo || r.Actor != "unknown" {
+	if r.Title != "x" || *r.Priority != DefaultPriority || r.Status != StatusTodo || r.Actor != "unknown" ||
+		r.Type != TypeShip || r.Owner != "unknown" {
 		t.Errorf("defaults not applied: %+v", r)
+	}
+	r = CreateRequest{Title: "x", Type: TypeScout, Status: StatusBacklog, Actor: "planner"}
+	if err := r.Validate(); err != nil || r.Owner != "planner" {
+		t.Errorf("scout owner should default to the actor: %+v, %v", r, err)
 	}
 	bad := []CreateRequest{
 		{Title: ""}, {Title: "a\nb"}, {Title: "x", Role: "Bad Role"},
-		{Title: "x", Status: StatusDone}, {Title: "x", Priority: ptr(9)},
+		{Title: "x", Status: StatusDone}, {Title: "x", Status: StatusInProgress}, {Title: "x", Priority: ptr(9)},
+		{Title: "x", Type: "epic"}, {Title: "x", Type: TypeScout}, // a scout needs an owner
+		{Title: "x", Owner: "a\nb"},
 	}
 	for _, r := range bad {
 		if err := r.Validate(); !errors.Is(err, ErrInvalid) {
@@ -135,6 +184,14 @@ func TestClaimValidate(t *testing.T) {
 	if err := r.Validate(); !errors.Is(err, ErrInvalid) {
 		t.Errorf("claiming done should be invalid, got %v", err)
 	}
+	r = ClaimRequest{Holder: "planner/s1", Statuses: []Status{StatusTodo, StatusBacklog}}
+	if err := r.Validate(); !errors.Is(err, ErrInvalid) {
+		t.Errorf("claim --next from backlog should be invalid, got %v", err)
+	}
+	r = ClaimRequest{ID: 3, Holder: "planner/s1", Statuses: []Status{StatusBacklog}}
+	if err := r.Validate(); err != nil {
+		t.Errorf("claiming a backlog ticket by id: %v", err)
+	}
 }
 
 func TestClassify(t *testing.T) {
@@ -150,4 +207,115 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestParseType(t *testing.T) {
+	if ty, err := ParseType(" scout "); err != nil || ty != TypeScout {
+		t.Errorf("ParseType = %v, %v", ty, err)
+	}
+	if _, err := ParseType("epic"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("ParseType(epic) = %v", err)
+	}
+}
+
 func ptr(i int) *int { return &i }
+
+func TestCheckFence(t *testing.T) {
+	live := Ticket{ID: 1, Claim: &Claim{Holder: "jse/s1", Token: 3, ExpiresAt: time.Now().Add(time.Hour)}}
+	expired := Ticket{ID: 1, Claim: &Claim{Holder: "jse/s1", Token: 3, Expired: true}}
+	free := Ticket{ID: 1}
+	cases := []struct {
+		name   string
+		t      Ticket
+		holder string
+		token  int64
+		want   error
+	}{
+		{"holder and token", live, "jse/s1", 3, nil},
+		{"no holder", live, "", 0, ErrClaimed},
+		{"other holder", live, "jse/s2", 3, ErrClaimed},
+		{"missing token", live, "jse/s1", 0, ErrInvalid},
+		{"stale token", live, "jse/s1", 2, ErrLeaseLost},
+		{"unclaimed, anonymous", free, "", 0, nil},
+		{"unclaimed, names a lease", free, "jse/s1", 3, ErrLeaseLost},
+		{"unclaimed, token only", free, "", 3, ErrLeaseLost},
+		{"expired, own lease", expired, "jse/s1", 3, ErrLeaseLost},
+		{"expired, anonymous", expired, "", 0, nil},
+	}
+	for _, c := range cases {
+		err := c.t.CheckFence(c.holder, c.token)
+		if (c.want == nil) != (err == nil) || (c.want != nil && !errors.Is(err, c.want)) {
+			t.Errorf("%s: err = %v; want %v", c.name, err, c.want)
+		}
+	}
+}
+
+func TestCheckGate(t *testing.T) {
+	ship := Ticket{Type: TypeShip, Owner: "planner"}
+	scout := Ticket{Type: TypeScout, Owner: "chief-of-staff"}
+	cases := []struct {
+		name        string
+		t           Ticket
+		to          Status
+		actor, role string
+		ok          bool
+	}{
+		{"ops sets ship done", ship, StatusDone, "ops-1", RoleOperationsManager, true},
+		{"junior can't", ship, StatusDone, "jse", "junior-software-engineer", false},
+		{"owner of a ship ticket can't", ship, StatusDone, "planner", "planner", false},
+		{"no role can't", ship, StatusDone, "ops", "", false},
+		{"other moves ungated", ship, StatusCancelled, "jse", "", true},
+		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},
+		{"ops can't close a scout", scout, StatusDone, "ops", RoleOperationsManager, false},
+		{"scout with no owner", Ticket{Type: TypeScout, Owner: "unknown"}, StatusDone, "unknown", "", false},
+	}
+	for _, c := range cases {
+		err := c.t.CheckGate(c.to, c.actor, c.role)
+		if c.ok != (err == nil) || (err != nil && !errors.Is(err, ErrForbidden)) {
+			t.Errorf("%s: err = %v; want ok=%v", c.name, err, c.ok)
+		}
+	}
+	if code, exit := Classify(fmt.Errorf("%w: x", ErrForbidden)); code != "forbidden" || exit != ExitUsage {
+		t.Errorf("Classify(forbidden) = %s, %d", code, exit)
+	}
+}
+
+// F13: the numeric path accepted 0 and negative ids.
+func TestIDUnmarshalRejectsNonPositive(t *testing.T) {
+	for _, in := range []string{`0`, `-3`, `"T-0"`, `"-1"`} {
+		var id ID
+		if err := json.Unmarshal([]byte(in), &id); err == nil {
+			t.Errorf("%s: got %v, want an error", in, id)
+		}
+	}
+	var id ID
+	if err := json.Unmarshal([]byte(`7`), &id); err != nil || id != 7 {
+		t.Fatalf("7: %v, %v", id, err)
+	}
+}
+
+func TestAreas(t *testing.T) {
+	got, err := NormalizeAreas([]string{"skills/", " tools/maestro-ticket ", "skills", ""})
+	if err != nil || len(got) != 2 || got[0] != "skills" || got[1] != "tools/maestro-ticket" {
+		t.Fatalf("normalize %v, %v", got, err)
+	}
+	for _, bad := range []string{"/abs", "..", "a/../b", "a//b", ".", "a b", "a,b",
+		// Spellings of another path would slip past the overlap check (0244).
+		"./tools/x", "tools/x/..", "tools/x/.", "tools/./x", "../x"} {
+		if _, err := NormalizeAreas([]string{bad}); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"tools", "tools/maestro-ticket", true},
+		{"tools/maestro-ticket/cli", "tools/maestro-ticket", true},
+		{"tools/maestro-ticket", "tools/maestro-ticketing", false},
+		{"skills", "skills", true},
+		{"skills", "playbooks", false},
+	} {
+		if got := AreasOverlap(c.a, c.b); got != c.want {
+			t.Errorf("AreasOverlap(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}

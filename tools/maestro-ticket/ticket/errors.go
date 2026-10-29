@@ -7,6 +7,7 @@ import "errors"
 var (
 	ErrInvalid             = errors.New("invalid request")
 	ErrInvalidTransition   = errors.New("transition not allowed")
+	ErrForbidden           = errors.New("not allowed for this actor")
 	ErrNotFound            = errors.New("not found")
 	ErrVersionConflict     = errors.New("version conflict")
 	ErrStatusConflict      = errors.New("status conflict")
@@ -14,6 +15,8 @@ var (
 	ErrLeaseLost           = errors.New("lease lost")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request")
 	ErrNoWork              = errors.New("no work available")
+	ErrWaitingOnDeps       = errors.New("waiting on dependencies")
+	ErrAreaBusy            = errors.New("code area busy")
 )
 
 // Exit codes shared by the CLI and documented for bots.
@@ -33,6 +36,7 @@ var errorKinds = []struct {
 }{
 	{ErrInvalid, "invalid", ExitUsage},
 	{ErrInvalidTransition, "invalid_transition", ExitUsage},
+	{ErrForbidden, "forbidden", ExitUsage},
 	{ErrNotFound, "not_found", ExitNotFound},
 	{ErrVersionConflict, "version_conflict", ExitConflict},
 	{ErrStatusConflict, "status_conflict", ExitConflict},
@@ -40,6 +44,8 @@ var errorKinds = []struct {
 	{ErrLeaseLost, "lease_lost", ExitConflict},
 	{ErrIdempotencyConflict, "idempotency_conflict", ExitConflict},
 	{ErrNoWork, "no_work", ExitNoWork},
+	{ErrWaitingOnDeps, "waiting_on_deps", ExitConflict},
+	{ErrAreaBusy, "area_busy", ExitConflict},
 }
 
 // Classify maps an error to a stable machine code and process exit code.

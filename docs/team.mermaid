@@ -1,65 +1,60 @@
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Frontier"]
-    Planner["<b>Planner</b><br/>Mid-tier"]
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket · Backlog.md view<br/>Specs, tickets, status, blockers")]
+    CoS["<b>Chief of Staff</b><br/>Frontier<br/>Goals and workstreams, never tickets"]
+    Planner["<b>Planner sessions</b><br/>Mid-tier<br/>One per workstream, owns its tickets"]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>Ship and scout tickets, status, blockers<br/>Backlog.md and Jira are mirrors")]
 
-    subgraph Build ["Build, review and test"]
+    subgraph Build ["Build, review and test: pools of parallel sessions"]
         subgraph Engineers ["Engineers"]
             SSE["<b>Senior Engineer</b><br/>Frontier"]
             JSE["<b>Junior Engineer</b><br/>Mid-tier"]
         end
-        Checks["<b>Automated checks</b><br/>No tokens"]
-        CR["<b>Code Reviewer</b><br/>Mid-tier, opposite model<br/>family to the author"]
-        QA["<b>QA Lead</b><br/>Mid-tier"]
+        Checks["<b>Automated checks</b><br/>Runner, no tokens"]
+        CR["<b>Code Reviewer</b><br/>Mid-tier, another model<br/>family from the author"]
+        QA["<b>QA Lead</b><br/>Mid-tier<br/>Evidence from the running app"]
     end
 
     Ops["<b>Operations Manager</b><br/>Mid-tier"]
-    Logs[("<b>Logs</b><br/>Every agent's handoffs<br/>and token cost")]
+    Logs[("<b>Logs, usage and memory inbox</b><br/>Retros, failures, token cost,<br/>memory proposals")]
     Done([Released])
 
     %% User and Chief of Staff
-    User <-->|"goals, decisions, approvals"| CoS
+    User <-->|"goals, decisions, approvals,<br/>digest and recap"| CoS
 
     %% Planning
-    CoS -->|"big project"| Planner
-    CoS -->|"small task: writes ticket"| Tickets
+    CoS -->|"workstream brief"| Planner
     Planner -->|"writes specs and tickets"| Tickets
-    Planner -.->|"escalates above its authority"| CoS
+    Planner -.->|"workstream summary,<br/>escalates above its authority"| CoS
 
     %% Status and blockers flow through the ticket system
-    Tickets -.->|"status and blockers:<br/>project tickets"| Planner
-    Tickets -.->|"status and blockers:<br/>small tasks, escalations"| CoS
+    Tickets -.->|"status, blockers, escalations,<br/>scout reports"| Planner
 
     %% Engineers pick up work
     Tickets -->|"complex or risky"| SSE
     Tickets -->|"routine"| JSE
-    JSE -.->|"escalates after 2 failed tries"| SSE
-    Engineers -.->|"updates status, flags blockers"| Tickets
+    JSE -.->|"escalates after 2 tries"| SSE
+    Engineers -.->|"updates status, escalates,<br/>scout reports"| Tickets
 
     %% Build, review, test
-    Engineers -->|"submits code"| Checks
+    Engineers -->|"submits ship ticket"| Checks
     Checks -->|"passed"| CR
     CR -->|"approved"| QA
     Checks -.->|"failed"| Engineers
-    CR -.->|"changes requested"| Engineers
-    QA -.->|"failed"| Engineers
-
-    %% Exception path
-    CoS -.->|"exception: steps in directly"| Engineers
+    CR -.->|"changes requested: +1 try"| Engineers
+    QA -.->|"failed: +1 try"| Engineers
 
     %% Release
     QA -->|"passed: ready to release"| Ops
-    Ops -.->|"production deploy needs approval"| CoS
-    Ops -->|"merges to main and deploys"| Done
-    Ops -->|"marks ticket done after release"| Tickets
+    Ops -.->|"deploy needs approval"| CoS
+    Ops -->|"opens PR; merges and deploys<br/>only as the trust level allows"| Done
+    Ops -->|"marks ship ticket done after release"| Tickets
 
     %% Operations
     CoS -->|"infrastructure requests"| Ops
     Build -.->|"logs"| Logs
-    Logs -->|"reviews costs and failures"| Ops
-    Ops -.->|"suggests workflow improvements"| CoS
+    Logs -->|"curates memory, reviews costs and failures"| Ops
+    Ops -.->|"suggests one tested workflow change"| CoS
 
     %% Legend
     subgraph Legend ["Legend"]

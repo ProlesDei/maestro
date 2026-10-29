@@ -1,0 +1,6 @@
+# 0403 The runner contract, and `harness-cli` becomes `runner`
+
+- **Context:** 0011 put every no-token step in a deterministic runner, but nothing described it, and `harness-cli` still had the bot run `claude auth status`, `git status` and the harness launch commands itself (G4.1).
+- **Choice:** `docs/runner.md` is the runner's contract: named requests, an allowlist by role and trust level, the stop-file check on every request, preflight, the per-harness launch flags and skill naming, and the session permissions per role. The bot skill `harness-cli` is renamed `runner` and only says what to ask for and how to judge the reply. `model-selection` makes "No tokens" a runner request and drops its copy of the per-role tiers (personas hold them). Pushing, opening PRs, merging and deploying are runner requests gated by trust level, never session tools.
+- **Alternatives:** Keep the flags in the bot skill (the bot can't run them, and every bot pays tokens to read them); let harness sessions push and merge under deny rules (one wrong allow rule skips the trust level).
+- **Why:** The bot touches nothing, the trust level is enforced in one program, and the harness details live where the code that uses them will be written.
