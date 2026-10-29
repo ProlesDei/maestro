@@ -1,0 +1,6 @@
+# 0882 The installer copies every skill folder, not the use.yaml lists
+
+- **Context:** 0781 says the installer copies the skills listed under `prompts` and `commands` in `skills/use.yaml`, and rejected copying every folder ("then you can't keep a skill uninstalled"). 0880's script copies every folder and says only that today it's the same set, without saying it replaces part of 0781.
+- **Choice:** Keep copying every folder in `skills/`, and replace 0781's install rule: `skills/` is what gets installed, `use.yaml` is what gets named (in prompts) or offered as a command. A skill you want kept out of a target stays out of `skills/`. The copies are hidden by `.git/info/exclude` (0881). The rest of 0781 stands: the engine never names a `commands` skill in a prompt.
+- **Alternatives:** Read `use.yaml` in the script (bash has no YAML parser; a sed parse of flow and block lists breaks on the first comment or quote, and needing `python3` or `maestro-play` on PATH to install is a new dependency). Have `check.py` fail on a folder `use.yaml` doesn't list (makes the optional file required).
+- **Why:** The script stays dependency-free and easy to read, `skills/` is already the user's own slot (0780), and a skill there that `use.yaml` doesn't list is still the user's, which their harness treats like any other skill in that folder.

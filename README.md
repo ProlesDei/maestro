@@ -197,6 +197,16 @@ flowchart TD
     class Guard note
 ```
 
+## Install
+
+From a clone of this repo, with the target already a git repo; give the top of its work tree:
+
+```sh
+scripts/install.sh /path/to/your-repo
+```
+
+It copies every folder in `skills/` into the target's `.claude/skills/` (Claude Code) and `.agents/skills/` (Codex, Grok Build), creates `.maestro/project/` and `.maestro/local/`, hides the skill folders and `.maestro/local/` from git through `.git/info/exclude`, and creates the ticket store if `maestro-ticket` is on your PATH. If any of those skill folders already exists it stops and writes nothing, and if a later step fails it removes what it wrote. Then run `chief-of-staff/setup-project`. To uninstall, run the lines at the top of `scripts/install.sh` in the target repo; the second also deletes your tickets. Decisions 0880 and 0881 say why the installer is this small.
+
 ## Supported harnesses
 
 maestro runs on the three main coding agents:
@@ -209,4 +219,4 @@ Installed sessions get Maestro's rules through launch flags and never rely on, o
 
 ## Status
 
-Early. The roles, playbooks, the playbook engine and the ticket store are written; the runner, the wake loop and the installer aren't built yet, so nothing installs today. Install steps will land here once they are.
+Early. The roles, playbooks, the playbook engine and the ticket store are written; `scripts/install.sh` installs the skills and folders (see Install). The runner and the wake loop aren't built yet.
