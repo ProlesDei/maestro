@@ -2,9 +2,9 @@
 
 Reusable instructions for one task. Every skill lives in this repo at `skills/<name>/SKILL.md`. There are two kinds, and the prefix tells them apart.
 
-## Harness skills (`at-*`)
+## Harness skills (`maestro-*`)
 
-- Installed into the target repo as part of maestro's footprint, at `.agent-team/skills/<name>/SKILL.md`.
+- Installed into the target repo as part of maestro's footprint, at `.maestro/skills/<name>/SKILL.md`.
 - For harnesses that only discover skills at their standard project path, also installed at `.agents/skills/<name>/SKILL.md`.
 - The harness (Claude Code, Codex, Grok Build) loads one only when the bot's prompt names it.
 - They do the hands-on work in the repo: ticket CLI, files, git, commands.
@@ -31,7 +31,7 @@ One skill per folder: `skills/<name>/SKILL.md`. Copy `_template/` to start.
 ## Rules
 
 - Folder names: lowercase, hyphens, matching `name`.
-- Use the `at-` prefix if and only if it's a harness skill.
+- Use the `maestro-` prefix if and only if it's a harness skill.
 - Folders starting with `_` are not skills. Readers and installers skip them.
 - The body must stand alone. Don't point to "see above" or to another skill for a step it needs.
 - Never put secrets in a skill: no keys, tokens, passwords or private URLs.
@@ -43,10 +43,10 @@ Step names are from the session loop in `docs/bot-anatomy.mermaid`.
 
 | Skill | Kind | Used at |
 |---|---|---|
-| `at-check-intake` | Harness | Check intake |
-| `at-claim` | Harness | Pick the playbook (claim the work) |
-| `at-wrap-up` | Harness | Wrap up |
-| `at-clean-up` | Harness | Clean up, when the harness has no cleanup hook |
+| `maestro-check-intake` | Harness | Check intake |
+| `maestro-claim` | Harness | Pick the playbook (claim the work) |
+| `maestro-wrap-up` | Harness | Wrap up |
+| `maestro-clean-up` | Harness | Clean up, when the harness has no cleanup hook |
 | `harness-cli` | Shared bot | Preflight; Start a harness session; Next step; Clean up (close the session) |
 | `prompt-contract` | Shared bot | Next step; Check the structured reply; Result |
 | `model-selection` | Shared bot | Next step (pick the model tier) |

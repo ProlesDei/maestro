@@ -23,7 +23,7 @@ A `todo` ticket for role `senior-software-engineer` whose latest comment starts 
 - **Goal:** The ticket is in progress under your lease.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `at-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start` exits `0`.
+- **Done when:** `maestro-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start` exits `0`.
 - **Evidence:** exit code; new version.
 
 ### 2. Read the escalation
@@ -31,15 +31,15 @@ A `todo` ticket for role `senior-software-engineer` whose latest comment starts 
 - **Goal:** Know why it failed and whether the existing branch is worth keeping.
 - **Skill:** none
 - **Tier:** Frontier
-- **Done when:** The cause is named, and you've decided: continue on `at/<id>-<slug>`, or start over from the main branch. Plan and decision are in the scratchpad.
-- **Evidence:** the escalation comment; `git log` and `git diff <main branch>...at/<id>-<slug>` exit codes; the failing check output it points to.
+- **Done when:** The cause is named, and you've decided: continue on `maestro/<id>-<slug>`, or start over from the main branch. Plan and decision are in the scratchpad.
+- **Evidence:** the escalation comment; `git log` and `git diff <main branch>...maestro/<id>-<slug>` exit codes; the failing check output it points to.
 
 ### 3. Set up the worktree
 
 - **Goal:** A worktree on the branch you chose.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `$(git rev-parse --git-common-dir)/agent-team/worktrees/<id>` exists. Continue: `git worktree add <path> at/<id>-<slug>`. Start over: leave the old branch as it is and run `git worktree add -b at/<id>-<new-slug> <path> <main branch>`. Name the old branch in the handoff note.
+- **Done when:** `$(git rev-parse --git-common-dir)/maestro/worktrees/<id>` exists. Continue: `git worktree add <path> maestro/<id>-<slug>`. Start over: leave the old branch as it is and run `git worktree add -b maestro/<id>-<new-slug> <path> <main branch>`. Name the old branch in the handoff note.
 - **Evidence:** exit code; branch and path.
 
 ### 4. Build
@@ -55,7 +55,7 @@ A `todo` ticket for role `senior-software-engineer` whose latest comment starts 
 - **Goal:** The project's checks pass on the branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build, lint and test from `.agent-team/project-setup.md` all exit `0` in the worktree.
+- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
 - **Evidence:** each command, exit code and test counts.
 
 On a failure, go back to step 4. That counts as a retry.

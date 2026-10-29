@@ -5,11 +5,11 @@ description: One sentence on what this skill does and when to use it.
 
 # Example skill
 
-What this skill is for, in one or two sentences. Harness skills use the `at-` prefix; bot skills don't.
+What this skill is for, in one or two sentences. Harness skills use the `maestro-` prefix; bot skills don't.
 
 ## Inputs
 
-What the prompt gives you: ticket id, holder, paths, values from `.agent-team/environment.md`.
+What the prompt gives you: ticket id, holder, paths, values from `.maestro/environment.md`.
 
 ## Steps
 

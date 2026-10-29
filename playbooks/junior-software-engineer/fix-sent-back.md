@@ -28,7 +28,7 @@ An `in_progress` ticket for role `junior-software-engineer` with no live lease, 
 - **Skill:** none
 - **Tier:** Mid-tier
 - **Done when:** Each item has its source, the file or acceptance criterion, and the fix you plan.
-- **Evidence:** `at-ticket get <id> --json` version; the comment the items came from.
+- **Evidence:** `maestro-ticket get <id> --json` version; the comment the items came from.
 
 If an item needs a design decision, escalate now. That isn't a failed try.
 
@@ -37,7 +37,7 @@ If an item needs a design decision, escalate now. That isn't a failed try.
 - **Goal:** A worktree on the ticket's existing branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `$(git rev-parse --git-common-dir)/agent-team/worktrees/<id>` exists on `at/<id>-<slug>`. If it's missing, `git worktree add <path> at/<id>-<slug>` exits `0`.
+- **Done when:** `$(git rev-parse --git-common-dir)/maestro/worktrees/<id>` exists on `maestro/<id>-<slug>`. If it's missing, `git worktree add <path> maestro/<id>-<slug>` exits `0`.
 - **Evidence:** exit code; branch and path.
 
 ### 3. Fix
@@ -53,7 +53,7 @@ If an item needs a design decision, escalate now. That isn't a failed try.
 - **Goal:** The project's checks pass on the branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build, lint and test from `.agent-team/project-setup.md` all exit `0` in the worktree.
+- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
 - **Evidence:** each command, exit code and test counts.
 
 A pass through steps 3 and 4 that ends with failing checks is a failed try. After the first, go back to step 3. After the second, escalate.

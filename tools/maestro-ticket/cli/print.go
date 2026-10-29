@@ -7,7 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 func oneLine(t ticket.Ticket) string {

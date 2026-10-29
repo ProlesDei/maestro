@@ -1,5 +1,5 @@
 ---
-name: at-clean-up
+name: maestro-clean-up
 description: Remove what this session created (processes, temp files, worktree, claim, scratchpad) after wrap-up; use it only when the harness has no cleanup hook.
 ---
 
@@ -12,7 +12,7 @@ You leave the repo the way the session found it, apart from the work you handed 
 - Ticket id and holder `<bot-id>/<session-id>`.
 - Whether wrap-up succeeded.
 
-Paths below are relative to `$(git rev-parse --git-common-dir)/agent-team/`. The scratchpad is `scratch/<bot-id>/<ticket-id>.md`.
+Paths below are relative to `$(git rev-parse --git-common-dir)/maestro/`. The scratchpad is `scratch/<bot-id>/<ticket-id>.md`.
 
 ## What you own
 
@@ -32,7 +32,7 @@ Read the scratchpad first and delete it last, because it is the record of what y
 3. **Worktree.** Run `git -C <worktree> status --porcelain`.
    - Clean: `git worktree remove <worktree>`, then `git worktree prune`. The branch stays.
    - Not clean: keep it and report the path. Never use `--force`.
-4. **Claim.** `at-ticket release <id> --holder <holder> --idempotency-key <session-id>:release --json`.
+4. **Claim.** `maestro-ticket release <id> --holder <holder> --idempotency-key <session-id>:release --json`.
    - Exit `0`: released, or already released.
    - Exit `4`: another holder has it now. That's fine; it's not yours.
 5. **Scratchpad.** Delete it if wrap-up succeeded. If wrap-up failed, keep it so a later session can resume, and say so.
@@ -44,8 +44,8 @@ status: done
 summary: cleaned up T-12; worktree removed, lease released
 evidence:
   - kill 41822 (npm run dev) → exit 0
-  - git worktree remove .git/agent-team/worktrees/T-12 → exit 0
-  - at-ticket release T-12 → exit 0
+  - git worktree remove .git/maestro/worktrees/T-12 → exit 0
+  - maestro-ticket release T-12 → exit 0
   - removed scratch/jse-1/T-12.md
 kept: []
 next: close the session

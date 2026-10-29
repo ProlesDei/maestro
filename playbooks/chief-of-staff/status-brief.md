@@ -23,7 +23,7 @@ The status brief is due, per the schedule the bot runtime keeps.
 - **Goal:** Spend no tokens when nothing changed.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `at-ticket events --since <cursor> --limit 1 --json` exits `0`. `<cursor>` is the `next_seq` you stored after the last brief (`0` the first time).
+- **Done when:** `maestro-ticket events --since <cursor> --limit 1 --json` exits `0`. `<cursor>` is the `next_seq` you stored after the last brief (`0` the first time).
   - No events: end here. No brief, no harness session, no wrap-up prompt.
   - Events: go on.
 - **Evidence:** exit code and event count.
@@ -35,7 +35,7 @@ Run this before you start a harness session for the brief.
 - **Goal:** A brief built from what changed.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** The harness has read `at-ticket events --since <cursor> --json` and `.agent-team/Backlog.md` and replied with at most 10 lines under:
+- **Done when:** The harness has read `maestro-ticket events --since <cursor> --json` and `.maestro/Backlog.md` and replied with at most 10 lines under:
   - Shipped
   - In flight
   - Blocked, and on whom
@@ -54,7 +54,7 @@ Run this before you start a harness session for the brief.
 
 ## Stop and block when
 
-- `at-ticket events` fails: tell the user the board can't be read, with the exit code. Don't guess a brief.
+- `maestro-ticket events` fails: tell the user the board can't be read, with the exit code. Don't guess a brief.
 
 ## Wrap-up
 

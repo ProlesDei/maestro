@@ -28,14 +28,14 @@ An `in_progress` ticket for role `senior-software-engineer` with no live lease, 
 - **Skill:** none
 - **Tier:** Frontier
 - **Done when:** Each item has its source (reviewer, QA, checks), the file or acceptance criterion, and the fix you plan. Items you disagree with are marked, with the reason.
-- **Evidence:** `at-ticket get <id> --json` version; the comment the items came from.
+- **Evidence:** `maestro-ticket get <id> --json` version; the comment the items came from.
 
 ### 2. Set up the worktree
 
 - **Goal:** A worktree on the ticket's existing branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `$(git rev-parse --git-common-dir)/agent-team/worktrees/<id>` exists on `at/<id>-<slug>`. If it's missing, `git worktree add <path> at/<id>-<slug>` exits `0`.
+- **Done when:** `$(git rev-parse --git-common-dir)/maestro/worktrees/<id>` exists on `maestro/<id>-<slug>`. If it's missing, `git worktree add <path> maestro/<id>-<slug>` exits `0`.
 - **Evidence:** exit code; branch and path.
 
 ### 3. Fix
@@ -51,7 +51,7 @@ An `in_progress` ticket for role `senior-software-engineer` with no live lease, 
 - **Goal:** The project's checks pass on the branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build, lint and test from `.agent-team/project-setup.md` all exit `0` in the worktree.
+- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
 - **Evidence:** each command, exit code and test counts.
 
 On a failure, go back to step 3. That counts as a retry.

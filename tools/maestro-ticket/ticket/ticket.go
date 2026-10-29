@@ -1,4 +1,4 @@
-// Package ticket is the storage-independent domain for the at-ticket tool:
+// Package ticket is the storage-independent domain for the maestro-ticket tool:
 // ticket types, the status workflow, lease rules, errors and the Store
 // interface. Drivers (SQLite today, Postgres later) implement Store; the CLI
 // only talks to Store.

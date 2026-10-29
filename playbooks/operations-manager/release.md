@@ -25,9 +25,9 @@ A `ready_to_release` ticket.
 - **Tier:** Mid-tier
 - **Done when:** The reply confirms:
   - The latest QA note is `Handoff: QA passed`, and the branch head matches the sha QA tested.
-  - Whether this deploys to production, per `.agent-team/project-setup.md`.
+  - Whether this deploys to production, per `.maestro/project-setup.md`.
   - For production: an `Approved:` comment from the Chief of Staff after the QA pass.
-- **Evidence:** `at-ticket get <id> --json` version; the branch head sha; the comments relied on.
+- **Evidence:** `maestro-ticket get <id> --json` version; the branch head sha; the comments relied on.
 
 New commits after QA: send it back to `in_progress`. Production and no approval: stop and block.
 
@@ -36,7 +36,7 @@ New commits after QA: send it back to `in_progress`. Production and no approval:
 - **Goal:** The branch is on the main branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** The merge command from `.agent-team/project-setup.md` exits `0` (for example `git checkout <main branch>` then `git merge --no-ff at/<id>-<slug>`, then push if the project has a remote).
+- **Done when:** The merge command from `.maestro/project-setup.md` exits `0` (for example `git checkout <main branch>` then `git merge --no-ff maestro/<id>-<slug>`, then push if the project has a remote).
 - **Evidence:** exit codes; the merge commit sha.
 
 Conflict: `git merge --abort`, then send it back to `in_progress` with the conflicting files.
@@ -46,7 +46,7 @@ Conflict: `git merge --abort`, then send it back to `in_progress` with the confl
 - **Goal:** The main branch still passes after the merge.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build and test from `.agent-team/project-setup.md` exit `0` on the main branch.
+- **Done when:** Build and test from `.maestro/project-setup.md` exit `0` on the main branch.
 - **Evidence:** each command, exit code and test counts.
 
 ### 4. Deploy (Gate)
@@ -54,7 +54,7 @@ Conflict: `git merge --abort`, then send it back to `in_progress` with the confl
 - **Goal:** The release is live and healthy.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** The deploy command and then the smoke check from `.agent-team/project-setup.md` exit `0`.
+- **Done when:** The deploy command and then the smoke check from `.maestro/project-setup.md` exit `0`.
 - **Evidence:** each command and exit code; the deployed version or sha.
 
 Skip if the project has no deploy step.
@@ -62,7 +62,7 @@ Skip if the project has no deploy step.
 ## Stop and block when
 
 - Production deploy without approval: comment `Escalation: approval needed for production deploy of T-<id>` with what ships, the risk and the rollback, and block.
-- Step 3 or 4 fails: run the rollback in `.agent-team/project-setup.md`, then block with an `Escalation:` note and the output. No rollback defined: block at once.
+- Step 3 or 4 fails: run the rollback in `.maestro/project-setup.md`, then block with an `Escalation:` note and the output. No rollback defined: block at once.
 
 ## Wrap-up
 

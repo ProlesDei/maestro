@@ -1,4 +1,4 @@
-// Package cli implements the at-ticket command line on top of ticket.Store.
+// Package cli implements the maestro-ticket command line on top of ticket.Store.
 package cli
 
 import (
@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/render"
-	"github.com/ProlesDei/maestro/tools/at-ticket/sqlitestore"
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // Env is everything the CLI touches outside its arguments, so tests can run
@@ -39,9 +39,9 @@ func OSEnv() Env {
 // Main runs the CLI against the real process and returns the exit code.
 func Main(args []string) int { return Run(context.Background(), args, OSEnv()) }
 
-const usage = `at-ticket: the maestro ticket store.
+const usage = `maestro-ticket: the maestro ticket store.
 
-Usage: at-ticket <command> [flags]
+Usage: maestro-ticket <command> [flags]
 
 Commands:
   create      --title T [--body B | --body-file F|-] [--role R] [--priority 0-3] [--status todo|blocked]
@@ -58,9 +58,9 @@ Commands:
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
-  --store PATH            ticket store (default $AT_TICKET_STORE, else
-                          $(git rev-parse --git-common-dir)/agent-team/tickets.db)
-  --actor NAME            who is acting (default $AT_TICKET_ACTOR)
+  --store PATH            ticket store (default $MAESTRO_TICKET_STORE, else
+                          $(git rev-parse --git-common-dir)/maestro/tickets.db)
+  --actor NAME            who is acting (default $MAESTRO_TICKET_ACTOR)
   --idempotency-key K     on create, claim, release, transition, comment:
                           a retry with the same key and request replays the result
 
@@ -127,14 +127,14 @@ func Run(ctx context.Context, args []string, env Env) int {
 		}
 	}
 	if cmd == nil {
-		fmt.Fprintf(env.Stderr, "at-ticket: unknown command %q\n\n%s", args[0], usage)
+		fmt.Fprintf(env.Stderr, "maestro-ticket: unknown command %q\n\n%s", args[0], usage)
 		return ticket.ExitUsage
 	}
-	c := &call{env: env, fs: flag.NewFlagSet("at-ticket "+cmd.name, flag.ContinueOnError)}
+	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError)}
 	c.fs.SetOutput(env.Stderr)
 	c.fs.BoolVar(&c.jsonOut, "json", false, "machine-readable output")
 	c.fs.StringVar(&c.storeFlag, "store", "", "ticket store path")
-	c.fs.StringVar(&c.actor, "actor", env.Getenv("AT_TICKET_ACTOR"), "who is acting")
+	c.fs.StringVar(&c.actor, "actor", env.Getenv("MAESTRO_TICKET_ACTOR"), "who is acting")
 	c.fs.StringVar(&c.idemKey, "idempotency-key", "", "idempotency key for writes")
 	c.args = args[1:]
 	err := cmd.run(ctx, c)
@@ -195,7 +195,7 @@ func (c *call) fail(err error) int {
 	if c.jsonOut {
 		c.writeJSON(map[string]any{"error": map[string]string{"code": code, "message": err.Error()}})
 	} else {
-		fmt.Fprintf(c.env.Stderr, "at-ticket: %v\n", err)
+		fmt.Fprintf(c.env.Stderr, "maestro-ticket: %v\n", err)
 	}
 	return exit
 }
@@ -215,20 +215,20 @@ func (c *call) out(v any, human func(w io.Writer)) error {
 	return nil
 }
 
-// storePath resolves the store: --store, then $AT_TICKET_STORE, then the git
+// storePath resolves the store: --store, then $MAESTRO_TICKET_STORE, then the git
 // common dir, which every worktree of a repo shares.
 func (c *call) storePath() (path, source string, err error) {
 	if c.storeFlag != "" {
 		return c.storeFlag, "--store", nil
 	}
-	if p := c.env.Getenv("AT_TICKET_STORE"); p != "" {
-		return p, "AT_TICKET_STORE", nil
+	if p := c.env.Getenv("MAESTRO_TICKET_STORE"); p != "" {
+		return p, "MAESTRO_TICKET_STORE", nil
 	}
 	common, err := c.git("rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return "", "", fmt.Errorf("%w: no --store or AT_TICKET_STORE, and not in a git repo: %v", ticket.ErrInvalid, err)
+		return "", "", fmt.Errorf("%w: no --store or MAESTRO_TICKET_STORE, and not in a git repo: %v", ticket.ErrInvalid, err)
 	}
-	return filepath.Join(common, "agent-team", "tickets.db"), "git common dir", nil
+	return filepath.Join(common, "maestro", "tickets.db"), "git common dir", nil
 }
 
 func (c *call) git(args ...string) (string, error) {
@@ -506,7 +506,7 @@ func runEvents(ctx context.Context, c *call) error {
 }
 
 func runRender(ctx context.Context, c *call) error {
-	outPath := c.fs.String("out", "", "output file (default <repo>/.agent-team/Backlog.md)")
+	outPath := c.fs.String("out", "", "output file (default <repo>/.maestro/Backlog.md)")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -517,7 +517,7 @@ func runRender(ctx context.Context, c *call) error {
 			if err != nil {
 				return fmt.Errorf("%w: no --out and not in a git work tree: %v", ticket.ErrInvalid, err)
 			}
-			path = filepath.Join(top, ".agent-team", "Backlog.md")
+			path = filepath.Join(top, ".maestro", "Backlog.md")
 		} else if !filepath.IsAbs(path) {
 			path = filepath.Join(c.env.Dir, path)
 		}

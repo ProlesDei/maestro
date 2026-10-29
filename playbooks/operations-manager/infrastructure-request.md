@@ -23,7 +23,7 @@ A `todo` ticket for role `operations-manager`, usually from the Chief of Staff.
 - **Goal:** A plan with risk, cost and rollback.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** The scratchpad has: what's needed and why, where it's done (per `.agent-team/project-setup.md`), the exact commands, the check that proves it works, the rollback, and whether it touches production.
+- **Done when:** The scratchpad has: what's needed and why, where it's done (per `.maestro/project-setup.md`), the exact commands, the check that proves it works, the rollback, and whether it touches production.
 - **Evidence:** ticket id and version read; paths read.
 
 Needs code changes in the repo: it's an engineer ticket. Create one for `senior-software-engineer` with the plan as its body, then wrap up this ticket as `cancelled` with the note `Replaced by T-<n>`.
@@ -33,7 +33,7 @@ Needs code changes in the repo: it's an engineer ticket. Create one for `senior-
 - **Goal:** The ticket is in progress under your lease.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `at-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start` exits `0`.
+- **Done when:** `maestro-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start` exits `0`.
 - **Evidence:** exit code; new version.
 
 ### 3. Make the change (Gate)

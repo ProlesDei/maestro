@@ -9,13 +9,13 @@ You drive the harness only through its command line. Everything a session needs 
 
 ## Preflight
 
-Stop if the kill switch in `.agent-team/environment.md` is set. Then all of these must pass, or the session doesn't start:
+Stop if the kill switch in `.maestro/environment.md` is set. Then all of these must pass, or the session doesn't start:
 
 - Harness logged in.
   - Claude Code: `claude auth status` prints JSON with `"loggedIn": true`.
   - Grok Build: `grok models` prints `You are not authenticated.` when signed out. Check the output, not the exit code.
   - Codex: `codex login status` (unverified; check `codex --help`).
-- Ticket CLI works: `at-ticket doctor` exits `0`.
+- Ticket CLI works: `maestro-ticket doctor` exits `0`.
 - Git clean: `git status --porcelain` prints nothing.
 
 ## Start, resume, close
@@ -26,7 +26,7 @@ Make a new UUID per ticket. Holder is `<bot-id>/<that-uuid>`. Pass the same laun
 
 ```sh
 claude -p "<prompt>" --session-id <uuid> --output-format json \
-  --model <model> --append-system-prompt "<team rules from .agent-team/rules.md>" \
+  --model <model> --append-system-prompt "<team rules from .maestro/rules.md>" \
   --permission-mode dontAsk --allowedTools <allow rules> --disallowedTools <deny rules> \
   --max-budget-usd <step budget> --json-schema '<reply schema>'
 claude -p "<next prompt>" -r <uuid> <same flags>
@@ -42,7 +42,7 @@ claude -p "<next prompt>" -r <uuid> <same flags>
 
 ```sh
 grok -p "<prompt>" -s <uuid> --output-format json -m <model> \
-  --rules "<team rules from .agent-team/rules.md>" --permission-mode dontAsk \
+  --rules "<team rules from .maestro/rules.md>" --permission-mode dontAsk \
   --allow <rule> --deny <rule> --max-turns <n> --json-schema '<reply schema>' --cwd <repo>
 grok -p "<next prompt>" -r <uuid> <same flags>
 ```
@@ -57,24 +57,24 @@ codex exec --json --model <model> --sandbox workspace-write "<prompt>"
 codex exec resume <session-id> "<next prompt>"
 ```
 
-- Read the session id from the `--json` output. For team rules and tool allow/deny rules, check `codex exec --help`; if there's no flag, point to `.agent-team/rules.md` at the top of the first prompt.
+- Read the session id from the `--json` output. For team rules and tool allow/deny rules, check `codex exec --help`; if there's no flag, point to `.maestro/rules.md` at the top of the first prompt.
 - `--sandbox read-only` blocks ticket writes, so only use it for steps that write nothing.
 
 **Close:** a headless call exits when its prompt is done. After clean-up, send no more prompts to that session id.
 
 ## Role permissions
 
-Use `--permission-mode dontAsk` so anything not allowed is denied without asking. Deny rules are a backstop in case their own settings allow more. Rules below use Claude Code syntax; Grok Build's `--allow` / `--deny` accept the same strings (they alias `--allowedTools` / `--disallowedTools`). Write paths in the harness's own path syntax. `<scratch>` and `<logs>` are under `$(git rev-parse --git-common-dir)/agent-team/`.
+Use `--permission-mode dontAsk` so anything not allowed is denied without asking. Deny rules are a backstop in case their own settings allow more. Rules below use Claude Code syntax; Grok Build's `--allow` / `--deny` accept the same strings (they alias `--allowedTools` / `--disallowedTools`). Write paths in the harness's own path syntax. `<scratch>` and `<logs>` are under `$(git rev-parse --git-common-dir)/maestro/`.
 
 | Role | Diagram | Allow | Deny |
 |---|---|---|---|
-| Every role | | `Bash(at-ticket *)`, `Bash(git rev-parse *)`, `Bash(git status *)`, `Read(.agent-team/**)`, Read/Edit/Write on `<scratch>/<bot-id>/**` and `<logs>/**`; for clean-up `Bash(ps *)`, `Bash(kill *)`, `Bash(git worktree remove *)`, `Bash(git worktree prune)` | `Bash(git push --force *)`, `Bash(git push -f *)`, `Bash(git reset --hard *)`, `Bash(git clean *)` |
+| Every role | | `Bash(maestro-ticket *)`, `Bash(git rev-parse *)`, `Bash(git status *)`, `Read(.maestro/**)`, Read/Edit/Write on `<scratch>/<bot-id>/**` and `<logs>/**`; for clean-up `Bash(ps *)`, `Bash(kill *)`, `Bash(git worktree remove *)`, `Bash(git worktree prune)` | `Bash(git push --force *)`, `Bash(git push -f *)`, `Bash(git reset --hard *)`, `Bash(git clean *)` |
 | chief-of-staff | Read summaries · write its own tickets | nothing more | `Edit`/`Write` elsewhere, `Bash(git commit *)`, `Bash(git push *)`, `Bash(git merge *)` |
 | planner | Full ticket system · read-only code | `Read`, `Grep`, `Glob`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | `Bash(git commit *)`, `Bash(git push *)`, `Bash(git merge *)` |
-| senior/junior-software-engineer | Edit code on at/ branches | `Read`, `Grep`, `Glob`, `Edit`/`Write` in the ticket worktree, `Bash(git worktree add *)`, `Bash(git add *)`, `Bash(git commit *)`, `Bash(git diff *)`, `Bash(git log *)`, the build and test commands from `.agent-team/project-setup.md` | `Bash(git push *)`, `Bash(git merge *)`, `Bash(git checkout main*)` |
+| senior/junior-software-engineer | Edit code on maestro/ branches | `Read`, `Grep`, `Glob`, `Edit`/`Write` in the ticket worktree, `Bash(git worktree add *)`, `Bash(git add *)`, `Bash(git commit *)`, `Bash(git diff *)`, `Bash(git log *)`, the build and test commands from `.maestro/project-setup.md` | `Bash(git push *)`, `Bash(git merge *)`, `Bash(git checkout main*)` |
 | code-reviewer | Read-only code and diffs | `Read`, `Grep`, `Glob`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git show *)` | `Bash(git commit *)`, `Bash(git push *)`, `Bash(git merge *)` |
-| qa-lead | Run tests and the app · read-only code | `Read`, `Grep`, `Glob`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git worktree add --detach *)`, test and run commands from `.agent-team/project-setup.md` | `Bash(git commit *)`, `Bash(git push *)`, `Bash(git merge *)` |
-| operations-manager | Merge · deploy · run the improvement loop | `Read`, `Grep`, `Glob`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git checkout main)`, `Bash(git merge *)`, `Bash(git push *)`, deploy commands from `.agent-team/project-setup.md` | `Edit`/`Write` elsewhere |
+| qa-lead | Run tests and the app · read-only code | `Read`, `Grep`, `Glob`, `Bash(git diff *)`, `Bash(git log *)`, `Bash(git worktree add --detach *)`, test and run commands from `.maestro/project-setup.md` | `Bash(git commit *)`, `Bash(git push *)`, `Bash(git merge *)` |
+| operations-manager | Merge · deploy · run the improvement loop | `Read`, `Grep`, `Glob`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git checkout main)`, `Bash(git merge *)`, `Bash(git push *)`, deploy commands from `.maestro/project-setup.md` | `Edit`/`Write` elsewhere |
 
 ## Rules
 

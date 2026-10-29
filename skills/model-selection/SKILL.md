@@ -13,7 +13,7 @@ Each step runs on the cheapest tier that can do it. Cost matters more across man
 |---|---|
 | Frontier | Hard judgment: ambiguous goals, risky or complex code, decisions for the user |
 | Mid-tier | Most steps: routine code, reviews, verification, intake, claim, wrap-up |
-| No tokens | Deterministic steps: tests, lint, build, `at-ticket` commands, `at-ticket render`, `git status` |
+| No tokens | Deterministic steps: tests, lint, build, `maestro-ticket` commands, `maestro-ticket render`, `git status` |
 
 No-tokens steps run as plain commands, not prompts. The bot runtime executes them the way it runs Preflight's health check: it runs the command in the repo and reads the exit code and output. It never reads or edits file contents itself; anything that needs reading or judging is a prompt. Judge them by exit code and output. Run only commands the role's permissions allow (see `harness-cli`).
 
@@ -38,7 +38,7 @@ A playbook step's `Tier` overrides the role default for that step. Never go belo
 3. Still not right, and retries remain: one tier up, in the same session (resume it with the new `--model`).
 4. Frontier didn't get it, or retries or budget ran out: set Blocked.
 
-Escalation applies to that step only. The next step starts on its own tier again. Retry limits and budgets come from `.agent-team/environment.md`.
+Escalation applies to that step only. The next step starts on its own tier again. Retry limits and budgets come from `.maestro/environment.md`.
 
 ## Code Reviewer: opposite model family
 
@@ -50,6 +50,6 @@ The reviewer's model must come from a different family than the author's (for ex
 
 ## Model IDs
 
-Don't hardcode model IDs in prompts, playbooks or skills. `.agent-team/environment.md` maps each tier to a model ID per harness, and names each model's family. Read it at preflight. If a tier has no model for your harness, use the next tier up and say so in the wrap-up retro.
+Don't hardcode model IDs in prompts, playbooks or skills. `.maestro/environment.md` maps each tier to a model ID per harness, and names each model's family. Read it at preflight. If a tier has no model for your harness, use the next tier up and say so in the wrap-up retro.
 
 Effort levels (`--effort`, `--reasoning-effort`) come from the same file when it sets them.

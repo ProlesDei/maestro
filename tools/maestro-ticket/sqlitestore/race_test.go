@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // openMany opens n independent stores on one file. Each has its own

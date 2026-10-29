@@ -3,4 +3,4 @@ CLAUDE.local.md
 .claude/settings.local.json
 
 # Build output
-tools/at-ticket/bin/
+tools/maestro-ticket/bin/

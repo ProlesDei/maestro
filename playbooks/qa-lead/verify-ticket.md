@@ -23,7 +23,7 @@ An `in_qa` ticket.
 - **Goal:** A separate checkout of exactly what was reviewed.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `git worktree add --detach $(git rev-parse --git-common-dir)/agent-team/worktrees/<id>-qa <sha>` exits `0`. `<sha>` is the commit in the latest handoff note.
+- **Done when:** `git worktree add --detach $(git rev-parse --git-common-dir)/maestro/worktrees/<id>-qa <sha>` exits `0`. `<sha>` is the commit in the latest handoff note.
 - **Evidence:** exit code; path and sha.
 
 ### 2. Run the checks
@@ -31,7 +31,7 @@ An `in_qa` ticket.
 - **Goal:** The project's checks pass on what you'll test.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build and test from `.agent-team/project-setup.md` all exit `0` in the QA worktree.
+- **Done when:** Build and test from `.maestro/project-setup.md` all exit `0` in the QA worktree.
 - **Evidence:** each command, exit code and test counts.
 
 A failure here is a QA fail. Skip to wrap-up with the output.
@@ -41,7 +41,7 @@ A failure here is a QA fail. Skip to wrap-up with the output.
 - **Goal:** Each acceptance criterion tried in the running app.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** The app was run the way `.agent-team/project-setup.md` says, and each criterion has: steps taken, expected, actual, pass or fail. The QA worktree, and the PID and command of anything started, are in the scratchpad so clean-up can stop it.
+- **Done when:** The app was run the way `.maestro/project-setup.md` says, and each criterion has: steps taken, expected, actual, pass or fail. The QA worktree, and the PID and command of anything started, are in the scratchpad so clean-up can stop it.
 - **Evidence:** commands run and exit codes; output or screenshots by path; the per-criterion results.
 
 Read-only code. Don't edit or fix anything, even a one-line fix.
@@ -56,7 +56,7 @@ Read-only code. Don't edit or fix anything, even a one-line fix.
 
 ## Stop and block when
 
-- The app can't be run the way `.agent-team/project-setup.md` says (missing service, access, data). Block with what's missing. That's not the engineer's failure.
+- The app can't be run the way `.maestro/project-setup.md` says (missing service, access, data). Block with what's missing. That's not the engineer's failure.
 - A criterion can't be tested as written: block and ask the Planner in the note.
 
 ## Wrap-up
