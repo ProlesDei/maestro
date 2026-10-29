@@ -3,11 +3,11 @@ flowchart TD
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
-        P1["<b>role.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P3["<b>Bot skills</b><br/>How to prompt and<br/>judge each step"] ~~~ P4["<b>optimizations.md</b><br/>General role tuning,<br/>improved upstream"] ~~~ P5["<b>Shared bot skills</b><br/>harness CLI · prompt contract ·<br/>choosing a model per step"]
+        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P3["<b>Bot skills</b><br/>How to prompt and<br/>judge each step"] ~~~ P4["<b>optimizations.md</b><br/>General role tuning,<br/>improved upstream"] ~~~ P5["<b>Shared bot skills</b><br/>harness CLI · prompt contract ·<br/>choosing a model per step"]
     end
 
     subgraph Loop ["Session loop: identical for every role"]
-        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, ticket CLI works, git clean<br/>Read environment.md and the trust level"]
+        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, at-ticket doctor passes, git clean<br/>Read .agent-team/environment.md and the trust level"]
         B1["<b>Start a harness session with launch flags</b><br/>Team rules · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
         B2["<b>Prompt: check intake</b> · at-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
         B3["<b>Pick the playbook</b><br/>Prompt: claim the work · at-claim"]
@@ -24,8 +24,8 @@ flowchart TD
 
     subgraph HarnessSide ["Their repo · the harness does all the work"]
         H["<b>Harness session</b>, headless<br/>Claude Code · Codex · Grok Build"]
-        Loads["<b>Uses our footprint only</b><br/>.agent-team/ rules, project setup and memory<br/>at-* skills, loaded only when named"]
-        Work["<b>Does the hands-on work</b><br/>Ticket system CLI · files and code ·<br/>git on at/ branches · tests and commands"]
+        Loads["<b>Uses our footprint only</b><br/>.agent-team/ rules, project-setup.md and memory<br/>at-* skills, loaded only when named"]
+        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: at-ticket · files and code ·<br/>git on at/ branches · tests and commands"]
     end
 
     Guard["<b>Guardrails</b><br/>Trust levels: propose-only at first · kill switch ·<br/>role permissions · budgets and retry limits ·<br/>approval gates · secrets never in prompts, replies or logs"]

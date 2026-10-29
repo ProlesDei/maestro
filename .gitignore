@@ -1,3 +1,6 @@
 # Personal, per-machine agent settings
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Build output
+tools/at-ticket/bin/

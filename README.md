@@ -9,8 +9,9 @@ maestro bundles a full suite of agent roles, skills, and tools. Install it, give
 | Part | What it is |
 |---|---|
 | Roles | Agent definitions. Each role owns one part of the delivery process. |
-| Skills | Reusable instructions agents load for specific tasks. |
-| Tools | Scripts and commands the agents call to do the work. |
+| Skills | Reusable instructions in `skills/<name>/SKILL.md`. `at-*` harness skills install into your repo under `.agent-team/` and the harness loads one only when a prompt names it. Bot skills (prompt contract, harness CLI, model selection) stay with the bot runtime. See `skills/README.md`. |
+| Playbooks | Step-by-step plans for each role's jobs, in `playbooks/<role>/`. The bot runtime picks one per ticket and runs its steps in one harness session. See `playbooks/README.md`. |
+| Tools | Scripts and commands the agents call to do the work. `tools/at-ticket/` is the ticket system: a CLI over a SQLite store shared by every worktree, with leases, versioned transitions, an event log and a generated `Backlog.md`. See `tools/at-ticket/README.md`. |
 | Bot profiles | One folder per bot at `bot-profiles/<name>/persona.md`, plus any supporting files in that folder. Outside tools, such as Grok, read a folder and copy it to create the bot. |
 
 ## How it works
@@ -21,7 +22,7 @@ maestro bundles a full suite of agent roles, skills, and tools. Install it, give
 
 ### The agent team
 
-You talk to one agent: the Chief of Staff. It hands big projects to the Planner and writes tickets for small tasks itself. Engineers pick up tickets from `tickets/`, and their code passes automated checks, a code review, and QA before the Operations Manager releases it. Each role runs on the cheapest model tier that can do the job; color marks the tier.
+You talk to one agent: the Chief of Staff. It hands big projects to the Planner and writes tickets for small tasks itself. Engineers pick up tickets from the ticket system (`at-ticket`), and their code passes automated checks, a code review, and QA before the Operations Manager releases it. Each role runs on the cheapest model tier that can do the job; color marks the tier.
 
 <!-- Source: docs/agent-team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
@@ -30,7 +31,7 @@ flowchart TD
 
     CoS["<b>Chief of Staff</b><br/>Frontier"]
     Planner["<b>Planner</b><br/>Mid-tier"]
-    Tickets[("<b>tickets/</b><br/>Specs, tickets, status, blockers")]
+    Tickets[("<b>Ticket system</b><br/>at-ticket · Backlog.md view<br/>Specs, tickets, status, blockers")]
 
     subgraph Build ["Build, review and test"]
         subgraph Engineers ["Engineers"]
@@ -55,7 +56,7 @@ flowchart TD
     Planner -->|"writes specs and tickets"| Tickets
     Planner -.->|"escalates above its authority"| CoS
 
-    %% Status and blockers flow through the tickets folder
+    %% Status and blockers flow through the ticket system
     Tickets -.->|"status and blockers:<br/>project tickets"| Planner
     Tickets -.->|"status and blockers:<br/>small tasks, escalations"| CoS
 
@@ -112,7 +113,7 @@ flowchart TD
 
 ### Bot anatomy
 
-An outside bot runtime, for example Grok Bot, creates a bot for each persona in `bot-profiles/`. Every persona operates under this same anatomy. The bot runtime loads the role's profile (persona, playbooks, bot skills, optimizations, and shared skills) outside the user's repo. It runs the standard session loop: preflight, starting a headless harness session with launch flags, checking intake, claiming work, prompting steps under the prompt contract, checking structured replies with evidence, batched wrap-up, and cleanup. It enforces guardrails and role-specific permissions while the coding harness does the hands-on work inside the repo.
+An outside bot runtime, for example Grok Bot, creates a bot for each persona in `bot-profiles/`. Every persona operates under this same anatomy. The bot runtime loads the role's profile (`persona.md`, playbooks, bot skills, optimizations, and shared skills) outside the user's repo. It runs the standard session loop: preflight, starting a headless harness session with launch flags, checking intake, claiming work, prompting steps under the prompt contract, checking structured replies with evidence, batched wrap-up, and cleanup. It enforces guardrails and role-specific permissions while the coding harness does the hands-on work inside the repo.
 
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
@@ -121,11 +122,11 @@ flowchart TD
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
-        P1["<b>role.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P3["<b>Bot skills</b><br/>How to prompt and<br/>judge each step"] ~~~ P4["<b>optimizations.md</b><br/>General role tuning,<br/>improved upstream"] ~~~ P5["<b>Shared bot skills</b><br/>harness CLI · prompt contract ·<br/>choosing a model per step"]
+        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P3["<b>Bot skills</b><br/>How to prompt and<br/>judge each step"] ~~~ P4["<b>optimizations.md</b><br/>General role tuning,<br/>improved upstream"] ~~~ P5["<b>Shared bot skills</b><br/>harness CLI · prompt contract ·<br/>choosing a model per step"]
     end
 
     subgraph Loop ["Session loop: identical for every role"]
-        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, ticket CLI works, git clean<br/>Read environment.md and the trust level"]
+        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, at-ticket doctor passes, git clean<br/>Read .agent-team/environment.md and the trust level"]
         B1["<b>Start a harness session with launch flags</b><br/>Team rules · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
         B2["<b>Prompt: check intake</b> · at-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
         B3["<b>Pick the playbook</b><br/>Prompt: claim the work · at-claim"]
@@ -142,8 +143,8 @@ flowchart TD
 
     subgraph HarnessSide ["Their repo · the harness does all the work"]
         H["<b>Harness session</b>, headless<br/>Claude Code · Codex · Grok Build"]
-        Loads["<b>Uses our footprint only</b><br/>.agent-team/ rules, project setup and memory<br/>at-* skills, loaded only when named"]
-        Work["<b>Does the hands-on work</b><br/>Ticket system CLI · files and code ·<br/>git on at/ branches · tests and commands"]
+        Loads["<b>Uses our footprint only</b><br/>.agent-team/ rules, project-setup.md and memory<br/>at-* skills, loaded only when named"]
+        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: at-ticket · files and code ·<br/>git on at/ branches · tests and commands"]
     end
 
     Guard["<b>Guardrails</b><br/>Trust levels: propose-only at first · kill switch ·<br/>role permissions · budgets and retry limits ·<br/>approval gates · secrets never in prompts, replies or logs"]

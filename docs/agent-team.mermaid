@@ -3,7 +3,7 @@ flowchart TD
 
     CoS["<b>Chief of Staff</b><br/>Frontier"]
     Planner["<b>Planner</b><br/>Mid-tier"]
-    Tickets[("<b>tickets/</b><br/>Specs, tickets, status, blockers")]
+    Tickets[("<b>Ticket system</b><br/>at-ticket · Backlog.md view<br/>Specs, tickets, status, blockers")]
 
     subgraph Build ["Build, review and test"]
         subgraph Engineers ["Engineers"]
@@ -28,7 +28,7 @@ flowchart TD
     Planner -->|"writes specs and tickets"| Tickets
     Planner -.->|"escalates above its authority"| CoS
 
-    %% Status and blockers flow through the tickets folder
+    %% Status and blockers flow through the ticket system
     Tickets -.->|"status and blockers:<br/>project tickets"| Planner
     Tickets -.->|"status and blockers:<br/>small tasks, escalations"| CoS
 
