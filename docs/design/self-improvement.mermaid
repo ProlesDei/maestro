@@ -10,7 +10,7 @@ flowchart TD
 
     subgraph Tiers ["Who approves, by risk"]
         direction LR
-        T1["<b>Tuning</b><br/>optimizations.md<br/>Ops adopts directly"] ~~~ T2["<b>Skill or prompt</b><br/>Trial first"] ~~~ T3["<b>Playbook</b><br/>Trial +<br/>Chief of Staff"] ~~~ T4["<b>Persona or authority</b><br/>User approval"]
+        T1["<b>Tuning</b><br/>Budgets, tiers, limits<br/>Ops adopts directly"] ~~~ T2["<b>Skill or prompt</b><br/>Trial first"] ~~~ T3["<b>Playbook</b><br/>Trial +<br/>Chief of Staff"] ~~~ T4["<b>Persona or authority</b><br/>User approval"]
     end
 
     Evals["<b>4 · Test on evals</b><br/>Run the change against golden tasks for the role<br/>Catches regressions before real work sees them"]
@@ -21,7 +21,7 @@ flowchart TD
     Keep(["Keep"])
     Revert(["Revert"])
 
-    Route["<b>Where a lesson goes</b><br/>Specific to this repo → .agent-team/project/memory<br/>Useful everywhere → proposed upstream to core,<br/>so every install benefits"]
+    Route["<b>Where a lesson goes</b><br/>Specific to this repo → .maestro/project/memory<br/>Useful everywhere → proposed upstream only,<br/>never pushed unless the maintainer opted in"]
 
     Hygiene["<b>Keep lessons lean</b><br/>Every lesson cites evidence · size cap per file ·<br/>expire lessons whose files changed ·<br/>Ops can never edit its own guardrails"]
 

@@ -8,9 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // When re-executed with this variable set, the test binary acts as the
@@ -28,6 +32,9 @@ type harness struct {
 	t   *testing.T
 	dir string
 	env map[string]string
+	now func() time.Time // store clock; nil means the database's
+	// checks replaces the store-directory checks when set.
+	checks func(dir string, allow bool) []ticket.Check
 }
 
 func newHarness(t *testing.T) *harness {
@@ -40,7 +47,7 @@ func (h *harness) run(stdin string, args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
 	code := Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb,
-		Getenv: func(k string) string { return h.env[k] }, Dir: h.dir,
+		Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, Now: h.now, StoreChecks: h.checks,
 	})
 	return code, out.String(), errb.String()
 }
@@ -80,6 +87,7 @@ type tk struct {
 	Version int64
 	Claim   *struct {
 		Holder  string
+		Token   int64
 		Expired bool
 	}
 	Comments []struct{ Body, Author string }
@@ -115,7 +123,7 @@ func TestLifecycleJSON(t *testing.T) {
 
 	var c tk
 	h.ok(&c, "claim", "--next", "--holder", "jse/s1", "--role", "junior-software-engineer", "--ttl", "10m")
-	if c.ID != "T-1" || c.Claim == nil || c.Claim.Holder != "jse/s1" || c.Version != 2 {
+	if c.ID != "T-1" || c.Claim == nil || c.Claim.Holder != "jse/s1" || c.Claim.Token != 1 || c.Version != 2 {
 		t.Fatalf("claim %+v", c)
 	}
 	if code := h.fails(5, "claim", "--next", "--holder", "jse/s2"); code != "no_work" {
@@ -127,33 +135,55 @@ func TestLifecycleJSON(t *testing.T) {
 
 	// Positional id before or after flags.
 	var tr tk
-	h.ok(&tr, "transition", "T-1", "--to", "in_progress", "--holder", "jse/s1", "--expect-version", "2")
+	h.ok(&tr, "transition", "T-1", "--to", "in_progress", "--holder", "jse/s1", "--token", "1", "--expect-version", "2")
 	if tr.Status != "in_progress" || tr.Version != 3 {
 		t.Fatalf("transition %+v", tr)
 	}
-	if code := h.fails(4, "transition", "--to", "in_review", "--holder", "jse/s1", "--expect-version", "2", "1"); code != "version_conflict" {
+	if code := h.fails(4, "transition", "--to", "in_review", "--holder", "jse/s1", "--token", "1", "--expect-version", "2", "1"); code != "version_conflict" {
 		t.Fatalf("version conflict code %q", code)
 	}
-	if code := h.fails(4, "transition", "1", "--from", "todo", "--to", "in_review", "--holder", "jse/s1"); code != "status_conflict" {
+	if code := h.fails(4, "transition", "1", "--from", "todo", "--to", "in_review", "--holder", "jse/s1", "--token", "1"); code != "status_conflict" {
 		t.Fatalf("status conflict code %q", code)
 	}
-	if code := h.fails(2, "transition", "1", "--to", "in_qa", "--holder", "jse/s1"); code != "invalid_transition" {
+	if code := h.fails(2, "transition", "1", "--to", "in_qa", "--holder", "jse/s1", "--token", "1"); code != "invalid_transition" {
 		t.Fatalf("invalid transition code %q", code)
 	}
 	if code := h.fails(2, "transition", "1", "--holder", "jse/s1"); code != "usage" {
 		t.Fatalf("missing --to code %q", code)
 	}
-	h.ok(nil, "heartbeat", "1", "--holder", "jse/s1", "--ttl", "20m")
-	if code := h.fails(4, "heartbeat", "1", "--holder", "jse/s2"); code != "lease_lost" {
+	h.ok(nil, "heartbeat", "1", "--holder", "jse/s1", "--token", "1", "--ttl", "20m")
+	if code := h.fails(4, "heartbeat", "1", "--holder", "jse/s2", "--token", "1"); code != "lease_lost" {
 		t.Fatalf("lease lost code %q", code)
 	}
-	h.fails(2, "heartbeat", "1", "--holder", "jse/s1", "--idempotency-key", "k")
+	if code := h.fails(4, "heartbeat", "1", "--holder", "jse/s1", "--token", "7"); code != "lease_lost" {
+		t.Fatalf("stale heartbeat code %q", code)
+	}
+	if code := h.fails(2, "heartbeat", "1", "--holder", "jse/s1"); code != "invalid" {
+		t.Fatalf("heartbeat without token code %q", code)
+	}
+	h.fails(2, "heartbeat", "1", "--holder", "jse/s1", "--token", "1", "--idempotency-key", "k")
 
-	if code, _, errs := h.run("handoff via stdin\n", "comment", "T-1", "--body-file", "-"); code != 0 {
+	// Fencing: a claimed ticket takes writes only from its holder and token.
+	if code := h.fails(4, "comment", "T-1", "--body", "drive-by"); code != "claimed" {
+		t.Fatalf("unfenced comment code %q", code)
+	}
+	if code := h.fails(2, "comment", "T-1", "--body", "x", "--holder", "jse/s1"); code != "invalid" {
+		t.Fatalf("comment without token code %q", code)
+	}
+	if code := h.fails(4, "transition", "1", "--to", "in_review", "--holder", "jse/s1", "--token", "7"); code != "lease_lost" {
+		t.Fatalf("stale token code %q", code)
+	}
+	if code, _, errs := h.run("handoff via stdin\n", "comment", "T-1", "--body-file", "-", "--holder", "jse/s1", "--token", "1"); code != 0 {
 		t.Fatalf("comment: %d %s", code, errs)
 	}
-	h.ok(nil, "transition", "T-1", "--to", "in_review", "--holder", "jse/s1", "--release", "--note", "checks pass")
-	h.ok(nil, "release", "T-1", "--holder", "jse/s1") // second release is a no-op
+	if code := h.fails(4, "release", "T-1", "--holder", "jse/s1", "--token", "7"); code != "lease_lost" {
+		t.Fatalf("stale release code %q", code)
+	}
+	h.ok(nil, "transition", "T-1", "--to", "in_review", "--holder", "jse/s1", "--token", "1", "--release", "--note", "checks pass")
+	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "1") // second release is a no-op
+	if code := h.fails(2, "release", "T-1", "--holder", "jse/s1"); code != "invalid" {
+		t.Fatalf("release without token code %q", code)
+	}
 
 	var got tk
 	h.ok(&got, "get", "T-1")
@@ -293,10 +323,18 @@ func TestGitDefaultsSharedAcrossWorktrees(t *testing.T) {
 		t.Fatalf("doctor %+v", doc)
 	}
 
+	// F8: render from an agent branch's worktree writes next to the store,
+	// in the git common dir, and leaves every work tree clean.
 	var r struct{ Path string }
 	linked.ok(&r, "render")
-	if r.Path != filepath.Join(wt, ".maestro", "Backlog.md") {
+	if r.Path != filepath.Join(repo, ".git", "maestro", "Backlog.md") {
 		t.Fatalf("render path %q", r.Path)
+	}
+	main.ok(nil, "render")
+	for _, dir := range []string{repo, wt} {
+		if st := git(t, dir, "status", "--porcelain", "--untracked-files=all"); st != "" {
+			t.Fatalf("render left changes in %s:\n%s", dir, st)
+		}
 	}
 	b, err := os.ReadFile(r.Path)
 	if err != nil || !strings.HasPrefix(string(b), "<!-- generated by maestro-ticket render, do not edit -->") ||
@@ -406,4 +444,470 @@ func TestRaceClaimProcesses(t *testing.T) {
 		t.Fatalf("store has %d claimed tickets; want %d", len(l.Tickets), tickets)
 	}
 	t.Logf("%d processes, %d tickets: %d claimed, %d no-work, 0 double claims", procs, tickets, len(won), noWork)
+}
+
+func TestCreateTypeOwnerBacklog(t *testing.T) {
+	h := newHarness(t)
+	var sc struct {
+		ID, Type, Status, Owner string
+		CreatedBy               string `json:"created_by"`
+	}
+	h.ok(&sc, "create", "--title", "investigate", "--type", "scout", "--status", "backlog", "--owner", "chief-of-staff", "--actor", "planner")
+	if sc.Type != "scout" || sc.Status != "backlog" || sc.Owner != "chief-of-staff" || sc.CreatedBy != "planner" {
+		t.Fatalf("create scout %+v", sc)
+	}
+	if code := h.fails(2, "create", "--title", "x", "--type", "epic"); code != "invalid" {
+		t.Fatalf("bad type code %q", code)
+	}
+	if code := h.fails(2, "create", "--title", "x", "--type", "scout"); code != "invalid" {
+		t.Fatalf("scout without owner code %q", code)
+	}
+	h.fails(2, "claim", "--next", "--status", "backlog", "--holder", "planner/s1")
+	h.fails(5, "claim", "--next", "--holder", "planner/s1")
+	var blk struct {
+		Status      string
+		BlockedFrom string `json:"blocked_from"`
+	}
+	h.ok(&blk, "create", "--title", "waits", "--status", "blocked")
+	if blk.BlockedFrom != "todo" {
+		t.Fatalf("created blocked %+v", blk)
+	}
+	if code, out, _ := h.run("", "get", "T-1"); code != 0 || !strings.Contains(out, "type:     scout") || !strings.Contains(out, "owner:    chief-of-staff") {
+		t.Fatalf("human get: %q", out)
+	}
+	if code, out, _ := h.run("", "get", "T-2"); code != 0 || !strings.Contains(out, "status:   blocked (from todo)") {
+		t.Fatalf("human get blocked: %q", out)
+	}
+}
+
+func TestDoneGateFlags(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "ship it")
+	for _, to := range []string{"in_progress", "in_review", "in_qa", "ready_to_release"} {
+		h.ok(nil, "transition", "T-1", "--to", to)
+	}
+	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "qa-lead"); code != "forbidden" {
+		t.Fatalf("non-ops done code %q", code)
+	}
+	h.env["MAESTRO_TICKET_ROLE"] = "operations-manager"
+	var d tk
+	h.ok(&d, "transition", "T-1", "--to", "done")
+	if d.Status != "done" {
+		t.Fatalf("ops done %+v", d)
+	}
+
+	h.ok(nil, "create", "--title", "scout", "--type", "scout", "--owner", "chief-of-staff")
+	h.ok(nil, "transition", "T-2", "--to", "in_progress")
+	h.ok(nil, "transition", "T-2", "--to", "in_review")
+	if code := h.fails(2, "transition", "T-2", "--to", "done", "--actor", "ops"); code != "forbidden" {
+		t.Fatalf("ops closing a scout code %q", code)
+	}
+	h.ok(&d, "transition", "T-2", "--to", "done", "--actor", "chief-of-staff")
+	if d.Status != "done" {
+		t.Fatalf("owner done %+v", d)
+	}
+}
+
+func TestReapCommand(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x")
+	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "5s")
+	now := time.Now().Add(time.Minute)
+	h.now = func() time.Time { return now }
+	var r struct{ Reaped []string }
+	h.ok(&r, "reap")
+	if len(r.Reaped) != 1 || r.Reaped[0] != "T-1" {
+		t.Fatalf("reap %+v", r)
+	}
+	var page struct {
+		Events []struct{ Type, Actor string }
+	}
+	h.ok(&page, "events", "--type", "lease_expired")
+	if len(page.Events) != 1 || page.Events[0].Actor != "maestro-ticket" {
+		t.Fatalf("lease_expired events %+v", page)
+	}
+	if code, out, _ := h.run("", "reap"); code != 0 || !strings.Contains(out, "reaped 0") {
+		t.Fatalf("human reap: %d %q", code, out)
+	}
+	h.fails(2, "reap", "--every", "10ms")
+}
+
+// F9: the git default refused nothing. A bare repo got a store and doctor
+// said ok; a submodule silently got its own store.
+func TestGitDefaultRefusesBareAndSubmodule(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	git(t, filepath.Dir(bare), "init", "-q", "--bare", bare)
+	b := &harness{t: t, dir: bare, env: map[string]string{}}
+	if code := b.fails(2, "doctor"); code != "invalid" {
+		t.Fatalf("doctor in bare repo: %q", code)
+	}
+	b.fails(2, "list")
+	if _, err := os.Stat(filepath.Join(bare, "maestro")); !os.IsNotExist(err) {
+		t.Fatalf("bare repo got a store dir: %v", err)
+	}
+	// --store still works from anywhere.
+	b.env["MAESTRO_TICKET_STORE"] = filepath.Join(t.TempDir(), "tickets.db")
+	b.ok(nil, "list")
+
+	lib := t.TempDir()
+	git(t, lib, "init", "-q")
+	git(t, lib, "commit", "-q", "--allow-empty", "-m", "lib")
+	super := t.TempDir()
+	git(t, super, "init", "-q")
+	git(t, super, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "lib")
+	sub := &harness{t: t, dir: filepath.Join(super, "lib"), env: map[string]string{}}
+	code, out, _ := sub.run("", "list", "--json")
+	if code != 2 || !strings.Contains(out, "submodule") {
+		t.Fatalf("list in submodule: exit %d %s", code, out)
+	}
+	top := &harness{t: t, dir: super, env: map[string]string{}}
+	top.ok(nil, "list")
+}
+
+// F13: a relative --store resolved against the process directory, not the
+// directory the CLI was asked to run in.
+func TestRelativeStoreFromDir(t *testing.T) {
+	h := &harness{t: t, dir: t.TempDir(), env: map[string]string{}}
+	h.ok(nil, "create", "--title", "x", "--store", "rel/tickets.db")
+	if _, err := os.Stat(filepath.Join(h.dir, "rel", "tickets.db")); err != nil {
+		t.Fatalf("store not under Env.Dir: %v", err)
+	}
+	var doc struct {
+		OK     bool
+		Checks []struct {
+			Name string
+			OK   bool
+		}
+	}
+	h.ok(&doc, "doctor", "--store", "rel/tickets.db")
+	names := map[string]bool{}
+	for _, c := range doc.Checks {
+		names[c.Name] = c.OK
+	}
+	if !doc.OK || !names["filesystem"] || !names["locks"] {
+		t.Fatalf("doctor checks %+v", doc.Checks)
+	}
+}
+
+// A watcher blocks on events --wait instead of polling with tokens.
+func TestEventsWait(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	var page struct {
+		Events  []struct{ Seq int64 }
+		NextSeq int64 `json:"next_seq"`
+	}
+	start := time.Now()
+	h.ok(&page, "events", "--since", "1", "--wait", "300ms")
+	if len(page.Events) != 0 || page.NextSeq != 1 || time.Since(start) < 300*time.Millisecond {
+		t.Fatalf("timeout after %s: %+v", time.Since(start), page)
+	}
+	// Already there: no wait.
+	start = time.Now()
+	h.ok(&page, "events", "--since", "0", "--wait", "1m")
+	if len(page.Events) != 1 || time.Since(start) > 5*time.Second {
+		t.Fatalf("existing event after %s: %+v", time.Since(start), page)
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		h2 := &harness{t: t, dir: h.dir, env: h.env}
+		h2.run("", "comment", "T-1", "--body", "wake")
+	}()
+	start = time.Now()
+	h.ok(&page, "events", "--since", "1", "--wait", "1m")
+	if len(page.Events) != 1 || page.NextSeq != 2 || time.Since(start) > 10*time.Second {
+		t.Fatalf("woken after %s: %+v", time.Since(start), page)
+	}
+	h.fails(2, "events", "--wait", "-1s")
+}
+
+func TestBackupAndExport(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "keep me")
+	h.ok(nil, "comment", "T-1", "--body", "note")
+	clock := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return clock }
+	var paths []string
+	for i := 0; i < 3; i++ {
+		var r struct {
+			Path   string
+			Pruned []string
+		}
+		h.ok(&r, "backup", "--keep", "2")
+		paths = append(paths, r.Path)
+		clock = clock.Add(time.Hour)
+	}
+	if filepath.Dir(paths[0]) != filepath.Join(h.dir, "backups") {
+		t.Fatalf("backup dir %s", filepath.Dir(paths[0]))
+	}
+	left, _ := filepath.Glob(filepath.Join(h.dir, "backups", "*"))
+	if len(left) != 2 || left[0] != paths[1] || left[1] != paths[2] {
+		t.Fatalf("after pruning: %v; want the two newest of %v", left, paths)
+	}
+	// A snapshot is a working store.
+	b := &harness{t: t, dir: h.dir, env: map[string]string{"MAESTRO_TICKET_STORE": paths[2]}}
+	var got tk
+	b.ok(&got, "get", "T-1")
+	if len(got.Comments) != 1 {
+		t.Fatalf("snapshot %+v", got)
+	}
+	// Same name twice is refused, not overwritten.
+	clock = clock.Add(-time.Hour)
+	h.fails(2, "backup")
+	h.fails(2, "backup", "--every", "1s")
+
+	// Pruning touches only snapshot names: not a store or another file that
+	// happens to match tickets-*.db in the same folder (0244).
+	data := filepath.Join(h.dir, "data")
+	os.MkdirAll(data, 0o755)
+	os.WriteFile(filepath.Join(data, "tickets-archive-2019.db"), []byte("x"), 0o644)
+	live := &harness{t: t, dir: h.dir, env: map[string]string{"MAESTRO_TICKET_STORE": filepath.Join(data, "tickets-1.db")}}
+	live.ok(nil, "create", "--title", "precious")
+	live.ok(nil, "backup", "--dir", "data", "--keep", "1")
+	live.ok(nil, "backup", "--dir", "data", "--keep", "1")
+	for _, f := range []string{"tickets-1.db", "tickets-archive-2019.db"} {
+		if _, err := os.Stat(filepath.Join(data, f)); err != nil {
+			t.Fatalf("pruning removed %s: %v", f, err)
+		}
+	}
+	var one tk
+	live.ok(&one, "get", "T-1")
+	// A store named like a snapshot, reached through a symlinked folder,
+	// is still the store.
+	snapName := "tickets-20200101T000000.000Z.db"
+	os.Rename(filepath.Join(data, "tickets-1.db"), filepath.Join(data, snapName))
+	os.Remove(filepath.Join(data, "tickets-1.db-wal"))
+	os.Remove(filepath.Join(data, "tickets-1.db-shm"))
+	if err := os.Symlink(data, filepath.Join(h.dir, "link")); err != nil {
+		t.Fatal(err)
+	}
+	linked := &harness{t: t, dir: h.dir, env: map[string]string{"MAESTRO_TICKET_STORE": filepath.Join(h.dir, "link", snapName)}}
+	linked.ok(nil, "backup", "--dir", "data", "--keep", "1")
+	if _, err := os.Stat(filepath.Join(data, snapName)); err != nil {
+		t.Fatalf("pruning removed the store through a symlink: %v", err)
+	}
+
+	var ex struct {
+		SchemaVersion int   `json:"schema_version"`
+		LastSeq       int64 `json:"last_seq"`
+		Tickets       []tk
+		Events        []struct{ Type string }
+	}
+	code, out, _ := h.run("", "export")
+	if code != 0 || json.Unmarshal([]byte(out), &ex) != nil {
+		t.Fatalf("export: %d %s", code, out)
+	}
+	if ex.SchemaVersion < 3 || ex.LastSeq != 2 || len(ex.Tickets) != 1 || len(ex.Tickets[0].Comments) != 1 || len(ex.Events) != 2 {
+		t.Fatalf("export %+v", ex)
+	}
+	var r struct{ Path string }
+	h.ok(&r, "export", "--out", "dump.json")
+	if r.Path != filepath.Join(h.dir, "dump.json") {
+		t.Fatalf("export path %q", r.Path)
+	}
+}
+
+func TestDepsAndAreasFlags(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "base", "--areas", "tools/maestro-ticket")
+	var tk2 struct {
+		DependsOn []string `json:"depends_on"`
+		Areas     []string
+	}
+	h.ok(&tk2, "create", "--title", "next", "--priority", "0", "--deps", "T-1", "--areas", "skills/,docs")
+	if fmt.Sprint(tk2.DependsOn) != "[T-1]" || fmt.Sprint(tk2.Areas) != "[docs skills]" {
+		t.Fatalf("create %+v", tk2)
+	}
+	if code := h.fails(4, "claim", "T-2", "--holder", "jse/a"); code != "waiting_on_deps" {
+		t.Fatalf("claim waiting ticket: %q", code)
+	}
+	h.ok(nil, "claim", "--next", "--holder", "jse/a") // T-1
+	h.ok(nil, "create", "--title", "same area", "--areas", "tools/maestro-ticket/cli")
+	if code := h.fails(4, "claim", "T-3", "--holder", "jse/b"); code != "area_busy" {
+		t.Fatalf("claim busy area: %q", code)
+	}
+	h.fails(5, "claim", "--next", "--holder", "jse/b")
+	h.ok(nil, "update", "T-2", "--remove-deps", "T-1")
+	var c tk
+	h.ok(&c, "claim", "--next", "--holder", "jse/b")
+	if c.ID != "T-2" {
+		t.Fatalf("claimed %s; want T-2", c.ID)
+	}
+	tok2 := fmt.Sprint(c.Claim.Token)
+	h.ok(nil, "update", "T-3", "--areas", "")
+	h.ok(&c, "claim", "--next", "--holder", "jse/c")
+	if c.ID != "T-3" {
+		t.Fatalf("claimed %s; want T-3 after clearing its areas", c.ID)
+	}
+	// T-2 -> T-1 again, then T-1 -> T-2 would be a cycle.
+	h.ok(nil, "update", "T-2", "--add-deps", "T-1", "--holder", "jse/b", "--token", tok2)
+	if code := h.fails(2, "update", "T-1", "--add-deps", "T-2", "--holder", "jse/a", "--token", "1"); code != "invalid" {
+		t.Fatalf("cycle: %q", code)
+	}
+	if code, out, _ := h.run("", "get", "T-2"); code != 0 || !strings.Contains(out, "deps:     T-1") || !strings.Contains(out, "areas:    docs skills") {
+		t.Fatalf("human get: %q", out)
+	}
+}
+
+func leaseExpiry(t *testing.T, h *harness, id string) time.Time {
+	t.Helper()
+	var got struct {
+		Claim *struct {
+			ExpiresAt time.Time `json:"expires_at"`
+		}
+	}
+	h.ok(&got, "get", id)
+	if got.Claim == nil {
+		return time.Time{}
+	}
+	return got.Claim.ExpiresAt
+}
+
+func startSleeper(t *testing.T) *exec.Cmd {
+	t.Helper()
+	sl := exec.Command("sleep", "60")
+	if err := sl.Start(); err != nil {
+		t.Skip("no sleep binary")
+	}
+	t.Cleanup(func() { sl.Process.Kill(); sl.Wait() })
+	return sl
+}
+
+// Heartbeats come from a background process watching the session's pid,
+// never from LLM turns.
+func TestKeepalive(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "long step")
+	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
+	first := leaseExpiry(t, h, "T-1")
+	sl := startSleeper(t)
+
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "1", "--pid", fmt.Sprint(sl.Process.Pid), "--ttl", "6s", "--every", "200ms")
+		done <- code
+	}()
+	time.Sleep(1200 * time.Millisecond)
+	if got := leaseExpiry(t, h, "T-1"); !got.After(first) {
+		t.Fatalf("keepalive didn't extend the lease: %s, first %s", got, first)
+	}
+	// The session dies: the keepalive stops, and the lease is left to expire.
+	sl.Process.Kill()
+	sl.Wait()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("keepalive exit %d after session died", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("keepalive outlived its session")
+	}
+
+	// A released lease stops the keepalive with lease_lost.
+	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
+	go func() {
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(os.Getpid()), "--ttl", "6s", "--every", "200ms")
+		done <- code
+	}()
+	time.Sleep(300 * time.Millisecond)
+	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "2")
+	select {
+	case code := <-done:
+		if code != 4 {
+			t.Fatalf("keepalive exit %d after release; want 4", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("keepalive kept running after release")
+	}
+	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2")
+	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "999999999")
+	// PID 1 never exits, and a process we may not signal isn't the
+	// session's: either would keep the lease forever (0244).
+	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "1")
+	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", "1")
+}
+
+// claim --keepalive starts the keepalive itself, as a detached process.
+func TestClaimStartsKeepalive(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "long step")
+	sl := startSleeper(t)
+	cmd := exec.Command(exe, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s", "--keepalive", fmt.Sprint(sl.Process.Pid), "--json")
+	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("claim: %v\n%s", err, out)
+	}
+	first := leaseExpiry(t, h, "T-1")
+	deadline := time.Now().Add(10 * time.Second)
+	for !leaseExpiry(t, h, "T-1").After(first) {
+		if time.Now().After(deadline) {
+			t.Fatal("no heartbeat from the keepalive claim started")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	// Stop it the normal way: the session ends. It checks every second;
+	// give it time to close the store before the temp dir goes.
+	sl.Process.Kill()
+	sl.Wait()
+	time.Sleep(1500 * time.Millisecond)
+}
+
+// claim --ttl 0 means the default TTL for the keepalive too. Passing the
+// raw 0 on made the detached keepalive exit at once with a usage error
+// nobody saw, while the claim reported success (0244).
+func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "long step")
+	sl := startSleeper(t)
+	defer func() {
+		sl.Process.Kill()
+		sl.Wait()
+		time.Sleep(1500 * time.Millisecond) // the keepalive closes the store
+	}()
+	store := h.env["MAESTRO_TICKET_STORE"]
+	cmd := exec.Command(exe, "claim", "T-1", "--holder", "jse/s1", "--ttl", "0", "--keepalive", fmt.Sprint(sl.Process.Pid), "--json")
+	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("claim: %v\n%s", err, out)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	out, _ := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output()
+	if len(strings.Fields(string(out))) != 1 {
+		t.Fatalf("want one keepalive running for the claim, got pids %q", out)
+	}
+}
+
+// F9: a store on an unsafe filesystem is refused before it's opened, by
+// every command; doctor reports why; the override lets it through.
+func TestUnsafeFilesystemRefused(t *testing.T) {
+	h := newHarness(t)
+	h.checks = func(dir string, allow bool) []ticket.Check {
+		return []ticket.Check{{Name: "filesystem", OK: allow, Detail: dir + " is on nfs"}}
+	}
+	if code := h.fails(2, "create", "--title", "x"); code != "invalid" {
+		t.Fatalf("create on nfs: %q", code)
+	}
+	if _, err := os.Stat(h.env["MAESTRO_TICKET_STORE"]); !os.IsNotExist(err) {
+		t.Fatalf("store opened on an unsafe filesystem: %v", err)
+	}
+	code, out, _ := h.run("", "doctor", "--json")
+	if code != 1 || !strings.Contains(out, "is on nfs") {
+		t.Fatalf("doctor: %d %s", code, out)
+	}
+	if _, err := os.Stat(h.env["MAESTRO_TICKET_STORE"]); !os.IsNotExist(err) {
+		t.Fatalf("doctor opened a store on an unsafe filesystem: %v", err)
+	}
+	h.env["MAESTRO_TICKET_ALLOW_UNSAFE_FS"] = "1"
+	h.ok(nil, "create", "--title", "x")
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,9 @@ func (id *ID) UnmarshalJSON(b []byte) error {
 		var n int64
 		if err2 := json.Unmarshal(b, &n); err2 != nil {
 			return err
+		}
+		if n <= 0 {
+			return fmt.Errorf("%w: bad ticket id %d (want T-<n>)", ErrInvalid, n)
 		}
 		*id = ID(n)
 		return nil
@@ -58,6 +62,7 @@ func ParseID(s string) (ID, error) {
 type Status string
 
 const (
+	StatusBacklog        Status = "backlog"
 	StatusTodo           Status = "todo"
 	StatusInProgress     Status = "in_progress"
 	StatusInReview       Status = "in_review"
@@ -70,43 +75,55 @@ const (
 
 // Statuses lists every status in workflow order.
 var Statuses = []Status{
-	StatusTodo, StatusInProgress, StatusInReview, StatusInQA,
+	StatusBacklog, StatusTodo, StatusInProgress, StatusInReview, StatusInQA,
 	StatusReadyToRelease, StatusBlocked, StatusDone, StatusCancelled,
 }
 
-// transitions is the workflow. in_progress -> done closes work with nothing
-// to review or release (tracking tickets, infrastructure requests); the
-// review and QA gates for code are enforced by role playbooks and
-// permissions, not here.
-var transitions = map[Status][]Status{
-	StatusTodo:           {StatusInProgress, StatusBlocked, StatusCancelled},
-	StatusInProgress:     {StatusInReview, StatusTodo, StatusBlocked, StatusDone, StatusCancelled},
-	StatusInReview:       {StatusInQA, StatusInProgress, StatusBlocked, StatusCancelled},
-	StatusInQA:           {StatusReadyToRelease, StatusInProgress, StatusBlocked, StatusCancelled},
-	StatusReadyToRelease: {StatusDone, StatusInProgress, StatusBlocked, StatusCancelled},
-	StatusBlocked:        {StatusTodo, StatusInProgress, StatusInReview, StatusInQA, StatusReadyToRelease, StatusCancelled},
-	StatusDone:           nil,
-	StatusCancelled:      nil,
+// workflows lists the moves each ticket type allows. Ship tickets reach done
+// only through review, QA and release; scout tickets end at in_review, where
+// the owner reads the report. Blocked is not listed as a source: a blocked
+// ticket returns only to the status it was blocked from, or is cancelled
+// (see Ticket.NextStatuses). Done and cancelled are terminal.
+var workflows = map[Type]map[Status][]Status{
+	TypeShip: {
+		StatusBacklog:        {StatusTodo, StatusBlocked, StatusCancelled},
+		StatusTodo:           {StatusInProgress, StatusBacklog, StatusBlocked, StatusCancelled},
+		StatusInProgress:     {StatusInReview, StatusTodo, StatusBlocked, StatusCancelled},
+		StatusInReview:       {StatusInQA, StatusInProgress, StatusBlocked, StatusCancelled},
+		StatusInQA:           {StatusReadyToRelease, StatusInProgress, StatusBlocked, StatusCancelled},
+		StatusReadyToRelease: {StatusDone, StatusInProgress, StatusBlocked, StatusCancelled},
+	},
+	TypeScout: {
+		StatusBacklog:    {StatusTodo, StatusBlocked, StatusCancelled},
+		StatusTodo:       {StatusInProgress, StatusBacklog, StatusBlocked, StatusCancelled},
+		StatusInProgress: {StatusInReview, StatusTodo, StatusBlocked, StatusCancelled},
+		StatusInReview:   {StatusDone, StatusInProgress, StatusBlocked, StatusCancelled},
+	},
 }
 
 // Valid reports whether s is a known status.
-func (s Status) Valid() bool { _, ok := transitions[s]; return ok }
-
-// Terminal reports whether no transition leaves s.
-func (s Status) Terminal() bool { return s.Valid() && len(transitions[s]) == 0 }
-
-// CanTransition reports whether the workflow allows from -> to.
-func CanTransition(from, to Status) bool {
-	for _, s := range transitions[from] {
-		if s == to {
+func (s Status) Valid() bool {
+	for _, x := range Statuses {
+		if s == x {
 			return true
 		}
 	}
 	return false
 }
 
-// NextStatuses returns the statuses reachable from s.
-func NextStatuses(s Status) []Status { return append([]Status(nil), transitions[s]...) }
+// Terminal reports whether no transition leaves s.
+func (s Status) Terminal() bool { return s == StatusDone || s == StatusCancelled }
+
+// WritesCode reports whether work in status s changes code: only then does
+// a claim wait on dependencies and areas, and hold its areas (0245).
+func (s Status) WritesCode() bool { return s == StatusTodo || s == StatusInProgress }
+
+// IsSendBack reports whether from -> to sends work back from review or QA,
+// which adds one to a ship ticket's tries. An owner sending a scout report
+// back is not a try (decision 0502).
+func IsSendBack(from, to Status) bool {
+	return to == StatusInProgress && (from == StatusInReview || from == StatusInQA)
+}
 
 // ParseStatus validates a status name.
 func ParseStatus(s string) (Status, error) {
@@ -132,6 +149,35 @@ func ParseStatuses(s string) ([]Status, error) {
 	}
 	return out, nil
 }
+
+// Type is a ticket's shape. Ship tickets deliver changes and go through
+// review, QA and release. Scout tickets end at an evidenced report.
+type Type string
+
+const (
+	TypeShip  Type = "ship"
+	TypeScout Type = "scout"
+)
+
+// Valid reports whether t is a known type.
+func (t Type) Valid() bool { return t == TypeShip || t == TypeScout }
+
+// ParseType validates a type name.
+func ParseType(s string) (Type, error) {
+	t := Type(strings.TrimSpace(s))
+	if !t.Valid() {
+		return "", fmt.Errorf("%w: unknown ticket type %q (want ship or scout)", ErrInvalid, s)
+	}
+	return t, nil
+}
+
+// SystemActor is the actor on events the store writes by itself, such as
+// lease_expired.
+const SystemActor = "maestro-ticket"
+
+// RoleOperationsManager is the only role that sets ship tickets done, after
+// release.
+const RoleOperationsManager = "operations-manager"
 
 // Priority runs 0 (most urgent) to 3.
 const (
@@ -187,26 +233,90 @@ func ValidateTTL(ttl time.Duration) (time.Duration, error) {
 
 // Claim is a session-scoped lease on a ticket.
 type Claim struct {
-	Holder    string    `json:"holder"`
+	Holder string `json:"holder"`
+	// Token is the lease number: it grows on every claim of the ticket,
+	// including a holder re-claiming its own lease. Writes to a claimed
+	// ticket must carry it, so a session that lost its lease is fenced out.
+	Token     int64     `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
 	// Expired is computed at read time. An expired claim no longer blocks
-	// anyone; the next claim or release clears it.
+	// anyone. The reaper, or the next write to the ticket, clears it and
+	// logs lease_expired.
 	Expired bool `json:"expired"`
 }
 
 // Ticket is one unit of work.
 type Ticket struct {
-	ID        ID        `json:"id"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	Status    Status    `json:"status"`
-	Role      string    `json:"role"`
-	Priority  int       `json:"priority"`
-	CreatedBy string    `json:"created_by"`
-	Version   int64     `json:"version"`
-	Claim     *Claim    `json:"claim"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        ID     `json:"id"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Type      Type   `json:"type"`
+	Status    Status `json:"status"`
+	Role      string `json:"role"`
+	Priority  int    `json:"priority"`
+	CreatedBy string `json:"created_by"`
+	// Owner asked for the work. On scout tickets the owner sets done.
+	Owner string `json:"owner"`
+	// Tries counts send-backs from review or QA.
+	Tries int `json:"tries"`
+	// LeaseExpiries counts the leases on this ticket that expired instead of
+	// being released: sessions that died or stalled while holding it.
+	LeaseExpiries int `json:"lease_expiries"`
+	// DependsOn lists tickets that must be done before this one is handed
+	// out.
+	DependsOn []ID `json:"depends_on"`
+	// Areas are the code areas the ticket touches. Two tickets whose areas
+	// overlap are never claimed at the same time.
+	Areas []string `json:"areas"`
+	// BlockedFrom is the status a blocked ticket returns to.
+	BlockedFrom Status    `json:"blocked_from,omitempty"`
+	Version     int64     `json:"version"`
+	Claim       *Claim    `json:"claim"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// NextStatuses returns the statuses t may move to.
+func (t Ticket) NextStatuses() []Status {
+	if t.Status == StatusBlocked {
+		back := t.BlockedFrom
+		if !back.Valid() || back == StatusBlocked || back.Terminal() {
+			back = StatusTodo
+		}
+		return []Status{back, StatusCancelled}
+	}
+	return append([]Status(nil), workflows[t.Type][t.Status]...)
+}
+
+// CanMove reports whether t may move to status to.
+func (t Ticket) CanMove(to Status) bool {
+	for _, s := range t.NextStatuses() {
+		if s == to {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckGate decides whether actor, acting as actorRole, may move t to
+// status to. Only the Operations Manager sets a ship ticket done; only its
+// owner sets a scout ticket done. Run it after CanMove.
+func (t Ticket) CheckGate(to Status, actor, actorRole string) error {
+	if to != StatusDone {
+		return nil
+	}
+	switch t.Type {
+	case TypeShip:
+		if actorRole != RoleOperationsManager {
+			return fmt.Errorf("%w: only %s sets ship tickets done (actor role %q; pass --actor-role)",
+				ErrForbidden, RoleOperationsManager, actorRole)
+		}
+	case TypeScout:
+		if t.Owner == "" || t.Owner == "unknown" || actor != t.Owner {
+			return fmt.Errorf("%w: only the owner (%s) sets scout ticket %s done, not %q", ErrForbidden, t.Owner, t.ID, actor)
+		}
+	}
+	return nil
 }
 
 // LiveClaim returns the claim if it has not expired.
@@ -215,6 +325,31 @@ func (t Ticket) LiveClaim() *Claim {
 		return nil
 	}
 	return t.Claim
+}
+
+// CheckFence decides whether a write by holder, carrying lease token, may
+// touch t. A ticket under a live claim takes writes only from its holder
+// with the current token. A writer that names a holder or token must hold
+// the live claim, so a session whose lease expired or was re-claimed is
+// fenced out even when nobody holds the ticket now. A writer naming neither
+// may write to an unclaimed ticket.
+func (t Ticket) CheckFence(holder string, token int64) error {
+	c := t.LiveClaim()
+	switch {
+	case c == nil && holder == "" && token == 0:
+		return nil
+	case c == nil:
+		return fmt.Errorf("%w: %s has no live claim by %s with token %d; claim it again", ErrLeaseLost, t.ID, holder, token)
+	case holder == "":
+		return fmt.Errorf("%w: %s is held by %s; pass --holder and --token to act on your own claim", ErrClaimed, t.ID, c.Holder)
+	case holder != c.Holder:
+		return fmt.Errorf("%w: %s is held by %s until %s", ErrClaimed, t.ID, c.Holder, c.ExpiresAt.Format(time.RFC3339))
+	case token == 0:
+		return fmt.Errorf("%w: %s is claimed; pass --token with the lease token from your claim", ErrInvalid, t.ID)
+	case token != c.Token:
+		return fmt.Errorf("%w: %s lease token is %d, not %d; it was re-claimed", ErrLeaseLost, t.ID, c.Token, token)
+	}
+	return nil
 }
 
 // Comment is a note on a ticket (handoff notes, review findings, reports).
@@ -240,6 +375,7 @@ const (
 	EventReleased     = "released"
 	EventTransitioned = "transitioned"
 	EventCommented    = "commented"
+	EventUpdated      = "updated"
 )
 
 // Event is one entry in the append-only log. Seq is strictly increasing and
@@ -253,25 +389,44 @@ type Event struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-// CreateRequest creates a ticket. Status may be todo (default) or blocked.
+// CreateRequest creates a ticket. Type defaults to ship. Status may be
+// backlog, todo (default) or blocked; a ticket created blocked returns to
+// todo. Owner defaults to the actor.
 type CreateRequest struct {
-	Title          string `json:"title"`
-	Body           string `json:"body"`
-	Role           string `json:"role"`
-	Priority       *int   `json:"priority,omitempty"`
-	Status         Status `json:"status"`
-	Actor          string `json:"actor"`
-	IdempotencyKey string `json:"-"`
+	Title          string   `json:"title"`
+	Body           string   `json:"body"`
+	Type           Type     `json:"type"`
+	Role           string   `json:"role"`
+	Priority       *int     `json:"priority,omitempty"`
+	Status         Status   `json:"status"`
+	Owner          string   `json:"owner"`
+	DependsOn      []ID     `json:"depends_on,omitempty"`
+	Areas          []string `json:"areas,omitempty"`
+	Actor          string   `json:"actor"`
+	IdempotencyKey string   `json:"-"`
 }
 
 // Validate checks the request and fills defaults.
 func (r *CreateRequest) Validate() error {
+	var err error
+	if r.Areas, err = NormalizeAreas(r.Areas); err != nil {
+		return err
+	}
+	if err := validateIDs(r.DependsOn); err != nil {
+		return err
+	}
 	r.Title = strings.TrimSpace(r.Title)
 	if r.Title == "" {
 		return fmt.Errorf("%w: title is required", ErrInvalid)
 	}
 	if strings.ContainsAny(r.Title, "\r\n") {
 		return fmt.Errorf("%w: title must be one line", ErrInvalid)
+	}
+	if r.Type == "" {
+		r.Type = TypeShip
+	}
+	if !r.Type.Valid() {
+		return fmt.Errorf("%w: unknown ticket type %q (want ship or scout)", ErrInvalid, r.Type)
 	}
 	if err := ValidateRole(r.Role); err != nil {
 		return err
@@ -286,10 +441,157 @@ func (r *CreateRequest) Validate() error {
 	if r.Status == "" {
 		r.Status = StatusTodo
 	}
-	if r.Status != StatusTodo && r.Status != StatusBlocked {
-		return fmt.Errorf("%w: new tickets start as todo or blocked, not %q", ErrInvalid, r.Status)
+	if r.Status != StatusBacklog && r.Status != StatusTodo && r.Status != StatusBlocked {
+		return fmt.Errorf("%w: new tickets start as backlog, todo or blocked, not %q", ErrInvalid, r.Status)
 	}
 	r.Actor = actorFor(r.Actor, "")
+	r.Owner = actorFor(r.Owner, r.Actor)
+	if strings.ContainsAny(r.Owner, "\r\n") {
+		return fmt.Errorf("%w: owner must be one line", ErrInvalid)
+	}
+	if r.Type == TypeScout && r.Owner == "unknown" {
+		return fmt.Errorf("%w: scout tickets need an owner to close them (--owner or --actor)", ErrInvalid)
+	}
+	return nil
+}
+
+var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
+
+// NormalizeAreas validates code areas, trims a trailing slash, and returns
+// them sorted with duplicates removed. An area is a repo-relative path such
+// as "tools/maestro-ticket" or "skills".
+func NormalizeAreas(areas []string) ([]string, error) {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, a := range areas {
+		a = strings.TrimSuffix(strings.TrimSpace(a), "/")
+		if a == "" {
+			continue
+		}
+		if !areaPattern.MatchString(a) || len(a) > 200 || hasDotSegment(a) {
+			return nil, fmt.Errorf("%w: area %q must be a repo-relative path like tools/maestro-ticket", ErrInvalid, a)
+		}
+		if !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// hasDotSegment reports whether path a has a "." or ".." segment. Those
+// spell another path ("tools/x/.." is "tools"), which the overlap check
+// would miss. Areas compare case-sensitively, as git paths do.
+func hasDotSegment(a string) bool {
+	for _, seg := range strings.Split(a, "/") {
+		if seg == "." || seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// AreasOverlap reports whether two areas cover any common path: they are
+// equal, or one is a directory containing the other.
+func AreasOverlap(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+// AnyAreaOverlaps reports whether any area in as overlaps any in bs.
+func AnyAreaOverlaps(as, bs []string) (string, string, bool) {
+	for _, a := range as {
+		for _, b := range bs {
+			if AreasOverlap(a, b) {
+				return a, b, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func validateIDs(ids []ID) error {
+	for _, id := range ids {
+		if id <= 0 {
+			return fmt.Errorf("%w: bad ticket id %d", ErrInvalid, id)
+		}
+	}
+	return nil
+}
+
+// ParseIDs parses a comma-separated ticket id list.
+func ParseIDs(s string) ([]ID, error) {
+	var out []ID
+	for _, part := range strings.Split(s, ",") {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		id, err := ParseID(part)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// SplitList splits a comma-separated flag value, dropping empty parts.
+func SplitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// UpdateRequest changes a ticket's dependencies or areas. Areas, when not
+// nil, replaces the whole list. Holder and Token are fenced like a
+// transition's.
+type UpdateRequest struct {
+	ID             ID        `json:"id"`
+	AddDeps        []ID      `json:"add_deps,omitempty"`
+	RemoveDeps     []ID      `json:"remove_deps,omitempty"`
+	Areas          *[]string `json:"areas,omitempty"`
+	Holder         string    `json:"holder,omitempty"`
+	Token          int64     `json:"token,omitempty"`
+	Actor          string    `json:"actor"`
+	IdempotencyKey string    `json:"-"`
+}
+
+// Validate checks the request and fills defaults.
+func (r *UpdateRequest) Validate() error {
+	if len(r.AddDeps) == 0 && len(r.RemoveDeps) == 0 && r.Areas == nil {
+		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps or --areas)", ErrInvalid)
+	}
+	if err := validateIDs(r.AddDeps); err != nil {
+		return err
+	}
+	if err := validateIDs(r.RemoveDeps); err != nil {
+		return err
+	}
+	for _, id := range r.AddDeps {
+		if id == r.ID {
+			return fmt.Errorf("%w: %s can't depend on itself", ErrInvalid, id)
+		}
+	}
+	if r.Areas != nil {
+		a, err := NormalizeAreas(*r.Areas)
+		if err != nil {
+			return err
+		}
+		r.Areas = &a
+	}
+	if r.Holder != "" {
+		if err := ValidateHolder(r.Holder); err != nil {
+			return err
+		}
+	}
+	if r.Token < 0 {
+		return fmt.Errorf("%w: token must be positive", ErrInvalid)
+	}
+	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil
 }
 
@@ -303,7 +605,8 @@ type ListFilter struct {
 }
 
 // ClaimRequest leases the next matching ticket, or a specific one when ID is
-// set. For --next claims Statuses defaults to [todo].
+// set. For --next claims Statuses defaults to [todo]. Backlog tickets are
+// claimed only by id, when the Planner grooms them, never by --next.
 type ClaimRequest struct {
 	ID             ID            `json:"id,omitempty"`
 	Statuses       []Status      `json:"statuses,omitempty"`
@@ -334,15 +637,21 @@ func (r *ClaimRequest) Validate() error {
 		if s.Terminal() {
 			return fmt.Errorf("%w: cannot claim %s tickets", ErrInvalid, s)
 		}
+		if s == StatusBacklog && r.ID == 0 {
+			return fmt.Errorf("%w: backlog tickets are claimed by id while grooming, not with --next", ErrInvalid)
+		}
 	}
 	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil
 }
 
-// HeartbeatRequest extends a live lease held by Holder.
+// HeartbeatRequest extends the live lease held by Holder with Token. The
+// token is required, so a leftover process of a session that re-claimed
+// can't keep the newer lease alive.
 type HeartbeatRequest struct {
 	ID     ID
 	Holder string
+	Token  int64
 	TTL    time.Duration
 }
 
@@ -351,16 +660,29 @@ func (r *HeartbeatRequest) Validate() error {
 	if err := ValidateHolder(r.Holder); err != nil {
 		return err
 	}
+	if err := requireToken(r.Token); err != nil {
+		return err
+	}
 	ttl, err := ValidateTTL(r.TTL)
 	r.TTL = ttl
 	return err
 }
 
-// ReleaseRequest drops Holder's lease. Releasing a ticket with no live lease
-// is a no-op, so cleanup can run twice.
+func requireToken(token int64) error {
+	if token <= 0 {
+		return fmt.Errorf("%w: --token is required: pass the lease token from your claim", ErrInvalid)
+	}
+	return nil
+}
+
+// ReleaseRequest drops the lease Holder holds with Token. The token is
+// required, so a stale session can't drop a newer lease of the same holder.
+// Releasing a lease that is already gone (released, expired or re-claimed
+// and since freed) is a no-op, so cleanup can run twice.
 type ReleaseRequest struct {
 	ID             ID     `json:"id"`
 	Holder         string `json:"holder"`
+	Token          int64  `json:"token,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }
@@ -370,20 +692,25 @@ func (r *ReleaseRequest) Validate() error {
 	if err := ValidateHolder(r.Holder); err != nil {
 		return err
 	}
+	if err := requireToken(r.Token); err != nil {
+		return err
+	}
 	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil
 }
 
 // TransitionRequest moves a ticket to a new status. From and ExpectVersion
-// are optional optimistic checks. If the ticket has a live claim, Holder must
-// match it.
+// are optional optimistic checks. Holder and Token are fenced (see
+// Ticket.CheckFence): if the ticket has a live claim, both must match it.
 type TransitionRequest struct {
 	ID             ID     `json:"id"`
 	From           Status `json:"from,omitempty"`
 	To             Status `json:"to"`
 	ExpectVersion  int64  `json:"expect_version,omitempty"`
 	Holder         string `json:"holder,omitempty"`
+	Token          int64  `json:"token,omitempty"`
 	Role           string `json:"role,omitempty"` // reassign, e.g. on escalation
+	ActorRole      string `json:"actor_role,omitempty"`
 	Note           string `json:"note,omitempty"`
 	Release        bool   `json:"release,omitempty"`
 	Actor          string `json:"actor"`
@@ -406,17 +733,26 @@ func (r *TransitionRequest) Validate() error {
 	if r.ExpectVersion < 0 {
 		return fmt.Errorf("%w: expect-version must be positive", ErrInvalid)
 	}
+	if r.Token < 0 {
+		return fmt.Errorf("%w: token must be positive", ErrInvalid)
+	}
 	if err := ValidateRole(r.Role); err != nil {
+		return err
+	}
+	if err := ValidateRole(r.ActorRole); err != nil {
 		return err
 	}
 	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil
 }
 
-// CommentRequest adds a comment.
+// CommentRequest adds a comment. Holder and Token are fenced like a
+// transition's: a claimed ticket takes comments only from its holder.
 type CommentRequest struct {
 	ID             ID     `json:"id"`
 	Body           string `json:"body"`
+	Holder         string `json:"holder,omitempty"`
+	Token          int64  `json:"token,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }
@@ -426,7 +762,15 @@ func (r *CommentRequest) Validate() error {
 	if strings.TrimSpace(r.Body) == "" {
 		return fmt.Errorf("%w: comment body is required", ErrInvalid)
 	}
-	r.Actor = actorFor(r.Actor, "")
+	if r.Holder != "" {
+		if err := ValidateHolder(r.Holder); err != nil {
+			return err
+		}
+	}
+	if r.Token < 0 {
+		return fmt.Errorf("%w: token must be positive", ErrInvalid)
+	}
+	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil
 }
 
@@ -436,6 +780,20 @@ type EventFilter struct {
 	TicketID ID
 	Type     string
 	Limit    int
+}
+
+// ReapResult lists the tickets whose expired leases a reap freed.
+type ReapResult struct {
+	Reaped []ID `json:"reaped"`
+}
+
+// Export is the whole store as JSON, read in one snapshot: every ticket with
+// its comments, and every event.
+type Export struct {
+	SchemaVersion int      `json:"schema_version"`
+	LastSeq       int64    `json:"last_seq"`
+	Tickets       []Detail `json:"tickets"`
+	Events        []Event  `json:"events"`
 }
 
 // Check is one doctor result.
@@ -471,17 +829,33 @@ type Store interface {
 	Get(ctx context.Context, id ID) (Detail, error)
 	List(ctx context.Context, f ListFilter) ([]Ticket, error)
 	// ClaimNext leases the most urgent claimable ticket (priority, then
-	// oldest id). A ticket is claimable when its lease is missing or expired.
-	// Returns ErrNoWork when nothing matches.
+	// oldest id). A ticket is claimable when its lease is missing or expired,
+	// every ticket it depends on is done, and none of its areas overlaps an
+	// area of a ticket under a live claim. Returns ErrNoWork when nothing
+	// matches. Claiming by id fails with ErrWaitingOnDeps or ErrAreaBusy
+	// instead, except for backlog tickets, which are claimed to groom them.
 	ClaimNext(ctx context.Context, req ClaimRequest) (Ticket, error)
 	Heartbeat(ctx context.Context, req HeartbeatRequest) (Ticket, error)
+	// Reap frees every expired lease, logging lease_expired for each and
+	// counting it on the ticket, so a session that died is reported without
+	// waiting for someone to claim its ticket. Any write to a ticket with an
+	// expired lease does the same for that ticket first.
+	Reap(ctx context.Context) (ReapResult, error)
 	Release(ctx context.Context, req ReleaseRequest) (Ticket, error)
 	Transition(ctx context.Context, req TransitionRequest) (Ticket, error)
 	Comment(ctx context.Context, req CommentRequest) (Comment, error)
+	// Update changes dependencies or areas. Adding a dependency that would
+	// make a cycle fails with ErrInvalid.
+	Update(ctx context.Context, req UpdateRequest) (Ticket, error)
 	Events(ctx context.Context, f EventFilter) ([]Event, error)
 	// LastSeq returns the newest event seq, or 0 for an empty log.
 	LastSeq(ctx context.Context) (int64, error)
 	Doctor(ctx context.Context) (DoctorReport, error)
+	// Backup writes a consistent snapshot of the store to a new file at
+	// path, without blocking writers, and checks it opens clean.
+	Backup(ctx context.Context, path string) error
+	// Export reads the whole store in one snapshot.
+	Export(ctx context.Context) (Export, error)
 	Close() error
 }
 

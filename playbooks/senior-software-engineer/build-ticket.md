@@ -4,64 +4,79 @@ description: Build a complex or risky ticket on its own maestro/ branch, with te
 role: senior-software-engineer
 trigger: new-work
 claims: todo
+types: feature, chore, docs
 ---
 
 # Build a ticket
 
 ## Goal
 
-Clean, well-tested code that does exactly what the ticket asks, on an `maestro/` branch, passing the project's checks.
+Clean, well-tested code that does exactly what the ticket asks, on a `maestro/` branch, passing the project's checks.
 
 ## When to use
 
-A `todo` ticket for role `senior-software-engineer`. For a ticket escalated by the Junior Engineer, use `take-escalation`.
+A `todo` ticket for role `senior-software-engineer`. Not for bugs (`bug-fix`), a body line `Playbook: refactor` or `Playbook: performance`, investigations (`scout-investigation`), or an `Escalation:` from the Junior Engineer (`take-escalation`).
 
 ## Steps
 
 ### 1. Start and set up
 
 - **Goal:** The ticket is in progress and has its own worktree.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Both exit `0`:
-  - `maestro-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start`
-  - `git worktree add -b maestro/<id>-<slug> $(git rev-parse --git-common-dir)/maestro/worktrees/<id> <main branch>`. `<slug>`: up to five lowercase words from the title, joined by hyphens. If the branch already exists, `git worktree add <path> maestro/<id>-<slug>`.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <holder> --token <token> --idempotency-key <session-id>:start`, then `worktree add <id> --from <main branch>`
+- **Done when:** Both exit `0`.
 - **Evidence:** exit codes; new ticket version; branch and worktree path.
 
 ### 2. Plan
 
 - **Goal:** A plan that maps every acceptance criterion to a test or check, and names the risks.
-- **Skill:** none
-- **Tier:** Frontier
-- **Done when:** The plan is in the scratchpad, with the branch and worktree recorded. It lists files to change, the approach, each criterion with its proof, and each risk with how it's covered.
-- **Evidence:** paths read (the ticket, any spec it points to, `.maestro/project-setup.md`, `.maestro/memory/`, the code); the scratchpad path.
+- **Role:** harness
+- **Skill:** `maestro-plan-change`
+- **Model:** Frontier
+- **Done when:** The plan is in the scratchpad: files to change, approach, each criterion with its proof, each risk with how it's covered.
+- **Evidence:** paths read; the scratchpad path.
 
 ### 3. Build
 
 - **Goal:** The change and its tests, committed on the branch.
-- **Skill:** none
-- **Tier:** Frontier
-- **Done when:** Work is committed in the worktree; `git -C <worktree> status --porcelain` is empty. The diff touches only what the ticket needs and matches the code around it.
+- **Role:** harness
+- **Skill:** `maestro-build-change`
+- **Model:** Frontier
+- **Done when:** Work is committed in the worktree and it is clean. The diff touches only what the ticket needs.
 - **Evidence:** commit sha; files changed; tests added.
-
-Heartbeat the lease during long builds.
 
 ### 4. Run the checks
 
 - **Goal:** The project's checks pass on the branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
-- **Evidence:** each command, exit code and test counts.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `check all`
+- **Done when:** Every check exits `0`.
+- **Evidence:** each check, exit code and test counts.
 
-On a failure, go back to step 3 with a pointer to the failing output. That counts as a retry.
+On a failure, go back to step 3 with the output path. Failing checks are not a try; the step budget is the limit.
+
+### 5. Verify
+
+- **Goal:** Evidence from the running app that each acceptance criterion is met.
+- **Role:** harness
+- **Skill:** `maestro-verify`
+- **Model:** Mid-tier
+- **Done when:** Every acceptance criterion passes, and every definition-of-done row a later gate doesn't own, with its evidence saved. Anything started is stopped, or listed in the scratchpad for clean-up.
+- **Evidence:** per criterion: pass or fail, and the evidence path.
+
+A failure: go back to step 3. It isn't a try.
 
 ## Stop and block when
 
-- The ticket is unclear or contradicts the code or another ticket: comment the exact question and block. If it needs a decision above your authority, start the comment `Escalation:`.
-- Retries or budget run out. Commit work in progress first so the next engineer can see it.
+- The ticket is unclear or contradicts the code or another ticket: block with an `Escalation:` note to the owner (`maestro-escalate`) with the exact question.
+- The step budget runs out: commit work in progress, then block with an `Escalation:` note to the owner.
 
 ## Wrap-up
 
+- Skill: `maestro-handoff-note` (`maestro-escalate` when blocking).
 - Status: `in_review` (submit).
-- Handoff note: branch, commit sha, check results with exit codes and test counts, how each criterion is met, risks and how they're covered, `author-family: <family>`.
+- Handoff note: branch, commit sha, check results, verification evidence paths, how each criterion is met, risks and how they're covered, any `Skipped:` steps, `author-family: <family>`.

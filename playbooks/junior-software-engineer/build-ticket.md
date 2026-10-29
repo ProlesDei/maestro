@@ -1,16 +1,17 @@
 ---
 name: build-ticket
-description: Build a routine, well-defined ticket by following an existing pattern in the code, and hand it to the Senior Engineer after two failed tries.
+description: Build a routine, well-defined ticket by following an existing pattern in the code, reproducing bugs first, and submit it for review.
 role: junior-software-engineer
 trigger: new-work
 claims: todo
+types: feature, bug, chore, docs
 ---
 
 # Build a ticket
 
 ## Goal
 
-The ticket is done the way similar code in the repo is already done, with tests, on an `maestro/` branch, passing the project's checks.
+The ticket is done the way similar code in the repo is already done, with tests, on a `maestro/` branch, passing the project's checks.
 
 ## When to use
 
@@ -21,53 +22,82 @@ A `todo` ticket for role `junior-software-engineer`.
 ### 1. Start and set up
 
 - **Goal:** The ticket is in progress and has its own worktree.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Both exit `0`:
-  - `maestro-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start`
-  - `git worktree add -b maestro/<id>-<slug> $(git rev-parse --git-common-dir)/maestro/worktrees/<id> <main branch>`. `<slug>`: up to five lowercase words from the title, joined by hyphens. If the branch already exists, `git worktree add <path> maestro/<id>-<slug>`.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <holder> --token <token> --idempotency-key <session-id>:start`, then `worktree add <id> --from <main branch>`
+- **Done when:** Both exit `0`.
 - **Evidence:** exit codes; new ticket version; branch and worktree path.
 
 ### 2. Find the pattern
 
 - **Goal:** An existing example in the code to follow, and a plan.
-- **Skill:** none
-- **Tier:** Mid-tier
-- **Done when:** The scratchpad names the example (paths), the files to change, and how each acceptance criterion is proved. Branch and worktree are recorded.
-- **Evidence:** paths read (the ticket, `.maestro/project-setup.md`, `.maestro/memory/`, the example).
+- **Role:** harness
+- **Skill:** `maestro-plan-change`
+- **Model:** Mid-tier
+- **Done when:** The scratchpad names the example (paths), the files to change, and how each acceptance criterion is proved.
+- **Evidence:** paths read; the example.
 
-No pattern to follow, or the ticket needs a design decision: escalate now. That isn't a failed try.
+No pattern to follow, or the ticket needs a design decision: escalate to the Senior Engineer now.
 
-### 3. Build
+### 3. Reproduce
+
+- **Goal:** A test that fails because of the bug, committed on the branch.
+- **Role:** harness
+- **Skill:** `maestro-capture-baseline`
+- **Model:** Mid-tier
+- **Skip when:** the ticket type isn't `bug`.
+- **Done when:** The repro fails on the unfixed code for the reason the ticket describes.
+- **Evidence:** the repro's path; the command; its failing exit code and output path; commit sha.
+
+Can't reproduce: escalate to the Senior Engineer.
+
+### 4. Build
 
 - **Goal:** The change and its tests, committed on the branch.
-- **Skill:** none
-- **Tier:** Mid-tier
-- **Done when:** Work is committed; `git -C <worktree> status --porcelain` is empty. The diff follows the example and touches only what the ticket needs.
+- **Role:** harness
+- **Skill:** `maestro-build-change`
+- **Model:** Mid-tier
+- **Done when:** Work is committed and the worktree is clean. The diff follows the example and touches only what the ticket needs. For a bug, the repro now passes.
 - **Evidence:** commit sha; files changed; tests added.
 
-### 4. Run the checks
+### 5. Run the checks
 
 - **Goal:** The project's checks pass on the branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
-- **Evidence:** each command, exit code and test counts.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `check all`
+- **Done when:** Every check exits `0`.
+- **Evidence:** each check, exit code and test counts.
 
-A pass through steps 3 and 4 that ends with failing checks is a failed try. After the first, go back to step 3. After the second, escalate.
+On a failure, go back to step 4. Failing checks are not a try; the step budget is the limit.
+
+### 6. Verify
+
+- **Goal:** Evidence from the running app that each acceptance criterion is met.
+- **Role:** harness
+- **Skill:** `maestro-verify`
+- **Model:** Mid-tier
+- **Done when:** Every acceptance criterion passes, and every definition-of-done row a later gate doesn't own, with its evidence saved. Anything started is stopped, or listed in the scratchpad for clean-up.
+- **Evidence:** per criterion: pass or fail, and the evidence path.
+
+A failure: go back to step 4. It isn't a try.
 
 ## Stop and block when
 
-- The ticket is unclear: comment the exact question and block.
-- Retries or budget run out before two tries: block.
+- The ticket is unclear: block with an `Escalation:` note to the owner (`maestro-escalate`) with the exact question.
 
 ## Escalate to the Senior Engineer
 
+When there's no pattern, a design decision is needed, the bug won't reproduce, or the step budget runs out:
+
 1. Commit work in progress on the branch so the worktree is clean.
 2. Wrap up with status `todo` and `--role senior-software-engineer`.
-3. Start the note `Escalation:` and say what you tried each time, the failing output, the branch, and what you think is wrong.
+3. The note starts `Escalation:` (`maestro-escalate`): what you tried, the failing output, the branch, `Tries`, and what you think is wrong.
 
 ## Wrap-up
 
+- Skill: `maestro-handoff-note`, or `maestro-escalate` when blocking or handing the ticket to the Senior Engineer.
 - Status: `in_review` (submit), or `todo` with `--role senior-software-engineer` when escalating.
-- Handoff note: branch, commit sha, check results with exit codes and test counts, how each criterion is met, the example followed, `author-family: <family>`.
+- Handoff note: branch, commit sha, check results, verification evidence paths, how each criterion is met, the example followed, any `Skipped:` steps, `author-family: <family>`.

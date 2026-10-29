@@ -1,75 +1,101 @@
 ---
 name: fix-sent-back
-description: Fix a routine ticket sent back by failed checks, a code review or QA, and resubmit, handing it to the Senior Engineer after two failed tries.
+description: Fix a routine ticket the Code Reviewer or QA sent back and resubmit it, or hand it to the Senior Engineer once Tries reaches 2.
 role: junior-software-engineer
 trigger: sent-back
 claims: in_progress
+types: feature, bug, chore, docs
 ---
 
 # Fix work sent back
 
 ## Goal
 
-Every item that came back is fixed, or answered with evidence, and the ticket is back in review.
+Every item that came back is fixed, or answered with evidence, and the ticket is back in review. After two send-backs it goes to the Senior Engineer instead.
 
 ## When to use
 
-An `in_progress` ticket for role `junior-software-engineer` with no live lease, whose latest `Handoff:` is one of:
-
-- checks failed
-- changes requested by the Code Reviewer
-- QA failed
+An `in_progress` ticket for role `junior-software-engineer` with no live lease, whose latest `Handoff:` is `changes requested` from the Code Reviewer or `QA failed`.
 
 ## Steps
 
-### 1. Read what came back
+### 1. Check the tries
+
+- **Goal:** Know whether this ticket gets another try from you.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `ticket get <id> --json`
+- **Done when:** You have `Tries`. At 2 or more: skip to Escalate to the Senior Engineer.
+- **Evidence:** version; `Tries`.
+
+### 2. Read what came back
 
 - **Goal:** A numbered list of what must change.
-- **Skill:** none
-- **Tier:** Mid-tier
-- **Done when:** Each item has its source, the file or acceptance criterion, and the fix you plan.
-- **Evidence:** `maestro-ticket get <id> --json` version; the comment the items came from.
+- **Role:** harness
+- **Skill:** `maestro-read-feedback`
+- **Model:** Mid-tier
+- **Done when:** Each item has its source, the file or acceptance criterion, and the planned fix.
+- **Evidence:** the comment the items came from; the list.
 
-If an item needs a design decision, escalate now. That isn't a failed try.
+An item needs a design decision, or you disagree with it: escalate now, with the reason.
 
-### 2. Set up the worktree
+### 3. Set up the worktree
 
 - **Goal:** A worktree on the ticket's existing branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** `$(git rev-parse --git-common-dir)/maestro/worktrees/<id>` exists on `maestro/<id>-<slug>`. If it's missing, `git worktree add <path> maestro/<id>-<slug>` exits `0`.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `worktree add <id>`
+- **Done when:** Exit `0`, on `maestro/<id>-<slug>`.
 - **Evidence:** exit code; branch and path.
 
-### 3. Fix
+### 4. Fix
 
 - **Goal:** Each item addressed, nothing else changed.
-- **Skill:** none
-- **Tier:** Mid-tier
-- **Done when:** Fixes and any new tests are committed; `git -C <worktree> status --porcelain` is empty. Branch and worktree are in the scratchpad.
+- **Role:** harness
+- **Skill:** `maestro-build-change`
+- **Model:** Mid-tier
+- **Done when:** Fixes and any new tests are committed and the worktree is clean.
 - **Evidence:** commit sha; for each item, the files changed.
 
-### 4. Run the checks
+### 5. Run the checks
 
 - **Goal:** The project's checks pass on the branch.
-- **Skill:** none
-- **Tier:** No tokens
-- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
-- **Evidence:** each command, exit code and test counts.
+- **Role:** runner
+- **Skill:** `runner`
+- **Model:** No tokens
+- **Run:** `check all`
+- **Done when:** Every check exits `0`.
+- **Evidence:** each check, exit code and test counts.
 
-A pass through steps 3 and 4 that ends with failing checks is a failed try. After the first, go back to step 3. After the second, escalate.
+On a failure, go back to step 4. Failing checks are not a try; the step budget is the limit.
+
+### 6. Verify
+
+- **Goal:** Evidence from the running app that each acceptance criterion is met.
+- **Role:** harness
+- **Skill:** `maestro-verify`
+- **Model:** Mid-tier
+- **Done when:** Every acceptance criterion passes, and every definition-of-done row a later gate doesn't own, with its evidence saved. Anything started is stopped, or listed in the scratchpad for clean-up.
+- **Evidence:** per criterion: pass or fail, and the evidence path.
+
+A failure: go back to step 4. It isn't a try.
 
 ## Stop and block when
 
-- You disagree with a requested change: don't skip it silently. Escalate, with the reason and evidence.
-- Retries or budget run out before two tries: block.
+- Nothing here blocks. Anything you can't finish goes to the Senior Engineer.
 
 ## Escalate to the Senior Engineer
 
+When `Tries` is 2 or more, an item needs a design decision, you disagree with an item, or the step budget runs out:
+
 1. Commit work in progress on the branch so the worktree is clean.
 2. Wrap up with status `todo` and `--role senior-software-engineer`.
-3. Start the note `Escalation:` and list the items, what you tried, the failing output and the branch.
+3. The note starts `Escalation:` (`maestro-escalate`): the items, what each try changed, the failing output, the branch and `Tries`.
 
 ## Wrap-up
 
+- Skill: `maestro-handoff-note`, or `maestro-escalate` when blocking or handing the ticket to the Senior Engineer.
 - Status: `in_review` (resubmit), or `todo` with `--role senior-software-engineer` when escalating.
-- Handoff note: each item and how it was fixed; commit sha; check results; `author-family: <family>`.
+- Handoff note: each item and how it was fixed; commit sha; check results; verification evidence paths; `Tries`; any `Skipped:` steps; `author-family: <family>`.
