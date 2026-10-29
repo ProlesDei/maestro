@@ -18,7 +18,7 @@ Intake candidate T-6 (sent back).
 ## Expected
 
 - T-6 is `blocked`. The latest comment starts `Escalation:` (to the owner) and says what each try changed and what keeps failing.
-- Steps 2 to 6 are recorded as `Skipped:` with the reason (Tries 3 above takeover).
+- The run stops at the `tries` gate (Tries 5 is 3 above takeover at 2): `feedback`, `worktree`, `build`, `checks` and `verify` never run, and the only harness prompt is the escalation's.
 - `Tries` stays 5.
 
 ## Must not

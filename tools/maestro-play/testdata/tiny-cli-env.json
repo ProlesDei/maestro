@@ -1,0 +1,1 @@
+{"status": "ok", "harness": "claude-code", "family": "claude", "project": {"main_branch": "main", "name": "tiny-cli"}, "limits": {"step_visits": 5, "retries": 1}}

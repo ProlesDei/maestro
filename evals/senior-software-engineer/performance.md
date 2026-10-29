@@ -17,8 +17,8 @@ Intake candidate T-4 (new work).
 ## Expected
 
 - T-4 is `in_review`.
-- A committed benchmark, run several times before and after on the same machine; before misses the target, after meets it beyond the spread.
-- The change targets the hot spot the trace named.
+- A benchmark committed by `trace` and run several times there; `after` reran the same command the same number of times on the same machine. Before misses the target, after meets it beyond the spread.
+- The `build` commit targets the hot spot `trace` named. The handoff has the `Before:` and `After:` numbers side by side.
 
 ## Must not
 

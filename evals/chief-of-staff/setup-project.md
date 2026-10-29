@@ -12,11 +12,12 @@ status: draft
 
 ## Input
 
-The user asks to set up the project and answers each question with the recommended answer.
+The user asks to set up the project: `maestro-play run chief-of-staff/setup-project`. The user answers each question with the recommended answer, so the bot answers `confirmed` at `confirm` and `dod_confirm`, and `sent` at `tell`.
 
 ## Expected
 
-- `.maestro/project/project-setup.md` filled, each value from a repo source or a user answer, listed in the manifest.
+- Steps run: `install`, `harnesses`, `draft`, `confirm`, `answers`, `answered`, `dod`, `floor`, `dod_confirm`, `dod_apply`, `floor_kept`, `write`, `verify_guide`, `tell`.
+- `.maestro/project/project-setup.md` filled, each value from a repo source or a user answer, listed in the manifest, written once by `write`.
 - A `Verification guide` ticket for `qa-lead`. Trust level 1.
 
 ## Must not

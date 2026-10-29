@@ -1,0 +1,72 @@
+name: plan-project
+role: planner
+description: Turn a workstream's planning ticket from the Chief of Staff into a short spec and ordered, testable tickets with dependencies, each routed to the right role.
+intake: {category: request, status: todo, type: scout, kinds: [investigation], title: "Plan: "}
+claim: true
+session: ticket
+steps:
+  - id: start
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: goal
+    prompt: investigate
+    mode: goal
+    model: mid
+    out: [outcome, constraints, areas, decided, above_authority]
+  - id: authority
+    gate: '{{not .steps.goal.reply.above_authority}}'
+    block: {to: chief-of-staff}      # you own this ticket, so a question above you goes straight up
+  - id: spec
+    prompt: plan
+    mode: spec
+    model: mid
+    out: [outcome, scope, non_goals, approach, risks, order]
+  - id: report
+    ticket: comment {{.ticket.id}}
+    body: |
+      Report: spec for {{.ticket.title}}
+      Outcome: {{.steps.spec.reply.outcome}}
+      Scope: {{.steps.spec.reply.scope}}
+      Non-goals: {{.steps.spec.reply.non_goals}}
+      Approach: {{.steps.spec.reply.approach}}
+      Risks:{{range .steps.spec.reply.risks}}
+      - {{.}}{{end}}
+      Order of work:{{range .steps.spec.reply.order}}
+      - {{.}}{{end}}
+  - id: tickets
+    prompt: tickets
+    mode: plan
+    model: mid
+    retry: {max: 1, tier_up: true}
+    out: [tickets]
+  - id: none_blocked
+    gate: '{{$ok := true}}{{range .steps.tickets.reply.tickets}}{{if not (or (eq (print .status) "todo") (eq (print .status) "backlog"))}}{{$ok = false}}{{end}}{{end}}{{$ok}}'
+    on: {fail: tickets}              # a ticket waits through --deps, never as blocked
+  - id: create
+    each: .steps.tickets.reply.tickets
+    ticket: >-
+      create --type {{quote .item.type}} --role {{quote .item.role}} --priority {{quote (print .item.priority)}}
+      --owner planner --status {{quote .item.status}} --title {{quote .item.title}}
+      {{- with index .item "areas"}} --areas {{quote (join . ",")}}{{end}}
+      {{- $deps := join (index .item "deps") ","}}
+      {{- range index .item "after"}}{{$id := (index $.steps.create.results .).json.id}}{{if $deps}}{{$deps = printf "%s,%s" $deps $id}}{{else}}{{$deps = print $id}}{{end}}{{end}}
+      {{- with $deps}} --deps {{quote .}}{{end}}
+    body: |
+      Type: {{.item.kind}}
+      Goal: {{.item.goal}}
+      Acceptance criteria:{{range .item.criteria}}
+      - {{.}}{{end}}
+      Pointers: {{join .item.pointers ", "}}; the spec is the Report: on {{.ticket.id}}.
+      {{- with index .item "constraints"}}
+      Constraints: {{.}}{{end}}
+      {{- with index .item "playbook"}}
+      Playbook: {{.}}{{end}}
+  - id: review
+    ticket: transition {{.ticket.id}} --to in_review --from in_progress
+done:
+  to: done
+  actor: planner                     # you own this scout and have read its report (0009)
+  note: |
+    Handoff: plan for {{.ticket.title}}: {{range $i, $r := .steps.create.results}}{{if $i}}, {{end}}{{$r.json.id}}{{end}}
+    Order of work:{{range .steps.spec.reply.order}}
+    - {{.}}{{end}}
+    {{.run.skipped}}

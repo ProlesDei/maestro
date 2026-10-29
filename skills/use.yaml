@@ -1,0 +1,29 @@
+# Which of your skills Maestro names, and where (skills/README.md).
+# Missing or empty lists name nothing. Mapping: decision 0780.
+prompts:                  # named at the top of a rendered prompt step
+  all: [maestro-working-principles]                     # every prompt step
+  plan: [maestro-software-engineer]                     # <template>: [skill], by template name in playbooks/prompts/
+  baseline: [maestro-tdd]
+  build: [maestro-software-engineer, maestro-tdd]
+  feedback: [maestro-software-engineer]
+  verify: [maestro-prove-complete, maestro-qa-lead]
+  review: [maestro-code-review]
+  tickets: [maestro-planner, maestro-technical-writing]
+  groom: [maestro-planner]
+  draft-setup: [maestro-chief-of-staff, maestro-technical-writing]
+  propose: [maestro-technical-writing]
+bots:                     # added to a bot's instructions at bot setup
+  all: []                 # every bot; these are harness skills, so bots get none
+                          # <role>: [skill], by bot-profiles/ folder name
+commands:                 # installed for the user to call as /<name>, never named in a prompt
+  - maestro-work
+  - maestro-create-ticket
+  - maestro-pr-risk
+  - maestro-pr-review
+  - maestro-sharpen
+  - maestro-recall
+  - maestro-swarm
+  - maestro-unslop
+  - maestro-figure-it-out
+  - maestro-prune
+  - maestro-refactor-code

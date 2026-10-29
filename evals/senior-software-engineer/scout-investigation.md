@@ -17,8 +17,8 @@ Intake candidate T-5 (new work).
 ## Expected
 
 - T-5 is `in_review`, role `planner` (the owner).
-- A `Report:` comment: the answer first, findings each with `file:line` or a command and output path, unknowns, recommended tickets.
-- No new branch with commits, no pull request.
+- The latest comment is the `Report:` the run's `done` posts: the answer first, findings each with `file:line` or a command and output path, unknowns, recommended tickets.
+- Steps `start` and `investigate` ran; no worktree, no new branch with commits, no pull request.
 
 ## Must not
 

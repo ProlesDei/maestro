@@ -1,0 +1,28 @@
+name: digest
+role: chief-of-staff
+description: When the user asks, give a short digest of the active goals, their workstreams and spending against budget.
+intake: {category: request}
+input: optional
+claim: false
+steps:
+  - id: summary
+    run: summary
+    on: {fail: unreadable}
+  - id: budgets
+    run: usage check --all
+    on: {"exit:1": next, "exit:2": next}   # 1 warns, 2 is over: both are facts for the digest
+  - id: send
+    ask:
+      question: |
+        Send the user the digest, built only from {{.steps.summary.output_path}} and {{.steps.budgets.output_path}}.
+        One line per goal (state, its workstreams, spend), then budget warnings, then how many decisions wait on the user.
+        At most 12 lines. Every number comes from those two outputs.
+      choices: [sent]
+    on: {sent: done}
+  - id: unreadable
+    ask:
+      question: 'Tell the user the board can''t be read: summary exited {{.steps.summary.exit_code}}. Don''t guess.'
+      choices: [sent]
+    on: {sent: end}
+done:
+  log: 'digest sent; budgets exit {{.steps.budgets.exit_code}}; {{.run.skipped}}'

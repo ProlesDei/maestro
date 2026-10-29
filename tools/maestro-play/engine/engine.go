@@ -1,0 +1,421 @@
+// Package engine runs playbooks: it claims the ticket, runs each step as a
+// maestro-ticket call, a runner request or a harness prompt, records every
+// output in the run state, and does the wrap-up (done), escalation (block)
+// and clean-up itself.
+package engine
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
+)
+
+// Config is where the engine finds things.
+type Config struct {
+	Playbooks string // the playbooks folder
+	Skills    string // the skills folder (use.yaml)
+	Common    string // <git common dir>/maestro
+	Dir       string // the main checkout, where commands run
+	TicketBin string // maestro-ticket
+	RunnerBin string // the runner
+	Environ   []string
+	// PID is the process the ticket lease stays alive with (claim
+	// --keepalive); the engine's own by default.
+	PID   int
+	Now   func() time.Time
+	Sleep func(time.Duration)
+}
+
+// Engine runs playbooks.
+type Engine struct {
+	cfg  Config
+	uses *playbook.Uses
+}
+
+// New checks the config and reads skills/use.yaml.
+func New(cfg Config) (*Engine, error) {
+	if cfg.Playbooks == "" || cfg.Common == "" {
+		return nil, errors.New("engine: playbooks and common dir are required")
+	}
+	if cfg.TicketBin == "" {
+		cfg.TicketBin = "maestro-ticket"
+	}
+	if cfg.RunnerBin == "" {
+		cfg.RunnerBin = "maestro-runner"
+	}
+	if cfg.PID == 0 {
+		cfg.PID = os.Getpid()
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Sleep == nil {
+		cfg.Sleep = time.Sleep
+	}
+	if cfg.Environ == nil {
+		cfg.Environ = os.Environ()
+	}
+	uses := &playbook.Uses{}
+	if cfg.Skills != "" {
+		var err error
+		if uses, err = playbook.LoadUses(cfg.Skills); err != nil {
+			return nil, err
+		}
+	}
+	return &Engine{cfg: cfg, uses: uses}, nil
+}
+
+func (e *Engine) now() time.Time { return e.cfg.Now() }
+
+// Result is what run and resume report.
+type Result struct {
+	RunID    string   `json:"id,omitempty"`
+	Status   string   `json:"state"`
+	Playbook string   `json:"playbook,omitempty"`
+	Ticket   string   `json:"ticket,omitempty"`
+	Step     string   `json:"step,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+	Question string   `json:"question,omitempty"`
+	Choices  []string `json:"choices,omitempty"`
+	Evidence []string `json:"evidence,omitempty"`
+}
+
+// Exit codes of run and resume, by status.
+var exitCodes = map[string]int{
+	StatusDone: 0, StatusFailed: 1, StatusBlocked: 3, StatusLost: 4, StatusIdle: 5,
+	StatusWaiting: 6, StatusStopped: 7,
+}
+
+// ExitCode is the process exit code for the result.
+func (r Result) ExitCode() int {
+	if c, ok := exitCodes[r.Status]; ok {
+		return c
+	}
+	return 1
+}
+
+func failed(format string, args ...any) Result {
+	return Result{Status: StatusFailed, Reason: fmt.Sprintf(format, args...)}
+}
+
+// RunOpts selects what run does.
+type RunOpts struct {
+	Ref    string // <role>/<job>, or <role> with Next
+	Ticket string
+	Next   bool
+	Bot    string
+	Input  string // .input.text, for playbooks with input:
+}
+
+// Run starts a run: preflight, intake, claim, the steps, then done or
+// block, and clean-up.
+func (e *Engine) Run(o RunOpts) (Result, error) {
+	if id := e.insideRun(); id != "" {
+		return failed("refused: this process belongs to run %s, and a run never starts another (0787)", id), nil
+	}
+	if o.Bot == "" || strings.Contains(o.Bot, "/") {
+		return failed("--bot: want a bot id without /"), nil
+	}
+	role, job, _ := strings.Cut(o.Ref, "/")
+	if !playbook.Contains(playbook.Roles, role) {
+		return failed("unknown role %q", role), nil
+	}
+	if e.stopped() {
+		return Result{Status: StatusStopped, Reason: "the stop file exists"}, nil
+	}
+	pre := &State{Bot: o.Bot, Role: role}
+	env, res, err := e.preflight(pre)
+	if err != nil || res != nil {
+		return deref(res), err
+	}
+	if o.Next {
+		if r, ok, err := e.resumeUnfinished(o.Bot, role); ok || err != nil {
+			return r, err
+		}
+		return e.runNext(role, job, o.Bot, o.Input, env)
+	}
+	if job == "" {
+		return failed("run %s: name a playbook, or pass --next", o.Ref), nil
+	}
+	p, err := playbook.Load(e.cfg.Playbooks, o.Ref)
+	if err != nil {
+		return failed("%v", err), nil
+	}
+	if o.Ticket == "" && p.Claim {
+		return failed("%s claims a ticket: pass --ticket or --next", p.Ref()), nil
+	}
+	if p.Input == "required" && strings.TrimSpace(o.Input) == "" {
+		return failed("%s needs --input", p.Ref()), nil
+	}
+	if p.Input == "" && o.Input != "" {
+		return failed("%s takes no --input", p.Ref()), nil
+	}
+	st := e.newState(p, o.Bot, o.Ticket, env)
+	st.Input = flat(o.Input)
+	if o.Ticket != "" {
+		t, res := e.readTicket(st)
+		if res != nil {
+			return *res, nil
+		}
+		// The store reads "1" as T-1; from here on the run uses its id, so
+		// a step's write to .ticket.id is a write to the run's own ticket.
+		if id := str(t["id"]); id != "" {
+			st.Ticket = id
+		}
+		if msg := statusMismatch(p, t); msg != "" {
+			return failed("%s: %s", st.Ticket, msg), nil
+		}
+		if p.Claim {
+			code, res := e.claim(st)
+			if res != nil {
+				return *res, nil
+			}
+			if code != "" {
+				return Result{Status: StatusFailed, Ticket: st.Ticket, Playbook: p.Ref(), Reason: "claim: " + code}, nil
+			}
+		}
+	}
+	return e.start(p, st)
+}
+
+func deref(r *Result) Result {
+	if r == nil {
+		return Result{}
+	}
+	return *r
+}
+
+func (e *Engine) newState(p *playbook.Playbook, bot, ticketID string, env map[string]any) *State {
+	session := newUUID()
+	st := &State{
+		ID: newRunID(p.Name, ticketID, e.now()), Playbook: p.Ref(), Role: p.Role, Bot: bot,
+		Holder: bot + "/" + session, Ticket: ticketID, Session: session,
+		Status: StatusRunning, Phase: phaseSteps, Visits: map[string]int{},
+		Steps: map[string]map[string]any{}, Env: env, Wrapped: map[string]bool{}, Created: e.now(),
+	}
+	for i := range p.Steps {
+		st.Steps[p.Steps[i].ID] = zeroRecord(&p.Steps[i])
+	}
+	if len(p.Steps) > 0 {
+		st.Cursor = p.Steps[0].ID
+	}
+	if p.Cursor != nil {
+		st.Cursor0 = e.loadCursor(bot, p.Cursor.Name)
+	}
+	return st
+}
+
+// stopped reports whether the stop file exists (docs/runner.md).
+func (e *Engine) stopped() bool {
+	_, err := os.Stat(filepath.Join(e.cfg.Common, "STOP"))
+	return err == nil
+}
+
+// preflight asks the runner for the environment. A failed preflight means
+// nothing starts.
+func (e *Engine) preflight(st *State) (map[string]any, *Result, error) {
+	reply, err := e.runner(st, "preflight")
+	if err != nil {
+		return nil, nil, err
+	}
+	switch reply["status"] {
+	case "ok":
+	case "stopped":
+		return nil, &Result{Status: StatusStopped, Reason: "runner: stopped"}, nil
+	default:
+		r := failed("preflight %v: %v", reply["status"], reply["output"])
+		return nil, &r, nil
+	}
+	return reply, nil, nil
+}
+
+// Resume continues a run after a crash, a stop or an ask step.
+func (e *Engine) Resume(id, choice, text string) (Result, error) {
+	if in := e.insideRun(); in != "" {
+		return failed("refused: this process belongs to run %s, and a run never resumes another (0787)", in), nil
+	}
+	r, _, err := e.resume(id, choice, text)
+	return r, err
+}
+
+// resume is Resume; busy reports that another process is driving the run.
+func (e *Engine) resume(id, choice, text string) (r Result, busy bool, err error) {
+	if _, err := e.LoadState(id); err != nil {
+		return failed("%v", err), false, nil
+	}
+	unlock, ok, err := e.lockRun(id)
+	if err != nil {
+		return Result{}, false, err
+	}
+	if !ok {
+		return Result{RunID: id, Status: StatusFailed, Reason: "another maestro-play process is driving run " + id}, true, nil
+	}
+	defer unlock()
+	r, err = e.resumeLocked(id, choice, text)
+	return r, false, err
+}
+
+func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
+	st, err := e.LoadState(id)
+	if err != nil {
+		return failed("%v", err), nil
+	}
+	p, err := playbook.Load(e.cfg.Playbooks, st.Playbook)
+	if err != nil {
+		return failed("%v", err), nil
+	}
+	switch st.Status {
+	case StatusWaiting:
+		if choice == "" {
+			return failed("run %s waits on %s: pass --choice (%s)", id, st.Ask.Step, strings.Join(st.Ask.Choices, ", ")), nil
+		}
+		if !playbook.Contains(st.Ask.Choices, choice) {
+			return failed("--choice %q: want one of %s", choice, strings.Join(st.Ask.Choices, ", ")), nil
+		}
+		// The answer's text goes into notes, so it's one line: it can never
+		// add a trailer line of its own (0746).
+		st.Ask.Choice, st.Ask.Text, st.Ask.Answered = choice, flat(text), true
+	case StatusRunning, StatusStopped:
+		if choice != "" {
+			return failed("run %s isn't waiting on a question", id), nil
+		}
+	default:
+		return Result{RunID: id, Status: st.Status, Playbook: st.Playbook, Ticket: st.Ticket, Reason: "run already " + st.Status}, nil
+	}
+	if e.stopped() {
+		return e.result(st), nil
+	}
+	env, res, err := e.preflight(st)
+	if err != nil || res != nil {
+		return deref(res), err
+	}
+	st.Env = env
+	st.Status = StatusRunning
+	if st.Ticket != "" {
+		if p.Claim && !st.Wrapped["released"] {
+			if res := e.reclaim(p, st); res != nil {
+				return *res, nil
+			}
+		}
+		if _, res := e.readTicket(st); res != nil {
+			return *res, nil
+		}
+	}
+	return e.drive(p, st)
+}
+
+// resumeUnfinished resumes this bot's oldest crashed or stopped run of the
+// role, the first category --next tries.
+func (e *Engine) resumeUnfinished(bot, role string) (Result, bool, error) {
+	runs, err := e.unfinished(bot)
+	if err != nil {
+		return Result{}, false, err
+	}
+	for _, st := range runs {
+		if st.Role == role {
+			r, busy, err := e.resume(st.ID, "", "")
+			if busy {
+				continue // a live run, not a crashed one
+			}
+			return r, true, err
+		}
+	}
+	return Result{}, false, nil
+}
+
+// start drives a new run under its lock.
+func (e *Engine) start(p *playbook.Playbook, st *State) (Result, error) {
+	unlock, ok, err := e.lockRun(st.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	if !ok {
+		return failed("run %s: locked by another process", st.ID), nil
+	}
+	defer unlock()
+	return e.drive(p, st)
+}
+
+// drive runs the phases until the run finishes or pauses. The caller holds
+// the run's lock.
+func (e *Engine) drive(p *playbook.Playbook, st *State) (Result, error) {
+	if err := e.save(st); err != nil {
+		return Result{}, err
+	}
+	if st.Phase == phaseSteps {
+		if st.ClaimRole == "" && st.TicketD != nil {
+			st.ClaimRole = str(st.TicketD["role"])
+		}
+		if err := e.steps(p, st); err != nil {
+			return Result{}, err
+		}
+		if st.Status != StatusRunning {
+			if st.Status == StatusLost {
+				e.cleanup(st)
+			}
+			return e.result(st), e.save(st)
+		}
+	}
+	switch st.Phase {
+	case phaseDone:
+		if err := e.finish(p, st); err != nil {
+			return Result{}, err
+		}
+	case phaseBlock:
+		if err := e.escalate(p, st); err != nil {
+			return Result{}, err
+		}
+	case phaseEnd:
+		if err := e.end(p, st); err != nil {
+			return Result{}, err
+		}
+	}
+	if st.Status == StatusStopped {
+		return e.result(st), e.save(st)
+	}
+	e.cleanup(st)
+	if st.Status == StatusDone {
+		os.Remove(statePath(e.cfg.Common, st.ID))
+		os.RemoveAll(runDir(e.cfg.Common, st.ID))
+		return e.result(st), nil
+	}
+	return e.result(st), e.save(st)
+}
+
+func (e *Engine) result(st *State) Result {
+	r := Result{RunID: st.ID, Status: st.Status, Playbook: st.Playbook, Ticket: st.Ticket}
+	switch st.Status {
+	case StatusWaiting:
+		r.Step, r.Question, r.Choices = st.Ask.Step, st.Ask.Question, st.Ask.Choices
+		r.Evidence = e.evidence(st)
+	case StatusBlocked, StatusLost, StatusFailed:
+		r.Step, r.Reason = st.StoppedAt, st.StopReason
+	case StatusStopped:
+		r.Step, r.Reason = st.Cursor, "the stop file exists"
+	}
+	return r
+}
+
+// evidence points the bot at what a waiting run has: its state, the
+// evidence folder and every output path a step recorded.
+func (e *Engine) evidence(st *State) []string {
+	out := []string{statePath(e.cfg.Common, st.ID)}
+	if st.Ticket != "" {
+		out = append(out, e.evidenceDir(st))
+	}
+	for _, rec := range st.Steps {
+		if p, ok := rec["output_path"].(string); ok && p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (e *Engine) evidenceDir(st *State) string {
+	return filepath.Join(e.cfg.Common, "evidence", st.Ticket)
+}

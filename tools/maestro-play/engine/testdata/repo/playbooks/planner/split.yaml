@@ -1,0 +1,37 @@
+name: split
+role: planner
+description: Draft tickets for a plan, create them, and confirm each one.
+intake:
+  - {category: request, status: todo, title: "Plan:"}
+  - {category: sent-back, status: in_progress, owner: planner}
+claim: true
+input: optional
+cursor: {name: split, save: '{{add .cursor 1}}'}
+steps:
+  - id: draft
+    prompt: tickets
+    session: fresh
+    with:
+      goal: '{{.ticket.title}}'
+    out: [tickets]
+    block: {to: chief-of-staff}
+  - id: create
+    each: .steps.draft.reply.tickets
+    when: '{{ne .item.title ""}}'
+    reason: no title
+    ticket: create --title {{quote .item.title}} --role {{.item.role}} --type ship
+    body: '{{.item.body}}'
+  - id: confirm
+    each: .steps.create.results
+    when: '{{eq .item.outcome "ok"}}'
+    reason: not created
+    ask: {question: 'Created {{.item.json.id}}. Tell the user?', choices: [sent]}
+  - id: quiet
+    gate: '{{eq .input.text "quiet"}}'
+    on: {ok: end, fail: next}
+done:
+  to: '{{if .steps.create.results}}in_review{{else}}keep{{end}}'
+  note: |
+    Report: {{len .steps.create.results}} drafted, sha {{index .ticket.trailers "sha"}}, check {{latestLine .ticket "Check"}}.
+    {{.run.skipped}}cursor: {{.cursor}}
+  log: 'split: {{len .steps.create.results}} tickets'

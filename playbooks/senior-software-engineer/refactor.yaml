@@ -1,0 +1,45 @@
+name: refactor
+role: senior-software-engineer
+description: Restructure code without changing what it does, by committing tests of its current behaviour first, proving they can fail, and keeping them passing.
+intake: {category: new-work, status: todo, kinds: [chore],
+         body: "Playbook: refactor", unless_latest: "Escalation:"}
+claim: true
+session: ticket
+steps:
+  - id: start
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: worktree
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: characterise              # tests at the public edges, committed; then one reverted break makes one fail
+    prompt: baseline
+    mode: characterise
+    model: frontier
+    out: [baseline, gaps, broke, commit]
+  - id: build                     # a captured test that has to change is a behaviour change: blocked
+    prompt: build
+    model: frontier
+    retry: {max: 1, tier_up: false}
+    out: [commit, files, tests]
+  - id: checks
+    run: check all
+    on: {fail: build}
+  - id: verify
+    prompt: verify
+    model: mid
+    out: [criteria, failures]
+    on: {failed: build}
+done:
+  to: in_review
+  note: |
+    Handoff: refactored on {{.run.branch}} at {{json .steps.build.reply.commit}}.
+    Captured tests (committed at {{json .steps.characterise.reply.commit}}, unchanged since): {{json .steps.characterise.reply.baseline}}
+    Proof they can fail: {{json .steps.characterise.reply.broke}}
+    Not covered: {{json .steps.characterise.reply.gaps}}
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.build.reply.commit}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}

@@ -1,0 +1,44 @@
+name: fix-sent-back
+role: junior-software-engineer
+description: Fix a routine ticket that came back and resubmit it, or hand it to the Senior Engineer once Tries reaches 2.
+intake: {category: sent-back, status: in_progress, latest: "Handoff: ", kinds: [feature, bug, chore, docs]}   # review, QA or release sent it back; a crashed build has no such note last
+claim: true
+session: ticket
+steps:
+  - id: tries                     # Tries 2: no third try from the junior
+    gate: '{{lt .ticket.tries 2}}'
+  - id: worktree
+    run: worktree add {{.ticket.id}}
+  - id: feedback                  # an item needs a design decision, or you disagree: blocked, so the senior takes it
+    prompt: feedback
+    model: mid
+    out: [items]
+  - id: build
+    prompt: build
+    model: mid
+    retry: {max: 1, tier_up: true}
+    out: [commit, files, tests]
+  - id: checks
+    run: check all
+    on: {fail: build}
+  - id: verify
+    prompt: verify
+    model: mid
+    out: [criteria, failures]
+    on: {failed: build}
+done:
+  to: in_review
+  note: |
+    Handoff: fixed what came back, on {{.run.branch}} at {{json .steps.build.reply.commit}}.
+    Items:{{range .steps.feedback.reply.items}}
+    - {{json .}}{{end}}
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.build.reply.commit}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}
+block:
+  to: senior-software-engineer    # nothing here blocks; what the junior can't finish goes to the senior

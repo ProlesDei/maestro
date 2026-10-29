@@ -79,6 +79,34 @@ func TestCreateGetList(t *testing.T) {
 	}
 }
 
+// List order is part of the contract: the playbook engine takes the first
+// match. Priority first (0 is most urgent), then id as a number, so T-2
+// comes before T-10.
+func TestListOrderPriorityThenID(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	prios := []int{2, 1, 2, 0, 1, 2, 2, 2, 2, 2, 1}
+	for i, p := range prios {
+		mustCreate(t, s, fmt.Sprint("t", i+1), "planner", p)
+	}
+	all, err := s.List(ctx, ticket.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, tk := range all {
+		got = append(got, tk.ID.String())
+	}
+	want := "[T-4 T-2 T-5 T-11 T-1 T-3 T-6 T-7 T-8 T-9 T-10]"
+	if fmt.Sprint(got) != want {
+		t.Fatalf("order %v; want %s", got, want)
+	}
+	top, _ := s.List(ctx, ticket.ListFilter{Limit: 2})
+	if len(top) != 2 || top[0].ID != 4 || top[1].ID != 2 {
+		t.Fatalf("limit keeps the order: %+v", top)
+	}
+}
+
 func TestClaimNextOrderAndFilters(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()

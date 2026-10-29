@@ -51,6 +51,8 @@ Both allow send-backs to `in_progress`, `in_progress → todo` (escalation) and 
 
 **Dependencies and areas.** `create --deps T-1,T-2 --areas tools/maestro-ticket,skills`, or `update <id> --add-deps/--remove-deps/--areas` later. These gate work that writes code: tickets in `todo` or `in_progress`. `claim --next` only hands out such a ticket when its dependencies are all `done` and none of its areas overlaps (equal, or one inside the other) an area of another `todo` or `in_progress` ticket under a live claim. Claiming one by id fails with exit 4 `waiting_on_deps` or `area_busy`; renewing your own lease is exempt. Claims in other statuses (grooming `backlog`, answering `blocked`, review, QA, release) neither wait nor hold areas (`0245`). Their holder can't move the ticket into `todo` or `in_progress` without `--release` until the same checks pass, and the holder of a working claim can't `update --areas` onto another live claim's areas (`0243`). Areas are repo-relative paths with no `.` or `..` segments, compared case-sensitively. Cycles are refused. Decisions: `docs/decisions/0200`–`0206`, `0220` onward and `0432`.
 
+**Listing.** `list` and `claim --next` order tickets by priority (0 first), then by id as a number (`T-2` before `T-10`), so the first match is the most urgent and the oldest. Playbook intake relies on this order. `list --latest-prefix P` keeps only tickets whose latest comment starts with `P`; `--not-latest-prefix P` keeps tickets with no comments or whose latest comment doesn't start with `P`. Both match case-sensitively on the start of the comment body, can be combined with each other and the other filters, and `--limit` counts after them (decision 0720).
+
 ## Exit codes
 
 | Code | Meaning |

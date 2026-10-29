@@ -2,17 +2,17 @@
 
 An automated agentic workflow that takes products from plan to ship, packaged so you can install it into any project.
 
-maestro bundles a full suite of agent roles, skills, and tools. Install it, give it context about your project, and the workflow is ready to run. No per-project setup of agents, prompts, or tooling.
+maestro bundles a full suite of agent roles, playbooks and tools. Install it, give it context about your project, and the workflow is ready to run. No per-project setup of agents, prompts, or tooling.
 
 ## What's included
 
 | Part | What it is |
 |---|---|
 | Roles | Agent definitions. Each role owns one part of the delivery process. |
-| Skills | Reusable instructions. Bot skills (`skills/bot/`) teach the bots how to prompt and judge, and stay with the bot runtime. Harness skills (`skills/harness/`, `maestro-*`) teach a harness session one step; they install into your harness's skill folder and run only when a prompt names them. See `skills/README.md`. |
-| Playbooks | Step-by-step plans for each role's jobs, in `playbooks/<role>/`. The bot runtime picks one per ticket and runs its steps in one harness session. See `playbooks/README.md`. |
-| Tools | Scripts and commands the agents call to do the work. `tools/maestro-ticket/` is the ticket system: a CLI over a SQLite store shared by every worktree, with leases, versioned transitions, an event log and a generated `Backlog.md`. See `tools/maestro-ticket/README.md`. |
-| Evals | One golden task per playbook in `evals/<role>/`, the situation and the result it must produce, for catching regressions once the eval runner exists. `evals/check.py` checks the format of the playbooks, tasks, skills and docs. See `evals/README.md`. |
+| Playbooks | Each role's jobs as YAML workflows in `playbooks/<role>/`: typed steps for ticket writes, runner requests, checks, waits, questions for the bot, and prompts rendered from the templates in `playbooks/prompts/`. `maestro-play` runs one per ticket, all its prompt steps in one harness session. See `playbooks/README.md`. |
+| Skills | Yours. `skills/` holds your own skills, and `skills/use.yaml` says which prompt steps and bots name them and which install as slash commands. Maestro's playbooks, templates and personas name none, so nothing depends on a skill. See `skills/README.md`. |
+| Tools | Commands that do the work. `tools/maestro-play/` is the playbook engine. `tools/maestro-ticket/` is the ticket system: a CLI over a SQLite store shared by every worktree, with leases, versioned transitions, an event log and a generated `Backlog.md`. See `tools/maestro-ticket/README.md`. `tools/maestro-usage/` records usage and checks budgets. |
+| Evals | One golden task per playbook in `evals/<role>/`, the situation and the result it must produce, for catching regressions once the eval runner exists. `maestro-play lint` checks the playbooks; `evals/check.py` checks the tasks and docs. See `evals/README.md`. |
 | Bot profiles | One folder per bot at `bot-profiles/<name>/persona.md`, plus any supporting files in that folder, and `bot-profiles/team-rules.md` shared by all of them. Outside tools, such as Grok, read a folder and copy it to create the bot. |
 
 ## How it works
@@ -109,39 +109,41 @@ flowchart TD
 
 ### Bot anatomy
 
-An outside bot runtime, for example Grok Bot, creates a bot for each persona in `bot-profiles/`. Every persona operates under this same anatomy. The bot runtime loads the role's profile (`persona.md`, the team rules, playbooks and bot skills) outside the user's repo. It runs the standard session loop: preflight, starting a headless harness session with launch flags, checking intake, claiming work, prompting steps under the prompt contract, checking structured replies with evidence, batched wrap-up, and cleanup. The bot never touches the repo: harness sessions do the hands-on work, and the runner (`docs/runner.md`) runs every no-token step within the role's permissions and the trust level.
+An outside bot runtime, for example Grok Bot, creates a bot for each persona in `bot-profiles/`. Every persona operates under this same anatomy. The bot runtime loads the role's profile (`persona.md`, the team rules and the role's playbooks) outside the user's repo. The bot starts each job with the runner's `play` request, and `maestro-play` runs the rest: preflight, intake, the claim, each step, the structured reply checked against the step's schema, the handoff or escalation, the log line and clean-up. The bot decides only where the playbook asks it to, and handles escalations. It never touches the repo: harness sessions do the hands-on work, and the runner (`docs/runner.md`) checks every request against the role's permissions and the trust level.
 
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. a Grok or Claude bot<br/>Thinks, decides and prompts. Never touches files or runs commands<br/><i>How it's started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. a Grok or Claude bot<br/>Thinks and decides. Never touches files or runs commands<br/><i>How it's started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
-        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"] ~~~ P3["<b>playbooks/</b><br/>Step-by-step plans<br/>for the role's jobs"] ~~~ P5["<b>Bot skills</b><br/>runner · prompt contract ·<br/>choosing a model per step"]
+        P1["<b>persona.md</b><br/>Persona and<br/>decision authority"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"] ~~~ P3["<b>playbooks/</b><br/>YAML workflows and<br/>prompt templates"] ~~~ P5["<b>skills/use.yaml</b><br/>the user's own skills,<br/>if any"]
     end
+
+    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs one playbook's steps in order, keeps the run state<br/>Stops only to ask the bot or to block"]
 
     Runner["<b>Runner</b> · no tokens<br/>The bot's only way into their repo<br/>Named requests, allowed by role and trust level<br/>Stop file checked first · usage recorded"]
 
-    subgraph Loop ["Session loop: identical for every role"]
+    subgraph Loop ["Playbook run: identical for every role"]
         B0["<b>Preflight</b>, through the runner<br/>Stop file set? Stop<br/>Health check: harness logged in, maestro-ticket doctor passes, git clean<br/>Environment, trust level, budgets"]
-        B1["<b>Start a harness session with launch flags</b><br/>.maestro/rules.md · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
-        B2["<b>Prompt: check intake</b> · maestro-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
-        B3["<b>Pick the playbook</b><br/>Prompt: claim the work · maestro-claim<br/>The claim keeps the lease alive in the background"]
-        B4["<b>Next step</b><br/>Pick the model tier for this step<br/>No tokens: a runner request<br/>Otherwise a prompt naming the harness skill"]
-        B5["<b>Check the structured reply</b><br/>Goal met? Evidence included?"]
-        B6{"Result?"}
-        B7["<b>Prompt: wrap up</b>, batched<br/>maestro-propose-memory, to the inbox ·<br/>maestro-handoff-note or maestro-escalate ·<br/>maestro-log-entry: retro, what slowed me down?"]
-        B8["<b>Clean up</b> · hook if available, else maestro-clean-up<br/>Scratchpad · temp files · processes · worktree · claim<br/>Then close the harness session"]
+        B1["<b>Harness sessions get launch flags</b><br/>playbooks/rules.md · role permissions · model tier<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
+        B2["<b>Intake</b> · maestro-play --next<br/>Requests → work sent back → new work<br/>Scheduled duties run by name · a crashed run resumes first"]
+        B3["<b>Claim</b>, by the engine<br/>The token goes into the run state<br/>The keepalive holds the lease in the background"]
+        B4["<b>Next step</b><br/>ticket · run · prompt · gate · wait · ask<br/>No tokens unless it's a prompt"]
+        B5["<b>Check the reply</b><br/>The base schema plus the step's out: fields<br/>Evidence included?"]
+        B6{"on: outcome"}
+        B7["<b>Built-in done or block</b><br/>memory to the inbox · Handoff: or Escalation: note ·<br/>move and release · log line with the retro"]
+        B8["<b>Built-in clean-up</b><br/>Listed processes · clean worktree · run state<br/>Then close the harness session"]
         B9{"More in intake?"}
-        B10(["Session ends"])
+        B10(["Run ends"])
     end
 
-    Contract["<b>Prompt contract</b><br/>1 the goal<br/>2 pointers, not pasted content<br/>3 constraints and permissions<br/>4 what done means<br/>5 reply: short, structured, with evidence<br/><br/>Same session across a playbook's steps ·<br/>fresh session per ticket"]
+    Contract["<b>playbooks/prompts/_contract.md</b><br/>first in every prompt, never changes<br/>then the skills use.yaml names,<br/>then the step's template<br/><br/>Same session across a playbook's steps ·<br/>fresh session per ticket"]
 
     subgraph HarnessSide ["Their repo · the harness does all the work"]
         H["<b>Harness session</b>, headless<br/>Claude Code · Codex · Grok Build"]
-        Loads["<b>Uses our footprint only</b><br/>.maestro/rules.md · project/ setup and memory<br/>maestro-* skills, loaded only when named"]
+        Loads["<b>Uses our footprint only</b><br/>project/ setup and memory<br/>skills named in use.yaml, loaded only when named"]
         Work["<b>Does the hands-on work</b><br/>Ticket system CLI: maestro-ticket · files and code ·<br/>commits on maestro/ branches · tests and the running app"]
     end
 
@@ -153,9 +155,11 @@ flowchart TD
     end
 
     Runtime -->|"loads the profile it's configured for"| Profile
-    Profile --> B0
+    Profile -->|"play run, through the runner"| Engine
+    Engine --> B0
     Guard -.-> B0
     B0 --> B1 --> B2 --> B3 --> B4
+    B4 -.->|"ask or block: the bot answers<br/>with play resume"| Runtime
     Contract -.->|"shapes every prompt"| B4
     B0 -.->|"requests"| Runner
     B4 -.->|"no-token steps"| Runner
@@ -163,12 +167,12 @@ flowchart TD
     B4 ==>|"prompt"| H
     H ==>|"structured reply"| B5
     B5 --> B6
-    B6 -->|"step done, more to do"| B4
-    B6 -->|"not right, within budget:<br/>sharper prompt"| B4
-    B6 -->|"stuck or over budget:<br/>escalate"| B7
-    B6 -->|"playbook done"| B7
+    B6 -->|"ok or done: next step,<br/>or the step on: names"| B4
+    B6 -->|"missing a field:<br/>retry, maybe a tier up"| B4
+    B6 -->|"blocked, failed or over<br/>step_visits: block"| B7
+    B6 -->|"last step, or on: done"| B7
     B7 --> B8 --> B9
-    B9 -->|"yes: new session"| B0
+    B9 -->|"yes: next run"| B0
     B9 -->|"no"| B10
     Loads --> H
     H --> Work
@@ -188,7 +192,7 @@ flowchart TD
     class P5,Contract shared
     class B0,B1,B2,B3,B4,B5,B6,B7,B8,B9 step
     class H,Work harness
-    class Loads,Runner ours
+    class Loads,Runner,Engine ours
     class E1,E2,E3,E4,E5,E6 role
     class Guard note
 ```
@@ -205,4 +209,4 @@ Installed sessions get Maestro's rules through launch flags and never rely on, o
 
 ## Status
 
-Early. The roles, skills, playbooks and the ticket store are written; the runner, the wake loop and the installer aren't built yet, so nothing installs today. Install steps will land here once they are.
+Early. The roles, playbooks, the playbook engine and the ticket store are written; the runner, the wake loop and the installer aren't built yet, so nothing installs today. Install steps will land here once they are.

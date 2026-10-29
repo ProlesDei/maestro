@@ -1,0 +1,52 @@
+name: performance
+role: senior-software-engineer
+description: Make code faster or leaner by tracing it before the change, changing only what the trace shows, and tracing again the same way after.
+intake: {category: new-work, status: todo, kinds: [feature, bug, chore],
+         body: "Playbook: performance", unless_latest: "Escalation:"}
+claim: true
+session: ticket
+steps:
+  - id: start
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: worktree
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: trace                     # no target, or already met: blocked with the numbers
+    prompt: baseline
+    mode: trace
+    model: frontier
+    out: [baseline, hotspots, commit]
+  - id: build                     # aims only at the hot spots; a new cache, schema or dependency: blocked
+    prompt: build
+    model: frontier
+    retry: {max: 1, tier_up: false}
+    out: [commit, files, tests]
+  - id: after                     # reruns ## Baseline from the scratch file: same command, run count and machine; target not met beyond the spread: failed
+    prompt: baseline
+    mode: after
+    model: mid
+    out: [baseline]
+    on: {failed: build}
+  - id: checks
+    run: check all
+    on: {fail: build}
+  - id: verify
+    prompt: verify
+    model: mid
+    out: [criteria, failures]
+    on: {failed: build}
+done:
+  to: in_review
+  note: |
+    Handoff: faster on {{.run.branch}} at {{json .steps.build.reply.commit}}.
+    Trace committed at {{json .steps.trace.reply.commit}}; profiles in {{.run.evidence_dir}}.
+    Before: {{json .steps.trace.reply.baseline}}
+    After: {{json .steps.after.reply.baseline}}
+    Hot spots: {{json .steps.trace.reply.hotspots}}
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.build.reply.commit}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}

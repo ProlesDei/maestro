@@ -1,0 +1,40 @@
+name: verification-skill
+role: qa-lead
+description: Write the project's verification guide, .maestro/project/verify.md, which says how to build, start, drive and observe the real app, prove it on one behaviour, and submit it for review.
+intake:
+  - {category: request, status: todo, kinds: [chore]}          # "Verification guide", from chief-of-staff/setup-project
+  - {category: sent-back, status: in_progress, kinds: [chore]}  # the guide came back from review or QA
+claim: true
+session: ticket
+steps:
+  - id: start
+    when: '{{eq .ticket.status "todo"}}'
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: worktree
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: draft                     # verify.md next to the scratch file (0731): build, start, stop, drive and observe, each from a repo path; a service or access the team can't get: blocked
+    prompt: draft-setup
+    mode: verify
+    model: mid
+    out: [draft]
+  - id: verify                    # a fresh session with only the draft proves it on one behaviour from project-setup.md or the README
+    prompt: verify
+    mode: guide
+    session: fresh
+    model: mid
+    out: [criteria, failures]
+    on: {failed: draft}
+  - id: install                   # from the fixed draft path, never a replied one; refuses if the file exists and differs: never overwrite, so it blocks
+    run: install write .maestro/project/verify.md --from {{.run.scratch_dir}}/verify.md --commit
+done:
+  to: in_review                   # ships like code; at trust level 1 as a pull request
+  note: |
+    Handoff: verification guide on {{.run.branch}}, installed with install write.
+    Proved on:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    Installed: {{.steps.install.path}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.install.commit}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}

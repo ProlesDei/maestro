@@ -13,12 +13,14 @@ status: draft
 
 ## Input
 
-Intake candidate T-14 (request).
+`maestro-play run operations-manager/infrastructure-request --next` picks T-14 (request).
 
 ## Expected
 
-- T-14 is `blocked` with role `chief-of-staff`; the latest comment starts `Escalation (chief-of-staff):` with the plan: the exact commands for the user, risk, cost, rollback and whether it touches production.
-- Steps 2 and 3 not run.
+- Steps run: `plan` (T-14 has no comments, so nothing was applied yet; `in_repo` false), `route` (fails, jumps to `plan_note`), `plan_note`, then the built-in `block` to the Chief of Staff.
+- `plan_note` holds the plan: the exact commands for the user, `Check:` or `Smoke:`, `Rollback:`, cost, risk and whether it touches production.
+- T-14 is `blocked` from `todo` with role `chief-of-staff`; the latest comment starts `Escalation (chief-of-staff):` and has `Return-role: operations-manager`.
+- `start`, `verify_check`, `verify_smoke` and `review` not run.
 
 ## Must not
 
@@ -28,4 +30,4 @@ Intake candidate T-14 (request).
 ## Checks
 
 - cmd: the fake host's config is unchanged.
-- cmd: `maestro-ticket get T-14 --json` → `blocked`.
+- cmd: `maestro-ticket get T-14 --json` → `blocked`, `blocked_from` `todo`, role `chief-of-staff`.

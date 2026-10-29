@@ -1,67 +1,38 @@
 # Skills
 
-Reusable instructions for one task, one skill per folder. Two kinds, kept in separate folders:
+This folder is yours. Maestro's playbooks, prompt templates and personas name no skill, so you can add, rename or remove skills here without editing Maestro. The skills here now are Paul's harness skills (decision 0780). They are separate from the bot personas in `bot-profiles/`.
 
-| | Bot skills | Harness skills |
-|---|---|---|
-| Folder | `skills/bot/<name>/` | `skills/harness/<name>/` |
-| Name | no prefix | `maestro-` prefix |
-| Read by | the bot runtime, as part of every bot profile | a harness session in the target repo |
-| Teaches | how to plan, prompt and judge | how to do one step: ticket CLI, files, git |
-| Installed into the target repo | never | yes: generated per installed harness (decision 0143) |
+## Layout
 
-Harness skills go to `.claude/skills/<name>/` for Claude Code and `.agents/skills/<name>/` for Codex and Grok Build, hidden from `git status` by `.git/info/exclude`. A session loads one only when the prompt names it; the runner (`docs/runner.md`) names it the way each harness expects. `skills/harness/rules.md` is installed as `.maestro/rules.md` and passed to every session in its launch flags.
+- `skills/<name>/SKILL.md`: one skill per folder, flat, in any format your harnesses or bot runtime read. Other files in the folder go with it.
+- `skills/use.yaml`: optional. It says which skills get named, and where. If it's missing or a list is empty, nothing is named.
 
-## Format
+```yaml
+prompts:                  # harness skills
+  all: []                 # every prompt step
+  build: [tdd]            # by template name in playbooks/prompts/, never by playbook
+  review: [deep-review]
+bots:                     # bot skills
+  all: []
+  senior-software-engineer: [architecture]
+commands: [work]          # slash commands for the user, never named in a prompt
+```
 
-Copy the `_template/` folder of the kind you're writing.
+## How they're used
 
-- **Frontmatter**
-  - `name`: the folder name.
-  - `description`: one sentence: what the skill does and when to use it.
-  - `metadata.internal: true` on every skill, so third-party skill installers skip them.
-  - Harness skills also set `disable-model-invocation: true` (Claude Code, Grok Build) and ship `agents/openai.yaml` with `policy.allow_implicit_invocation: false` (Codex), so they run only when named.
-  - Add other fields only when a reader needs them.
-- **Body**: what the skill is for, inputs, steps, the reply or output, rules.
-- **Other files** in the folder support that skill. Installers copy the whole folder.
+- **Prompts.** For each prompt step, `maestro-play` names `prompts.all` plus `prompts.<template>` right after `playbooks/prompts/_contract.md`, the way each harness expects (`docs/runner.md`).
+- **Install.** The installer copies the skills listed under `prompts` or `commands` into each harness's skill folder in the target repo: `.claude/skills/<name>/SKILL.md` for Claude Code, and `.agents/skills/<name>/SKILL.md` for Codex and Grok (decision 0143). Nothing else here is installed.
+- **Bots.** Bot setup adds `bots.all` plus `bots.<role>` to that bot's instructions.
+- **One list.** `use.yaml` is global. A project can't override it (decision 0701).
+- **Checked.** `maestro-play lint` fails on any listed skill that has no folder here.
 
-## Rules
+## Slash commands
 
-- Folder names: lowercase, hyphens, matching `name`. Folders starting with `_` are not skills; readers and installers skip them.
-- Harness skills rely on `.maestro/rules.md` and bot skills on `bot-profiles/team-rules.md`. Never restate a rule from either.
-- Apart from those, the body stands alone. Don't send the reader to another skill for a step it needs.
-- Harness skills reply in the structured format from `skills/bot/prompt-contract`.
+An installed skill is a command you call by name: `/<name>` in Claude Code, `$<name>` in Codex. Grok Build finds the same folders (decision 0140), and its headless prompts name a skill by its path. Skills under `commands` are manual-only, so they run only when you call them: `disable-model-invocation: true` in the frontmatter for Claude Code and Grok, and `agents/openai.yaml` with `policy.allow_implicit_invocation: false` for Codex, which ignores the frontmatter key (decision 0143). `evals/check.py` fails a skill that has the first without the second, and `maestro-play lint` fails a `commands` skill that lacks either, or that a `prompts` skill tells a step to call (decision 0788). Skills under `prompts` set neither, because a playbook step has to be able to load them.
 
-## Current skills
+Two commands are workflow entry points, not procedures. They hold no workflow logic of their own: that stays in the playbooks and the engine.
 
-Session-loop step names are from `docs/bot-anatomy.mermaid`. Playbook-step skills are named by the playbooks' **Skill:** lines.
+- `/maestro-work [ticket id]` drives one ticket from `todo` to merged. It runs the playbook chain through `maestro-play` (build, review, QA, then release), relays each `ask` step to you, and stops at a block, a refusal or a PR waiting for a human merge.
+- `/maestro-create-ticket [what needs doing]` makes one `maestro-ticket create` call. It asks once for type, kind, role, owner, deps and areas, then hands you the id for `/maestro-work`.
 
-| Skill | Kind | Used at |
-|---|---|---|
-| `maestro-check-intake` | Harness | Check intake |
-| `maestro-claim` | Harness | Pick the playbook (claim the work) |
-| `maestro-propose-memory` | Harness | Wrap up, when there's something durable to keep |
-| `maestro-handoff-note` | Harness | Wrap up, handing the ticket on |
-| `maestro-escalate` | Harness | Wrap up, when someone above must act |
-| `maestro-log-entry` | Harness | Wrap up, last; the only wrap-up for scheduled duties |
-| `maestro-clean-up` | Harness | Clean up, when the harness has no cleanup hook |
-| `maestro-plan-change` | Harness | Playbook step: plan a build, find a bug's cause, plan an infrastructure request |
-| `maestro-capture-baseline` | Harness | Playbook step: repro, captured behaviour or trace, before and after a change |
-| `maestro-build-change` | Harness | Playbook step: build or fix on the ticket branch |
-| `maestro-verify` | Harness | Playbook step: prove the change works, before submitting and at QA |
-| `maestro-read-feedback` | Harness | Playbook step: read a send-back, an escalation or a report |
-| `maestro-review-change` | Harness | Playbook step: code review |
-| `maestro-investigate` | Harness | Playbook step: scout investigation, and fact-finding for plans and answers |
-| `maestro-write-report` | Harness | Playbook step: a scout's report, a workstream spec |
-| `maestro-write-tickets` | Harness | Playbook step: create or fix tickets |
-| `maestro-groom-board` | Harness | Playbook step: find board problems |
-| `maestro-check-release` | Harness | Playbook step: ship gates before release |
-| `maestro-analyse-logs` | Harness | Playbook step: improvement loop measuring and pattern-finding |
-| `maestro-propose-change` | Harness | Playbook step: improvement loop, adopt tuning or propose |
-| `maestro-curate-memory` | Harness | Playbook step: memory curation |
-| `maestro-housekeeping` | Harness | Playbook step: check a housekeeping plan |
-| `maestro-draft-setup` | Harness | Playbook step: project setup, definition of done, verification guide |
-| `runner` | Bot | Preflight; Start a harness session; every no-token step; Clean up (close the session) |
-| `prompt-contract` | Bot | Next step; Check the structured reply; Result; Wrap up |
-| `model-selection` | Bot | Next step (pick the model tier) |
-| `talk-to-user` | Bot | Chief of Staff playbook steps that message the user |
+To try them in a clone of this repo before an installer exists, copy the folders by hand: `cp -r skills/maestro-work skills/maestro-create-ticket .claude/skills/`. Use `.agents/skills/` for Codex and Grok, and list the copies in `.git/info/exclude` so they stay out of commits.

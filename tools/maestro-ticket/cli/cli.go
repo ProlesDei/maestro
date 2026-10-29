@@ -63,6 +63,7 @@ Commands:
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--holder H --token N]
   get         <id>
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed] [--limit N]
+              [--latest-prefix P] [--not-latest-prefix P]   (ordered by priority, then id)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
@@ -461,11 +462,17 @@ func runList(ctx context.Context, c *call) error {
 	claimed := c.fs.Bool("claimed", false, "only tickets with a live claim")
 	unclaimed := c.fs.Bool("unclaimed", false, "only tickets without a live claim")
 	limit := c.fs.Int("limit", 0, "max results (0 = all)")
+	latest := c.fs.String("latest-prefix", "", "only tickets whose latest comment starts with this")
+	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
 		f := ticket.ListFilter{Role: *role, Holder: *holder, Limit: *limit}
+		byComment := *latest != "" || *notLatest != ""
+		if byComment {
+			f.Limit = 0 // the limit applies after the comment filter
+		}
 		var err error
 		if f.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
@@ -483,8 +490,43 @@ func runList(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
+		if byComment {
+			if list, err = filterLatest(ctx, s, list, *latest, *notLatest, *limit); err != nil {
+				return err
+			}
+		}
 		return c.out(map[string]any{"tickets": list}, func(w io.Writer) { printList(w, list) })
 	})
+}
+
+// filterLatest keeps the tickets whose latest comment starts with prefix
+// (when set) and doesn't start with notPrefix (when set), in list order, up
+// to limit (0 = all). A ticket with no comments never matches prefix and
+// always passes notPrefix. Comments are read after the list, so one added in
+// between counts.
+func filterLatest(ctx context.Context, s ticket.Store, list []ticket.Ticket, prefix, notPrefix string, limit int) ([]ticket.Ticket, error) {
+	out := []ticket.Ticket{}
+	for _, t := range list {
+		if limit > 0 && len(out) == limit {
+			break
+		}
+		d, err := s.Get(ctx, t.ID)
+		if err != nil {
+			return nil, err
+		}
+		body, has := "", len(d.Comments) > 0
+		if has {
+			body = d.Comments[len(d.Comments)-1].Body
+		}
+		if prefix != "" && !(has && strings.HasPrefix(body, prefix)) {
+			continue
+		}
+		if notPrefix != "" && has && strings.HasPrefix(body, notPrefix) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func runClaim(ctx context.Context, c *call) error {

@@ -17,8 +17,8 @@ Intake candidate T-3 (new work).
 ## Expected
 
 - T-3 is `in_review`.
-- The first branch commit adds characterisation tests only, passing on unchanged code.
-- The handoff shows a deliberate break made a captured test fail, and the gap list.
+- The first branch commit (from `characterise`) adds characterisation tests only, passing on unchanged code.
+- The handoff's `Proof they can fail:` line names the deliberate break and the test that failed, and `Not covered:` lists the gaps.
 - Captured tests are unchanged after the refactor commits.
 
 ## Must not

@@ -12,10 +12,11 @@ status: draft
 
 ## Input
 
-User: "digest"
+User: "digest": `maestro-play run chief-of-staff/digest --input digest`. The bot sends the digest and answers `sent` at `send`.
 
 ## Expected
 
+- Steps run: `summary`, `budgets` (exit `1`, routed to `next`), `send`. `unreadable` doesn't run.
 - At most 12 lines: one per goal with state, workstreams and spend, then the budget warning, then the count of decisions waiting.
 
 ## Must not

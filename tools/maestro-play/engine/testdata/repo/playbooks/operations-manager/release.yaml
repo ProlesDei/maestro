@@ -1,0 +1,23 @@
+name: release
+role: operations-manager
+description: Open the pull request, wait for it to merge, and ask before a risky deploy.
+intake: {category: new-work, status: ready_to_release, role: any}
+claim: true
+steps:
+  - id: open
+    run: open pr {{.ticket.id}}
+  - id: status
+    run: pr status {{.ticket.id}}
+  - id: merged
+    wait: {step: status, until: '{{eq .steps.status.state "merged"}}', every: 1m, timeout: 5m}
+    on: {timeout: block}
+  - id: deploy_now
+    ask:
+      question: 'PR {{.steps.open.url}} merged at {{.steps.status.sha}}. Deploy now?'
+      choices: [deploy, hold]
+    on: {hold: done}
+  - id: deploy
+    run: deploy production
+done:
+  to: done
+  note: 'Handoff: released {{.steps.status.sha}}{{with .steps.deploy_now.text}} ({{.}}){{end}}.'

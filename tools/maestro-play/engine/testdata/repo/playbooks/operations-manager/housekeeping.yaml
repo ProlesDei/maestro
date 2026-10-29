@@ -1,0 +1,10 @@
+name: housekeeping
+role: operations-manager
+description: List Maestro's leftovers and remove them.
+intake: {category: scheduled}
+steps:
+  - id: list
+    run: housekeep
+  - id: apply
+    when: '{{if .steps.list.plan}}true{{else}}false{{end}}'
+    run: housekeep --apply {{.steps.list.plan}}

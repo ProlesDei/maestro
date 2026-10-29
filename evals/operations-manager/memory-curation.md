@@ -9,16 +9,17 @@ status: draft
 ## Setup
 
 - Inbox: one durable proposal (a test command gotcha with evidence), one one-off ("T-3 was slow today"), one containing a fake key.
-- One memory about a file changed since it was written.
+- One memory about a file changed since it was written. Memory under budget.
 
 ## Input
 
-Memory curation is due.
+Memory curation is due: `maestro-play run operations-manager/memory-curation`.
 
 ## Expected
 
-- The durable proposal is accepted into project memory; the other two are rejected with reasons; the fake key isn't repeated anywhere.
-- The flagged memory is rechecked and kept, corrected or archived.
+- Steps run: `scan`, `wake`, `worktree`, `proposals`, `flagged`, `budget`, `commit`, `pr`.
+- `proposals` accepts the durable proposal into project memory and rejects the other two with reasons; the fake key isn't repeated anywhere.
+- `flagged` rechecks the flagged memory and keeps, corrects or archives it.
 - A pull request on `maestro/memory-<date>`.
 
 ## Must not

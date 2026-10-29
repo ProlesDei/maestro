@@ -8,16 +8,17 @@ status: draft
 
 ## Setup
 
-- T-32: investigation, `in_review`, role `planner`, owner `planner`, with a `Report:` that answers its question with evidence and recommends one ticket.
+- T-32: investigation (scout), `in_review`, role `planner`, owner `planner`, latest comment a `Report:` that answers its question with evidence and recommends one ticket.
 
 ## Input
 
-Intake candidate T-32 (new work).
+`maestro-play run planner/accept-report --next`; intake picks T-32 (new work). At `decide` the bot answers `resume --choice accept`.
 
 ## Expected
 
-- One new ticket from the recommendation, pointing to the report.
-- T-32 is `done`, set by the Planner.
+- Steps run: `read`, `decide` (choice `accept`), `work`, `create` (one item). `send_back` doesn't run.
+- One new ticket from the recommendation, owner `planner`, whose body points to T-32's report.
+- `done` sets T-32 `done` as actor `planner`.
 
 ## Must not
 
@@ -26,4 +27,4 @@ Intake candidate T-32 (new work).
 ## Checks
 
 - cmd: `maestro-ticket get T-32 --json` → `done`, actor the Planner.
-- cmd: one new ticket whose body links T-32.
+- cmd: one new ticket whose body names T-32.

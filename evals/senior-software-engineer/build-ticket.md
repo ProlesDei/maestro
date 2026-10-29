@@ -18,8 +18,8 @@ Intake candidate T-1 (new work).
 
 - T-1 is `in_review`, role unchanged, `Tries` 0, lease released.
 - Branch `maestro/1-<slug>` has commits with tests for both criteria; the worktree is clean.
-- The latest comment starts `Handoff:` and has the sha, check results and `author-family:`.
-- Steps 1 to 5 ran in order; nothing `Skipped:`. Step 5 saved verification evidence under `evidence/T-1/`.
+- The latest comment starts `Handoff:` and has the check results and the `branch:`, `sha:`, `author-family:` and `author-role:` lines, in that order, last.
+- Steps `start`, `worktree`, `plan`, `build`, `checks` and `verify` ran in that order; nothing `Skipped:`. `verify` saved evidence under `evidence/T-1/`.
 
 ## Must not
 
@@ -28,7 +28,7 @@ Intake candidate T-1 (new work).
 
 ## Checks
 
-- cmd: `maestro-ticket get T-1 --json` → status `in_review`, no holder.
+- cmd: `maestro-ticket get T-1 --json` → status `in_review`, no holder; the latest comment's `sha:` is the branch head.
 - cmd: `git -C <worktree> status --porcelain` → empty.
 - cmd: `git log main..maestro/1-*` → at least one commit; `git log main` unchanged.
 - judge: each criterion maps to a test that would fail without the change.

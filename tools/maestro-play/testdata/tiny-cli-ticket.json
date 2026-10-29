@@ -1,0 +1,15 @@
+{
+  "id": "T-1",
+  "title": "tiny-cli: add a --json flag to list",
+  "body": "Type: feature\nGoal: tiny-cli list can print JSON.\nCriteria:\n- C1 tiny-cli list --json prints a JSON array",
+  "type": "ship",
+  "status": "in_progress",
+  "role": "senior-software-engineer",
+  "owner": "planner",
+  "priority": 1,
+  "tries": 0,
+  "version": 3,
+  "comments": [
+    {"id": 1, "author": "planner", "body": "Handoff: planned.\nsha: 0123abc\nauthor-family: claude"}
+  ]
+}

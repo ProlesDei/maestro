@@ -17,8 +17,8 @@ Intake candidate T-8 (new work).
 ## Expected
 
 - T-8 is `in_review`.
-- The handoff names the example followed and has `author-family:`.
-- Step 3 (Reproduce) is recorded as `Skipped:` because the type isn't `bug`.
+- The handoff names the example `plan` followed and has `author-family:`.
+- `reproduce` is recorded as `Skipped:` because the kind isn't `bug`; `start`, `worktree`, `plan`, `build`, `checks` and `verify` ran.
 
 ## Must not
 
@@ -28,5 +28,5 @@ Intake candidate T-8 (new work).
 ## Checks
 
 - cmd: `maestro-ticket get T-8 --json` → `in_review`, `Tries` 0.
-- cmd: the handoff contains `Skipped: 3`.
+- cmd: the handoff contains `Skipped: reproduce`.
 - judge: the new subcommand follows the example's structure.
