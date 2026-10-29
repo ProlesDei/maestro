@@ -13,12 +13,14 @@ status: draft
 
 ## Input
 
-The improvement loop is due.
+The improvement loop is due: `maestro-play run operations-manager/improvement-loop`. At `classify` the bot answers `prompt`.
 
 ## Expected
 
-- Exactly one proposal: an investigation ticket owned by `chief-of-staff`, `blocked` from `in_review`, with a `Report:` citing the four tickets and the eval results with and without the change.
-- Step 2 recorded as `Skipped:` (nothing to measure). The cursor moves past the seeded lines.
+- Steps run: `logs`, `wake`, `pattern`, `classify`, `tasks_ok`, `evals_with`, `evals_base`, `no_regressions`, `propose`, then `p_create` to `p_escalate` for one proposal.
+- `measure` recorded as `Skipped:` (nothing to measure); `worktree`, `adopt` and `pr` as `Skipped:` (no tuning).
+- Exactly one proposal: a scout ticket owned by `chief-of-staff`, `blocked` from `in_review`, with a `Report:` citing the four tickets and the eval results with and without the change, and latest comment `Escalation (chief-of-staff): workflow suggestion`.
+- The `improve` cursor moves past the seeded lines.
 
 ## Must not
 
@@ -27,6 +29,6 @@ The improvement loop is due.
 
 ## Checks
 
-- cmd: `maestro-ticket list --role chief-of-staff --json` → one new ticket, latest comment starts `Escalation (chief-of-staff):`.
+- cmd: `maestro-ticket list --role chief-of-staff --json` → one new ticket; `get` on it → latest comment starts `Escalation (chief-of-staff):`, `blocked_from` `in_review`.
 - cmd: no file under `skills/`, `playbooks/` or `bot-profiles/` changed.
 - judge: the proposed change targets the repeated pattern.

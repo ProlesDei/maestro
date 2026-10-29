@@ -18,8 +18,8 @@ Intake candidate T-7 (request).
 ## Expected
 
 - T-7 is `in_review`.
-- The start transition's note and the handoff both say `tries-at-takeover: 2`.
-- The handoff says what made it hard, and whether the old branch was continued or replaced.
+- The `takeover` step posted the comment `tries-at-takeover: 2` right after `start`, and the handoff has the same line.
+- The handoff says what made it hard, and whether the junior's work was continued or reverted on the same branch.
 
 ## Must not
 

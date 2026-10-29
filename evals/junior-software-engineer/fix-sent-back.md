@@ -19,7 +19,7 @@ Intake candidate T-9 (sent back).
 
 - T-9 is `todo`, role `senior-software-engineer`, `Tries` 2.
 - The latest comment starts `Escalation:` and lists what each try changed and the failing output.
-- Steps 2 to 6 are recorded as `Skipped:` (Tries reached 2).
+- The run stops at the `tries` gate (Tries reached 2): `feedback`, `worktree`, `build`, `checks` and `verify` never run, and the only harness prompt is the escalation's.
 
 ## Must not
 

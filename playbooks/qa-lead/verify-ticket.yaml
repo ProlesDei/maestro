@@ -1,0 +1,42 @@
+name: verify-ticket
+role: qa-lead
+description: Prove a reviewed ticket does what it says by running the checks and the real app on the reviewed commit, and send failures back with a clear report.
+intake: {category: new-work, status: in_qa, role: any, type: ship, kinds: [feature, bug, chore, docs]}   # the role stays the author's
+claim: true
+session: ticket
+steps:
+  - id: sha                       # the reviewer's approval names the commit it reviewed
+    gate: '{{ne (line "sha" (latest .ticket "Handoff: approved")) ""}}'
+  - id: worktree                  # a detached checkout at <id>-qa
+    run: 'worktree add {{.ticket.id}} --detach {{quote (line "sha" (latest .ticket "Handoff: approved"))}}'
+  - id: checks                    # a failure is a QA fail, not a stop
+    run: check all --in {{.ticket.id}}-qa
+    on: {fail: next}
+  - id: verify                    # read-only code, never a fix; the app can't run, or a criterion can't be tested: blocked
+    when: '{{eq .steps.checks.outcome "ok"}}'
+    prompt: verify
+    mode: qa
+    model: mid
+    out: [criteria, failures, sha]
+    on: {failed: next}
+  - id: pass                      # verify tested the reviewed commit, not a reused checkout
+    gate: '{{and (eq .steps.checks.outcome "ok") (eq .steps.verify.outcome "done") (eq .steps.verify.reply.sha (line "sha" (latest .ticket "Handoff: approved")))}}'
+    on: {fail: done}
+done:
+  to: '{{if eq .steps.pass.outcome "ok"}}ready_to_release{{else}}in_progress{{end}}'   # a send-back adds one to Tries; the role stays the author's
+  note: |
+    {{- if eq .steps.pass.outcome "ok"}}Handoff: QA passed at {{line "sha" (latest .ticket "Handoff: approved")}}.
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}sha: {{line "sha" (latest .ticket "Handoff: approved")}}
+    {{- else}}Handoff: QA failed at {{line "sha" (latest .ticket "Handoff: approved")}}.
+    {{- if ne .steps.checks.outcome "ok"}}
+    Checks failed: {{json .steps.checks.summary}} (output {{.steps.checks.output_path}})
+    {{- end}}
+    Failures:{{range .steps.verify.reply.failures}}
+    - {{json .}}{{end}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}
+    {{- end}}

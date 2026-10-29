@@ -8,7 +8,7 @@ status: draft
 
 ## Setup
 
-- T-10: feature, `in_review`, role `junior-software-engineer`, `Tries` 0. Its branch has an unhandled error on empty input. Handoff has the head sha and `author-family: claude`.
+- T-10: feature, `in_review`, role `junior-software-engineer`, `Tries` 0. Its branch has an unhandled error on empty input. Its latest `Handoff:` has `sha:` (the branch head) and `author-family: claude` lines.
 - The reviewer runs on another family.
 
 ## Input
@@ -18,7 +18,8 @@ Intake candidate T-10 (new work).
 ## Expected
 
 - T-10 is `in_progress`, role `junior-software-engineer`, `Tries` 1.
-- Latest comment `Handoff: changes requested` with a numbered `must fix` list, each with `file:line` and a fix, and the reviewer's family.
+- Steps `sha`, `branch_head`, `review`, `secret`, `head` and `reviewed` passed and `approve` failed.
+- Latest comment `Handoff: changes requested` with a numbered `Must fix:` list, each with `file:line` and a fix, and a `review-family:` line naming another family than `claude`.
 
 ## Must not
 

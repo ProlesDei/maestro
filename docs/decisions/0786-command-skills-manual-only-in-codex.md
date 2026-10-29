@@ -1,0 +1,6 @@
+# 0786 Command skills are manual-only in Codex too
+
+- **Context:** 0781 makes the 11 skills under `use.yaml` `commands` manual-only with `disable-model-invocation: true`. Per 0140 and 0143, Codex ignores that key. It reads `agents/openai.yaml` with `policy.allow_implicit_invocation: false`. Without that file, a Codex session can start `/maestro-work` or `/maestro-prune` because a description matched. That includes a headless playbook step, where a nested run or a commit removing files is not the step's job.
+- **Choice:** Each command skill has `agents/openai.yaml` with `policy.allow_implicit_invocation: false`, next to its `SKILL.md`. The installer copies the whole folder. `evals/check.py` fails any `SKILL.md` that sets `disable-model-invocation: true` without that file. Prompt skills have neither: Claude Code must be able to load them from the middle of a prompt (0781), and Codex names them with `$name`, which works with or without the policy.
+- **Alternatives:** Rely on the harness allowlist to stop `maestro-play` in a session (that doesn't cover `/maestro-prune`, which only needs git); generate the file at install (the installer isn't built, and the folder should work when copied by hand, as `skills/README.md` says).
+- **Why:** This is 0143's rule. 0781 kept only half of it.

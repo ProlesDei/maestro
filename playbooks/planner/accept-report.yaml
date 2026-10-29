@@ -1,0 +1,61 @@
+name: accept-report
+role: planner
+description: As an investigation ticket's owner, read its report, turn the findings into tickets, and set it done, or send it back when the report doesn't answer the question.
+intake: {category: new-work, status: in_review, type: scout, kinds: [investigation], owner: planner, latest: "Report:", role: any}   # the scout keeps its investigator's role
+claim: true
+session: ticket
+steps:
+  - id: read
+    prompt: feedback
+    mode: report
+    model: mid
+    out: [question, answer, findings, spot_checked, missing, recommended_work, author_role]
+  - id: decide
+    ask:
+      question: |
+        Does the Report: on {{.ticket.id}} answer its question with evidence that holds up?
+        Question: {{.steps.read.reply.question}}
+        Answer: {{.steps.read.reply.answer}}
+        Spot-checked: {{json .steps.read.reply.spot_checked}}
+        Missing: {{json .steps.read.reply.missing}}
+        Accept, or send back with what's missing in --text. Escalate findings that need a decision above you.
+      choices: [accept, send_back, escalate]
+    on: {accept: work, send_back: send_back, escalate: block}
+    block: {to: chief-of-staff}
+  - id: work
+    prompt: tickets
+    mode: report
+    model: mid
+    when: '{{if .steps.read.reply.recommended_work}}true{{else}}false{{end}}'
+    reason: the report recommends no new work
+    out: [tickets]
+  - id: none_blocked
+    gate: '{{$ok := true}}{{range .steps.work.reply.tickets}}{{if not (or (eq (print .status) "todo") (eq (print .status) "backlog"))}}{{$ok = false}}{{end}}{{end}}{{$ok}}'
+    on: {fail: work}                 # a ticket waits through --deps, never as blocked
+  - id: create
+    each: .steps.work.reply.tickets
+    ticket: >-
+      create --type {{quote .item.type}} --role {{quote .item.role}} --priority {{quote (print .item.priority)}}
+      --owner planner --status {{quote .item.status}} --title {{quote .item.title}}
+      {{- with index .item "areas"}} --areas {{quote (join . ",")}}{{end}}
+      {{- with index .item "deps"}} --deps {{quote (join . ",")}}{{end}}
+    body: |
+      Type: {{.item.kind}}
+      Goal: {{.item.goal}}
+      Acceptance criteria:{{range .item.criteria}}
+      - {{.}}{{end}}
+      From the Report: on {{$.ticket.id}}.
+    on: {ok: done}
+  - id: send_back
+    ticket: >-
+      transition {{.ticket.id}} --to in_progress --from in_review
+      --role {{quote .steps.read.reply.author_role}} --note {{quote (printf "Handoff: report sent back: %s" .steps.decide.text)}} --release
+    on: {ok: end}                    # a scout send-back doesn't add a try
+done:
+  to: done
+  actor: planner
+  note: |
+    Handoff: report accepted. {{.steps.decide.text}}
+    {{- with .steps.create.results}}
+    Tickets:{{range .}} {{.json.id}}{{end}}{{end}}
+    {{.run.skipped}}

@@ -1,0 +1,6 @@
+# 0718 The engine reads a trailer's last line and never writes a reply's newline into its notes
+
+- **Context:** 0746 (slice 4) found that a reply value rendered above a note's trailers can carry its own `author-family:` or `sha:` line, and readers that take the first match trust it. In slice 1, `authorFamily`, `line` and `latestLine` took the first match, while `.ticket.trailers` took the last, and the built-in `Escalation:` note wrote `happened`, the stop reason and other reply values with their newlines. 0756 (slice 5) asked for the same change.
+- **Choice:** `authorFamily`, `line` and `latestLine` take the last line of a key that has a value, so they agree with `.ticket.trailers`. Every reply and runner value in the built-in escalation note is put on one line. Lint renders each `when`, `gate` and `until` on empty data and fails one that renders anything but `true` or `false`, since `and` and `or` return an operand (0755).
+- **Alternatives:** Indent continuation lines (the readers trim each line first, so an indented `sha:` still matches); check comment authors (`--actor` is self-declared, so it proves nothing).
+- **Why:** The engine writes the last lines of its notes from its own data, and the playbooks' notes end with their trailers (0746), so a model can only add lines above the ones that are read.

@@ -1,0 +1,112 @@
+name: improvement-loop
+role: operations-manager
+description: On a schedule, turn repeated patterns in the logs into one tested change at a time, adopt it within your approval level or propose it, and keep or revert it against a baseline.
+intake: {category: scheduled}
+claim: false
+session: run
+cursor: {name: improve, save: '{{.steps.logs.json.next_cursor}}'}
+steps:
+  - id: logs
+    run: logs --since {{.cursor}}
+    on: {fail: end}                  # a log that can't be read: the log line says which; never guess the numbers
+  - id: wake
+    gate: '{{if or .steps.logs.json.new_lines .steps.logs.json.due}}true{{else}}false{{end}}'
+    on: {fail: end}                  # nothing new and nothing due for measuring: no session
+  - id: measure
+    prompt: patterns
+    mode: measure
+    model: mid
+    with: {logs: '{{.steps.logs.output_path}}'}
+    when: '{{if .steps.logs.json.due}}true{{else}}false{{end}}'
+    reason: no adopted change has reached its measuring window
+    out: [verdicts, tuning_reverts, other_reverts]
+  - id: pattern
+    prompt: patterns
+    mode: find
+    model: mid
+    with: {logs: '{{.steps.logs.output_path}}'}
+    out: [pattern, count, evidence, change, expected_effect, measure, tasks]
+  - id: classify
+    ask:
+      question: |
+        Pattern: {{.steps.pattern.reply.pattern}} ({{.steps.pattern.reply.count}} times; evidence {{json .steps.pattern.reply.evidence}}).
+        Proposed change: {{.steps.pattern.reply.change}}
+        Class it by "Changing Maestro" in the team rules: tuning (budgets, tiers, limits: you adopt it),
+        prompt, playbook, or persona (all proposals). drop: a change to your own guardrails, or not worth it.
+      choices: [tuning, prompt, playbook, persona, drop]
+    when: '{{ne .steps.pattern.reply.pattern ""}}'
+    reason: no pattern at the threshold
+  - id: tasks_ok                   # each task is a <role>/<job> golden task, never a flag that would change the baseline run
+    gate: '{{$ok := true}}{{range .steps.pattern.reply.tasks}}{{if or (hasPrefix . "-") (not (contains . "/"))}}{{$ok = false}}{{end}}{{end}}{{$ok}}'
+  - id: evals_with
+    run: evals {{range $i, $t := .steps.pattern.reply.tasks}}{{if $i}} {{end}}{{quote $t}}{{end}} --with {{quote .steps.pattern.reply.change}}
+    when: '{{if and (not .steps.classify.skipped) (ne .steps.classify.choice "drop") .steps.pattern.reply.tasks}}true{{else}}false{{end}}'
+    reason: no pattern, the change was dropped, or no golden task covers it
+  - id: evals_base
+    run: evals {{range $i, $t := .steps.pattern.reply.tasks}}{{if $i}} {{end}}{{quote $t}}{{end}}
+    when: '{{not .steps.evals_with.skipped}}'
+    reason: no eval run with the change
+  - id: no_regressions
+    gate: '{{$ok := true}}{{range $t, $r := .steps.evals_base.json.results}}{{if and (eq $r "pass") (ne (index $.steps.evals_with.json.results $t) "pass")}}{{$ok = false}}{{end}}{{end}}{{$ok}}'
+    when: '{{not .steps.evals_with.skipped}}'
+    reason: no eval run with the change
+    on: {fail: done}                 # a golden task that passed without it fails with it: adopt and propose nothing
+  - id: worktree
+    run: worktree add tuning-{{.run.date}} --branch maestro/tuning-{{.run.date}} --from {{.project.main_branch}}
+    when: '{{if or (eq .steps.classify.choice "tuning") (index .steps.measure.reply "tuning_reverts")}}true{{else}}false{{end}}'
+    reason: no tuning to adopt or revert
+  - id: adopt
+    prompt: propose
+    mode: tuning
+    model: mid
+    with: {class: '{{.steps.classify.choice}}'}   # empty when only measured reverts brought it here
+    when: '{{not .steps.worktree.skipped}}'
+    reason: no tuning to adopt or revert
+    out: [commit, baseline, window]
+  - id: pr
+    run: open pr --branch maestro/tuning-{{.run.date}}
+    when: '{{not .steps.adopt.skipped}}'
+    reason: no tuning committed
+  - id: propose
+    prompt: propose
+    mode: proposal
+    model: mid
+    with: {class: '{{.steps.classify.choice}}'}
+    when: '{{if or (and (not .steps.classify.skipped) (ne .steps.classify.choice "tuning") (ne .steps.classify.choice "drop")) (index .steps.measure.reply "other_reverts")}}true{{else}}false{{end}}'
+    reason: nothing to propose
+    out: [proposals]
+  # Each proposal is an investigation ticket owned by chief-of-staff: Report:, in_review, then blocked with the prefix last (0436).
+  - id: p_create
+    each: .steps.propose.reply.proposals
+    ticket: create --type scout --owner chief-of-staff --role chief-of-staff --title {{quote .item.title}}
+    body: |
+      Type: investigation
+      Workflow suggestion ({{.item.class}}) from the improvement loop.
+  - id: p_report
+    each: .steps.propose.reply.proposals
+    ticket: comment {{(index $.steps.p_create.results .index).json.id}}
+    body: |
+      Report: {{.item.title}}
+      Pattern: {{.item.pattern}}
+      Evidence: {{json .item.evidence}}
+      Evals: {{.steps.evals_with.output_path}} (with), {{.steps.evals_base.output_path}} (without)
+      Change: {{.item.change}}
+      Expected effect: {{.item.expected_effect}}
+      Measure: {{.item.measure}}
+  - id: p_start
+    each: .steps.propose.reply.proposals
+    ticket: transition {{(index $.steps.p_create.results .index).json.id}} --to in_progress --from todo
+  - id: p_review
+    each: .steps.propose.reply.proposals
+    ticket: transition {{(index $.steps.p_create.results .index).json.id}} --to in_review --from in_progress
+  - id: p_block
+    each: .steps.propose.reply.proposals
+    ticket: transition {{(index $.steps.p_create.results .index).json.id}} --to blocked --from in_review
+  - id: p_escalate
+    each: .steps.propose.reply.proposals
+    ticket: comment {{(index $.steps.p_create.results .index).json.id}}
+    body: 'Escalation (chief-of-staff): workflow suggestion: {{.item.title}}. Approve or decline; the Report: has the evidence.'
+done:
+  log: >-
+    improvement: cursor {{.steps.logs.json.next_cursor}}; pattern {{or (index .steps.pattern.reply "pattern") "none"}};
+    class {{or .steps.classify.choice "none"}}{{range .steps.p_create.results}}; proposal {{.json.id}}{{end}}; {{.run.skipped}}

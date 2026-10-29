@@ -1,0 +1,9 @@
+name: digest
+role: chief-of-staff
+description: Answer the user's request for a digest; it takes no ticket.
+intake: {category: request}
+input: optional
+claim: false
+steps:
+  - id: summary
+    run: summary

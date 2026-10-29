@@ -1,0 +1,60 @@
+name: groom-board
+role: planner
+description: On a schedule, keep one workstream's board tidy by promoting ready backlog tickets, finding stale work and duplicates, checking dependencies, and fixing order.
+intake: {category: scheduled}
+claim: false
+session: run
+cursor: {name: groom, save: '{{.steps.events.json.next_seq}}'}   # the store's seq, never the reply's
+steps:
+  - id: events
+    ticket: events --since {{.cursor}}
+  - id: doctor
+    ticket: doctor
+    on: {fail: store_broken}
+  - id: wake
+    # An expired lease nobody reaped is no event, so doctor's leases check counts them.
+    gate: >-
+      {{- $expired := false}}{{range .steps.doctor.json.checks}}
+      {{- if and (eq (print (index . "name")) "leases") (not (contains (print (index . "detail")) ", 0 expired"))}}{{$expired = true}}{{end}}
+      {{- end}}{{if or .steps.events.json.events $expired}}true{{else}}false{{end}}
+    on: {fail: end}                  # no events and no expired lease: no session
+  - id: problems
+    prompt: groom
+    model: mid
+    with: {cursor: '{{.cursor}}'}
+    out: [fixes, next_seq]
+  - id: never_done
+    gate: >-
+      {{- $ok := true}}{{range .steps.problems.reply.fixes}}{{$c := print (index . "command")}}
+      {{- if eq (print (index . "to")) "done"}}{{$ok = false}}{{end}}
+      {{- if not (or (eq $c "transition") (eq $c "update") (eq $c "comment"))}}{{$ok = false}}{{end}}
+      {{- end}}{{$ok}}
+    on: {fail: problems}             # grooming never sets done, and only moves, updates or comments
+  - id: apply
+    each: .steps.problems.reply.fixes
+    # Every value is quoted and every flag is named here, so a reply can't add one (0755).
+    # Notes and comments start "Groom: ", so a reply never writes another role's prefix.
+    ticket: >-
+      {{.item.command}} {{quote .item.ticket}}
+      {{- if eq .item.command "transition"}} --to {{quote .item.to}} --expect-version {{quote (print .item.version)}}
+      {{- with index .item "from"}} --from {{quote .}}{{end}} --note {{quote (print "Groom: " (index .item "note"))}}{{end}}
+      {{- if eq .item.command "update"}}
+      {{- with index .item "add_deps"}} --add-deps {{quote (join . ",")}}{{end}}
+      {{- with index .item "remove_deps"}} --remove-deps {{quote (join . ",")}}{{end}}
+      {{- with index .item "areas"}} --areas {{quote (join . ",")}}{{end}}{{end}}
+    body: '{{if eq .item.command "comment"}}Groom: {{index .item "note"}}{{end}}'
+    on: {ok: done, fail: done}       # a live lease held by someone else refuses its fix; leave that ticket alone
+  - id: store_broken
+    ticket: create --type ship --role planner --owner planner --status blocked --title "Ticket store failed its health check"
+    body: |
+      Type: chore
+      ticket doctor output: {{.steps.doctor.output}}
+  - id: store_escalation
+    ticket: comment {{.steps.store_broken.json.id}}
+    body: |
+      Escalation (chief-of-staff): ticket store failed its health check
+      Doctor output: {{.steps.doctor.output}}
+      Changed nothing else. A failed environment check (filesystem, locks, a bare repo or a submodule) isn't store damage: the user fixes the machine, not the store.
+    on: {ok: end}
+done:
+  log: 'groom: {{len .steps.problems.reply.fixes}} fixes tried; {{.run.skipped}}'

@@ -26,7 +26,7 @@ Take ship tickets in Ready to release. What you may do depends on the trust leve
 - **Level 1:** stop there. The ticket stays in Ready to release until the user merges, then set it Done.
 - **Levels 2 and 3:** if the risk class is allowed, `merge` through the merge queue, then set the ticket Done.
 - **Level 4:** `deploy` as well. Any deploy that needs approval (production, by default) waits for the Chief of Staff. Never skip approval.
-- A release that fails: roll it back if you can, escalate (`maestro-escalate`), and tell the Chief of Staff.
+- A release that fails: roll it back if you can, escalate, and tell the Chief of Staff.
 
 ### 3. Curate memory
 - Review the memory inbox regularly. Keep only proposals that are durable and backed by evidence, merge duplicates, and file each as project or role memory.
@@ -34,7 +34,7 @@ Take ship tickets in Ready to release. What you may do depends on the trust leve
 - Memory changes go through a harness session on a `maestro/` branch, as a pull request.
 
 ### 4. Keep the logs useful
-- Check that sessions log in the `maestro-log-entry` format, and flag any that don't.
+- Check that every run left its log line with a retro, and flag any that didn't.
 - Keep the log easy to summarise, so reviewing it costs less than the work it describes.
 
 ### 5. Improve the workflow

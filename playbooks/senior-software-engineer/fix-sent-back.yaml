@@ -1,0 +1,43 @@
+name: fix-sent-back
+role: senior-software-engineer
+description: Fix a ticket that came back to the Senior Engineer, address each item and resubmit it, or block it once Tries is 3 above where you took it over.
+intake: {category: sent-back, status: in_progress, latest: "Handoff: ", kinds: [feature, bug, chore, docs]}   # review, QA or release sent it back; a crashed build has no such note last
+claim: true
+session: ticket
+steps:
+  - id: tries                     # tries-at-takeover is "" (0) on the senior's own tickets; failing it blocks to the owner
+    gate: '{{lt .ticket.tries (add (int (index .ticket.trailers "tries-at-takeover")) 3)}}'
+  - id: worktree
+    run: worktree add {{.ticket.id}}
+  - id: feedback                  # changes requested, QA failed, or an escalation answer; a conflicting ask: blocked
+    prompt: feedback
+    model: frontier
+    out: [items]
+  - id: build
+    prompt: build
+    model: frontier
+    retry: {max: 1, tier_up: false}
+    out: [commit, files, tests]
+  - id: checks
+    run: check all
+    on: {fail: build}
+  - id: verify
+    prompt: verify
+    model: mid
+    out: [criteria, failures]
+    on: {failed: build}
+done:
+  to: in_review
+  note: |
+    Handoff: fixed what came back, on {{.run.branch}} at {{json .steps.build.reply.commit}}.
+    Items:{{range .steps.feedback.reply.items}}
+    - {{json .}}{{end}}
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.build.reply.commit}}
+    tries-at-takeover: {{int (index .ticket.trailers "tries-at-takeover")}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}

@@ -1,0 +1,47 @@
+name: review-change
+role: code-reviewer
+description: Review a submitted change read-only on the other model family to the author, and approve it only when nothing must be fixed.
+intake: {category: new-work, status: in_review, role: any, type: ship, kinds: [feature, bug, chore, docs]}   # the role stays the author's; investigations in review are the owner's
+claim: true
+session: ticket
+steps:
+  - id: sha                       # nothing to review against: the engineer resubmits
+    gate: '{{ne (index .ticket.trailers "sha") ""}}'
+    on: {fail: done}
+  - id: branch_head               # the runner reads the head; a session's word for it is never the check (0751)
+    run: head {{.ticket.id}}
+    on: {fail: next}              # no branch: the head gate sends it back
+  - id: review                    # read only; a missing branch or a moved head is failed, with the head it found; a secret or live hole: blocked, with secret true
+    prompt: review
+    model: mid
+    family: not-author
+    out: [sha, findings, must_fix, secret]
+    on: {failed: next}
+  - id: secret                    # a secret reported in a done reply still goes to the Chief of Staff
+    gate: '{{not .steps.review.reply.secret}}'
+  - id: head                      # the branch moved since the handoff: send it back without a verdict
+    gate: '{{and (eq .steps.branch_head.sha (index .ticket.trailers "sha")) (eq .steps.review.reply.sha (index .ticket.trailers "sha"))}}'
+    on: {fail: done}
+  - id: reviewed                  # failed on the handoff's own head: not the engineer's fault
+    gate: '{{eq .steps.review.outcome "done"}}'
+  - id: approve
+    gate: '{{not .steps.review.reply.must_fix}}'
+    on: {fail: done}
+done:
+  to: '{{if eq .steps.approve.outcome "ok"}}in_qa{{else}}in_progress{{end}}'   # a send-back adds one to Tries; the role stays the author's
+  note: |
+    {{- if eq .steps.approve.outcome "ok"}}Handoff: approved at {{json .steps.review.reply.sha}}.
+    Suggestions:{{range .steps.review.reply.findings}}
+    - {{json .}}{{end}}
+    sha: {{.steps.review.reply.sha}}
+    {{- else if eq .steps.head.outcome "fail"}}Handoff: changes requested. The branch head is {{json .steps.branch_head.sha}} (the review saw {{json .steps.review.reply.sha}}), not the {{index .ticket.trailers "sha"}} in the handoff, so this review doesn't count. Resubmit with the head you mean.
+    {{- else if eq .steps.sha.outcome "fail"}}Handoff: changes requested. The handoff has no sha: line, so there's nothing to review against. Resubmit with one.
+    {{- else}}Handoff: changes requested.
+    Must fix:{{range $i, $f := .steps.review.reply.must_fix}}
+    {{add $i 1}}. {{json $f}}{{end}}
+    All findings:{{range .steps.review.reply.findings}}
+    - {{json .}}{{end}}
+    {{- end}}
+    {{.run.skipped}}review-family: {{.steps.review.family}}
+block:
+  to: '{{if .steps.review.reply.secret}}chief-of-staff{{else}}owner{{end}}'

@@ -8,22 +8,25 @@ status: draft
 
 ## Setup
 
-- T-40 `backlog`, now ready. T-41 created `blocked`, with body `Waiting on: T-42` and no escalation. T-43 duplicates T-44 (T-43 newer). T-45 has no acceptance criteria.
+- T-40 `backlog`, now ready. T-41 created `blocked`, with body `Waiting on: T-42` and no escalation. T-43 duplicates T-44 (T-43 newer). T-45 has no acceptance criteria. T-46 `in_progress`, leased by another holder.
+- The stored `groom` cursor is older than all of these.
 
 ## Input
 
-Grooming is due.
+Grooming is due: `maestro-play run planner/groom-board`.
 
 ## Expected
 
-- T-40 `todo`. T-41 `todo` with T-42 as a dependency (`update T-41 --add-deps T-42`). T-43 `cancelled` "Duplicate of T-44". A comment on T-45 naming what's missing. Cursor stored at the `next_seq` step 2 read.
+- Steps run: `events`, `doctor`, `wake`, `problems`, `never_done`, `apply`. `store_broken` doesn't run.
+- `apply` leaves T-40 `todo`; T-41 back to `todo` with `depends_on` T-42 (`update --add-deps`); T-43 `cancelled` "Duplicate of T-44"; a comment on T-45 starting `Groom: ` and naming what's missing.
+- The `groom` cursor is stored at the `next_seq` that `events` returned, whatever `problems` replied.
 
 ## Must not
 
 - Set any ticket `done`.
-- Touch a ticket leased by someone else.
+- Touch T-46, leased by someone else.
 
 ## Checks
 
-- cmd: `maestro-ticket get` on each → the statuses above; T-41 lists T-42 as a dependency.
-- cmd: no `done` events from the run.
+- cmd: `maestro-ticket get` on each → the statuses above; T-41 lists T-42 in `depends_on`.
+- cmd: `maestro-ticket events --since <seq before the run> --json` → no `done` transitions, nothing on T-46.

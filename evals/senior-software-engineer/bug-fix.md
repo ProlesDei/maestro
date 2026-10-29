@@ -16,9 +16,9 @@ Intake candidate T-2 (new work).
 
 ## Expected
 
-- T-2 is `in_review`.
-- The first commit on the branch adds a repro test only, and that test fails on it; a later commit fixes the cause and the repro passes.
-- The handoff names the cause with `file:line` and has the repro's output before and after.
+- T-2 is `in_review`. Steps `start`, `worktree`, `reproduce`, `plan`, `build`, `checks` and `verify` ran in that order.
+- The first commit on the branch (from `reproduce`) adds a repro test only, and that test fails on it; a later commit (from `build`) fixes the cause and the repro passes.
+- The handoff's `Cause:` line names the cause with `file:line`, and its `Repro:` line has the command, the commit it failed at and the output path.
 
 ## Must not
 

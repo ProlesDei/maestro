@@ -1,0 +1,268 @@
+// Package cli is maestro-play's command line: flag parsing, config and
+// output. The engine does the work.
+package cli
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/ProlesDei/maestro/tools/maestro-play/engine"
+)
+
+const usage = `maestro-play runs Maestro playbooks.
+
+Usage:
+  maestro-play run <role>/<job> --ticket <id> --bot <bot-id> [--input <text>]
+  maestro-play run <role>[/<job>] --next --bot <bot-id>
+  maestro-play run <role>/<job> --bot <bot-id> [--input <text>]   (claim: false, no ticket)
+  maestro-play resume <run-id> [--choice <c> [--text <t>]]
+  maestro-play render <role>/<job> --step <id> [--ticket <id> | --ticket-file <f>] [--env <f>] [--input <t>]
+  maestro-play lint [<playbooks-dir>]
+
+Flags for every command:
+  --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else ./playbooks)
+  --skills DIR      skills folder with use.yaml ($MAESTRO_SKILLS, else <playbooks>/../skills)
+  --common DIR      Maestro's state folder ($MAESTRO_COMMON, else $(git rev-parse --git-common-dir)/maestro)
+  --ticket-bin P    maestro-ticket ($MAESTRO_TICKET_BIN, else maestro-ticket)
+  --runner-bin P    the runner ($MAESTRO_RUNNER_BIN, else maestro-runner)
+
+run and resume print one JSON object: id, state, playbook, ticket, step,
+reason, and for a waiting run question, choices and evidence.
+
+Exit codes: 0 done (lint: clean), 1 failed (lint: problems), 2 usage,
+3 blocked, 4 lease lost, 5 idle (--next found nothing), 6 waiting on an
+ask step, 7 stopped (the stop file exists).
+`
+
+// Env is what the CLI reads from outside.
+type Env struct {
+	Args   []string
+	Getenv func(string) string
+	Stdout io.Writer
+	Stderr io.Writer
+	Dir    string
+	// Engine adjusts the engine config before use (tests).
+	Engine func(*engine.Config)
+}
+
+// Main runs one command and returns the exit code.
+func Main(env Env) int {
+	if env.Getenv == nil {
+		env.Getenv = os.Getenv
+	}
+	if len(env.Args) == 0 || env.Args[0] == "-h" || env.Args[0] == "--help" || env.Args[0] == "help" {
+		fmt.Fprint(env.Stdout, usage)
+		if len(env.Args) == 0 {
+			return 2
+		}
+		return 0
+	}
+	c := &cmd{env: env, fs: flag.NewFlagSet(env.Args[0], flag.ContinueOnError)}
+	c.fs.SetOutput(env.Stderr)
+	c.fs.StringVar(&c.playbooks, "playbooks", env.Getenv("MAESTRO_PLAYBOOKS"), "playbooks folder")
+	c.fs.StringVar(&c.skills, "skills", env.Getenv("MAESTRO_SKILLS"), "skills folder")
+	c.fs.StringVar(&c.common, "common", env.Getenv("MAESTRO_COMMON"), "Maestro's state folder")
+	c.fs.StringVar(&c.ticketBin, "ticket-bin", env.Getenv("MAESTRO_TICKET_BIN"), "maestro-ticket binary")
+	c.fs.StringVar(&c.runnerBin, "runner-bin", env.Getenv("MAESTRO_RUNNER_BIN"), "runner binary")
+	switch env.Args[0] {
+	case "run":
+		return c.run()
+	case "resume":
+		return c.resume()
+	case "render":
+		return c.render()
+	case "lint":
+		return c.lint()
+	}
+	fmt.Fprintf(env.Stderr, "maestro-play: unknown command %q\n\n%s", env.Args[0], usage)
+	return 2
+}
+
+type cmd struct {
+	env                                             Env
+	fs                                              *flag.FlagSet
+	playbooks, skills, common, ticketBin, runnerBin string
+	args                                            []string
+}
+
+// parse allows flags before and after the positional arguments.
+func (c *cmd) parse() error {
+	rest := c.env.Args[1:]
+	for {
+		if err := c.fs.Parse(rest); err != nil {
+			return err
+		}
+		rest = c.fs.Args()
+		if len(rest) == 0 {
+			return nil
+		}
+		c.args = append(c.args, rest[0])
+		rest = rest[1:]
+	}
+}
+
+func (c *cmd) usageErr(format string, a ...any) int {
+	fmt.Fprintf(c.env.Stderr, "maestro-play %s: %s\n", c.env.Args[0], fmt.Sprintf(format, a...))
+	return 2
+}
+
+func (c *cmd) config() (engine.Config, error) {
+	dir := c.env.Dir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	cfg := engine.Config{
+		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: dir,
+		TicketBin: c.ticketBin, RunnerBin: c.runnerBin,
+	}
+	if cfg.Playbooks == "" {
+		cfg.Playbooks = filepath.Join(dir, "playbooks")
+	}
+	if cfg.Skills == "" {
+		cfg.Skills = filepath.Join(filepath.Dir(filepath.Clean(cfg.Playbooks)), "skills")
+	}
+	if cfg.Common == "" {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output()
+		if err != nil {
+			return cfg, errors.New("not in a git repo: pass --common or set MAESTRO_COMMON")
+		}
+		common := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(dir, common)
+		}
+		cfg.Common = filepath.Join(common, "maestro")
+	}
+	if c.env.Engine != nil {
+		c.env.Engine(&cfg)
+	}
+	return cfg, nil
+}
+
+func (c *cmd) engine() (*engine.Engine, int) {
+	cfg, err := c.config()
+	if err != nil {
+		return nil, c.usageErr("%v", err)
+	}
+	e, err := engine.New(cfg)
+	if err != nil {
+		fmt.Fprintf(c.env.Stderr, "maestro-play: %v\n", err)
+		return nil, 1
+	}
+	return e, 0
+}
+
+func (c *cmd) report(r engine.Result, err error) int {
+	if err != nil {
+		r = engine.Result{Status: engine.StatusFailed, Reason: err.Error()}
+	}
+	b, _ := json.Marshal(r)
+	fmt.Fprintln(c.env.Stdout, string(b))
+	return r.ExitCode()
+}
+
+func (c *cmd) run() int {
+	ticketID := c.fs.String("ticket", "", "ticket id")
+	next := c.fs.Bool("next", false, "take the next ticket the role's intake matches")
+	bot := c.fs.String("bot", "", "bot id (required)")
+	input := c.fs.String("input", "", "text for a playbook with input: (.input.text)")
+	if err := c.parse(); err != nil {
+		return 2
+	}
+	if len(c.args) != 1 {
+		return c.usageErr("want one <role>/<job>")
+	}
+	if *bot == "" {
+		return c.usageErr("--bot is required")
+	}
+	if *next && *ticketID != "" {
+		return c.usageErr("use --ticket or --next, not both")
+	}
+	e, code := c.engine()
+	if e == nil {
+		return code
+	}
+	return c.report(e.Run(engine.RunOpts{Ref: c.args[0], Ticket: *ticketID, Next: *next, Bot: *bot, Input: *input}))
+}
+
+func (c *cmd) resume() int {
+	choice := c.fs.String("choice", "", "the answer to the ask step")
+	text := c.fs.String("text", "", "free text with the answer")
+	if err := c.parse(); err != nil {
+		return 2
+	}
+	if len(c.args) != 1 {
+		return c.usageErr("want one <run-id>")
+	}
+	if *text != "" && *choice == "" {
+		return c.usageErr("--text goes with --choice")
+	}
+	e, code := c.engine()
+	if e == nil {
+		return code
+	}
+	return c.report(e.Resume(c.args[0], *choice, *text))
+}
+
+func (c *cmd) render() int {
+	o := engine.RenderOpts{}
+	c.fs.StringVar(&o.Step, "step", "", "step id, done (the note) or escalate (required)")
+	c.fs.StringVar(&o.Ticket, "ticket", "", "ticket id, read from the store")
+	c.fs.StringVar(&o.TicketFile, "ticket-file", "", "a maestro-ticket get --json document instead of the store")
+	c.fs.StringVar(&o.EnvFile, "env", "", "a preflight reply (JSON) for .env, .project and .limits")
+	c.fs.StringVar(&o.Bot, "bot", "", "bot id for .run (default render)")
+	c.fs.StringVar(&o.Input, "input", "", "text for .input.text")
+	if err := c.parse(); err != nil {
+		return 2
+	}
+	if len(c.args) != 1 || o.Step == "" {
+		return c.usageErr("want <role>/<job> --step <id>")
+	}
+	o.Ref = c.args[0]
+	e, code := c.engine()
+	if e == nil {
+		return code
+	}
+	out, err := e.Render(o)
+	if err != nil {
+		fmt.Fprintf(c.env.Stderr, "maestro-play render: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(c.env.Stdout, out)
+	return 0
+}
+
+func (c *cmd) lint() int {
+	if err := c.parse(); err != nil {
+		return 2
+	}
+	if len(c.args) > 1 {
+		return c.usageErr("want at most one playbooks folder")
+	}
+	if len(c.args) == 1 {
+		c.playbooks = c.args[0]
+	}
+	cfg, err := c.config()
+	if err != nil && cfg.Playbooks == "" {
+		return c.usageErr("%v", err)
+	}
+	res, err := engine.Lint(cfg.Playbooks, cfg.Skills)
+	if err != nil {
+		fmt.Fprintf(c.env.Stderr, "maestro-play lint: %v\n", err)
+		return 1
+	}
+	for _, p := range res.Problems {
+		fmt.Fprintln(c.env.Stdout, p.String())
+	}
+	fmt.Fprintf(c.env.Stdout, "%d playbooks, %d problems\n", res.Playbooks, len(res.Problems))
+	if len(res.Problems) > 0 {
+		return 1
+	}
+	return 0
+}

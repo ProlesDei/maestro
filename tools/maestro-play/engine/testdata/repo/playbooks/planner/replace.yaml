@@ -1,0 +1,11 @@
+name: replace
+role: planner
+description: Replace a plan with a new ticket and cancel the old one, which drops the lease.
+intake: {category: request, status: todo, title: "Replace:"}
+claim: true
+steps:
+  - id: replacement
+    ticket: create --title {{quote .ticket.title}} --role planner --type scout --owner planner
+  - id: cancel
+    ticket: transition {{.ticket.id}} --to cancelled --from todo
+    on: {ok: end}

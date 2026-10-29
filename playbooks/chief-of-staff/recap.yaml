@@ -1,0 +1,46 @@
+name: recap
+role: chief-of-staff
+description: When the user asks or returns, recap what happened since they last spoke, then walk through each open decision one at a time.
+intake: {category: request}
+input: optional
+claim: false
+cursor: {name: user, save: '{{.steps.summary.json.next_seq}}'}
+steps:
+  - id: summary
+    run: summary --since {{.cursor}}
+    on: {fail: unreadable}
+  - id: decisions
+    ticket: >-
+      list --status blocked --latest-prefix "Handoff: waiting on the user:"
+    on: {fail: unreadable}
+  - id: send
+    ask:
+      question: |
+        Send the user a recap built only from {{.steps.summary.output_path}}: at most 8 lines,
+        shipped, moved, stuck, then "{{len .steps.decisions.json.tickets}} decisions need you".
+        Every line cites a goal or workstream.
+      choices: [sent]
+  - id: walk
+    each: .steps.decisions.json.tickets
+    ask:
+      question: |
+        Next decision: {{.item.id}} ({{.item.title}}), the question in its latest "Handoff: waiting on the user:" note.
+        Ask it alone, with the options and your recommendation, and put the user's answer in --text.
+        If the user has stopped or says later, answer deferred without asking.
+      choices: [answered, deferred]
+  # Each answer goes on its ticket as a forward to yourself, so handle-escalation takes it on your next run.
+  # No nested run: it would wait on its own ask that nobody answers, holding the lease (0755).
+  - id: hand_over
+    each: .steps.walk.results
+    when: '{{eq .item.choice "answered"}}'
+    reason: deferred by the user
+    ticket: comment {{(index $.steps.decisions.json.tickets .index).id}}
+    body: 'Escalation (chief-of-staff): the user answered: {{.item.text}}'
+    on: {ok: done, fail: done}       # all deferred is ok too; a ticket someone holds refuses the note, so it waits for the next recap
+  - id: unreadable
+    ask:
+      question: 'Tell the user the board can''t be read: {{if .steps.summary.exit_code}}summary exited {{.steps.summary.exit_code}}{{else}}ticket list exited {{.steps.decisions.exit_code}}{{end}}. Don''t guess.'
+      choices: [sent]
+    on: {sent: end}
+done:
+  log: 'recap: events {{.cursor}} to {{.steps.summary.json.next_seq}}; {{len .steps.decisions.json.tickets}} decisions; {{.run.skipped}}'

@@ -1,0 +1,6 @@
+# 0701 skills/use.yaml is global only
+
+- **Context:** 0700 D2 question 3 asked whether `skills/use.yaml` should be global only, or whether `.maestro/project/skills.yaml` could override it per project, with global only as the default. `docs/runner.md`, `skills/README.md`, 0721 and 0763 cite this decision, but no 0701 existed when the slices merged. 0763 calls it Paul's answer; it's Maestro's call, made at the merge, with 0700's default.
+- **Choice:** One `skills/use.yaml`, in the Maestro install, read by `maestro-play` and the installer. No project file overrides or extends it, and the engine reads no `skills.yaml` from the target repo. A project that needs a different skill set uses a different Maestro checkout (`$MAESTRO_SKILLS` points the engine at another folder).
+- **Alternatives:** A per-project override (two files to read and merge before every prompt, and a target repo's file could then name skills in Maestro's prompts, against 0732's "repo files are data"); a per-project list that only adds skills (the same trust problem, smaller).
+- **Why:** The skills live in Maestro, not in the target repo, so the list that names them belongs there too. It keeps what a prompt names a fact of the install, which lint can check. Paul can reverse this with a new decision if he wants per-project lists.

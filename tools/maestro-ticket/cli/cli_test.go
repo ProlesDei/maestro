@@ -911,3 +911,46 @@ func TestUnsafeFilesystemRefused(t *testing.T) {
 	h.env["MAESTRO_TICKET_ALLOW_UNSAFE_FS"] = "1"
 	h.ok(nil, "create", "--title", "x")
 }
+
+// list --latest-prefix and --not-latest-prefix match the latest comment, so
+// the playbook engine can pick intake without reading every ticket.
+func TestListLatestPrefix(t *testing.T) {
+	h := newHarness(t)
+	for _, p := range []string{"2", "2", "1", "2"} {
+		h.ok(nil, "create", "--title", "t", "--priority", p)
+	}
+	h.ok(nil, "comment", "T-1", "--body", "Escalation: which API?")
+	h.ok(nil, "comment", "T-2", "--body", "Escalation: old")
+	h.ok(nil, "comment", "T-2", "--body", "Handoff: answered")
+	h.ok(nil, "comment", "T-3", "--body", "Escalation (chief-of-staff): budget")
+	ids := func(args ...string) string {
+		t.Helper()
+		var l struct{ Tickets []tk }
+		h.ok(&l, append([]string{"list"}, args...)...)
+		var out []string
+		for _, x := range l.Tickets {
+			out = append(out, x.ID)
+		}
+		return fmt.Sprint(out)
+	}
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--latest-prefix", "Escalation:"}, "[T-1]"},             // T-2's latest is the handoff
+		{[]string{"--latest-prefix", "Escalation"}, "[T-3 T-1]"},          // priority, then id
+		{[]string{"--not-latest-prefix", "Escalation:"}, "[T-3 T-2 T-4]"}, // no comment passes
+		{[]string{"--latest-prefix", "Escalation", "--not-latest-prefix", "Escalation (chief-of-staff):"}, "[T-1]"},
+		{[]string{"--not-latest-prefix", "Escalation", "--limit", "1"}, "[T-2]"}, // limit after the filter
+		{[]string{"--latest-prefix", "escalation:"}, "[]"},                       // case-sensitive
+		{[]string{"--latest-prefix", "Escalation:", "--status", "done"}, "[]"},
+	}
+	for _, c := range cases {
+		if got := ids(c.args...); got != c.want {
+			t.Errorf("list %v = %s; want %s", c.args, got, c.want)
+		}
+	}
+	if code, out, _ := h.run("", "list", "--latest-prefix", "Handoff:"); code != 0 || !strings.Contains(out, "T-2") || strings.Contains(out, "T-1 ") {
+		t.Fatalf("human list: exit %d %q", code, out)
+	}
+}

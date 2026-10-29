@@ -1,0 +1,49 @@
+name: definition-of-done
+role: chief-of-staff
+description: Draft the project's definition of done from the repo's CI, pull request template, contributing guide, branch protection and coverage settings, and have the user confirm it.
+intake: {category: request}
+input: optional                      # what the user wants changed
+claim: false
+session: run
+steps:
+  - id: draft
+    prompt: draft-setup
+    mode: dod
+    model: mid
+    out: [draft, items, floor]
+  - id: floor
+    gate: '{{$f := .steps.draft.reply.floor}}{{and (eq (print $f.verification) "true") (eq (print $f.review) "true") (eq (print $f.merge_queue) "true") (eq (print $f.investigation) "true")}}'
+    on: {fail: draft}                # every ship type has app evidence, review and the merge queue; investigations an evidenced answer
+  - id: confirm
+    ask:
+      question: |
+        Show the user the definition of done in {{.steps.draft.reply.draft}}: per ticket type, each item, how it's checked
+        and its source. Items marked floor are Maestro's minimum.
+        Only the user may lower the bar, and never below the floor. Put each change they ask for in --text.
+      choices: [confirmed, changed, not_confirmed]
+    on: {not_confirmed: unconfirmed}
+  - id: apply
+    prompt: draft-setup
+    mode: dod-answers
+    with: {answers: '{{.steps.confirm.choice}}: {{.steps.confirm.text}}'}
+    model: mid
+    out: [draft, diff, floor]
+  - id: floor_kept
+    gate: '{{$f := .steps.apply.reply.floor}}{{and (eq (print $f.verification) "true") (eq (print $f.review) "true") (eq (print $f.merge_queue) "true") (eq (print $f.investigation) "true")}}'
+    on: {fail: apply}
+  - id: write
+    run: install write .maestro/project/project-setup.md --from {{quote .steps.apply.reply.draft}} --branch maestro/dod-{{.run.date}}
+  - id: pr
+    run: open pr --branch maestro/dod-{{.run.date}}
+  - id: tell
+    ask:
+      question: 'Tell the user the confirmed definition of done is up for review: {{.steps.pr.json.url}}'
+      choices: [sent]
+    on: {sent: done}
+  - id: unconfirmed
+    ask:
+      question: 'Tell the user the draft stays in {{.steps.draft.reply.draft}} and the floor stays in force; you''ll ask again at the next recap.'
+      choices: [sent]
+    on: {sent: end}
+done:
+  log: 'definition of done: {{len .steps.apply.reply.diff}} changes; {{.run.skipped}}'
