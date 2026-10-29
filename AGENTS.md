@@ -17,6 +17,7 @@ Layout:
 - `tools/maestro-play/`: the playbook engine (Go module): runs, resumes, renders and lints playbooks.
 - `tools/maestro-ticket/`: the ticket system CLI and store (Go module). Design and guarantees in `tools/maestro-ticket/README.md`.
 - `tools/maestro-usage/`: zero-token usage recording, budget checks and breakers (Go module). See its README.
+- `scripts/install.sh`: the installer (decision 0880). `scripts/install_test.sh` is its acceptance test.
 - `docs/runner.md`: the runner contract: how bots reach a repo without touching it.
 - `evals/`: one golden task per playbook (`evals/<role>/<job>.md`) and `evals/check.py`, the docs check: golden tasks, the skills slot, skill names, links, repo paths and README's diagram embeds. Format in `evals/README.md`.
 - `docs/decisions/`: the decision log. Format in `docs/decisions/README.md`.
@@ -26,6 +27,8 @@ One rule, one file: when a rule already lives somewhere, link to it instead of r
 ## Commands
 
 Docs check, from the repo root: `python3 evals/check.py` (exits 0 when clean). Run it after changing any Markdown or YAML. After changing `evals/check.py`, also run `python3 evals/test_check.py`.
+
+Installer check: `bash scripts/install_test.sh` (and `shellcheck scripts/*.sh` if installed). Run it after changing `scripts/` or the layout of `skills/`.
 
 Playbook check: `go test ./...` in `tools/maestro-play/` lints `playbooks/` (or `maestro-play lint playbooks`). Run it after changing a playbook, a prompt template or `skills/use.yaml`.
 

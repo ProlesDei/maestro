@@ -1,17 +1,16 @@
 name: setup-project
 role: chief-of-staff
-description: Onboard a repo after the footprint is installed, by drafting project-setup.md from the repo, confirm it with the user, with its definition of done, and start the verification guide.
+description: Onboard a repo after scripts/install.sh has run, by drafting project-setup.md from the repo, confirm it with the user, with its definition of done, and start the verification guide.
 intake: {category: request}
 input: optional
 claim: false
 session: run
 steps:
-  - id: install
-    run: install status
-    on: {fail: changed}              # a file changed since install, or a target file already existed: never overwrite
-  - id: harnesses
-    run: install detect
-    on: {fail: logged_out}
+  - id: installed
+    ask:
+      question: 'Ask the user whether they ran scripts/install.sh on this repo. It copies the skills and creates .maestro/project/ and .maestro/local/; setup needs it first.'
+      choices: [installed, not_installed]
+    on: {not_installed: not_installed}
   - id: draft
     prompt: draft-setup
     mode: setup
@@ -70,18 +69,13 @@ steps:
   - id: tell
     ask:
       question: |
-        Tell the user setup is done: the trust level is 1 (pull requests only), harnesses {{.steps.harnesses.output}},
+        Tell the user setup is done: the trust level is 1 (pull requests only),
         and next QA writes the verification guide ({{.steps.verify_guide.json.id}}).
       choices: [sent]
     on: {sent: done}
-  - id: changed
+  - id: not_installed
     ask:
-      question: 'Tell the user install status found files changed since install, or a file that already existed, and that you overwrote nothing: {{.steps.install.output}}'
-      choices: [sent]
-    on: {sent: end}
-  - id: logged_out
-    ask:
-      question: 'Tell the user which harness to log in; no session was started: {{.steps.harnesses.output}}'
+      question: 'Tell the user to run scripts/install.sh <this repo> from their Maestro checkout first, then start setup again; nothing was written.'
       choices: [sent]
     on: {sent: end}
   - id: unconfirmed
@@ -90,4 +84,4 @@ steps:
       choices: [sent]
     on: {sent: end}
 done:
-  log: 'setup: harnesses {{.steps.harnesses.output}}; verification guide {{.steps.verify_guide.json.id}}; {{.run.skipped}}'
+  log: 'setup: verification guide {{.steps.verify_guide.json.id}}; {{.run.skipped}}'

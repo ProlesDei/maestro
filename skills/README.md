@@ -21,7 +21,7 @@ commands: [work]          # slash commands for the user, never named in a prompt
 ## How they're used
 
 - **Prompts.** For each prompt step, `maestro-play` names `prompts.all` plus `prompts.<template>` right after `playbooks/prompts/_contract.md`, the way each harness expects (`docs/runner.md`).
-- **Install.** The installer copies the skills listed under `prompts` or `commands` into each harness's skill folder in the target repo: `.claude/skills/<name>/SKILL.md` for Claude Code, and `.agents/skills/<name>/SKILL.md` for Codex and Grok (decision 0143). Nothing else here is installed.
+- **Install.** `scripts/install.sh` copies every skill folder here into each harness's skill folder in the target repo, hidden from git by `.git/info/exclude` (decision 0882): `.claude/skills/<name>/SKILL.md` for Claude Code, and `.agents/skills/<name>/SKILL.md` for Codex and Grok (decision 0143). Nothing else here is installed.
 - **Bots.** Bot setup adds `bots.all` plus `bots.<role>` to that bot's instructions.
 - **One list.** `use.yaml` is global. A project can't override it (decision 0701).
 - **Checked.** `maestro-play lint` fails on any listed skill that has no folder here.
@@ -35,4 +35,4 @@ Two commands are workflow entry points, not procedures. They hold no workflow lo
 - `/maestro-work [ticket id]` drives one ticket from `todo` to merged. It runs the playbook chain through `maestro-play` (build, review, QA, then release), relays each `ask` step to you, and stops at a block, a refusal or a PR waiting for a human merge.
 - `/maestro-create-ticket [what needs doing]` makes one `maestro-ticket create` call. It asks once for type, kind, role, owner, deps and areas, then hands you the id for `/maestro-work`.
 
-To try them in a clone of this repo before an installer exists, copy the folders by hand: `cp -r skills/maestro-work skills/maestro-create-ticket .claude/skills/`. Use `.agents/skills/` for Codex and Grok, and list the copies in `.git/info/exclude` so they stay out of commits.
+To try them in a clone of this repo without installing, copy the folders by hand: `cp -r skills/maestro-work skills/maestro-create-ticket .claude/skills/`. Use `.agents/skills/` for Codex and Grok, and list the copies in `.git/info/exclude` so they stay out of commits.
