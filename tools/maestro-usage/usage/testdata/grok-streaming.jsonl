@@ -1,0 +1,5 @@
+{"type":"thought","data":"Analyzing the directory structure..."}
+{"type":"tool_call","toolCallId":"call_1","title":"Read","kind":"read","status":"in_progress","toolName":"read_file","rawInput":{"path":"src/main.rs"},"content":[],"locations":[]}
+{"type":"text","data":"Here's a summary"}
+{"type":"usage","messageId":"resp_1","stopReason":"end_turn","usage":{"input_tokens":812,"output_tokens":45,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_tokens":0},"signature":"sig"}
+{"type":"end","stopReason":"end_turn","sessionId":"g-stream","requestId":"r1","cwd":"/repo","usage":{"input_tokens":812,"cache_read_input_tokens":3000,"cache_creation_input_tokens":0,"output_tokens":45},"num_turns":1,"modelUsage":{"grok-4.6":{"inputTokens":812,"outputTokens":45,"cacheReadInputTokens":3000,"modelCalls":1,"costUSD":0.0021}},"total_cost_usd":0.0021}
