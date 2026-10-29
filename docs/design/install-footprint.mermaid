@@ -1,0 +1,43 @@
+flowchart TD
+    Source["<b>Our repo: the source, written once</b><br/><b>bot/</b> profiles, playbooks, bot skills<br/><b>harness/</b> rules.md and harness skills<br/><b>targets/</b> one file per harness: skill paths, launch flags, permission syntax<br/><b>templates/</b> project-setup.md and environment.md<br/><b>evals/</b> golden tasks per role"]
+
+    BotRuntime["<b>Bot runtime</b><br/>Gets bot/ only<br/>Nothing bot-side goes into their repo"]
+
+    Install["<b>Install</b><br/>1 Detect which harnesses are installed and logged in<br/>2 Write environment.md<br/>3 Generate at-* skills for those harnesses only, using targets/<br/>4 Onboarding playbook drafts project-setup.md<br/>5 Start at the cautious, propose-only trust level<br/><i>Stops and reports if any target file already exists</i>"]
+
+    subgraph Repo ["Their repo after install"]
+        subgraph Ours ["Our footprint: namespaced and removable"]
+            direction LR
+            O1["<b>.agent-team/rules.md</b><br/>Team rules<br/>Read-only, versioned<br/>Passed to bot sessions<br/>via launch flags"] ~~~ O2["<b>.agent-team/project/</b><br/>project-setup.md · memory<br/><i>Committed. Theirs to keep</i>"] ~~~ O3["<b>.agent-team/local/</b><br/>environment.md · logs ·<br/>scratchpads · worktrees<br/><i>Ignored by our own<br/>.gitignore inside the folder</i>"] ~~~ O4["<b>at-* harness skills</b><br/>.claude/skills/at-*<br/>.agents/skills/at-*<br/>Only trigger when named"] ~~~ O5["<b>.agent-team/manifest.json</b><br/>Every file we created,<br/>with checksums"]
+        end
+
+        Theirs["<b>Their own setup: never edited</b><br/>AGENTS.md · CLAUDE.md · harness settings · root .gitignore ·<br/>ticket workflow and statuses · branches without the at/ prefix<br/><i>Their own harness sessions never see our rules</i>"]
+    end
+
+    Plugin["<b>Where a harness supports plugins</b><br/>Ship the at-* skills as a plugin instead of copies:<br/>native install, update and removal"]
+
+    subgraph Later ["Later"]
+        direction LR
+        U1["<b>Update</b><br/>Replace rules.md and at-* skills<br/>Never touch project/ or local/"] ~~~ U2["<b>Uninstall</b><br/>Remove exactly what the manifest lists<br/>If a file's checksum changed, ask first<br/>Offer project/ memory as keep-or-delete"]
+    end
+
+    Source -->|"bot/"| BotRuntime
+    Source -->|"harness/, targets/, templates/"| Install
+    Install --> Ours
+    Plugin -.->|"alternative to copying skills"| Ours
+    Ours ~~~ Theirs
+    Repo --> Later
+
+    classDef src fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
+    classDef step fill:#f8c4b4,stroke:#b5472b,color:#1a1a1a
+    classDef ours fill:#c8e6c9,stroke:#2e7d32,color:#1a1a1a
+    classDef theirs fill:#ffffff,stroke:#555,color:#1a1a1a,stroke-dasharray:4 3
+    classDef runtime fill:#f5f5f5,stroke:#555,color:#1a1a1a
+    classDef note fill:#fff3c4,stroke:#b38f00,color:#1a1a1a
+
+    class Source src
+    class Install,U1,U2 step
+    class O1,O2,O3,O4,O5 ours
+    class Theirs theirs
+    class BotRuntime runtime
+    class Plugin note
