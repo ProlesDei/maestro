@@ -24,7 +24,7 @@ An `in_review` ticket whose latest `Handoff:` has an `author-family` different f
 - **Skill:** none
 - **Tier:** Mid-tier, on the opposite family to the author
 - **Done when:** The reply lists the acceptance criteria, the files changed, and the check results the engineer reported. The branch head matches the commit sha in the handoff note.
-- **Evidence:** `at-ticket get <id> --json` version; `git diff <main branch>...at/<id>-<slug>` and `git log` exit codes; the branch head sha.
+- **Evidence:** `maestro-ticket get <id> --json` version; `git diff <main branch>...maestro/<id>-<slug>` and `git log` exit codes; the branch head sha.
 
 Branch missing, or head doesn't match the handoff: send it back without reviewing.
 

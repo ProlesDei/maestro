@@ -4,15 +4,15 @@ Step-by-step plans for each role's jobs. Playbooks are part of the bot profile: 
 
 ## How they run
 
-1. Intake (`at-check-intake`) lists the waiting work in order.
-2. At "Pick the playbook", the bot picks the playbook whose `trigger` matches the top candidate, then claims it (`at-claim`) from the playbook's `claims` status.
+1. Intake (`maestro-check-intake`) lists the waiting work in order.
+2. At "Pick the playbook", the bot picks the playbook whose `trigger` matches the top candidate, then claims it (`maestro-claim`) from the playbook's `claims` status.
 3. The steps run in one harness session for this ticket. Same session across the playbook's steps, fresh session per ticket.
 4. For each step the bot picks the model tier (`model-selection`), writes a prompt under the prompt contract that names the step's harness skill, and checks the structured reply: goal met? evidence included?
 5. Result:
    - Step done, more to do: next step.
    - Not right, within budget: sharper prompt.
    - Stuck or over budget: set Blocked, then wrap up.
-   - Playbook done: wrap up (`at-wrap-up`), then clean up.
+   - Playbook done: wrap up (`maestro-wrap-up`), then clean up.
 
 ## Layout
 
@@ -25,7 +25,7 @@ Step-by-step plans for each role's jobs. Playbooks are part of the bot profile: 
   - `description`: one sentence on what the playbook does.
   - `role`: the role folder name.
   - `trigger`: the intake category that starts it: `request`, `sent-back`, `new-work` or `scheduled`.
-  - `claims`: the at-ticket status it claims from, or `none`.
+  - `claims`: the maestro-ticket status it claims from, or `none`.
 - **Body**: Goal, When to use, Steps, Stop and block when, Wrap-up.
 - **Each step**: Goal, Skill (harness skill name, or `none`), Tier, Done when, Evidence.
 
@@ -35,9 +35,9 @@ Step-by-step plans for each role's jobs. Playbooks are part of the bot profile: 
 - Steps never paste file contents into prompts. They point to files, tickets and branches.
 - Every step's reply follows the prompt contract.
 - Every step names its harness skill, or says `none`.
-- Budgets and retry limits come from `.agent-team/environment.md`, never from the playbook.
+- Budgets and retry limits come from `.maestro/environment.md`, never from the playbook.
 - A step marked **Gate** needs approval at the propose-only trust level: post the plan as an `Escalation:` comment and set Blocked instead of acting.
-- Long steps run `at-ticket heartbeat`. A lost lease (exit `4`) means stop and wrap up without a status change.
+- Long steps run `maestro-ticket heartbeat`. A lost lease (exit `4`) means stop and wrap up without a status change.
 
 ## Shared conventions
 
@@ -46,9 +46,9 @@ Step-by-step plans for each role's jobs. Playbooks are part of the bot profile: 
   - `Escalation:` needs a decision above the author's authority. On a `blocked` ticket it goes to the Chief of Staff; on a `todo` ticket it goes to the ticket's role.
   - `Approved:` / `Declined:` the Chief of Staff's answer to an escalation.
   - When a playbook says to block with an `Escalation:` note, that note is the wrap-up handoff note, so it stays the latest comment.
-- Engineers work on branch `at/<ticket-id>-<slug>` in the worktree `$(git rev-parse --git-common-dir)/agent-team/worktrees/<ticket-id>/`.
-- Project checks (build, lint, test) come from `.agent-team/project-setup.md`. Submit means `in_progress` → `in_review` after they pass.
-- Closing a ticket with no code to release (a tracking ticket, a finished infrastructure request, an accepted suggestion): while you hold the lease, move it to `in_progress` if it isn't there already (from `todo` or `blocked`), then `in_progress` → `done`, each with `--expect-version` and a `--note`. Never use this for code: code goes through review, QA and release. at-ticket allows the move; the role's playbook and permissions are what keep code on the full path.
+- Engineers work on branch `maestro/<ticket-id>-<slug>` in the worktree `$(git rev-parse --git-common-dir)/maestro/worktrees/<ticket-id>/`.
+- Project checks (build, lint, test) come from `.maestro/project-setup.md`. Submit means `in_progress` → `in_review` after they pass.
+- Closing a ticket with no code to release (a tracking ticket, a finished infrastructure request, an accepted suggestion): while you hold the lease, move it to `in_progress` if it isn't there already (from `todo` or `blocked`), then `in_progress` → `done`, each with `--expect-version` and a `--note`. Never use this for code: code goes through review, QA and release. maestro-ticket allows the move; the role's playbook and permissions are what keep code on the full path.
 
 ## Index
 

@@ -9,9 +9,9 @@ maestro bundles a full suite of agent roles, skills, and tools. Install it, give
 | Part | What it is |
 |---|---|
 | Roles | Agent definitions. Each role owns one part of the delivery process. |
-| Skills | Reusable instructions in `skills/<name>/SKILL.md`. `at-*` harness skills install into your repo under `.agent-team/` and the harness loads one only when a prompt names it. Bot skills (prompt contract, harness CLI, model selection) stay with the bot runtime. See `skills/README.md`. |
+| Skills | Reusable instructions in `skills/<name>/SKILL.md`. `maestro-*` harness skills install into your repo under `.maestro/` and the harness loads one only when a prompt names it. Bot skills (prompt contract, harness CLI, model selection) stay with the bot runtime. See `skills/README.md`. |
 | Playbooks | Step-by-step plans for each role's jobs, in `playbooks/<role>/`. The bot runtime picks one per ticket and runs its steps in one harness session. See `playbooks/README.md`. |
-| Tools | Scripts and commands the agents call to do the work. `tools/at-ticket/` is the ticket system: a CLI over a SQLite store shared by every worktree, with leases, versioned transitions, an event log and a generated `Backlog.md`. See `tools/at-ticket/README.md`. |
+| Tools | Scripts and commands the agents call to do the work. `tools/maestro-ticket/` is the ticket system: a CLI over a SQLite store shared by every worktree, with leases, versioned transitions, an event log and a generated `Backlog.md`. See `tools/maestro-ticket/README.md`. |
 | Bot profiles | One folder per bot at `bot-profiles/<name>/persona.md`, plus any supporting files in that folder. Outside tools, such as Grok, read a folder and copy it to create the bot. |
 
 ## How it works
@@ -22,16 +22,16 @@ maestro bundles a full suite of agent roles, skills, and tools. Install it, give
 
 ### The agent team
 
-You talk to one agent: the Chief of Staff. It hands big projects to the Planner and writes tickets for small tasks itself. Engineers pick up tickets from the ticket system (`at-ticket`), and their code passes automated checks, a code review, and QA before the Operations Manager releases it. Each role runs on the cheapest model tier that can do the job; color marks the tier.
+You talk to one agent: the Chief of Staff. It hands big projects to the Planner and writes tickets for small tasks itself. Engineers pick up tickets from the ticket system (`maestro-ticket`), and their code passes automated checks, a code review, and QA before the Operations Manager releases it. Each role runs on the cheapest model tier that can do the job; color marks the tier.
 
-<!-- Source: docs/agent-team.mermaid. Edit that file, then copy it here. -->
+<!-- Source: docs/team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
     User([User])
 
     CoS["<b>Chief of Staff</b><br/>Frontier"]
     Planner["<b>Planner</b><br/>Mid-tier"]
-    Tickets[("<b>Ticket system</b><br/>at-ticket · Backlog.md view<br/>Specs, tickets, status, blockers")]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket · Backlog.md view<br/>Specs, tickets, status, blockers")]
 
     subgraph Build ["Build, review and test"]
         subgraph Engineers ["Engineers"]
@@ -126,15 +126,15 @@ flowchart TD
     end
 
     subgraph Loop ["Session loop: identical for every role"]
-        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, at-ticket doctor passes, git clean<br/>Read .agent-team/environment.md and the trust level"]
+        B0["<b>Preflight</b><br/>Kill switch set? Stop<br/>Health check: harness logged in, maestro-ticket doctor passes, git clean<br/>Read .maestro/environment.md and the trust level"]
         B1["<b>Start a harness session with launch flags</b><br/>Team rules · role permissions · model<br/>Their config files stay untouched<br/>Stable content first, so it gets cached"]
-        B2["<b>Prompt: check intake</b> · at-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
-        B3["<b>Pick the playbook</b><br/>Prompt: claim the work · at-claim"]
+        B2["<b>Prompt: check intake</b> · maestro-check-intake<br/>Requests → work sent back → new work → scheduled duties<br/>Resume the scratchpad if one exists"]
+        B3["<b>Pick the playbook</b><br/>Prompt: claim the work · maestro-claim"]
         B4["<b>Next step</b><br/>Pick the model tier for this step<br/>Write the prompt, naming the harness skill"]
         B5["<b>Check the structured reply</b><br/>Goal met? Evidence included?"]
         B6{"Result?"}
-        B7["<b>Prompt: wrap up</b>, batched · at-wrap-up<br/>Status · handoff note · memory proposals ·<br/>one-line retro: what slowed me down? · log"]
-        B8["<b>Clean up</b> · hook if available, else at-clean-up<br/>Scratchpad · temp files · processes · worktree · claim<br/>Then close the harness session"]
+        B7["<b>Prompt: wrap up</b>, batched · maestro-wrap-up<br/>Status · handoff note · memory proposals ·<br/>one-line retro: what slowed me down? · log"]
+        B8["<b>Clean up</b> · hook if available, else maestro-clean-up<br/>Scratchpad · temp files · processes · worktree · claim<br/>Then close the harness session"]
         B9{"More in intake?"}
         B10(["Session ends"])
     end
@@ -143,15 +143,15 @@ flowchart TD
 
     subgraph HarnessSide ["Their repo · the harness does all the work"]
         H["<b>Harness session</b>, headless<br/>Claude Code · Codex · Grok Build"]
-        Loads["<b>Uses our footprint only</b><br/>.agent-team/ rules, project-setup.md and memory<br/>at-* skills, loaded only when named"]
-        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: at-ticket · files and code ·<br/>git on at/ branches · tests and commands"]
+        Loads["<b>Uses our footprint only</b><br/>.maestro/ rules, project-setup.md and memory<br/>maestro-* skills, loaded only when named"]
+        Work["<b>Does the hands-on work</b><br/>Ticket system CLI: maestro-ticket · files and code ·<br/>git on maestro/ branches · tests and commands"]
     end
 
     Guard["<b>Guardrails</b><br/>Trust levels: propose-only at first · kill switch ·<br/>role permissions · budgets and retry limits ·<br/>approval gates · secrets never in prompts, replies or logs"]
 
     subgraph Roles ["Same anatomy, different profiles: what each role lets the harness do"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Read summaries ·<br/>write its own tickets"] ~~~ E2["<b>Planner</b><br/>Full ticket system ·<br/>read-only code"] ~~~ E3["<b>Engineers</b><br/>Edit code on<br/>at/ branches"] ~~~ E4["<b>Code Reviewer</b><br/>Read-only code<br/>and diffs"] ~~~ E5["<b>QA Lead</b><br/>Run tests and the app ·<br/>read-only code"] ~~~ E6["<b>Operations</b><br/>Merge · deploy ·<br/>run the improvement loop"]
+        E1["<b>Chief of Staff</b><br/>Read summaries ·<br/>write its own tickets"] ~~~ E2["<b>Planner</b><br/>Full ticket system ·<br/>read-only code"] ~~~ E3["<b>Engineers</b><br/>Edit code on<br/>maestro/ branches"] ~~~ E4["<b>Code Reviewer</b><br/>Read-only code<br/>and diffs"] ~~~ E5["<b>QA Lead</b><br/>Run tests and the app ·<br/>read-only code"] ~~~ E6["<b>Operations</b><br/>Merge · deploy ·<br/>run the improvement loop"]
     end
 
     Runtime -->|"loads the profile it's configured for"| Profile

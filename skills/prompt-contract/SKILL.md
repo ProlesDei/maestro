@@ -10,12 +10,12 @@ Every prompt you send has the same five parts, and every reply comes back in the
 ## The five parts
 
 1. **The goal.** One or two sentences: what this step must achieve.
-2. **Pointers, not pasted content.** Name files, ticket ids, branches, the harness skill to load (`.agent-team/skills/<name>/SKILL.md`). The harness reads them itself. Never paste file contents, diffs or logs into the prompt.
+2. **Pointers, not pasted content.** Name files, ticket ids, branches, the harness skill to load (`.maestro/skills/<name>/SKILL.md`). The harness reads them itself. Never paste file contents, diffs or logs into the prompt.
 3. **Constraints and permissions.** What the harness may and may not do in this step: paths, branch, commands, the holder and expected version, the idempotency key `<session-id>:<step>`.
 4. **What done means.** The check that proves the goal is met: an exit code, a status, a test count.
 5. **Reply: short, structured, with evidence.** Ask for the reply block below and nothing else.
 
-Every step prompt also says: add one line to the scratchpad; if the step may outlast the lease, run `at-ticket heartbeat <id> --holder <holder>` as you go, and stop if it exits `4`.
+Every step prompt also says: add one line to the scratchpad; if the step may outlast the lease, run `maestro-ticket heartbeat <id> --holder <holder>` as you go, and stop if it exits `4`.
 
 ## Sessions
 
@@ -49,13 +49,13 @@ Skills may add fields (for example `candidates`, `claimed`, `kept`).
 
 1. **Goal met?** Compare against what done means, not against the summary.
 2. **Evidence included?** Each claim needs proof: "tests pass" without a command and exit code is not done. Missing evidence means not done.
-3. If in doubt, check one fact yourself with a no-token command (for example `at-ticket get <id> --json`).
+3. If in doubt, check one fact yourself with a no-token command (for example `maestro-ticket get <id> --json`).
 
 ## Result
 
 - Step done, more to do: next step.
 - Not right, within budget: send a sharper prompt in the same session. Say exactly what was missing, narrow the scope, keep the same idempotency key for the same write.
-- Stuck or over budget: set Blocked, then wrap up. Retry limits and budgets come from `.agent-team/environment.md`.
+- Stuck or over budget: set Blocked, then wrap up. Retry limits and budgets come from `.maestro/environment.md`.
 - Playbook done: wrap up.
 
 ## Rules

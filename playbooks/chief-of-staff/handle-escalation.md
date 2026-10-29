@@ -25,7 +25,7 @@ Unblock the team fast. Decide what you have the authority to decide; bring the u
 - **Skill:** none
 - **Tier:** Frontier
 - **Done when:** The decision is stated in one sentence, with options and a recommended one.
-- **Evidence:** `at-ticket get <id> --json` exit code and version; the escalation comment; related ticket ids.
+- **Evidence:** `maestro-ticket get <id> --json` exit code and version; the escalation comment; related ticket ids.
 
 Read the ticket, its comments and the tickets it points to. Don't read code.
 
@@ -35,7 +35,7 @@ Read the ticket, its comments and the tickets it points to. Don't read code.
 - **Skill:** none
 - **Tier:** Frontier
 - **Done when:** One of:
-  - Within your authority and the trust level in `.agent-team/environment.md`: you decide.
+  - Within your authority and the trust level in `.maestro/environment.md`: you decide.
   - Production deploy, scope, cost, risk to users or data, or anything you can't undo, beyond what the trust level lets you approve: ask the user. One question, the options, your recommendation.
 - **Evidence:** the decision and the reason, or the question sent to the user.
 
@@ -46,7 +46,7 @@ This is your judgment, not a harness prompt.
 - **Goal:** The team can act on the decision without asking again.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** `at-ticket comment <id> --body "Approved: ..."` or `"Declined: ..."` is posted, with what to do next. For a declined deploy, say what would change your answer.
+- **Done when:** `maestro-ticket comment <id> --body "Approved: ..."` or `"Declined: ..."` is posted, with what to do next. For a declined deploy, say what would change your answer.
 - **Evidence:** comment exit code.
 
 For an accepted workflow suggestion, tell the user what should change upstream (playbooks and skills live in the bot profile, not their repo), then close the ticket the no-code way from the playbooks README.

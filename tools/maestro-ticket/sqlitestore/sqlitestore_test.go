@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 type clock struct {
@@ -25,7 +25,7 @@ func (c *clock) Advance(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.U
 func newStore(t *testing.T) (*Store, *clock) {
 	t.Helper()
 	clk := &clock{t: time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)}
-	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "agent-team", "tickets.db"), Options{Now: clk.Now})
+	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "maestro", "tickets.db"), Options{Now: clk.Now})
 	if err != nil {
 		t.Fatal(err)
 	}

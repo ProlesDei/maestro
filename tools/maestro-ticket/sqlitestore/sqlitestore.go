@@ -24,7 +24,7 @@ import (
 
 	"modernc.org/sqlite"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 const (
@@ -158,7 +158,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return nil
 	}
 	if v > schemaVersion {
-		return fmt.Errorf("schema version %d is newer than this at-ticket (%d); upgrade at-ticket", v, schemaVersion)
+		return fmt.Errorf("schema version %d is newer than this maestro-ticket (%d); upgrade maestro-ticket", v, schemaVersion)
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {

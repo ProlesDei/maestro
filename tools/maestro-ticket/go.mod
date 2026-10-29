@@ -1,4 +1,4 @@
-module github.com/ProlesDei/maestro/tools/at-ticket
+module github.com/ProlesDei/maestro/tools/maestro-ticket
 
 go 1.26.0
 

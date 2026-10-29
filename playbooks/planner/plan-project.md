@@ -24,7 +24,7 @@ A `todo` ticket for role `planner`, usually titled `Plan: <goal>`, written by th
 - **Skill:** none
 - **Tier:** Mid-tier
 - **Done when:** The reply lists the outcome, constraints, affected areas of the code and open questions. Each open question is marked "I can decide" or "above my authority".
-- **Evidence:** ticket id and version read; paths read in `.agent-team/project-setup.md`, `.agent-team/memory/` and the code (read only).
+- **Evidence:** ticket id and version read; paths read in `.maestro/project-setup.md`, `.maestro/memory/` and the code (read only).
 
 If any question is above your authority, stop and block.
 
@@ -33,7 +33,7 @@ If any question is above your authority, stop and block.
 - **Goal:** One short spec the tickets can point to.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** `at-ticket comment <id> --body "Spec: ..." --idempotency-key <session-id>:spec` is posted. The spec covers: outcome, scope and non-goals, approach, risks, order of work.
+- **Done when:** `maestro-ticket comment <id> --body "Spec: ..." --idempotency-key <session-id>:spec` is posted. The spec covers: outcome, scope and non-goals, approach, risks, order of work.
 - **Evidence:** comment exit code.
 
 ### 3. Write the tickets
@@ -41,7 +41,7 @@ If any question is above your authority, stop and block.
 - **Goal:** Ordered tickets that each fit in one engineer session.
 - **Skill:** none
 - **Tier:** Mid-tier
-- **Done when:** Each ticket is created with `at-ticket create --title ... --body-file <file> --role <R> --priority <P> --idempotency-key <session-id>:create-<n>`. Write the body files in the scratch temp dir. Each body has: goal, testable acceptance criteria, pointers (files, the spec comment on this ticket), constraints.
+- **Done when:** Each ticket is created with `maestro-ticket create --title ... --body-file <file> --role <R> --priority <P> --idempotency-key <session-id>:create-<n>`. Write the body files in the scratch temp dir. Each body has: goal, testable acceptance criteria, pointers (files, the spec comment on this ticket), constraints.
   - Complex or risky: `senior-software-engineer`. Routine, with an existing pattern to follow: `junior-software-engineer`. Infrastructure: `operations-manager`.
   - Order by priority. A ticket that must wait for another is created with `--status blocked` and a body line `Waiting on: T-<n>`.
 - **Evidence:** every new ticket id, role and priority.
@@ -51,7 +51,7 @@ If any question is above your authority, stop and block.
 - **Goal:** The plan is on the board as intended.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** `at-ticket list --json` shows every ticket from step 3; `at-ticket render` exits `0`.
+- **Done when:** `maestro-ticket list --json` shows every ticket from step 3; `maestro-ticket render` exits `0`.
 - **Evidence:** both exit codes; ticket count.
 
 ## Stop and block when

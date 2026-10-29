@@ -21,7 +21,7 @@ Which intake candidates this playbook is for, and which it isn't.
 ### 1. Step name
 
 - **Goal:** what this step must achieve.
-- **Skill:** `at-...` or none.
+- **Skill:** `maestro-...` or none.
 - **Tier:** Frontier, Mid-tier or No tokens.
 - **Done when:** the check that proves it.
 - **Evidence:** what the reply must include.

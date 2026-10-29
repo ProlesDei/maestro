@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build a complex or risky ticket on its own at/ branch, with tests that prove each acceptance criterion, and submit it for review.
+description: Build a complex or risky ticket on its own maestro/ branch, with tests that prove each acceptance criterion, and submit it for review.
 role: senior-software-engineer
 trigger: new-work
 claims: todo
@@ -10,7 +10,7 @@ claims: todo
 
 ## Goal
 
-Clean, well-tested code that does exactly what the ticket asks, on an `at/` branch, passing the project's checks.
+Clean, well-tested code that does exactly what the ticket asks, on an `maestro/` branch, passing the project's checks.
 
 ## When to use
 
@@ -24,8 +24,8 @@ A `todo` ticket for role `senior-software-engineer`. For a ticket escalated by t
 - **Skill:** none
 - **Tier:** No tokens
 - **Done when:** Both exit `0`:
-  - `at-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start`
-  - `git worktree add -b at/<id>-<slug> $(git rev-parse --git-common-dir)/agent-team/worktrees/<id> <main branch>`. `<slug>`: up to five lowercase words from the title, joined by hyphens. If the branch already exists, `git worktree add <path> at/<id>-<slug>`.
+  - `maestro-ticket transition <id> --to in_progress --from todo --expect-version <N> --holder <H> --idempotency-key <session-id>:start`
+  - `git worktree add -b maestro/<id>-<slug> $(git rev-parse --git-common-dir)/maestro/worktrees/<id> <main branch>`. `<slug>`: up to five lowercase words from the title, joined by hyphens. If the branch already exists, `git worktree add <path> maestro/<id>-<slug>`.
 - **Evidence:** exit codes; new ticket version; branch and worktree path.
 
 ### 2. Plan
@@ -34,7 +34,7 @@ A `todo` ticket for role `senior-software-engineer`. For a ticket escalated by t
 - **Skill:** none
 - **Tier:** Frontier
 - **Done when:** The plan is in the scratchpad, with the branch and worktree recorded. It lists files to change, the approach, each criterion with its proof, and each risk with how it's covered.
-- **Evidence:** paths read (the ticket, any spec it points to, `.agent-team/project-setup.md`, `.agent-team/memory/`, the code); the scratchpad path.
+- **Evidence:** paths read (the ticket, any spec it points to, `.maestro/project-setup.md`, `.maestro/memory/`, the code); the scratchpad path.
 
 ### 3. Build
 
@@ -51,7 +51,7 @@ Heartbeat the lease during long builds.
 - **Goal:** The project's checks pass on the branch.
 - **Skill:** none
 - **Tier:** No tokens
-- **Done when:** Build, lint and test from `.agent-team/project-setup.md` all exit `0` in the worktree.
+- **Done when:** Build, lint and test from `.maestro/project-setup.md` all exit `0` in the worktree.
 - **Evidence:** each command, exit code and test counts.
 
 On a failure, go back to step 3 with a pointer to the failing output. That counts as a retry.

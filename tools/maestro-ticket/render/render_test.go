@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/at-ticket/ticket"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 func sample() []ticket.Ticket {
@@ -53,7 +53,7 @@ func TestBacklogDeterministic(t *testing.T) {
 }
 
 func TestWriteAtomic(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), ".agent-team")
+	dir := filepath.Join(t.TempDir(), ".maestro")
 	path := filepath.Join(dir, "Backlog.md")
 	if err := WriteAtomic(path, []byte("one")); err != nil {
 		t.Fatal(err)
