@@ -1,0 +1,6 @@
+# 0143 Where generated harness skills go
+
+- **Context:** The brief left Grok's skill path to be verified. Grok Build also reads `.agents/skills/` and `.claude/skills/`, and ignores gitignore rules when finding skills (0140). Grok headless loads project skills only with `--trust`, and `--trust` writes `~/.grok/trusted_folders.toml`.
+- **Choice:** Generate into `.claude/skills/` for Claude Code and `.agents/skills/` for Codex and Grok, never `.grok/skills/`. Mark every skill manual-only: `disable-model-invocation: true` in frontmatter, plus `agents/openai.yaml` with `allow_implicit_invocation: false` for Codex. Grok finds the same skill name in both folders and keeps one, which is fine because both copies are identical. Never pass `--trust` or write `~/.grok/trusted_folders.toml`: Grok headless prompts name each skill by its path (`.agents/skills/<n>/SKILL.md`) instead. Phase 3's live runs must show that this works.
+- **Alternatives:** A one-time `--trust` grant per target repo. A third copy in `.grok/skills/`. Or a Grok plugin.
+- **Why:** Two copies cover three harnesses, and `.git/info/exclude` hides both from `git status` without hiding them from Grok. The trust grant edits a machine-wide harness setting outside the repo, which the brief forbids, and naming the paths gets the same result. **Status: resolved by Paul** (2026-10-28).

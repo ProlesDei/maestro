@@ -15,6 +15,7 @@ Layout:
 - `skills/`: one folder per skill (`skills/<name>/SKILL.md`). `maestro-*` skills are harness skills, installed into the target repo under `.maestro/`; the rest are bot skills loaded by the bot runtime. Format in `skills/README.md`.
 - `playbooks/`: one folder per role (`playbooks/<role>/<job>.md`, role names match `bot-profiles/`). The bot runtime loads them; never installed into the target repo. Format in `playbooks/README.md`.
 - `tools/maestro-ticket/`: the ticket system CLI and store (Go module). Design and guarantees in `tools/maestro-ticket/README.md`.
+- `tools/maestro-usage/`: zero-token usage recording, budget checks and breakers (Go module). See its README.
 
 ## Commands
 
