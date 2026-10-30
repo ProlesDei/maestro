@@ -28,6 +28,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if d := os.Getenv("FAKE_SIGNAL_DIR"); d != "" {
+		os.Exit(signalEngine(d))
+	}
 	switch filepath.Base(os.Args[0]) {
 	case "maestro-ticket":
 		os.Exit(fakeTicket(os.Args[1:]))
@@ -356,6 +359,23 @@ func (cfg *fakeConfig) popHarness() map[string]any {
 
 func cwd() string { d, _ := os.Getwd(); return d }
 
+// noPrompt is the call's GIT_TERMINAL_PROMPT, GH_PROMPT_DISABLED and
+// GIT_SSH_COMMAND, joined by |.
+func noPrompt() string {
+	return os.Getenv("GIT_TERMINAL_PROMPT") + "|" + os.Getenv("GH_PROMPT_DISABLED") + "|" + os.Getenv("GIT_SSH_COMMAND")
+}
+
+// signalEngine is an engine whose command, a shell, writes its pid to
+// dir/ready, then waits; an interrupt makes it write dir/got and exit.
+// TestForwardSignals interrupts the engine. It returns only if the
+// interrupt didn't stop it.
+func signalEngine(dir string) int {
+	e := &Engine{cfg: Config{Environ: os.Environ()}}
+	script := `trap 'echo INT > got; exit 0' INT; echo $$ > ready; while :; do sleep 0.1; done`
+	e.exec(dir, "sh", nil, "", -1, "-c", script)
+	return 0
+}
+
 // hang runs a scripted reply's sleep: it starts a child that sleeps a
 // minute, writes its pid to $FAKE_DIR/child.pid, then sleeps itself for
 // the duration given. A timeout must kill both.
@@ -503,7 +523,7 @@ func anyStrings(list []any) []string {
 
 // fakeGh is gh pr list, create and view over the PRs in fake.json.
 func fakeGh(args []string) int {
-	logCall("gh", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("gh", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv), "no_prompt": noPrompt()})
 	cfg := loadFake()
 	defer saveJSON("fake.json", cfg)
 	if len(args) < 2 || args[0] != "pr" {
@@ -552,7 +572,7 @@ func fakeGh(args []string) int {
 
 // fakeGit logs the call, fails it if fake.json says so, else runs git.
 func fakeGit(args []string) int {
-	logCall("git", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("git", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv), "no_prompt": noPrompt()})
 	if len(args) > 0 {
 		cfg := loadFake()
 		r := cfg.pop("git " + args[0])

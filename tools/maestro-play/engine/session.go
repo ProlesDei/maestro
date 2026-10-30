@@ -178,10 +178,12 @@ var (
 		"claude": {"--permission-mode", "bypassPermissions"},
 		"codex":  {"--dangerously-bypass-approvals-and-sandbox"},
 	}
+	// permFlags set permissions; a claude settings file or codex profile
+	// may too.
 	permFlags = map[string][]string{
 		"claude": {"--permission-mode", "--dangerously-skip-permissions", "--allowedTools", "--allowed-tools",
-			"--disallowedTools", "--disallowed-tools", "--restricted"},
-		"codex": {"--dangerously-bypass-approvals-and-sandbox", "--sandbox", "-s", "--approve-for-me"},
+			"--disallowedTools", "--disallowed-tools", "--restricted", "--settings"},
+		"codex": {"--dangerously-bypass-approvals-and-sandbox", "--sandbox", "-s", "--approve-for-me", "--profile", "-p"},
 	}
 	// permKeys are codex -c keys that set permissions.
 	permKeys = []string{"sandbox_mode", "approval_policy"}
