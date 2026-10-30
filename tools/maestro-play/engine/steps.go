@@ -270,7 +270,7 @@ func (e *Engine) ticketStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 		return blockOut("step %s: ticket: nothing to run", s.ID), nil
 	}
 	if args[0] == "transition" && flagArg(args, "--to") == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		return blockOut("step %s: %s/%s may not move a ticket to done; /maestro-review does", s.ID, p.Role, p.Name), nil
+		return blockOut("step %s: %s/%s may not move a ticket to done; /maestro-code-review does", s.ID, p.Role, p.Name), nil
 	}
 	if s.Body != "" {
 		body, err := renderTemplate(s.ID+".body", s.Body, d)

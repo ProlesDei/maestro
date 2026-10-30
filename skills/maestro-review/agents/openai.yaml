@@ -1,6 +1,0 @@
-interface:
-  display_name: "Review"
-  short_description: "Review a PR and give GO or NO-GO for one head sha"
-  default_prompt: "Use $maestro-review to review PR <number>, branch maestro/<ticket> or ticket <id>: run the ten passes and the project's checks, then merge and set done on GO, or send it back with a Kickback comment on NO-GO."
-policy:
-  allow_implicit_invocation: false

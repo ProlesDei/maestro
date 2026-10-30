@@ -17,7 +17,7 @@ How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot p
 2. The planner turns a goal into tickets in `maestro-ticket`.
 3. The engineer runs the work playbook. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
-5. The reviewer, from another model family than the author when one is installed, runs `/maestro-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
+5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
 6. A blocked run leaves an `Escalation:` note. The engineer or the chief of staff answers it and runs it again.
 
 What we hold to:
@@ -48,7 +48,7 @@ Two builders shape how Maestro works. Before you add a rule, see how they handle
 - When two fixes on one premise fail, test the premise.
 - Work in small units that each end in a check, and order commits so they argue for the change.
 
-Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`'s checks and `/maestro-review` play the part of no-mistakes; the worktree per change comes from both; `skills/` follows pstack's form.
+Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`'s checks and `/maestro-code-review` play the part of no-mistakes; the worktree per change comes from both; `skills/` follows pstack's form.
 
 ## Layout
 

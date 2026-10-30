@@ -29,7 +29,7 @@ Any `blocked` reply, or a step that fails with no `on:` route, escalates: `_esca
 
 | `state` | Next |
 |---|---|
-| `done` | The ticket is `in_review` with a `Handoff:` note. Run `/maestro-qa-lead <id>`, then `/maestro-review <id>`. |
+| `done` | The ticket is `in_review` with a `Handoff:` note. Run `/maestro-qa-lead <id>`, then `/maestro-code-review <id>`. |
 | `blocked` | A blocked run is over; `resume` won't restart it. Answer the `Escalation:` note as [Unblock](../../skills/maestro-chief-of-staff/SKILL.md#unblock) shows, then run it again. |
 | `failed` with `no unclaimed ticket matches its intake` | The board has nothing to take. Add work with `/maestro-create-ticket` or `/maestro-planner`. |
 | `failed`, `lost`, `stopped`, or `refused` in `reason` | Read `reason`. Never work around a refused step or run one by hand. |

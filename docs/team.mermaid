@@ -6,7 +6,7 @@ flowchart TD
         Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
         Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
-        Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
+        Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Another model family from the author<br/>Passes scaled to risk, one verdict per head sha"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]

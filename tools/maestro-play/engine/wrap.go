@@ -74,7 +74,7 @@ func (e *Engine) finish(p *playbook.Playbook, st *State) error {
 			return fail(fmt.Sprintf("done.to rendered %q, not a status", to))
 		}
 		if to == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-			return fail(fmt.Sprintf("%s/%s may not move a ticket to done; /maestro-review does", p.Role, p.Name))
+			return fail(fmt.Sprintf("%s/%s may not move a ticket to done; /maestro-code-review does", p.Role, p.Name))
 		}
 		role, err := e.render(p, st, "done.role", p.Done.Role)
 		if err != nil {

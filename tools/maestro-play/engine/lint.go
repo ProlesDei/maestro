@@ -395,12 +395,12 @@ func (l *linter) ticketStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 var doneWord = regexp.MustCompile(`(^|[^\w.])done($|[^\w])`)
 
 // DoneEnders are the playbooks that may move a ticket to done: none. The
-// reviewer's /maestro-review merges the PR and sets done itself.
+// reviewer's /maestro-code-review merges the PR and sets done itself.
 var DoneEnders []string
 
 func (l *linter) endsDone(p *playbook.Playbook, step string) {
 	if !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		l.add(p.Path, step, "moves the ticket to done; no playbook may: /maestro-review does")
+		l.add(p.Path, step, "moves the ticket to done; no playbook may: /maestro-code-review does")
 	}
 }
 

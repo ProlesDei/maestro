@@ -1,54 +1,56 @@
 ---
 name: maestro-software-engineer
-description: "Make one code change by hand in this session: plan it against the closest existing code, build it test first, review your own diff as a stranger would, and fix what review or QA sent back. Use for /maestro-software-engineer, 'make this change', 'fix the kickback on T-12', or work you want to drive yourself instead of the `work` playbook."
-argument-hint: "[ticket id | what to change]"
-disable-model-invocation: true
+description: "Sets the bar and the method for a code change: plan against the closest existing code, read every caller, write the least code, name the failure that hurts most, and review your own diff against the bar review uses. Use for /maestro-software-engineer, 'make this change', 'implement X', 'fix the kickback on T-12', a design question about the code, before you write, change or refactor code in any session, and in a Maestro plan or build step. Load it with maestro-working-principles and maestro-tdd, not instead of them. Not for docs-only edits, writing a skill (maestro-create-edit-skill), proving finished work (maestro-prove-complete) or reviewing a PR (maestro-code-review)."
 ---
 
-# Make a change by hand
+# Software engineer
 
-Read the code, change it and prove it, in your own session. `maestro-play run work --ticket <id>` does the same job through the playbook and moves the ticket; this skill is for a change you drive. You write no ticket.
+Write code a stranger can trust: correct, secure, plain, and shaped like the code around it. You hand back a change that passes review on the first read, and you never trade quality for speed in silence: when they clash, say so.
 
-Follow the **maestro-working-principles** skill.
+Follow the **maestro-working-principles** skill for worktrees, commits and PRs, and the **maestro-tdd** skill for tests. Read `## Conventions` in `.maestro/project/project-setup.md` and the repo's decision records, if it keeps any (`docs/adr/`, `docs/decisions.md`): an accepted one binds, and only a new one replaces it.
 
-## Start
+Write to the bar, not toward a kickback. Before you code, read the ten passes in the **maestro-code-review** skill ([passes.md](../maestro-code-review/references/passes.md)): they are what blocks a merge.
 
-Open a todo list with one item per phase below.
+## Plan first
 
-## Phase A: Read and plan
+Plan before the first edit when the change touches more than one file (a file and its test count as one), crosses a module or layer edge, or carries 3 or more design calls. If a plan exists (the step's scratch file, the PR body), follow it instead. For a design question with no code yet, answer with the key calls, their trade-offs and one pick.
 
-1. Read the user's words, or the whole ticket (`maestro-ticket get <id> --json`). Restate the goal in one sentence and number the acceptance criteria.
-2. Read the latest `Kickback:` and `QA: fail` comments. Their items come first.
-3. Find the closest code that already does the same kind of thing (a command, endpoint, test or migration), by path and lines, and copy its shape.
-4. Give each criterion the test that will prove it. `git grep` each symbol you change and read every caller.
-5. Name the risks (behaviour callers rely on, data, security, speed, concurrency) and how you cover each.
-6. Stop and ask if the change needs a decision the ticket doesn't make, a new dependency, or a change to an interface other code relies on. If it is really two tickets, propose the split.
+1. **Frame.** The goal in one sentence, the numbered acceptance criteria (the ticket's, from `maestro-ticket get <id> --json`, else your own), the constraints, and what you won't do.
+2. **Read.** The target, the closest code that already does the same kind of thing (path and lines), and every caller. Learn why that code has its shape before you copy or change it.
+3. **Decide.** Spend the thought on the 2-4 calls that drive the outcome; give the rest a pick and a one-line reason. Make hard trade-offs yourself. Ask only for a missing requirement or a product call.
+4. **Write it down.** In a step, where the step's prompt says. In your own session, in the PR body:
 
-## Phase B: Build
+```
+Goal:      <one line, the outcome a user sees>
+Files:     <each file to change or add>
+Decisions: <call>: <pick>, <one-line reason> | <the option you passed on>
+Hazards:   <the failure that hurts most, and where>
+Tests:     <what fails without the change; what passes with it>
+```
 
-1. Work on a branch, never the main branch (the line under `## Main branch` in `.maestro/project/project-setup.md`).
-2. Build each criterion test first, the way the **maestro-tdd** skill says. Make the smallest change that passes, in the style of the example: no abstraction or flag nobody asked for.
-3. Update the docs the change makes wrong.
-4. Run each command under `## Checks` in `project-setup.md` until it passes. Never skip, weaken or edit a test to make it pass.
-5. Commit in small steps that each pass, saying what changed and why.
+## Rules
 
-## Phase C: Review your own diff
+1. **Name each reading.** If the ask reads two ways, name both and ask; never pick one in silence. Never invent a requirement.
+2. **Know the blast radius.** Before you change a shared function, type, payload, schema or constant, `git grep` it (or query a code graph) and read every caller and every reader and writer of the state it touches.
+3. **Write the least code.** No feature, flag, option or layer nobody asked for. Every changed line traces to the ask. Pull out shared code on its second copy, not its first.
+4. **Match the codebase.** Use the pattern it already uses, even when you'd pick another. Replace one only on purpose, naming its cost and every place that must change with it.
+5. **Name the worst failure.** A race, a replay, a partial write, lost precision, unbounded growth, a dependency slow or down. Show the design survives it.
+6. **Guard shared writes.** Data two processes can write at once gets a guard you pick before you code: compare-and-swap, a lock, a transaction or an idempotency key. Name it in the plan.
+7. **Give every loop an exit.** Retries, workers and scheduled jobs get a bound, a backoff and a way to stop.
+8. **Fail closed.** A check that denies (auth, permissions, signatures) denies on a timeout, bad input or a tool that can't answer. Allowlist when the good inputs can be listed. Every refusal says how to recover.
+9. **Read the API; don't recall it.** Check the installed version and signature (lockfile, vendored source, type stubs) before you call it.
+10. **Let the code explain itself.** Types and names that say what a thing is, in the codebase's own words. Comment only what the code can't say; never narrate history.
 
-Read `git diff <main>...HEAD` top to bottom as a stranger would. Look for:
+## Never
 
-- debug prints, commented-out code, stray TODOs, unrelated formatting;
-- what happens when each call fails, times out or returns empty;
-- names that don't say what the thing is in the codebase's own words;
-- tests that assert no behaviour, or wouldn't fail if the change were wrong;
-- secrets, hard-coded paths, values that only work on this machine;
-- files outside the ticket's areas.
+- Swallow an error: no empty catch, no catch-and-log to make a path "work".
+- Add, bump or unpin a dependency the task doesn't name. Ask first, and pin the exact version.
+- Leave debug prints, commented-out code, TODO stubs, or paths and values that only work on this machine.
+- Call it done on green tests alone: run the changed path for real, as the **maestro-prove-complete** skill says.
 
-Fix what you find and run the checks again.
+## Review your diff, then fix what comes back
 
-## Phase D: Fix what came back
+1. Read `git diff <main branch>...HEAD` top to bottom as a stranger, against the ten passes. Fix what you find and run `## Checks` again.
+2. In your own session, number each item in the latest `Kickback:` or `QA: fail` comment. Fix it, answer it with evidence, or disagree in one or two sentences. Fix exactly what it asks, then rerun the checks and the proof for each item you touched. In a step, the step's prompt says how.
 
-1. Number each review or QA item. Fix it, answer it with evidence, or disagree in one or two sentences.
-2. Fix exactly what was asked. Rerun the checks and the proof for every item you touched.
-3. Put a problem outside the change in the reply; don't fix it.
-
-**Reply:** the branch and commits, one line per criterion with its test and result, each check's command and exit code, what self-review found and fixed, each review or QA item and what you did, and anything outside the change.
+**Reply:** the plan, the branch and commits, one line per criterion with its test and result, each check with its exit code, what self-review found and fixed, each kickback or QA item and what you did, and what you left out of scope. In a step, put these in the step's reply fields.

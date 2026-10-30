@@ -181,7 +181,7 @@ func TestRunStepRefusesBadRequests(t *testing.T) {
 }
 
 // No playbook moves a ticket to done, even when lint never saw it:
-// /maestro-review does.
+// /maestro-code-review does.
 func TestOnlyDoneEndersSetDone(t *testing.T) {
 	for name, yaml := range map[string]string{
 		"step":    "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done --from todo\n",

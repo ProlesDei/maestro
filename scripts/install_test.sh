@@ -92,7 +92,7 @@ git init -q "$tmp/team"
 install --tickets "$team" "$tmp/team" || { cat "$tmp/out"; fail "install --tickets exited non-zero"; }
 for harness in .claude .agents; do
 	same "$team/maestro-create-ticket" "$tmp/team/$harness/skills/maestro-create-ticket"
-	same "$skills/maestro-review" "$tmp/team/$harness/skills/maestro-review"
+	same "$skills/maestro-code-review" "$tmp/team/$harness/skills/maestro-code-review"
 done
 
 # A bad --tickets dir refuses before doctor runs or anything is written.
@@ -113,20 +113,20 @@ refuses "usage:" "$tmp/bad" --tickets
 refuses "--tickets needs a directory" "$tmp/bad" --tickets "" "$tmp/bad"
 [ "$(wc -l <"$STUB_LOG")" -eq 3 ] || fail "doctor ran for a refused install: $(cat "$STUB_LOG")"
 
-# A team's own work and review skills don't clash; a maestro-review does.
+# A team's own work and review skills don't clash; a maestro-code-review does.
 git init -q "$tmp/own"
-for name in work review create-ticket; do
+for name in work review code-review create-ticket; do
 	mkdir -p "$tmp/own/.claude/skills/$name"
 	echo mine >"$tmp/own/.claude/skills/$name/SKILL.md"
 done
 install "$tmp/own" || { cat "$tmp/out"; fail "install beside the team's own skills exited non-zero"; }
-for name in work review create-ticket; do
+for name in work review code-review create-ticket; do
 	[ "$(cat "$tmp/own/.claude/skills/$name/SKILL.md")" = mine ] || fail "install changed the team's $name skill"
 done
-same "$skills/maestro-review" "$tmp/own/.claude/skills/maestro-review"
+same "$skills/maestro-code-review" "$tmp/own/.claude/skills/maestro-code-review"
 git init -q "$tmp/clash"
-mkdir -p "$tmp/clash/.agents/skills/maestro-review"
-refuses ".agents/skills/maestro-review already exists" "$tmp/clash" "$tmp/clash"
+mkdir -p "$tmp/clash/.agents/skills/maestro-code-review"
+refuses ".agents/skills/maestro-code-review already exists" "$tmp/clash" "$tmp/clash"
 
 git init -q "$tmp/nostore"
 export STUB_FAIL=1

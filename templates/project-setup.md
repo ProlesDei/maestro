@@ -31,6 +31,10 @@ maestro-ticket
 
 <or your own tool, and how to find, claim, comment on and close a ticket in it; `maestro-working-principles` reads this>
 
+## Review
+
+<paths every review treats as high risk, such as `src/auth/` or `migrations/`; `/maestro-code-review` reads this>
+
 ## Conventions
 
 <branch and commit style, where tests live, files never to touch>

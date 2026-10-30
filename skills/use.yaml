@@ -5,14 +5,14 @@
 #     build: [my-tdd]        # one step, by template name: playbooks/<playbook>/build.md
 prompts:
   all: [maestro-working-principles]
-  build: [maestro-tdd]
+  plan: [maestro-software-engineer]
+  build: [maestro-software-engineer, maestro-tdd]
   verify: [maestro-prove-complete]
 commands:                    # you call these; no prompt names them
   - maestro-create-ticket
-  - maestro-review
+  - maestro-code-review
   - maestro-planner
   - maestro-qa-lead
-  - maestro-software-engineer
   - maestro-chief-of-staff
   - maestro-figure-it-out
   - maestro-swarm
