@@ -58,15 +58,15 @@ Who does what, and how work moves between them:
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts every job with claude -p, never touches code"]
+    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts jobs with claude -p, or codex exec for review<br/>Never touches code"]
     Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>todo → in_progress → in_review → done<br/>blocked · cancelled")]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
     Eng["<b>Engineer</b><br/>/maestro-work &lt;id&gt;"]
 
     subgraph Work ["maestro-play run engineer/work: one ticket to one PR"]
         Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
-        Build["<b>Build</b><br/>Frontier<br/>Test first · mode: feature, bug, refactor, perf"]
+        Build["<b>Build</b><br/>Frontier<br/>Test first (perf: measure first)<br/>mode: feature, bug, refactor, perf"]
         Checks["<b>Project checks</b><br/>Checks list in project-setup.md<br/>No tokens · none listed passes"]
         Verify["<b>Verify</b><br/>Mid-tier<br/>Evidence from the running code"]
         PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
@@ -93,7 +93,8 @@ flowchart TD
     Eng --> Plan --> Build --> Checks --> Verify --> PR
     Checks -.->|"failed"| Build
     Verify -.->|"failed"| Build
-    Work -.->|"blocked: Escalation note"| CoS
+    Work -.->|"blocked: Escalation note"| Eng
+    Eng -.->|"what the ticket can't settle"| CoS
     CoS -.->|"Answer note, unblock"| Tickets
 
     %% Test and review
@@ -131,7 +132,7 @@ How each bot works, and what one `/maestro-work` run does:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;<br/><i>How the bot is started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
@@ -145,7 +146,7 @@ flowchart TD
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]
 
-    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · every call has a timeout"]
+    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
 
     subgraph Run ["One /maestro-work run"]
         B1["<b>Claim</b><br/>Lease and fencing token<br/>A keepalive holds the lease"]
@@ -158,11 +159,11 @@ flowchart TD
         B8(["Run ends<br/>maestro-play resume &lt;run-id&gt; after a crash"])
     end
 
-    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt"]
+    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
 
     Step["<b>Step session</b>, headless<br/>claude -p --json-schema or codex exec<br/>All permissions unless MAESTRO_CLAUDE_ARGS<br/>or MAESTRO_CODEX_ARGS set limits<br/>Never writes tickets: the engine does"]
 
-    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>dirty worktree refused · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
+    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>a dirty worktree fails check, head and open pr · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
 
     subgraph Roles ["Same anatomy, different profiles: what each bot starts"]
         direction LR
@@ -184,10 +185,10 @@ flowchart TD
     B5 -->|"ok or done: next step,<br/>or the step on: names"| B3
     B5 -->|"missing a field: retry"| B3
     B5 -->|"last step"| B6
-    B5 -->|"blocked, failed or over step_visits"| B7
+    B5 -->|"blocked, partial, failed with no on: route,<br/>or over step_visits"| B7
     B6 --> B8
     B7 --> B8
-    B1 -.-> S3
+    B1 -.-> Installed
     B8 ~~~ Roles
 
     classDef runtime fill:#f5f5f5,stroke:#555,color:#1a1a1a

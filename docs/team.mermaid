@@ -1,15 +1,15 @@
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts every job with claude -p, never touches code"]
+    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts jobs with claude -p, or codex exec for review<br/>Never touches code"]
     Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>todo → in_progress → in_review → done<br/>blocked · cancelled")]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
     Eng["<b>Engineer</b><br/>/maestro-work &lt;id&gt;"]
 
     subgraph Work ["maestro-play run engineer/work: one ticket to one PR"]
         Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
-        Build["<b>Build</b><br/>Frontier<br/>Test first · mode: feature, bug, refactor, perf"]
+        Build["<b>Build</b><br/>Frontier<br/>Test first (perf: measure first)<br/>mode: feature, bug, refactor, perf"]
         Checks["<b>Project checks</b><br/>Checks list in project-setup.md<br/>No tokens · none listed passes"]
         Verify["<b>Verify</b><br/>Mid-tier<br/>Evidence from the running code"]
         PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
@@ -36,7 +36,8 @@ flowchart TD
     Eng --> Plan --> Build --> Checks --> Verify --> PR
     Checks -.->|"failed"| Build
     Verify -.->|"failed"| Build
-    Work -.->|"blocked: Escalation note"| CoS
+    Work -.->|"blocked: Escalation note"| Eng
+    Eng -.->|"what the ticket can't settle"| CoS
     CoS -.->|"Answer note, unblock"| Tickets
 
     %% Test and review

@@ -1,5 +1,5 @@
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;<br/><i>How the bot is started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
@@ -13,7 +13,7 @@ flowchart TD
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]
 
-    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · every call has a timeout"]
+    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
 
     subgraph Run ["One /maestro-work run"]
         B1["<b>Claim</b><br/>Lease and fencing token<br/>A keepalive holds the lease"]
@@ -26,11 +26,11 @@ flowchart TD
         B8(["Run ends<br/>maestro-play resume &lt;run-id&gt; after a crash"])
     end
 
-    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt"]
+    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
 
     Step["<b>Step session</b>, headless<br/>claude -p --json-schema or codex exec<br/>All permissions unless MAESTRO_CLAUDE_ARGS<br/>or MAESTRO_CODEX_ARGS set limits<br/>Never writes tickets: the engine does"]
 
-    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>dirty worktree refused · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
+    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>a dirty worktree fails check, head and open pr · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
 
     subgraph Roles ["Same anatomy, different profiles: what each bot starts"]
         direction LR
@@ -52,10 +52,10 @@ flowchart TD
     B5 -->|"ok or done: next step,<br/>or the step on: names"| B3
     B5 -->|"missing a field: retry"| B3
     B5 -->|"last step"| B6
-    B5 -->|"blocked, failed or over step_visits"| B7
+    B5 -->|"blocked, partial, failed with no on: route,<br/>or over step_visits"| B7
     B6 --> B8
     B7 --> B8
-    B1 -.-> S3
+    B1 -.-> Installed
     B8 ~~~ Roles
 
     classDef runtime fill:#f5f5f5,stroke:#555,color:#1a1a1a
