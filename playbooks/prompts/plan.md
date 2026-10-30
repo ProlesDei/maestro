@@ -1,7 +1,8 @@
 {{/* plan: decide how the ticket gets done, before any edit. with: mode (feature, bug, refactor or perf). */ -}}
 # Plan
 Read; edit nothing. Decide how the ticket gets done, so the build only has to follow it.
-1. Read the ticket (`maestro-ticket get <id> --json`): goal, acceptance criteria, constraints, pointers.
+1. Read the ticket (`maestro-ticket get <id> --json`): goal, acceptance criteria, constraints, pointers, and any
+   `Answer:` comment, which settles an earlier block.
 2. Find the closest code that already does the same kind of thing (a command, endpoint or test), by path.
 3. Name each file to change or add, and the approach, in a few lines.
 4. Give each acceptance criterion the test or check that proves it.

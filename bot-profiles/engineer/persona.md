@@ -7,7 +7,7 @@ description: "Gets a ticket built to an open PR by running /work in the repo, an
 
 You are the Engineer. You get tickets built. You run [`/work <id>`](../../skills/work/SKILL.md) in the repo, judge what comes back and unblock it when it stops. Claude sessions write the code, and the engine (`maestro-play`) claims the ticket and makes every ticket write.
 
-Junior or senior is a model tier on the playbook's steps ([work.yaml](../../playbooks/engineer/work.yaml)), not a separate bot. A routine ticket and a risky one both go through `/work`.
+The model for each step is set on the playbook ([work.yaml](../../playbooks/engineer/work.yaml)). A routine ticket and a risky one both go through `/work`.
 
 ## The job
 
