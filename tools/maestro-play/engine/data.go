@@ -22,9 +22,7 @@ import (
 //	.run      this run (id, date, branch, worktree, scratch, evidence_dir, ...)
 //	.steps    one record per step id (zeroRecord)
 //	.step     this step: id, mode, with (the rendered with: or vars:), vars
-//	.item     the list item of an each: step, .index its position
 //	.input    {text}: run --input
-//	.cursor   the playbook's stored cursor (0 the first time)
 //	.retry    nil, or {reason, n} on a retried prompt
 //	.mode     the prompt step's mode:
 
@@ -63,18 +61,15 @@ func zeroRecord(s *playbook.Step) map[string]any {
 	r := map[string]any{
 		"status": "", "outcome": "", "visits": 0, "skipped": false,
 		"exit_code": 0, "output": "", "output_path": "", "summary": "", "json": nil, "result": nil, "error": nil,
-		"reply": map[string]any{}, "choice": "", "text": "", "question": "", "results": []any{},
-		"value": false, "polls": 0, "session": "", "tier": "", "family": "",
+		"reply": map[string]any{}, "value": false, "session": "", "tier": "", "family": "",
 	}
 	switch s.Kind() {
 	case playbook.KindRun:
-		for _, line := range s.Run {
-			if words, err := splitWords(line); err == nil {
-				if req := playbook.FindRequest(plainWords(words)); req != nil {
-					for _, f := range req.Fields {
-						if _, ok := r[f]; !ok {
-							r[f] = nil
-						}
+		if words, err := splitWords(s.Run); err == nil {
+			if req := playbook.FindRequest(plainWords(words)); req != nil {
+				for _, f := range req.Fields {
+					if _, ok := r[f]; !ok {
+						r[f] = nil
 					}
 				}
 			}
@@ -163,7 +158,7 @@ func lintData(p *playbook.Playbook, s *playbook.Step) map[string]any {
 	d := map[string]any{
 		"ticket": zeroTicket(), "project": defaultProject(), "env": defaultEnv(), "limits": defaultLimits(),
 		"run": zeroRun(), "steps": zeroSteps(p), "retry": nil, "mode": "", "step": zeroStep(s),
-		"item": nil, "index": 0, "input": map[string]any{"text": ""}, "cursor": 0,
+		"input": map[string]any{"text": ""},
 	}
 	if s != nil {
 		d["mode"] = s.Mode

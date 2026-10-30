@@ -125,12 +125,6 @@ func (l *linter) playbook(p *playbook.Playbook, folder string) {
 	if p.Input != "" && p.Input != "required" && p.Input != "optional" {
 		l.add(path, "", fmt.Sprintf("input %q: want required or optional", p.Input))
 	}
-	if c := p.Cursor; c != nil {
-		if !playbook.IdentRE.MatchString(strings.ReplaceAll(c.Name, "-", "_")) {
-			l.add(path, "", fmt.Sprintf("cursor.name %q: want lower case letters, digits, - and _", c.Name))
-		}
-		l.template(p, nil, "cursor.save", c.Save, lintSchema(p, nil))
-	}
 	l.intake(p)
 	if len(p.Steps) == 0 {
 		l.add(path, "", "no steps")
@@ -197,9 +191,6 @@ func (l *linter) intakeEntry(p *playbook.Playbook, in *playbook.Intake) {
 	if !playbook.Contains(playbook.Categories, in.Category) {
 		l.add(p.Path, "", fmt.Sprintf("intake.category %q: want one of %s", in.Category, strings.Join(playbook.Categories, ", ")))
 	}
-	if in.Category == "scheduled" && len(in.Status) > 0 {
-		l.add(p.Path, "", "intake: a scheduled playbook takes no ticket status")
-	}
 	if (in.Category == "sent-back" || in.Category == "new-work") && len(in.Status) == 0 {
 		l.add(p.Path, "", "intake.status is empty")
 	}
@@ -208,25 +199,10 @@ func (l *linter) intakeEntry(p *playbook.Playbook, in *playbook.Intake) {
 			l.add(p.Path, "", fmt.Sprintf("intake.status %q: unknown status", st))
 		}
 	}
-	if in.Role != "" && in.Role != "any" && !playbook.Contains(playbook.Roles, in.Role) {
-		l.add(p.Path, "", fmt.Sprintf("intake.role %q: want any or a role", in.Role))
-	}
-	if in.Type != "" && in.Type != "ship" && in.Type != "scout" {
-		l.add(p.Path, "", fmt.Sprintf("intake.type %q: want ship or scout", in.Type))
-	}
-	if in.Owner != "" && !playbook.Contains(playbook.Roles, in.Owner) {
-		l.add(p.Path, "", fmt.Sprintf("intake.owner %q: not a role", in.Owner))
-	}
-	if in.Category == "scheduled" && p.Claim {
-		l.add(p.Path, "", "claim: a scheduled playbook has no ticket to claim")
-	}
 }
 
 // outcomes is what on: may map for a step.
 func outcomes(s *playbook.Step) (fixed []string, exitN bool) {
-	if s.Each != "" {
-		return []string{"ok", "fail"}, false
-	}
 	switch s.Kind() {
 	case playbook.KindTicket, playbook.KindRun:
 		return []string{"ok", "fail"}, true
@@ -234,8 +210,6 @@ func outcomes(s *playbook.Step) (fixed []string, exitN bool) {
 		return playbook.ReplyStatuses, false
 	case playbook.KindGate:
 		return []string{"ok", "fail"}, false
-	case playbook.KindAsk:
-		return s.Ask.Choices, false
 	}
 	return nil, false
 }
@@ -244,7 +218,7 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 	path := p.Path
 	kind := s.Kind()
 	if kind == "" {
-		l.add(path, s.ID, "want exactly one of ticket, run, prompt, gate, ask")
+		l.add(path, s.ID, "want exactly one of ticket, run, prompt, gate")
 		return
 	}
 	if kind != playbook.KindPrompt {
@@ -277,9 +251,6 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 			l.add(path, s.ID, "body is for ticket comment, create and transition steps")
 		}
 		l.template(p, s, "body", s.Body, schema)
-	}
-	if s.Each != "" {
-		l.template(p, s, "each", "{{"+s.Each+"}}", schema)
 	}
 	if s.Block != nil {
 		l.block(p, s.ID, *s.Block, schema)
@@ -323,23 +294,6 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 		l.promptStep(p, s, schema)
 	case playbook.KindGate:
 		l.boolTemplate(p, s, "gate", s.Gate, schema)
-	case playbook.KindAsk:
-		a := s.Ask
-		if strings.TrimSpace(a.Question) == "" {
-			l.add(path, s.ID, "ask.question is empty")
-		}
-		l.template(p, s, "ask.question", a.Question, schema)
-		if len(a.Choices) == 0 {
-			l.add(path, s.ID, "ask.choices: want one or more")
-		}
-		for _, c := range a.Choices {
-			if !playbook.IdentRE.MatchString(c) {
-				l.add(path, s.ID, fmt.Sprintf("ask.choices %q: want lower case letters, digits and _", c))
-			}
-		}
-		if _, err := a.LeaseTTL(); err != nil {
-			l.add(path, s.ID, "ask: "+err.Error())
-		}
 	}
 }
 
@@ -402,39 +356,37 @@ func (l *linter) ticketStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 var doneWord = regexp.MustCompile(`(^|[^\w.])done($|[^\w])`)
 
 // DoneEnders are the playbooks that may move a ticket to done: none. The
-// reviewer's /review merges the PR and sets done itself.
+// reviewer's /maestro-review merges the PR and sets done itself.
 var DoneEnders []string
 
 func (l *linter) endsDone(p *playbook.Playbook, step string) {
 	if !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		l.add(p.Path, step, "moves the ticket to done; no playbook may: /review does")
+		l.add(p.Path, step, "moves the ticket to done; no playbook may: /maestro-review does")
 	}
 }
 
 func (l *linter) runStep(p *playbook.Playbook, s *playbook.Step, schema map[string]any) {
-	for _, line := range s.Run {
-		words, err := splitWords(line)
-		if err != nil || len(words) == 0 {
-			l.add(p.Path, s.ID, fmt.Sprintf("run: can't split %q", line))
-			continue
-		}
-		req := playbook.FindRequest(plainWords(words))
-		switch {
-		case req == nil:
-			var names []string
-			for _, r := range playbook.Requests {
-				if !r.Engine {
-					names = append(names, r.Name)
-				}
-			}
-			l.add(p.Path, s.ID, fmt.Sprintf("run %q: not a built-in request (want %s)", words[0].text, strings.Join(names, ", ")))
-		case req.Engine:
-			l.add(p.Path, s.ID, fmt.Sprintf("run %s: the engine sends this itself", req.Name))
-		default:
-			l.requestArgs(p, s, req, words[len(strings.Fields(req.Name)):])
-		}
-		l.template(p, s, "run", line, schema)
+	words, err := splitWords(s.Run)
+	if err != nil || len(words) == 0 {
+		l.add(p.Path, s.ID, fmt.Sprintf("run: can't split %q", s.Run))
+		return
 	}
+	req := playbook.FindRequest(plainWords(words))
+	switch {
+	case req == nil:
+		var names []string
+		for _, r := range playbook.Requests {
+			if !r.Engine {
+				names = append(names, r.Name)
+			}
+		}
+		l.add(p.Path, s.ID, fmt.Sprintf("run %q: not a built-in request (want %s)", words[0].text, strings.Join(names, ", ")))
+	case req.Engine:
+		l.add(p.Path, s.ID, fmt.Sprintf("run %s: the engine sends this itself", req.Name))
+	default:
+		l.requestArgs(p, s, req, words[len(strings.Fields(req.Name)):])
+	}
+	l.template(p, s, "run", s.Run, schema)
 }
 
 // requestArgs checks a request's literal flags and, when no word is a

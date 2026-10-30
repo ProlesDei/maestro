@@ -2,11 +2,15 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
@@ -231,7 +235,8 @@ func TestWorktreeAddReuses(t *testing.T) {
 	}
 }
 
-// A check that isn't listed, or a setup with no checks, fails the step.
+// A check that isn't listed fails the step; check all with no checks
+// listed, or no setup, passes with none run.
 func TestCheckNeedsChecks(t *testing.T) {
 	w := newWorld(t)
 	st := &State{ID: "r1"}
@@ -242,7 +247,7 @@ func TestCheckNeedsChecks(t *testing.T) {
 		t.Errorf("one check: %v", r)
 	}
 	os.Remove(filepath.Join(w.repo, SetupPath))
-	if r, _ := w.e.check(st, "all"); r["status"] != "failed" || !strings.Contains(str(r["output"]), "no checks under ## Checks") {
+	if r, _ := w.e.check(st, "all"); r["status"] != "ok" || r["summary"] != "no checks listed" || len(r["checks"].([]any)) != 0 {
 		t.Errorf("no setup: %v", r)
 	}
 	if e := w.e.environment(); e["project"].(map[string]any)["main_branch"] != "main" {
@@ -431,5 +436,166 @@ func TestFailedStartRetriesWithANewSession(t *testing.T) {
 	first, second := flagValue(s[0].Args, "--session-id"), flagValue(s[1].Args, "--session-id")
 	if first == "" || second == "" || first == second {
 		t.Errorf("session ids %q then %q, want two new ones", first, second)
+	}
+}
+
+// A project with no checks still gets its PR: check all passes with none
+// run, and the Handoff note says so.
+func TestNoChecksStillOpensThePR(t *testing.T) {
+	w := newWorldAt(t, "testdata/work", &fakeTicketT{ID: "T-1", Title: "Add --json", Body: "Type: feature\nCriteria: C1",
+		Type: "ship", Status: "todo", Role: "engineer", Owner: "chief-of-staff", Version: 1})
+	os.WriteFile(filepath.Join(w.repo, SetupPath), []byte("# Project setup\n\n## Main branch\n\nmain\n\n## Checks\n\nNone yet.\n"), 0o644)
+	w.script(fakeConfig{Harness: workReplies("Add --json")})
+	r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+	if r.Status != StatusDone {
+		t.Fatalf("result %+v", r)
+	}
+	tk := w.ticket("T-1")
+	if note := tk.Comments[len(tk.Comments)-1].Body; tk.Status != "in_review" || !strings.Contains(note, `Checks: "no checks listed"`) {
+		t.Errorf("ticket %s, note:\n%s", tk.Status, note)
+	}
+	if n := len(w.find("check")); n != 0 {
+		t.Errorf("%d checks ran", n)
+	}
+}
+
+// Sessions may do anything unless the user's own args set permissions;
+// then the engine adds none. Codex gets the flag on resume too.
+func TestSessionPermissions(t *testing.T) {
+	session := func(w *world, st *State) fakeCall {
+		t.Helper()
+		if _, err := w.e.session(st, "plan", "prompt", []string{"plan"}, "mid", "", false); err != nil {
+			t.Fatal(err)
+		}
+		s := w.sessions()
+		return s[len(s)-1]
+	}
+	w := newWorld(t)
+	w.script(fakeConfig{Harness: []map[string]any{workReplies("x")[0]}})
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); flagValue(c.Args, "--permission-mode") != "bypassPermissions" {
+		t.Errorf("claude default %q", c.Args)
+	}
+	w.e.cfg.ClaudeArgs = []string{"--permission-mode", "acceptEdits"}
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); strings.Contains(strings.Join(c.Args, " "), "bypassPermissions") ||
+		flagValue(c.Args, "--permission-mode") != "acceptEdits" {
+		t.Errorf("claude with the user's mode %q", c.Args)
+	}
+	w.e.cfg.Harness = "codex"
+	st := w.e.newState(&playbookStub, "eng-1", "", nil)
+	for _, c := range []fakeCall{session(w, st), session(w, st)} {
+		if !hasFlag(c.Args, "--dangerously-bypass-approvals-and-sandbox") {
+			t.Errorf("codex default %q", c.Args)
+		}
+	}
+	w.e.cfg.CodexArgs = []string{"-c", "sandbox_mode=workspace-write"}
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); hasFlag(c.Args, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Errorf("codex with the user's sandbox %q", c.Args)
+	}
+	for _, c := range []struct {
+		h    string
+		user string
+		ours bool
+	}{
+		{"claude", "", true}, {"claude", "--model x", true}, {"claude", "--permission-mode=plan", false},
+		{"claude", "--dangerously-skip-permissions", false}, {"claude", "--allowedTools Edit", false},
+		{"codex", "", true}, {"codex", "-c model=x", true}, {"codex", "-s read-only", false},
+		{"codex", "--sandbox=workspace-write", false}, {"codex", "--config=approval_policy=never", false},
+	} {
+		got := permissionArgs(c.h, strings.Fields(c.user))
+		if ours := len(got) > len(strings.Fields(c.user)); ours != c.ours {
+			t.Errorf("permissionArgs(%s, %q) = %q", c.h, c.user, got)
+		}
+	}
+}
+
+// childGone reports, within 5s, that the child a hung fake started has
+// exited.
+func (w *world) childGone() bool {
+	b, err := os.ReadFile(filepath.Join(w.dir, "child.pid"))
+	pid, _ := strconv.Atoi(string(b))
+	if err != nil || pid <= 0 {
+		w.t.Fatalf("no child.pid: %v", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return true
+		}
+		if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+			if f := strings.Fields(string(b)); len(f) > 2 && f[2] == "Z" {
+				return true // dead, not yet reaped
+			}
+		}
+	}
+	return false
+}
+
+// A check that hangs is killed with what it started; it fails with
+// "timed out after", and the other checks still run.
+func TestCheckTimesOut(t *testing.T) {
+	w := newWorld(t)
+	w.e.cfg.CheckTimeout = 300 * time.Millisecond
+	w.script(fakeConfig{Replies: map[string][]map[string]any{"check unit": {{"sleep": "30s"}}}})
+	start := time.Now()
+	r, err := w.e.check(&State{ID: "r1"}, "all")
+	if err != nil || r["status"] != "failed" || r["summary"] != "1 of 2 failed: unit" || toInt(r["exit_code"]) != 124 ||
+		!strings.Contains(str(r["output"]), "timed out after 300ms") {
+		t.Fatalf("check %v %v", r, err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("check took %v", d)
+	}
+	if n := len(w.find("check", "lint")); n != 1 {
+		t.Errorf("lint ran %d times", n)
+	}
+	if !w.childGone() {
+		t.Errorf("the check's child outlived the timeout")
+	}
+}
+
+// A session that hangs times out, and the run escalates as for any other
+// failed step.
+func TestSessionTimesOutAndEscalates(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	w.e.cfg.SessionTimeout = 300 * time.Millisecond
+	hung := reply("done", map[string]any{"plan": "p", "risks": "r"})
+	hung["sleep"] = "30s"
+	w.script(fakeConfig{Harness: []map[string]any{hung, reply("done", map[string]any{"happened": "plan hung"})}})
+	r := w.run(RunOpts{Ref: "engineer/build-ticket", Ticket: "T-1"})
+	if r.Status != StatusBlocked || r.Step != "plan" || !strings.Contains(r.Reason, "session failed: timed out after 300ms") {
+		t.Fatalf("result %+v", r)
+	}
+	tk := w.ticket("T-1")
+	if tk.Status != "blocked" || tk.Claim != nil || !strings.HasPrefix(tk.Comments[len(tk.Comments)-1].Body, "Escalation: plan hung") {
+		t.Errorf("ticket %s claim %+v comments %+v", tk.Status, tk.Claim, tk.Comments)
+	}
+	if !w.childGone() {
+		t.Errorf("the session's child outlived the timeout")
+	}
+}
+
+// A push that hangs fails open pr with "timed out after", and no PR opens.
+func TestPushTimesOut(t *testing.T) {
+	w := newWorld(t)
+	st := &State{ID: "r1", Ticket: "T-1"}
+	wt, err := w.e.worktreeAdd(st, "T-1", "main")
+	if err != nil || wt["status"] != "ok" {
+		t.Fatalf("worktree add %v %v", wt, err)
+	}
+	st.Worktree, st.Branch = str(wt["path"]), str(wt["branch"])
+	os.WriteFile(filepath.Join(st.Worktree, "change.txt"), []byte("x\n"), 0o644)
+	w.git(st.Worktree, "add", "change.txt")
+	w.git(st.Worktree, "commit", "-q", "-m", "change")
+	w.e.cfg.GitTimeout = 300 * time.Millisecond
+	w.script(fakeConfig{Replies: map[string][]map[string]any{"git push": {{"sleep": "30s"}}}})
+	r, err := w.e.openPR(st, "", "")
+	if err != nil || r["status"] != "failed" || toInt(r["exit_code"]) != 124 ||
+		!strings.HasPrefix(str(r["output"]), "git push: ") || !strings.Contains(str(r["output"]), "timed out after 300ms") {
+		t.Fatalf("open pr %v %v", r, err)
+	}
+	if n := len(w.find("gh", "pr", "create")); n != 0 {
+		t.Errorf("%d PRs created", n)
+	}
+	if !w.childGone() {
+		t.Errorf("the push's child outlived the timeout")
 	}
 }

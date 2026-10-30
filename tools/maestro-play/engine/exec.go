@@ -2,11 +2,16 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type execResult struct {
@@ -15,15 +20,30 @@ type execResult struct {
 	stderr string
 }
 
-// run starts bin and waits. The error is only for a binary that can't
-// start; a non-zero exit is in the result.
+// timedOutExit is a timed-out command's exit code, as timeout(1) has it.
+const timedOutExit = 124
+
+// run starts bin and waits, with no time limit: maestro-ticket calls are
+// short, and a claim's keepalive shares the call's process group. The
+// error is only for a binary that can't start; a non-zero exit is in the
+// result.
 func (e *Engine) run(dir, bin string, args ...string) (execResult, error) {
-	return e.exec(dir, bin, nil, "", args...)
+	return e.exec(dir, bin, nil, "", -1, args...)
 }
 
-// exec is run with extra environment variables and stdin.
-func (e *Engine) exec(dir, bin string, extra []string, stdin string, args ...string) (execResult, error) {
-	cmd := exec.Command(bin, args...)
+// exec is run with extra environment variables, stdin and a time limit (a
+// negative one is none). The command gets its own process group, so a
+// timeout kills what it started too; the result then has exit 124 and
+// stderr ends "timed out after <d>". A signal that would stop this
+// process goes to the group first.
+func (e *Engine) exec(dir, bin string, extra []string, stdin string, timeout time.Duration, args ...string) (execResult, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(append([]string(nil), e.cfg.Environ...), extra...)
 	if stdin != "" {
@@ -31,16 +51,49 @@ func (e *Engine) exec(dir, bin string, extra []string, stdin string, args ...str
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second // a child that left the group may hold the pipes
+	if err := cmd.Start(); err != nil {
+		return execResult{}, fmt.Errorf("%s: %w", bin, err)
+	}
+	stop := forwardSignals(cmd.Process.Pid)
+	err := cmd.Wait()
+	stop()
 	res := execResult{stdout: out.String(), stderr: errb.String()}
 	var ee *exec.ExitError
 	switch {
+	case err != nil && ctx.Err() == context.DeadlineExceeded:
+		res.exit = timedOutExit
+		res.stderr += fmt.Sprintf("\ntimed out after %s\n", timeout)
 	case errors.As(err, &ee):
 		res.exit = ee.ExitCode()
 	case err != nil:
 		return res, fmt.Errorf("%s: %w", bin, err)
 	}
 	return res, nil
+}
+
+// forwardSignals sends an interrupt, hangup or terminate to the process
+// group pgid, which no longer shares this process's, then lets it stop
+// this process as before. stop ends it.
+func forwardSignals(pgid int) (stop func()) {
+	sigs := make(chan os.Signal, 1)
+	done := make(chan struct{})
+	signal.Notify(sigs, os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
+	go func() {
+		select {
+		case s := <-sigs:
+			syscall.Kill(-pgid, s.(syscall.Signal))
+			signal.Reset(s)
+			syscall.Kill(os.Getpid(), s.(syscall.Signal))
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(sigs)
+		close(done)
+	}
 }
 
 // ticketCall is one maestro-ticket call's outcome.

@@ -14,7 +14,7 @@ const playbooks, skills = "../../playbooks", "../../skills"
 
 func TestRepoPlaybooksLint(t *testing.T) {
 	if _, err := playbook.Load(playbooks, "engineer/work"); err != nil {
-		t.Fatalf("engineer/work, the playbook /work runs: %v", err)
+		t.Fatalf("engineer/work, the playbook /maestro-work runs: %v", err)
 	}
 	res, err := engine.Lint(playbooks, skills)
 	if err != nil {

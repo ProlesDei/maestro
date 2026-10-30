@@ -1,7 +1,7 @@
 name: review-change
 role: reviewer
 description: Review a change on another model family; approve it or send it back.
-intake: {category: new-work, status: in_review, role: any, type: ship, latest: "Handoff:"}
+intake: {category: new-work, status: in_review, latest: "Handoff:"}
 claim: true
 steps:
   - id: review

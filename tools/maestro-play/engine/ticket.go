@@ -2,10 +2,7 @@ package engine
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
@@ -60,15 +57,6 @@ func kind(body string) string {
 	return ""
 }
 
-func bodyHasLine(body, prefix string) bool {
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 // statusMismatch says why run --ticket can't take a ticket, or "": it
 // checks only the intake's statuses, so a bot can resume a ticket
 // that waits on someone.
@@ -80,50 +68,6 @@ func statusMismatch(p *playbook.Playbook, t map[string]any) string {
 	status := str(t["status"])
 	if len(want) > 0 && !playbook.Contains(want, status) {
 		return fmt.Sprintf("status %s; %s takes %s", status, p.Ref(), strings.Join(want, ", "))
-	}
-	return ""
-}
-
-// matchIntake says why a ticket doesn't fit one intake entry, or "".
-func matchIntake(in *playbook.Intake, role string, t map[string]any) string {
-	if len(in.Status) > 0 && !playbook.Contains(in.Status, str(t["status"])) {
-		return fmt.Sprintf("status %s, want %s", str(t["status"]), strings.Join(in.Status, ", "))
-	}
-	if r := in.TicketRole(role); r != "" && str(t["role"]) != r {
-		return fmt.Sprintf("role %s, want %s", str(t["role"]), r)
-	}
-	return matchFilters(in, t)
-}
-
-// matchFilters applies the intake filters list can't: type, kind, body
-// lines and the latest comment's prefix.
-func matchFilters(in *playbook.Intake, t map[string]any) string {
-	if in.Type != "" && str(t["type"]) != in.Type {
-		return fmt.Sprintf("type %s, want %s", str(t["type"]), in.Type)
-	}
-	if len(in.Kinds) > 0 && !playbook.Contains(in.Kinds, str(t["kind"])) {
-		return fmt.Sprintf("kind %q, want %s", str(t["kind"]), strings.Join(in.Kinds, ", "))
-	}
-	if in.Owner != "" && str(t["owner"]) != in.Owner {
-		return fmt.Sprintf("owner %s, want %s", str(t["owner"]), in.Owner)
-	}
-	if in.Title != "" && !strings.HasPrefix(str(t["title"]), in.Title) {
-		return fmt.Sprintf("title doesn't start %q", in.Title)
-	}
-	body := str(t["body"])
-	if in.Body != "" && !bodyHasLine(body, in.Body) {
-		return fmt.Sprintf("no body line starts %q", in.Body)
-	}
-	if in.UnlessBody != "" && bodyHasLine(body, in.UnlessBody) {
-		return fmt.Sprintf("a body line starts %q", in.UnlessBody)
-	}
-	if latest, ok := t["latest"].(string); ok {
-		if in.Latest != "" && !strings.HasPrefix(latest, in.Latest) {
-			return fmt.Sprintf("latest comment doesn't start %q", in.Latest)
-		}
-		if in.UnlessLatest != "" && strings.HasPrefix(latest, in.UnlessLatest) {
-			return fmt.Sprintf("latest comment starts %q", in.UnlessLatest)
-		}
 	}
 	return ""
 }
@@ -237,26 +181,4 @@ func (e *Engine) keepalive(st *State) error {
 	}
 	go cmd.Wait()
 	return nil
-}
-
-func cursorPath(common, bot, name string) string {
-	return filepath.Join(common, "cursors", bot, name)
-}
-
-// loadCursor is the playbook cursor's stored value for this bot: an int if
-// it's one, else the text; 0 the first time.
-func (e *Engine) loadCursor(bot, name string) any {
-	b, err := os.ReadFile(cursorPath(e.cfg.Common, bot, name))
-	if err != nil {
-		return 0
-	}
-	v := strings.TrimSpace(string(b))
-	if n, err := strconv.Atoi(v); err == nil {
-		return n
-	}
-	return v
-}
-
-func (e *Engine) saveCursor(bot, name, value string) error {
-	return writeAtomic(cursorPath(e.cfg.Common, bot, name), []byte(strings.TrimSpace(value)+"\n"))
 }

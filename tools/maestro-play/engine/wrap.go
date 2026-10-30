@@ -50,13 +50,13 @@ func (e *Engine) render(p *playbook.Playbook, st *State, name, tmpl string) (str
 	if tmpl == "" {
 		return "", nil
 	}
-	out, err := renderTemplate(name, tmpl, e.data(p, st, nil, nil))
+	out, err := renderTemplate(name, tmpl, e.data(p, st, nil))
 	return strings.TrimSpace(out), err
 }
 
 // finish is the built-in done: memory proposals to the inbox, the note as
-// a comment, the move with --release (or a release for to: keep), the
-// cursor, the log line.
+// a comment, the move with --release (or a release for to: keep), the log
+// line.
 func (e *Engine) finish(p *playbook.Playbook, st *State) error {
 	if err := e.writeMemory(p, st); err != nil {
 		return err
@@ -74,7 +74,7 @@ func (e *Engine) finish(p *playbook.Playbook, st *State) error {
 			return fail(fmt.Sprintf("done.to rendered %q, not a status", to))
 		}
 		if to == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-			return fail(fmt.Sprintf("%s/%s may not move a ticket to done; /review does", p.Role, p.Name))
+			return fail(fmt.Sprintf("%s/%s may not move a ticket to done; /maestro-review does", p.Role, p.Name))
 		}
 		role, err := e.render(p, st, "done.role", p.Done.Role)
 		if err != nil {
@@ -128,16 +128,6 @@ func (e *Engine) finish(p *playbook.Playbook, st *State) error {
 		st.Token = 0
 		st.Wrapped["released"] = true
 		e.readTicket(st)
-	}
-	if p.Cursor != nil && p.Cursor.Save != "" && !st.Wrapped["cursor"] {
-		v, err := e.render(p, st, "cursor.save", p.Cursor.Save)
-		if err != nil {
-			return fail("cursor.save: " + err.Error())
-		}
-		if err := e.saveCursor(st.Bot, p.Cursor.Name, v); err != nil {
-			return err
-		}
-		st.Wrapped["cursor"] = true
 	}
 	st.Status = StatusDone
 	return e.logLine(p, st, "")
@@ -332,7 +322,7 @@ func oneLine(s string) string {
 // escalatePrompt asks the session for the escalation's content. If it
 // can't, the note falls back on the stop reason.
 func (e *Engine) escalatePrompt(p *playbook.Playbook, st *State) error {
-	data := e.data(p, st, nil, nil)
+	data := e.data(p, st, nil)
 	prompt, err := e.compose("_escalate", data, str(st.Env["harness"]))
 	if err != nil {
 		st.Escalation = map[string]any{"error": "render _escalate.md: " + err.Error()}

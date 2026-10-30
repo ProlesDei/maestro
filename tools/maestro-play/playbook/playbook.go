@@ -13,21 +13,20 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Roles are the bot-profile folder names a playbook can belong to.
-var Roles = []string{"chief-of-staff", "engineer", "reviewer"}
+var Roles = []string{"chief-of-staff", "planner", "engineer", "qa-lead", "reviewer"}
 
 // Statuses are maestro-ticket's statuses (tools/maestro-ticket/ticket).
 var Statuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
 
-// Categories are the intake categories, in the order --next tries them.
-var Categories = []string{"request", "sent-back", "new-work", "scheduled"}
+// Categories are the intake categories: the kind of work an entry takes.
+var Categories = []string{"request", "sent-back", "new-work"}
 
 // Tiers are the model tiers a prompt step can ask for, cheapest first. The
 // engine maps them to model names; playbooks never name a model.
@@ -49,7 +48,6 @@ const (
 	KindRun    = "run"
 	KindPrompt = "prompt"
 	KindGate   = "gate"
-	KindAsk    = "ask"
 )
 
 // Targets an on: entry can name besides a step id. done goes to the done:
@@ -75,8 +73,6 @@ type Playbook struct {
 	// Input is required or optional for a playbook started with --input
 	// <text> (.input.text); empty means it takes none.
 	Input string `yaml:"input"`
-	// Cursor is a value kept per bot between runs (.cursor), saved at done.
-	Cursor *Cursor `yaml:"cursor"`
 	// Session is "ticket" or "run" (one harness session for every prompt
 	// step, the default) or "step" (a fresh session per prompt step).
 	Session string `yaml:"session"`
@@ -108,12 +104,6 @@ func (p *Playbook) Index(id string) int {
 		}
 	}
 	return -1
-}
-
-// Cursor names a stored value; Save is the template stored at done.
-type Cursor struct {
-	Name string `yaml:"name"`
-	Save string `yaml:"save"`
 }
 
 // IntakeList is one intake, or a list: the playbook takes a ticket that
@@ -159,42 +149,21 @@ func decodeStrict(n *yaml.Node, v any) error {
 	return nil
 }
 
-// Intake says which tickets the playbook takes, for run --next.
+// Intake says which tickets the playbook takes. run --ticket checks only
+// the status; Latest, the comment the entry expects last, is for readers.
 type Intake struct {
 	Category string     `yaml:"category"`
 	Status   StringList `yaml:"status"`
-	// Role filters on the ticket's role: the playbook's role when empty, no
-	// filter when "any".
-	Role         string   `yaml:"role"`
-	Type         string   `yaml:"type"`  // ship or scout; empty for both
-	Kinds        []string `yaml:"kinds"` // the body's "Type: <kind>" line
-	Latest       string   `yaml:"latest"`
-	UnlessLatest string   `yaml:"unless_latest"`
-	Body         string   `yaml:"body"`        // some body line starts with it
-	UnlessBody   string   `yaml:"unless_body"` // no body line starts with it
-	Owner        string   `yaml:"owner"`       // the ticket's owner role
-	Title        string   `yaml:"title"`       // the title starts with it
-}
-
-// TicketRole is the --role filter for list, or "" for none.
-func (in *Intake) TicketRole(playbookRole string) string {
-	switch in.Role {
-	case "":
-		return playbookRole
-	case "any":
-		return ""
-	}
-	return in.Role
+	Latest   string     `yaml:"latest"`
 }
 
 // Step is one entry of steps:. Exactly one of the kind keys is set.
 type Step struct {
 	ID     string `yaml:"id"`
 	Ticket string `yaml:"ticket"`
-	Run    Lines  `yaml:"run"`
+	Run    string `yaml:"run"`
 	Prompt string `yaml:"prompt"`
 	Gate   string `yaml:"gate"`
-	Ask    *Ask   `yaml:"ask"`
 
 	When  *When             `yaml:"when"`
 	On    map[string]string `yaml:"on"`
@@ -216,9 +185,6 @@ type Step struct {
 	// Body is rendered and passed as --body (comment, create) or --note
 	// (transition) when it isn't empty.
 	Body string `yaml:"body"`
-	// Each is a dot path to a list: the step runs once per item, with
-	// .item and .index, and .steps.<id>.results holds one record per item.
-	Each string `yaml:"each"`
 	// Block overrides the playbook's block: for this step's escalation.
 	Block *Block `yaml:"block"`
 }
@@ -237,7 +203,7 @@ func (s *Step) Kind() string {
 	if s.Ticket != "" {
 		kinds = append(kinds, KindTicket)
 	}
-	if len(s.Run) > 0 {
+	if s.Run != "" {
 		kinds = append(kinds, KindRun)
 	}
 	if s.Prompt != "" {
@@ -245,9 +211,6 @@ func (s *Step) Kind() string {
 	}
 	if s.Gate != "" {
 		kinds = append(kinds, KindGate)
-	}
-	if s.Ask != nil {
-		kinds = append(kinds, KindAsk)
 	}
 	if len(kinds) != 1 {
 		return ""
@@ -261,26 +224,6 @@ func (s *Step) Tier() string {
 		return "mid"
 	}
 	return s.Model
-}
-
-// Ask pauses the run for the bot's answer.
-type Ask struct {
-	Question string   `yaml:"question"`
-	Choices  []string `yaml:"choices"`
-	// Timeout is how long the lease is kept while the run waits (default 4h).
-	Timeout string `yaml:"timeout"`
-}
-
-// LeaseTTL is how long a waiting run keeps its lease.
-func (a *Ask) LeaseTTL() (time.Duration, error) {
-	if a.Timeout == "" {
-		return 4 * time.Hour, nil
-	}
-	d, err := time.ParseDuration(a.Timeout)
-	if err != nil || d < 5*time.Second || d > 24*time.Hour {
-		return 0, fmt.Errorf("timeout %q: want a duration from 5s to 24h", a.Timeout)
-	}
-	return d, nil
 }
 
 // When is a step's condition: a template that renders true or false, and an
@@ -363,30 +306,6 @@ func (b Block) MoveTo(to string) string {
 	return "todo"
 }
 
-// Lines is a run: step's built-in request: one line, or a list of them,
-// sent in order until one fails.
-type Lines []string
-
-// UnmarshalYAML takes a line or a list of lines.
-func (l *Lines) UnmarshalYAML(n *yaml.Node) error {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		*l = nil
-		if n.Value != "" {
-			*l = Lines{n.Value}
-		}
-		return nil
-	case yaml.SequenceNode:
-		var s []string
-		if err := n.Decode(&s); err != nil {
-			return fmt.Errorf("line %d: run: want a request or a list of them", n.Line)
-		}
-		*l = s
-		return nil
-	}
-	return fmt.Errorf("line %d: run: want a request or a list of them", n.Line)
-}
-
 // StringList is a YAML scalar or sequence of strings.
 type StringList []string
 
@@ -412,7 +331,7 @@ func (l *StringList) UnmarshalYAML(n *yaml.Node) error {
 	return fmt.Errorf("line %d: want a string or a list", n.Line)
 }
 
-// IdentRE is what step ids, reply fields and ask choices must match, so
+// IdentRE is what step ids and reply fields must match, so
 // templates can name them as .steps.<id>.reply.<field>.
 var IdentRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
@@ -441,19 +360,6 @@ func Load(dir, ref string) (*Playbook, error) {
 		return nil, err
 	}
 	return Parse(path, data)
-}
-
-// Intakes is the playbook's intake entries.
-func (p *Playbook) Intakes() []Intake { return p.Intake }
-
-// Scheduled reports whether the playbook takes no ticket from intake.
-func (p *Playbook) Scheduled() bool {
-	for _, in := range p.Intake {
-		if in.Category != "scheduled" {
-			return false
-		}
-	}
-	return len(p.Intake) > 0
 }
 
 // LoadRole reads every playbook of a role, sorted by file name.
