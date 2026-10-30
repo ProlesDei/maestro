@@ -1,0 +1,25 @@
+name: release
+role: reviewer
+description: Open the pull request, wait for it to merge, and ask before going on.
+intake: {category: new-work, status: in_review, role: any}
+claim: true
+steps:
+  - id: worktree
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: open
+    run: open pr --title {{quote .ticket.title}}
+  - id: status
+    run: pr status
+  - id: merged
+    wait: {step: status, until: '{{eq .steps.status.state "merged"}}', every: 1m, timeout: 5m}
+    on: {timeout: block}
+  - id: go_on
+    ask:
+      question: 'PR {{.steps.open.url}} merged at {{.steps.status.merge_sha}}. Check main now?'
+      choices: [check, hold]
+    on: {hold: done}
+  - id: check
+    run: check all
+done:
+  to: keep
+  note: 'Handoff: released {{.steps.status.merge_sha}}{{with .steps.go_on.text}} ({{.}}){{end}}.'

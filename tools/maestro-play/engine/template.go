@@ -139,7 +139,7 @@ func comments(t any) []string {
 
 // lineValue is the value of the last "<key>:" line of text with one, or
 // "". The last, because a note writes its trailers after any reply text,
-// which may carry a forged line of its own (0746).
+// which may carry a forged line of its own.
 func lineValue(key, text string) string {
 	v := ""
 	for _, l := range strings.Split(text, "\n") {
@@ -152,7 +152,7 @@ func lineValue(key, text string) string {
 
 // latestLine is lineValue of the newest comment that has the key. It is
 // the one trailer reader: latestLine, .ticket.trailers and the author's
-// family all go through it, so they never disagree (0746, 0756).
+// family all go through it, so they never disagree.
 func latestLine(bodies []string, key string) string {
 	for i := len(bodies) - 1; i >= 0; i-- {
 		if v := lineValue(key, bodies[i]); v != "" {

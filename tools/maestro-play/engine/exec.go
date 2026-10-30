@@ -18,14 +18,17 @@ type execResult struct {
 // run starts bin and waits. The error is only for a binary that can't
 // start; a non-zero exit is in the result.
 func (e *Engine) run(dir, bin string, args ...string) (execResult, error) {
-	return e.runEnv(dir, bin, nil, args...)
+	return e.exec(dir, bin, nil, "", args...)
 }
 
-// runEnv is run with extra environment variables.
-func (e *Engine) runEnv(dir, bin string, extra []string, args ...string) (execResult, error) {
+// exec is run with extra environment variables and stdin.
+func (e *Engine) exec(dir, bin string, extra []string, stdin string, args ...string) (execResult, error) {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(append([]string(nil), e.cfg.Environ...), extra...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
@@ -66,46 +69,9 @@ func (e *Engine) ticket(args ...string) (ticketCall, error) {
 	return c, nil
 }
 
-// runner sends one request and returns its reply: status, exit_code,
-// output and any fields the request adds. A reply that isn't JSON is
-// status failed.
-func (e *Engine) runner(st *State, words ...string) (map[string]any, error) {
-	args := []string{"--json", "--bot", st.Bot, "--role", st.Role}
-	if st.Ticket != "" {
-		args = append(args, "--ticket", st.Ticket)
-	}
-	if st.ID != "" {
-		args = append(args, "--run", st.ID)
-	}
-	// Every process a run starts, and every session the runner launches for
-	// it, carries the run's id, so none can start a run of its own (0787).
-	var env []string
-	if st.ID != "" {
-		env = []string{RunEnv + "=" + st.ID}
-	}
-	res, err := e.runEnv(e.cfg.Dir, e.cfg.RunnerBin, env, append(args, words...)...)
-	if err != nil {
-		return nil, err
-	}
-	reply := map[string]any{}
-	if decodeJSON([]byte(res.stdout), &reply) != nil {
-		reply = map[string]any{"status": "failed", "output": trimOutput(res.stdout + res.stderr)}
-	}
-	if _, ok := reply["status"].(string); !ok {
-		reply["status"] = "failed"
-	}
-	if _, ok := reply["exit_code"]; !ok {
-		reply["exit_code"] = res.exit
-	}
-	if _, ok := reply["output"]; !ok {
-		reply["output"] = trimOutput(res.stderr)
-	}
-	reply["exit_code"] = toInt(reply["exit_code"])
-	return reply, nil
-}
-
-// RunEnv names the run a process belongs to. The engine sets it on the
-// runner, and the runner passes it to every session it launches.
+// RunEnv names the run a process belongs to. The engine sets it on every
+// command and session it starts, so none of them can start a run of its
+// own.
 const RunEnv = "MAESTRO_RUN_ID"
 
 // insideRun is the run this engine's own process belongs to, or "".
@@ -118,7 +84,7 @@ func (e *Engine) insideRun() string {
 	return ""
 }
 
-// trimOutput keeps the last 40 lines, like the runner does.
+// trimOutput keeps the last 40 lines.
 func trimOutput(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	if len(lines) > 40 {

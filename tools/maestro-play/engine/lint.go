@@ -34,7 +34,7 @@ type LintResult struct {
 
 // Lint checks every playbooks/<role>/<job>.yaml under dir, the prompt
 // templates in dir/prompts and skillsDir/use.yaml: the schema, step types,
-// runner request names and roles, ticket subcommands, outcome targets,
+// built-in request names and flags, ticket subcommands, outcome targets,
 // template syntax and variables, and that every listed skill has a folder.
 func Lint(dir, skillsDir string) (LintResult, error) {
 	var res LintResult
@@ -397,9 +397,9 @@ func (l *linter) ticketStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 			}
 		}
 	}
-	// The store's write rules (0430-0434, 0760).
+	// The store's write rules.
 	if _, ok := flags["--add-try"]; ok {
-		l.add(p.Path, s.ID, "ticket: no --add-try; the store counts tries (0432)")
+		l.add(p.Path, s.ID, "ticket: no --add-try; the store counts tries")
 	}
 	if _, ok := flags["--expect-version"]; ok && sub == "comment" {
 		l.add(p.Path, s.ID, "ticket comment takes no --expect-version")
@@ -408,9 +408,9 @@ func (l *linter) ticketStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 		switch typ := flags["--type"]; {
 		case strings.Contains(typ, "{{"):
 		case typ != "ship" && typ != "scout":
-			l.add(p.Path, s.ID, fmt.Sprintf("ticket create --type %q: want ship or scout (0430)", typ))
+			l.add(p.Path, s.ID, fmt.Sprintf("ticket create --type %q: want ship or scout", typ))
 		case typ == "scout" && flags["--owner"] == "":
-			l.add(p.Path, s.ID, "ticket create --type scout needs --owner (0433)")
+			l.add(p.Path, s.ID, "ticket create --type scout needs --owner")
 		}
 	}
 	if sub == "transition" && flags["--to"] == "done" {
@@ -422,16 +422,13 @@ func (l *linter) ticketStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 // doneWord finds done in a done.to, templated or not.
 var doneWord = regexp.MustCompile(`(^|[^\w.])done($|[^\w])`)
 
-// DoneEnders are the only playbooks that may move a ticket to done (0760):
-// release ships it, and the others close what nobody ships.
-var DoneEnders = []string{
-	"operations-manager/release", "operations-manager/infrastructure-request",
-	"planner/plan-project", "planner/accept-report", "chief-of-staff/handle-escalation",
-}
+// DoneEnders are the playbooks that may move a ticket to done: none. The
+// reviewer's /review merges the PR and sets done itself.
+var DoneEnders []string
 
 func (l *linter) endsDone(p *playbook.Playbook, step string) {
 	if !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		l.add(p.Path, step, "moves the ticket to done; only "+strings.Join(DoneEnders, ", ")+" may (0760)")
+		l.add(p.Path, step, "moves the ticket to done; no playbook may: /review does")
 	}
 }
 
@@ -442,25 +439,55 @@ func (l *linter) runStep(p *playbook.Playbook, s *playbook.Step, schema map[stri
 			l.add(p.Path, s.ID, fmt.Sprintf("run: can't split %q", line))
 			continue
 		}
-		for _, w := range words[1:] {
-			for _, f := range playbook.RunnerFlags {
-				if isFlag(w.text, f) {
-					l.add(p.Path, s.ID, fmt.Sprintf("run: the engine sends %s itself", f))
-				}
-			}
-		}
 		req := playbook.FindRequest(plainWords(words))
 		switch {
 		case req == nil:
-			l.add(p.Path, s.ID, fmt.Sprintf("run %q: not a runner request (docs/runner.md)", words[0].text))
+			var names []string
+			for _, r := range playbook.Requests {
+				if !r.Engine {
+					names = append(names, r.Name)
+				}
+			}
+			l.add(p.Path, s.ID, fmt.Sprintf("run %q: not a built-in request (want %s)", words[0].text, strings.Join(names, ", ")))
 		case req.Engine:
 			l.add(p.Path, s.ID, fmt.Sprintf("run %s: the engine sends this itself", req.Name))
-		case req.Name == "play":
-			l.add(p.Path, s.ID, "run play: a run never starts another run (0787); post a note the other playbook's intake picks up")
-		case !req.Allows(p.Role):
-			l.add(p.Path, s.ID, fmt.Sprintf("run %s: not allowed for %s (docs/runner.md)", req.Name, p.Role))
+		default:
+			l.requestArgs(p, s, req, words[len(strings.Fields(req.Name)):])
 		}
 		l.template(p, s, "run", line, schema)
+	}
+}
+
+// requestArgs checks a request's literal flags and, when no word is a
+// template that may render to nothing or to several words, its shape.
+func (l *linter) requestArgs(p *playbook.Playbook, s *playbook.Step, req *playbook.Request, words []word) {
+	plain := true
+	var texts []string
+	for _, w := range words {
+		t := w.text
+		if strings.Contains(t, "{{") {
+			if inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(t, "{{"), "}}")); strings.Count(t, "{{") != 1 ||
+				!strings.HasPrefix(t, "{{") || !strings.HasSuffix(t, "}}") || !strings.HasPrefix(inner, ".") || strings.ContainsAny(inner, " |") {
+				plain = false
+			}
+			t = "x" // one word, whatever it renders
+		}
+		texts = append(texts, t)
+	}
+	for _, t := range texts {
+		if strings.HasPrefix(t, "-") {
+			name, _, _ := strings.Cut(t, "=")
+			if !playbook.Contains(req.Flags, "--"+strings.TrimLeft(name, "-")) {
+				l.add(p.Path, s.ID, fmt.Sprintf("run %s takes no %s (want %s)", req.Name, name, req.Usage))
+				return
+			}
+		}
+	}
+	if !plain {
+		return
+	}
+	if _, _, err := reqArgs(req, texts); err != nil {
+		l.add(p.Path, s.ID, "run "+err.Error())
 	}
 }
 
@@ -504,7 +531,7 @@ func (l *linter) template(p *playbook.Playbook, s *playbook.Step, name, text str
 
 // boolTemplate is template for a when, gate or until, which must also
 // render true or false when it renders on zero data: and and or return an
-// operand, so a list in one renders [] (0755).
+// operand, so a list in one renders [].
 func (l *linter) boolTemplate(p *playbook.Playbook, s *playbook.Step, name, text string, schema map[string]any) {
 	l.check(p, s, name, text, schema, true)
 }
@@ -589,9 +616,9 @@ func (l *linter) uses(skillsDir string) {
 	l.commands(path, skillsDir, u)
 }
 
-// commands checks use.yaml's commands (0788): each is a skill folder, only
-// the user can start it (Claude Code's disable-model-invocation and Codex's
-// agents/openai.yaml, 0786), no prompt names it, and no prompt skill tells
+// commands checks use.yaml's commands: each is a skill folder, only the
+// user can start it (Claude Code's disable-model-invocation and Codex's
+// agents/openai.yaml), no prompt names it, and no prompt skill tells
 // a step to call it, except on a line, or under a heading, about the
 // user's own session.
 func (l *linter) commands(path, skillsDir string, u *playbook.Uses) {

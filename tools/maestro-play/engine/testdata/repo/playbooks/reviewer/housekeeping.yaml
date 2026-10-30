@@ -1,0 +1,10 @@
+name: housekeeping
+role: reviewer
+description: Read the checkout's head, and act only if it names nothing.
+intake: {category: scheduled}
+steps:
+  - id: list
+    run: head
+  - id: apply
+    when: '{{if eq .steps.list.sha "none"}}true{{else}}false{{end}}'
+    run: head

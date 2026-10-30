@@ -41,7 +41,7 @@ func TestLintFixturesClean(t *testing.T) {
 }
 
 func TestLintCatches(t *testing.T) {
-	head := "name: bad\nrole: senior-software-engineer\ndescription: d\nclaim: true\n"
+	head := "name: bad\nrole: engineer\ndescription: d\nclaim: true\n"
 	cases := []struct {
 		name, yaml, want string
 	}{
@@ -53,14 +53,18 @@ func TestLintCatches(t *testing.T) {
 		{"two step types", head + "steps:\n  - id: a\n    run: check all\n    gate: 'true'\n", "want exactly one of"},
 		{"bad id", head + "steps:\n  - id: Write-Tests\n    run: check all\n", "id \"Write-Tests\""},
 		{"duplicate id", head + "steps:\n  - id: a\n    run: check all\n  - id: a\n    run: check all\n", "duplicate id"},
-		{"unknown request", head + "steps:\n  - id: a\n    run: deploy-everything now\n", "not a runner request"},
+		{"unknown request", head + "steps:\n  - id: a\n    run: deploy-everything now\n", "not a built-in request (want worktree add, check, head, open pr, pr status)"},
 		{"engine request", head + "steps:\n  - id: a\n    run: session start\n", "the engine sends this itself"},
-		{"role not allowed", head + "steps:\n  - id: a\n    run: merge {{.ticket.id}}\n", "merge: not allowed for senior-software-engineer"},
+		{"removed request", head + "steps:\n  - id: a\n    run: merge {{.ticket.id}}\n", `run "merge": not a built-in request`},
+		{"unknown flag", head + "steps:\n  - id: a\n    run: worktree add {{.ticket.id}} --from main --force\n", "run worktree add takes no --force (want worktree add <ticket> --from <branch>)"},
+		{"missing flag", head + "steps:\n  - id: a\n    run: worktree add {{.ticket.id}}\n", "run worktree add: want worktree add <ticket> --from <branch>"},
+		{"missing word", head + "steps:\n  - id: a\n    run: check\n", "run check: want check all, or check <name>"},
+		{"extra word", head + "steps:\n  - id: a\n    run: head {{.ticket.id}}\n", "run head: want head"},
 		{"ticket claim", head + "steps:\n  - id: a\n    ticket: claim {{.ticket.id}}\n", "the engine claims"},
 		{"engine flag", head + "steps:\n  - id: a\n    ticket: comment {{.ticket.id}} --body x --token 3\n", "--token is the engine's"},
-		{"engine flag, one dash", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done -actor-role=operations-manager\n", "--actor-role is the engine's"},
+		{"engine flag, one dash", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done -actor-role=reviewer\n", "--actor-role is the engine's"},
 		{"gate not a bool", head + "steps:\n  - id: a\n    run: check all\n  - id: b\n    gate: '{{or .steps.a.results .steps.a.results}}'\n", `gate rendered "[]" on empty data`},
-		{"runner flag", head + "steps:\n  - id: a\n    run: check all --role qa-lead\n", "the engine sends --role itself"},
+		{"flag a request doesn't take", head + "steps:\n  - id: a\n    run: check all --role reviewer\n", "run check takes no --role"},
 		{"bad subcommand", head + "steps:\n  - id: a\n    ticket: frob\n", "ticket \"frob\""},
 		{"on target", head + "steps:\n  - id: a\n    run: check all\n    on: {fail: nowhere}\n", "no step \"nowhere\""},
 		{"on outcome", head + "steps:\n  - id: a\n    run: check all\n    on: {done: next}\n", "\"done\" isn't an outcome of a run step"},
@@ -80,23 +84,25 @@ func TestLintCatches(t *testing.T) {
 		{"bad intake", head + "intake: {category: urgent, status: [todo, doing]}\nsteps:\n  - id: a\n    run: check all\n", "intake.category \"urgent\""},
 		{"bad intake status", head + "intake: {category: new-work, status: [doing]}\nsteps:\n  - id: a\n    run: check all\n", "intake.status \"doing\""},
 		{"syntax", head + "steps:\n  - id: a\n    gate: '{{if}}'\n", "missing value for if"},
-		{"nested run", head + "steps:\n  - id: a\n    run: play run planner/groom-board --bot pl-1\n", "run play: a run never starts another run"},
+		{"nested run", head + "steps:\n  - id: a\n    run: play run engineer/work --bot e-1\n", `run "play": not a built-in request`},
 		{"actor flag", head + "steps:\n  - id: a\n    ticket: comment {{.ticket.id}} --actor chief-of-staff\n", "--actor is the engine's"},
 		{"claim id", head + "steps:\n  - id: claim\n    run: check all\n", "id claim is the engine's"},
 		{"add try", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to in_progress --add-try\n", "no --add-try"},
 		{"comment version", head + "steps:\n  - id: a\n    ticket: comment {{.ticket.id}} --expect-version 3\n", "comment takes no --expect-version"},
-		{"create type", head + "steps:\n  - id: a\n    ticket: create --type feature --role planner --title x\n", `--type "feature": want ship or scout`},
-		{"create no type", head + "steps:\n  - id: a\n    ticket: create --role planner --title x\n", `--type "": want ship or scout`},
-		{"scout owner", head + "steps:\n  - id: a\n    ticket: create --type=scout --role planner --title x\n", "--type scout needs --owner"},
-		{"done move", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done\n", "moves the ticket to done; only"},
-		{"done wrap-up", head + "steps:\n  - id: a\n    run: check all\ndone: {to: '{{if .ticket.id}}done{{else}}in_review{{end}}'}\n", "moves the ticket to done; only"},
-		{"name mismatch", "name: other\nrole: senior-software-engineer\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", "must match the file name"},
+		{"create type", head + "steps:\n  - id: a\n    ticket: create --type feature --role engineer --title x\n", `--type "feature": want ship or scout`},
+		{"create no type", head + "steps:\n  - id: a\n    ticket: create --role engineer --title x\n", `--type "": want ship or scout`},
+		{"scout owner", head + "steps:\n  - id: a\n    ticket: create --type=scout --role engineer --title x\n", "--type scout needs --owner"},
+		{"done move", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done\n", "moves the ticket to done; no playbook may"},
+		{"done wrap-up", head + "steps:\n  - id: a\n    run: check all\ndone: {to: '{{if .ticket.id}}done{{else}}in_review{{end}}'}\n", "moves the ticket to done; no playbook may"},
+		{"removed status", head + "intake: {category: new-work, status: in_qa}\nsteps:\n  - id: a\n    run: check all\n", `intake.status "in_qa"`},
+		{"removed role", "name: bad\nrole: planner\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", `unknown role "planner"`},
+		{"name mismatch", "name: other\nrole: engineer\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", "must match the file name"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 			copyTree(t, "testdata/repo", dir)
-			if err := os.WriteFile(filepath.Join(dir, "playbooks", "senior-software-engineer", "bad.yaml"), []byte(c.yaml), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "playbooks", "engineer", "bad.yaml"), []byte(c.yaml), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			res, err := Lint(filepath.Join(dir, "playbooks"), filepath.Join(dir, "skills"))
@@ -280,7 +286,7 @@ func TestCheckReply(t *testing.T) {
 		{map[string]any{"status": "done", "summary": "", "evidence": ev, "commit": "c000001"}, "summary"},
 		{map[string]any{"status": "done", "summary": "s", "evidence": ev, "commit": "c000001", "processes": []any{map[string]any{"pid": 0}}}, "processes"},
 		{nil, "no structured reply"},
-		// A commit lands in a sha: trailer, so it must be one sha (0746).
+		// A commit lands in a sha: trailer, so it must be one sha.
 		{map[string]any{"status": "done", "summary": "s", "evidence": ev, "commit": "abc1234\ntries-at-takeover: 99"}, "commit: want one git sha"},
 		{map[string]any{"status": "done", "summary": "s", "evidence": ev, "commit": "HEAD"}, "commit: want one git sha"},
 		{map[string]any{"status": "done", "summary": "s", "evidence": ev, "commit": ""}, "commit: want one git sha"},

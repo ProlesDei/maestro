@@ -1,6 +1,6 @@
 name: review-change
-role: code-reviewer
-description: Review a change on another model family; pass it to QA or send it back.
+role: reviewer
+description: Review a change on another model family; approve it or send it back.
 intake: {category: new-work, status: in_review, role: any, type: ship, latest: "Handoff:"}
 claim: true
 steps:
@@ -15,5 +15,5 @@ steps:
     ticket: transition {{.ticket.id}} --to in_progress --note "changes requested"
     on: {ok: end}
   - id: pass
-    ticket: transition {{.ticket.id}} --to in_qa
+    ticket: comment {{.ticket.id}} --body approved
 block: {to: chief-of-staff}

@@ -1,5 +1,5 @@
 name: build-ticket
-role: senior-software-engineer
+role: engineer
 description: Build a complex or risky ticket on its own maestro/ branch, with tests for each criterion, and submit it for review.
 intake: {category: new-work, status: todo, kinds: [feature, chore, docs],
          unless_latest: "Escalation:", unless_body: "Playbook: "}

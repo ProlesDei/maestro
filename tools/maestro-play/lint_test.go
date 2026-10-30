@@ -13,6 +13,9 @@ import (
 const playbooks, skills = "../../playbooks", "../../skills"
 
 func TestRepoPlaybooksLint(t *testing.T) {
+	if _, err := playbook.Load(playbooks, "engineer/work"); err != nil {
+		t.Fatalf("engineer/work, the playbook /work runs: %v", err)
+	}
 	res, err := engine.Lint(playbooks, skills)
 	if err != nil {
 		t.Fatal(err)
@@ -20,18 +23,14 @@ func TestRepoPlaybooksLint(t *testing.T) {
 	for _, p := range res.Problems {
 		t.Error(p.String())
 	}
-	if res.Playbooks == 0 {
-		// Say so rather than pass on nothing: the YAML playbooks come with
-		// slices 4 and 5 of 0700.
-		t.Skip("no playbooks/<role>/*.yaml to lint yet")
-	}
 	t.Logf("%d playbooks linted", res.Playbooks)
 }
 
 // TestRepoPromptsRender renders every prompt step, the done note and the
-// escalation of every playbook on a tiny-cli ticket (0700 C's merge gate).
+// escalation of every playbook on a tiny-cli ticket, once as new work and
+// once sent back with a Kickback note.
 func TestRepoPromptsRender(t *testing.T) {
-	e, err := engine.New(engine.Config{Playbooks: playbooks, Skills: skills, Common: t.TempDir()})
+	e, err := engine.New(engine.Config{Playbooks: playbooks, Skills: skills, Common: t.TempDir(), Dir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +50,16 @@ func TestRepoPromptsRender(t *testing.T) {
 					steps = append(steps, s.ID)
 				}
 			}
-			for _, step := range steps {
-				n++
-				_, err := e.Render(engine.RenderOpts{Ref: p.Ref(), Step: step,
-					TicketFile: "testdata/tiny-cli-ticket.json", EnvFile: "testdata/tiny-cli-env.json"})
-				if err != nil {
-					t.Errorf("render %s --step %s: %v", p.Ref(), step, err)
+			for _, ticket := range []string{"testdata/tiny-cli-ticket.json", "testdata/tiny-cli-kickback.json"} {
+				for _, step := range steps {
+					n++
+					_, err := e.Render(engine.RenderOpts{Ref: p.Ref(), Step: step, TicketFile: ticket, EnvFile: "testdata/tiny-cli-env.json"})
+					if err != nil {
+						t.Errorf("render %s --step %s on %s: %v", p.Ref(), step, ticket, err)
+					}
 				}
 			}
 		}
-	}
-	if n == 0 {
-		t.Skip("no playbooks/<role>/*.yaml to render yet")
 	}
 	t.Logf("%d renders", n)
 }

@@ -1,7 +1,7 @@
 // Package engine runs playbooks: it claims the ticket, runs each step as a
-// maestro-ticket call, a runner request or a harness prompt, records every
-// output in the run state, and does the wrap-up (done), escalation (block)
-// and clean-up itself.
+// maestro-ticket call, a built-in request or a harness prompt, records
+// every output in the run state, and does the wrap-up (done), escalation
+// (block) and clean-up itself.
 package engine
 
 import (
@@ -22,8 +22,20 @@ type Config struct {
 	Common    string // <git common dir>/maestro
 	Dir       string // the main checkout, where commands run
 	TicketBin string // maestro-ticket
-	RunnerBin string // the runner
-	Environ   []string
+	GitBin    string // git
+	GhBin     string // gh
+	ClaudeBin string // claude
+	CodexBin  string // codex
+	// Harness runs prompt steps: claude (the default) or codex.
+	Harness string
+	// Models maps a tier (mid, frontier) to the harness's model name.
+	Models map[string]string
+	// ClaudeArgs and CodexArgs go on every session call, such as a
+	// permission mode.
+	ClaudeArgs, CodexArgs []string
+	// Limits override the default limits (step_visits, retries).
+	Limits  map[string]any
+	Environ []string
 	// PID is the process the ticket lease stays alive with (claim
 	// --keepalive); the engine's own by default.
 	PID   int
@@ -45,8 +57,15 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.TicketBin == "" {
 		cfg.TicketBin = "maestro-ticket"
 	}
-	if cfg.RunnerBin == "" {
-		cfg.RunnerBin = "maestro-runner"
+	for _, b := range []struct {
+		p   *string
+		def string
+	}{
+		{&cfg.GitBin, "git"}, {&cfg.GhBin, "gh"}, {&cfg.ClaudeBin, "claude"}, {&cfg.CodexBin, "codex"}, {&cfg.Harness, "claude"},
+	} {
+		if *b.p == "" {
+			*b.p = b.def
+		}
 	}
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
@@ -112,11 +131,11 @@ type RunOpts struct {
 	Input  string // .input.text, for playbooks with input:
 }
 
-// Run starts a run: preflight, intake, claim, the steps, then done or
-// block, and clean-up.
+// Run starts a run: the harness check, intake, claim, the steps, then done
+// or block, and clean-up.
 func (e *Engine) Run(o RunOpts) (Result, error) {
 	if id := e.insideRun(); id != "" {
-		return failed("refused: this process belongs to run %s, and a run never starts another (0787)", id), nil
+		return failed("refused: this process belongs to run %s, and a run never starts another", id), nil
 	}
 	if o.Bot == "" || strings.Contains(o.Bot, "/") {
 		return failed("--bot: want a bot id without /"), nil
@@ -128,11 +147,10 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 	if e.stopped() {
 		return Result{Status: StatusStopped, Reason: "the stop file exists"}, nil
 	}
-	pre := &State{Bot: o.Bot, Role: role}
-	env, res, err := e.preflight(pre)
-	if err != nil || res != nil {
-		return deref(res), err
+	if msg := e.ready(); msg != "" {
+		return failed("%s", msg), nil
 	}
+	env := e.environment()
 	if o.Next {
 		if r, ok, err := e.resumeUnfinished(o.Bot, role); ok || err != nil {
 			return r, err
@@ -183,13 +201,6 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 	return e.start(p, st)
 }
 
-func deref(r *Result) Result {
-	if r == nil {
-		return Result{}
-	}
-	return *r
-}
-
 func (e *Engine) newState(p *playbook.Playbook, bot, ticketID string, env map[string]any) *State {
 	session := newUUID()
 	st := &State{
@@ -210,34 +221,17 @@ func (e *Engine) newState(p *playbook.Playbook, bot, ticketID string, env map[st
 	return st
 }
 
-// stopped reports whether the stop file exists (docs/runner.md).
+// stopped reports whether the stop file, <common>/STOP, exists: every run
+// stops before its next step until someone removes it.
 func (e *Engine) stopped() bool {
 	_, err := os.Stat(filepath.Join(e.cfg.Common, "STOP"))
 	return err == nil
 }
 
-// preflight asks the runner for the environment. A failed preflight means
-// nothing starts.
-func (e *Engine) preflight(st *State) (map[string]any, *Result, error) {
-	reply, err := e.runner(st, "preflight")
-	if err != nil {
-		return nil, nil, err
-	}
-	switch reply["status"] {
-	case "ok":
-	case "stopped":
-		return nil, &Result{Status: StatusStopped, Reason: "runner: stopped"}, nil
-	default:
-		r := failed("preflight %v: %v", reply["status"], reply["output"])
-		return nil, &r, nil
-	}
-	return reply, nil, nil
-}
-
 // Resume continues a run after a crash, a stop or an ask step.
 func (e *Engine) Resume(id, choice, text string) (Result, error) {
 	if in := e.insideRun(); in != "" {
-		return failed("refused: this process belongs to run %s, and a run never resumes another (0787)", in), nil
+		return failed("refused: this process belongs to run %s, and a run never resumes another", in), nil
 	}
 	r, _, err := e.resume(id, choice, text)
 	return r, err
@@ -278,7 +272,7 @@ func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
 			return failed("--choice %q: want one of %s", choice, strings.Join(st.Ask.Choices, ", ")), nil
 		}
 		// The answer's text goes into notes, so it's one line: it can never
-		// add a trailer line of its own (0746).
+		// add a trailer line of its own.
 		st.Ask.Choice, st.Ask.Text, st.Ask.Answered = choice, flat(text), true
 	case StatusRunning, StatusStopped:
 		if choice != "" {
@@ -290,9 +284,12 @@ func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
 	if e.stopped() {
 		return e.result(st), nil
 	}
-	env, res, err := e.preflight(st)
-	if err != nil || res != nil {
-		return deref(res), err
+	if msg := e.ready(); msg != "" {
+		return failed("%s", msg), nil
+	}
+	env := e.environment()
+	if f := str(st.Env["family"]); f != "" {
+		env["family"] = f // the last session's, which the notes name
 	}
 	st.Env = env
 	st.Status = StatusRunning

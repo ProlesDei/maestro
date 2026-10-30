@@ -1,0 +1,44 @@
+name: work
+role: engineer
+description: The work playbook's shape, for the engine's end-to-end test - todo, or back with a Kickback note, to an open PR at in_review.
+intake:
+  - {category: new-work, status: todo}
+  - {category: sent-back, status: in_progress, latest: "Kickback:"}
+claim: true
+session: ticket
+steps:
+  - id: start
+    when: '{{if eq .ticket.status "todo"}}true{{else}}false{{end}}'
+    reason: already in_progress
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: worktree
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: plan
+    when: '{{if hasPrefix .ticket.latest "Kickback:"}}false{{else}}true{{end}}'
+    reason: sent back by review
+    prompt: plan
+    model: frontier
+    out: [plan, risks]
+  - id: build
+    prompt: build
+    model: frontier
+    out: [commit, files, tests]
+  - id: checks
+    run: check all
+    on: {fail: build}
+  - id: verify
+    prompt: verify
+    out: [criteria, failures]
+    on: {failed: build}
+  - id: head
+    run: head
+  - id: pr
+    run: open pr
+done:
+  to: in_review
+  note: |
+    Handoff: PR {{.steps.pr.url}} from {{.run.branch}} at {{.steps.head.sha}}.
+    Checks: {{json .steps.checks.summary}}
+    {{.run.skipped}}sha: {{.steps.head.sha}}
+    pr: {{.steps.pr.url}}
+    author-family: {{.env.family}}

@@ -47,7 +47,7 @@ func (e *Engine) compose(template string, data map[string]any, harness string) (
 	return strings.Join(parts, "\n\n") + "\n", nil
 }
 
-// nameSkills names skills the harness's way (docs/runner.md, Sessions).
+// nameSkills names skills the harness's way.
 func nameSkills(harness string, skills []string) string {
 	lines := []string{"Skills for this step:"}
 	for _, s := range skills {
@@ -111,7 +111,7 @@ func checkReply(reply map[string]any, out []string) string {
 		return "fields: " + strings.Join(missing, ", ")
 	}
 	// A commit or sha lands in a note's sha: trailer as it is, so it must be
-	// one sha, never text that could add a line of its own (0746).
+	// one sha, never text that could add a line of its own.
 	for _, f := range shaFields {
 		if v, ok := reply[f]; ok && v != nil {
 			sha, _ := v.(string)
@@ -169,7 +169,8 @@ func tierUp(tier string) string {
 }
 
 // authorFamily reads author-family: from the latest Handoff: comment: its
-// last such line, which the note writes after every reply value (0746).
+// last such line, which the note writes after every reply value, so a
+// reply can't forge it.
 func authorFamily(t map[string]any) string {
 	cs, _ := t["comments"].([]any)
 	for i := len(cs) - 1; i >= 0; i-- {
@@ -184,8 +185,9 @@ func authorFamily(t map[string]any) string {
 	return str(tr["author-family"])
 }
 
-// session sends one prompt to the harness through the runner: session
-// start for the first prompt of a session, session resume after.
+// session sends one prompt to the harness: a new session for the first
+// prompt, a resume after. A not-author step whose author's family is the
+// harness's own goes to the other harness, in a session of its own.
 func (e *Engine) session(st *State, name, prompt string, out []string, tier, notFamily string, fresh bool) (map[string]any, error) {
 	dir := runDir(e.cfg.Common, st.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -200,30 +202,27 @@ func (e *Engine) session(st *State, name, prompt string, out []string, tier, not
 	if err := os.WriteFile(schemaFile, schema, 0o644); err != nil {
 		return nil, err
 	}
-	if fresh {
-		st.Session, st.SessionStarted = newUUID(), false
+	h := e.cfg.Harness
+	if notFamily != "" && familyOf(h) == notFamily {
+		h = otherHarness(h)
 	}
-	verb := "resume"
+	if fresh || st.Harness != h {
+		st.SessionStarted = false
+	}
 	if !st.SessionStarted {
-		verb = "start"
+		// A failed start may still have made the session, so every start
+		// gets a new id.
+		st.Session, st.Harness = newUUID(), h
+		st.HarnessSession = st.Session
 	}
-	args := []string{"session", verb, "--session", st.Session, "--tier", tier,
-		"--prompt-file", promptFile, "--schema-file", schemaFile,
-		"--rules", filepath.Join(e.cfg.Playbooks, "rules.md")}
-	if notFamily != "" {
-		args = append(args, "--not-family", notFamily)
-	}
-	if st.Worktree != "" {
-		args = append(args, "--cwd", st.Worktree)
-	}
-	reply, err := e.runner(st, args...)
+	r, err := e.harness(st, sessionCall{harness: h, prompt: prompt, schemaFile: schemaFile, tier: tier, resume: st.SessionStarted})
 	if err != nil {
 		return nil, err
 	}
-	if reply["status"] == "ok" {
+	if r["status"] == "ok" {
 		st.SessionStarted = true
 	}
-	return reply, nil
+	return r, nil
 }
 
 // harnessReply is the structured reply inside a session reply.
@@ -234,22 +233,6 @@ func harnessReply(r map[string]any) map[string]any {
 
 func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {
 	rec := c.rec
-	usage := []string{"usage", "check"}
-	if st.Ticket != "" {
-		usage = append(usage, st.Ticket)
-	}
-	u, err := e.runner(st, usage...)
-	if err != nil {
-		return stepOut{}, err
-	}
-	switch {
-	case u["status"] == "stopped":
-		return stepOut{status: StatusStopped}, nil
-	case toInt(u["exit_code"]) == 2:
-		out := blockOut("step %s: usage check: the budget is used up: %v", c.label(s), u["output"])
-		out.noPrompt = true
-		return out, nil
-	}
 	notFamily := ""
 	if s.Family == "not-author" {
 		if notFamily = authorFamily(st.TicketD); notFamily == "" {
@@ -277,12 +260,6 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 		r, err := e.session(st, name, prompt, s.Out, tier, notFamily, fresh && try == 0)
 		if err != nil {
 			return stepOut{}, err
-		}
-		switch r["status"] {
-		case "stopped":
-			return stepOut{status: StatusStopped}, nil
-		case "refused":
-			return blockOut("step %s: runner refused the session: %v", c.label(s), r["output"]), nil
 		}
 		reply := harnessReply(r)
 		miss := checkReply(reply, s.Out)

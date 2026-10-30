@@ -1,5 +1,5 @@
 name: answer
-role: planner
+role: chief-of-staff
 description: Answer an escalation on a blocked ticket; one it can't answer goes on to the owner.
 intake: {category: request, status: blocked, latest: "Escalation:"}
 claim: true
