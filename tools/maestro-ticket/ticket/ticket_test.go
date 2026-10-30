@@ -114,12 +114,12 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestValidateRole(t *testing.T) {
-	for _, r := range []string{"", "chief-of-staff", "engineer", "reviewer"} {
+	for _, r := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead", "reviewer"} {
 		if err := ValidateRole(r); err != nil {
 			t.Errorf("ValidateRole(%q) = %v", r, err)
 		}
 	}
-	for _, r := range []string{"cos", "planner", "qa-lead", "Engineer", "engineer "} {
+	for _, r := range []string{"cos", "code-reviewer", "senior-software-engineer", "Engineer", "engineer "} {
 		if err := ValidateRole(r); !errors.Is(err, ErrInvalid) {
 			t.Errorf("ValidateRole(%q) = %v; want ErrInvalid", r, err)
 		}
@@ -268,7 +268,8 @@ func TestCheckGate(t *testing.T) {
 		{"reviewer sets ship done", ship, StatusDone, "rev-1", RoleReviewer, true},
 		{"engineer can't", ship, StatusDone, "eng", RoleEngineer, false},
 		{"owner of a ship ticket can't", ship, StatusDone, "chief-of-staff", RoleChiefOfStaff, false},
-		{"old release role can't", ship, StatusDone, "ops", "qa-lead", false},
+		{"planner can't", ship, StatusDone, "plan", RolePlanner, false},
+		{"qa lead can't", ship, StatusDone, "qa", RoleQALead, false},
 		{"no role can't", ship, StatusDone, "rev", "", false},
 		{"other moves ungated", ship, StatusCancelled, "jse", "", true},
 		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},
