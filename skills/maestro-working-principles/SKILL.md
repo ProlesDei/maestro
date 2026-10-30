@@ -11,11 +11,11 @@ One ticket, one worktree, one branch. Commit small and leave nothing unstaged. P
 
 In a playbook step, your prompt starts "You are one step of a Maestro playbook". The engine has claimed the ticket and made the worktree, and it makes every ticket write. Do only the step. The rules in your launch flags beat this file. Skip phases 2 and 4.
 
-In your own session, the user directs the work: start at phase 2. To have the playbook do the whole job, run `/maestro-work <id>` instead.
+In your own session, the user directs the work: start at phase 2. To have the playbook do the whole job, the user runs `/maestro-work <id>` instead.
 
 ## 2. Start (in your own session)
 
-1. **Take one ticket.** Use the one the user named, else the first of `maestro-ticket list --status todo --unclaimed --json`. Work with no ticket leaves no record, so in your own session run `/maestro-create-ticket` first.
+1. **Take one ticket.** Use the one the user named, else the first of `maestro-ticket list --status todo --unclaimed --json`. Work with no ticket leaves no record, so in your own session create one first, the way the installed `maestro-create-ticket` skill says (read its `SKILL.md` and follow it).
 2. **Claim it** so no bot takes it: `maestro-ticket claim <id> --holder <you>/<session> --keepalive $PPID --json`. Keep `claim.token`; every later write on the ticket needs `--holder` and `--token`. Exit 4 means someone else holds it: leave it.
 3. **Check the keepalive.** It renews the lease while `$PPID` lives. `ps -o comm= -p $PPID` must name your harness. If it names a short-lived wrapper, release the claim and stop: the lease would lapse while you work.
 4. **Make the worktree.** `git worktree add .maestro/worktrees/<id> -b maestro/<id> <main branch>`, with the branch from `## Main branch` in `.maestro/project/project-setup.md`. Never work in the main checkout or another ticket's worktree.

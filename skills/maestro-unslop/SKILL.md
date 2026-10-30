@@ -1,6 +1,6 @@
 ---
 name: maestro-unslop
-description: "Use for /maestro-unslop, 'unslop this', 'clean up this writing', 'make this sound less like AI', or before you send a doc, PR body or message that reads as generated. Removes the tells of AI text and keeps the meaning, the facts and the author's voice."
+description: "Use when the user types /maestro-unslop or says 'unslop this', 'clean up this writing', 'make this sound less like AI', or before you send a doc, PR body or message that reads as generated. Removes the tells of AI text and keeps the meaning, the facts and the author's voice."
 argument-hint: "<text, or a path to it>"
 disable-model-invocation: true
 ---

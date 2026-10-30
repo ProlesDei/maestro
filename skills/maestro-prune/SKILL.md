@@ -1,6 +1,6 @@
 ---
 name: maestro-prune
-description: "Use for /maestro-prune, 'prune this repo', 'remove dead code', 'delete unused files', or 'clear out stale branches and worktrees'. Finds what nothing uses, proves it, lists it by class, then removes it so a revert brings it back. Asks before anything that can't be recovered."
+description: "Use when the user types /maestro-prune or says 'prune this repo', 'remove dead code', 'delete unused files', or 'clear out stale branches and worktrees'. Finds what nothing uses, proves it, lists it by class, then removes it so a revert brings it back. Asks before anything that can't be recovered."
 argument-hint: "[path] [--dry-run]"
 disable-model-invocation: true
 ---
@@ -19,7 +19,7 @@ Find what nothing uses, prove that nothing uses it, and remove it so a revert br
 | Generated output | untracked files `.gitignore` covers: `git status --ignored --porcelain` |
 | Stale worktrees | in `git worktree list`, a worktree whose branch is merged into main and whose `git status --porcelain` prints nothing |
 | Merged branches | `git branch --merged <main>`, local only |
-| Maestro leftovers | `.maestro/worktrees/<ticket>`, and `evidence/<ticket>` and `scratch/` files under `$(git rev-parse --git-common-dir)/maestro/`, for tickets `maestro-ticket get <id> --json` shows `done` or `cancelled`; ask the user how old they must be |
+| Maestro leftovers | `.maestro/worktrees/<ticket>`, and `evidence/<ticket>` (QA evidence is in its `qa/` folder) and `scratch/` files under `$(git rev-parse --git-common-dir)/maestro/`, for tickets `maestro-ticket get <id> --json` shows `done` or `cancelled`; ask the user how old they must be |
 | Empty folders, duplicates | `find -type d -empty`; identical files by `git hash-object` |
 
 ## 2. Sort each candidate

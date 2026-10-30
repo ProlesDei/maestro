@@ -1,6 +1,6 @@
 ---
 name: maestro-sharpen
-description: "Use for /maestro-sharpen, 'sharpen this prompt', 'make this prompt deeper', or before you send a prompt that should go deeper, not longer. Rewrites the prompt with what a top expert would add and hands it back. Never does the task."
+description: "Use when the user types /maestro-sharpen or says 'sharpen this prompt', 'make this prompt deeper', or before you send a prompt that should go deeper, not longer. Rewrites the prompt with what a top expert would add and hands it back. Never does the task."
 argument-hint: "<the prompt, or a path to it>"
 disable-model-invocation: true
 ---

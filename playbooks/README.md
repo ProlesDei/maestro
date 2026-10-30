@@ -33,7 +33,7 @@ Any `blocked` reply, or a step that fails with no `on:` route, escalates: `_esca
 
 ## Add a playbook
 
-1. Copy `engineer/work.yaml` to `playbooks/<role>/<job>.yaml`. `name` is the file name and `role` the folder, one of `chief-of-staff`, `engineer`, `reviewer`.
+1. Copy `engineer/work.yaml` to `playbooks/<role>/<job>.yaml`. `name` is the file name and `role` the folder, one of `chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`.
 2. Make any step with no judgment a `run` or `ticket` step, never a prompt.
 3. Give each prompt template a one-line goal, about six numbered steps and a closing `Reply:` line, in 25 lines or fewer. Put fixed text first and the `## This step` variables last, so the harness can cache the prefix.
 4. Prompts point to files, tickets and branches; they never paste them. They never name a skill or a model id.

@@ -18,14 +18,13 @@ You turn one goal into tickets an engineer can finish without asking. You read c
    - deps (earlier tickets in this plan, or ids on the board), areas (the narrowest paths it touches), priority `0` (most urgent) to `3`, and status `todo` if every criterion can be checked, else `backlog`.
 5. **Check each criterion.** A command or the running app must be able to show it, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it. Waiting on another ticket is a dep, never `blocked`.
 6. **Ask once, only if you must.** If the goal leaves a field or a choice you can't infer, ask in one message, with your pick for each so the user can say "yes". Otherwise go on.
-7. **Create, in order.** Read the installed `maestro-create-ticket` skill (`.claude/skills/maestro-create-ticket/SKILL.md`, or `.agents/skills/` in Codex) and run its **Create** step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. On a refusal, fix only the field it names; if it still refuses, stop and show it.
-8. **Close a split.** When you split a ticket, comment and cancel it once every piece exists:
+7. **Create, in order.** Create each ticket the way the installed `maestro-create-ticket` skill says: read its `SKILL.md` (in `.claude/skills/maestro-create-ticket/`, or `.agents/skills/` in Codex) and follow it. Go earliest first, so each later ticket's deps name the ids the earlier ones got. On a refusal, fix only the field it names; if it still refuses, stop and show it.
+8. **Close a split.** Once every piece exists, cancel the split ticket. If it has a live claim, leave it and say who holds the claim. A ticket whose deps still name a cancelled ticket can never be claimed, so first move each dependent (each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`) onto the pieces:
 
    ```sh
+   maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>
    maestro-ticket comment <id> --body 'Split into T-a, T-b'
    maestro-ticket transition <id> --to cancelled
    ```
 
-   If it has a live claim, leave it and say who holds the claim.
-
-Reply: the spec in five lines or fewer, one line per ticket created (`<id> <title> [status, priority, deps, areas]`), the split ticket's new status if any, and "Run `/maestro-work <first id>` to start."
+Reply: the spec in five lines or fewer, one line per ticket created (`<id> <title> [status, priority, deps, areas]`), the split ticket's new status and each dependent moved onto the pieces, if any, and "Run `/maestro-work <first id>` to start."

@@ -15,7 +15,7 @@ List the playbooks (`ls <maestro>/playbooks/*/`) and read each `description:` an
 
 ## 2. Frame the task
 
-Before you design anything, write down the goal, the done criteria (each one checkable), the inputs, the outputs and where they land, the owning role (`chief-of-staff`, `engineer` or `reviewer`), each action that can't be undone, and each call a human must make.
+Before you design anything, write down the goal, the done criteria (each one checkable), the inputs, the outputs and where they land, the owning role (`chief-of-staff`, `planner`, `engineer`, `qa-lead` or `reviewer`), each action that can't be undone, and each call a human must make.
 
 ## 3. Pick a type for each step
 
