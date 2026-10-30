@@ -1,6 +1,8 @@
 ---
 name: maestro-create-edit-skill
 description: "Create, edit, rename or retire a skill so Claude Code, Codex and Grok Build all find it and a person can keep it up. Use for /maestro-create-edit-skill, 'add a skill', 'write a SKILL.md', 'this skill never triggers', 'this skill triggers too often', or when you change a skill's description. Not for using a skill, or for code and docs that are not skills."
+argument-hint: "[what the skill should do, or its name]"
+disable-model-invocation: true
 ---
 
 # Create or edit a skill
@@ -47,6 +49,6 @@ Open a todo list with one item per phase below.
 1. Run the tests for any script you added or changed. Skill text gets no tests.
 2. Trial it in a fresh session, such as `claude -p "<prompt>"` or `codex exec "<prompt>"`: one prompt that should load the skill, one nearby prompt that shouldn't. It passes when it loads on the first, stays out of the second, and the agent follows the steps without help. For a command, run `/<name>` once instead.
 3. If it never loads, sharpen the description's trigger phrases. If it loads too often, add to `Not for ...`. Trial it again.
-4. Put both prompts and their results in the PR body.
+4. Put both prompts and their results in the PR body or commit message.
 
 **Reply:** the decision and its reason, the folders and links written or removed, the `diff -r` result if you made copies, and the two trial prompts with what happened.

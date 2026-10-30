@@ -21,3 +21,4 @@ commands:                    # you call these; no prompt names them
   - maestro-unslop
   - maestro-prune
   - maestro-refactor-code
+  - maestro-create-edit-skill
