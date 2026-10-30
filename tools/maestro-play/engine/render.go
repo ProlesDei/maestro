@@ -121,9 +121,6 @@ func (e *Engine) Render(o RenderOpts) (string, error) {
 	case playbook.KindGate:
 		ok, err := renderBool(s.ID+".gate", s.Gate, d)
 		return fmt.Sprintln(ok), err
-	case playbook.KindWait:
-		ok, err := renderBool(s.ID+".until", s.Wait.Until, d)
-		return fmt.Sprintln(ok), err
 	case playbook.KindAsk:
 		q, err := renderTemplate(s.ID+".question", s.Ask.Question, d)
 		return strings.TrimSpace(q) + "\nchoices: " + strings.Join(s.Ask.Choices, ", ") + "\n", err

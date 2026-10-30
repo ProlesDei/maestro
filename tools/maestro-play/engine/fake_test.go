@@ -24,6 +24,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
 
 func TestMain(m *testing.M) {
@@ -147,6 +149,15 @@ func fakeTicket(args []string) int {
 			return fail("lease_lost", 4)
 		}
 		return 0
+	}
+	// fake.json may fail a subcommand ("ticket transition"); a reply with
+	// no exit lets the call through.
+	if cfg := loadFake(); cfg.Replies != nil {
+		r := cfg.pop("ticket " + args[0])
+		saveJSON("fake.json", cfg)
+		if n := toInt(r["exit"]); n != 0 {
+			return fail(fmt.Sprint(r["code"]), n)
+		}
 	}
 	if s.Keys == nil {
 		s.Keys, s.Results = map[string]string{}, map[string]string{}
@@ -307,6 +318,9 @@ func fakeTicket(args []string) int {
 		if f := fl["--from"]; f != "" && f != t.Status {
 			return fail("status_conflict", 4)
 		}
+		if r := fl["--role"]; r != "" && !contains(playbook.Roles, r) {
+			return fail("invalid", 2) // the store's: unknown role
+		}
 		to := fl["--to"]
 		if to == "blocked" {
 			if t.Status == "blocked" {
@@ -354,6 +368,7 @@ type fakePR struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	State  string `json:"state"`
+	Fork   bool   `json:"fork"`
 }
 
 func loadFake() *fakeConfig {
@@ -442,14 +457,27 @@ func fakeClaude(args []string) int {
 }
 
 // fakeCodex answers codex exec --json -o <file> like codex: events on
-// stdout, the last message in the file.
+// stdout, the last message's text in the file. Like codex-cli 0.162, it
+// refuses an --output-schema that isn't strict.
 func fakeCodex(args []string) int {
 	prompt, _ := io.ReadAll(os.Stdin)
 	logCall("codex", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	_, fl := fakeFlags(args)
+	if f := fl["--output-schema"]; f != "" {
+		var schema any
+		b, _ := os.ReadFile(f)
+		if err := json.Unmarshal(b, &schema); err != nil {
+			fmt.Fprintln(os.Stderr, "invalid_json_schema:", err)
+			return 1
+		}
+		if msg := strictSchema("schema", schema); msg != "" {
+			fmt.Fprintln(os.Stderr, "invalid_json_schema: "+msg)
+			return 1
+		}
+	}
 	cfg := loadFake()
 	h := cfg.popHarness()
 	saveJSON("fake.json", cfg)
-	_, fl := fakeFlags(args)
 	rep, _ := h["reply"].(map[string]any)
 	sideEffects(h, rep)
 	thread := "codex-thread-1"
@@ -458,8 +486,47 @@ func fakeCodex(args []string) int {
 	}
 	fmt.Printf(`{"type":"thread.started","thread_id":%q}`+"\n", thread)
 	b, _ := json.Marshal(rep)
-	os.WriteFile(fl["-o"], b, 0o644)
+	os.WriteFile(fl["-o"], []byte("Done.\n"+string(b)+"\n"), 0o644)
 	return 0
+}
+
+// strictSchema is what strict mode refuses in a schema, or "": an object
+// without additionalProperties false or with a key not in required, or a
+// field with no type.
+func strictSchema(at string, v any) string {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return at + ": want an object"
+	}
+	if m["type"] == nil && m["enum"] == nil && m["anyOf"] == nil {
+		return at + ": no type"
+	}
+	if props, ok := m["properties"].(map[string]any); ok || m["type"] == "object" {
+		if m["additionalProperties"] != false {
+			return "'" + at + ".additionalProperties' is required to be supplied and to be false when strict is true"
+		}
+		req, _ := m["required"].([]any)
+		for k, p := range props {
+			if !contains(anyStrings(req), k) {
+				return at + ": " + k + " is not in required"
+			}
+			if msg := strictSchema(at+"."+k, p); msg != "" {
+				return msg
+			}
+		}
+	}
+	if items, ok := m["items"]; ok {
+		return strictSchema(at+".items", items)
+	}
+	return ""
+}
+
+func anyStrings(list []any) []string {
+	out := make([]string, len(list))
+	for i, v := range list {
+		out[i] = fmt.Sprint(v)
+	}
+	return out
 }
 
 // fakeGh is gh pr list, create and view over the PRs in fake.json.
@@ -488,7 +555,7 @@ func fakeGh(args []string) int {
 		out := []any{}
 		for _, p := range cfg.PRs {
 			if p.Head == fl["--head"] && p.State == "OPEN" {
-				out = append(out, map[string]any{"number": p.Number, "url": p.URL})
+				out = append(out, map[string]any{"number": p.Number, "url": p.URL, "isCrossRepository": p.Fork})
 			}
 		}
 		return print(out)

@@ -236,13 +236,26 @@ func (e *Engine) escalate(p *playbook.Playbook, st *State) error {
 			}
 		}
 	}
+	st.Status = StatusBlocked
 	if msg != "" {
+		// The ticket didn't reach whoever takes the escalation, so the run
+		// failed. Drop the lease anyway, so the next run can claim it.
+		st.Status = StatusFailed
 		st.StopReason += "; escalation write failed: " + msg
-	} else {
+		if st.Token > 0 {
+			ok, rmsg, err := e.write(st, "escalate-release", "release", st.Ticket)
+			if err != nil || !ok {
+				return err
+			}
+			if msg = rmsg; msg != "" {
+				st.StopReason += "; " + msg
+			}
+		}
+	}
+	if msg == "" {
 		st.Token = 0
 		st.Wrapped["released"] = true
 	}
-	st.Status = StatusBlocked
 	return e.logLine(p, st, st.StopReason)
 }
 
@@ -269,7 +282,7 @@ func (e *Engine) escalateAlone(p *playbook.Playbook, st *State) error {
 		}
 		m, _ := call.result.(map[string]any)
 		if call.exit != 0 || str(m["id"]) == "" {
-			st.StopReason += fmt.Sprintf("; escalation ticket: exit %d: %s", call.exit, call.output)
+			st.Status, st.StopReason = StatusFailed, st.StopReason+fmt.Sprintf("; escalation ticket: exit %d: %s", call.exit, call.output)
 			return e.logLine(p, st, st.StopReason)
 		}
 		st.EscalationTicket = str(m["id"])
@@ -283,18 +296,23 @@ func (e *Engine) escalateAlone(p *playbook.Playbook, st *State) error {
 		return err
 	}
 	if msg != "" {
-		st.StopReason += "; escalation write failed: " + msg
+		st.Status, st.StopReason = StatusFailed, st.StopReason+"; escalation write failed: "+msg
 	} else if !strings.Contains(st.StopReason, "escalated on ") {
 		st.StopReason += "; escalated on " + st.EscalationTicket
 	}
 	return e.logLine(p, st, st.StopReason)
 }
 
-// blockRole is the --role an escalation hands the ticket to: the owner
-// role, or the role block.to names.
+// blockRole is the --role an escalation hands the ticket to: the role
+// block.to names, or the owner's when the owner is a role. An owner who is
+// a person gets "": the ticket keeps its role, so the bot that ran it reads
+// the note first and takes it up the chain.
 func blockRole(st *State, to string) string {
 	if to == "" || to == "owner" {
-		return str(st.TicketD["owner"])
+		to = str(st.TicketD["owner"])
+	}
+	if !playbook.Contains(playbook.Roles, to) {
+		return ""
 	}
 	return to
 }

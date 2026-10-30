@@ -205,8 +205,6 @@ func (e *Engine) one(p *playbook.Playbook, st *State, s *playbook.Step, c call) 
 			return stepOut{outcome: "ok"}, nil
 		}
 		return stepOut{outcome: "fail"}, nil
-	case playbook.KindWait:
-		return e.waitStep(p, st, s)
 	case playbook.KindAsk:
 		return e.askStep(p, st, s, c)
 	}
@@ -541,59 +539,6 @@ func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c ca
 		exit = 1
 	}
 	return exitOutcome(c.rec, exit), nil
-}
-
-func (e *Engine) waitStep(p *playbook.Playbook, st *State, s *playbook.Step) (stepOut, error) {
-	w := s.Wait
-	target := p.Step(w.Step)
-	if target == nil || (target.Kind() != playbook.KindRun && target.Kind() != playbook.KindTicket) {
-		return blockOut("step %s: wait.step %q isn't a run or ticket step", s.ID, w.Step), nil
-	}
-	every, timeout, err := w.Durations()
-	if err != nil {
-		return blockOut("step %s: %v", s.ID, err), nil
-	}
-	rec := st.Steps[s.ID]
-	deadline := e.now().Add(timeout)
-	for polls := 1; ; polls++ {
-		trec := zeroRecord(target)
-		tc := call{rec: trec, index: -1}
-		var out stepOut
-		if target.Kind() == playbook.KindRun {
-			out, err = e.runStep(p, st, target, tc)
-		} else {
-			args, rerr := renderArgs(target.ID, target.Ticket, e.data(p, st, target, nil))
-			if rerr != nil {
-				return blockOut("step %s: %v", s.ID, rerr), nil
-			}
-			out, err = e.ticketCall(st, target, tc, args, key(st, s.ID, fmt.Sprintf("%s:%d", target.ID, polls)))
-		}
-		if err != nil || out.status != "" {
-			return out, err
-		}
-		trec["outcome"], trec["visits"] = out.outcome, st.Visits[target.ID]
-		st.Steps[target.ID] = trec
-		rec["polls"] = polls
-		ok, err := renderBool(s.ID+".until", w.Until, e.data(p, st, s, nil))
-		if err != nil {
-			return blockOut("step %s: until: %v", s.ID, err), nil
-		}
-		if ok {
-			rec["status"] = "ok"
-			return stepOut{outcome: "ok"}, nil
-		}
-		if !e.now().Add(every).Before(deadline) {
-			rec["status"] = "timeout"
-			return stepOut{outcome: "timeout"}, nil
-		}
-		if err := e.save(st); err != nil {
-			return stepOut{}, err
-		}
-		e.cfg.Sleep(every)
-		if e.stopped() {
-			return stepOut{status: StatusStopped}, nil
-		}
-	}
 }
 
 func (e *Engine) askStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {

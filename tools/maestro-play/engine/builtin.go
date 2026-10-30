@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +11,9 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
 
-// The built-in requests a run: step sends: worktree add, check, head, open
-// pr and pr status. Each reply has status (ok, failed or refused),
-// exit_code, output and the request's fields (playbook.Requests).
+// The built-in requests a run: step sends: worktree add, check, head and
+// open pr. Each reply has status (ok, failed or refused), exit_code, output
+// and the request's fields (playbook.Requests).
 
 // SetupPath is where the project's setup lives, under the main checkout.
 const SetupPath = ".maestro/project/project-setup.md"
@@ -189,12 +188,6 @@ func (e *Engine) request(st *State, req *playbook.Request, words []string) (map[
 		return e.head(st)
 	case "open pr":
 		return e.openPR(st, flags["--title"], flags["--body"])
-	case "pr status":
-		target := st.Branch
-		if len(pos) > 0 {
-			target = pos[0]
-		}
-		return e.prStatus(st, target)
 	}
 	return refused("%s: the engine sends it itself", req.Name), nil
 }
@@ -320,6 +313,16 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 		}
 	}
 	outPath := filepath.Join(dir, fmt.Sprintf("check-%d.txt", n))
+	// Checks on files the branch lacks would pass for a sha that fails.
+	if msg, err := e.dirty(st, "check"); err != nil || msg != "" {
+		if err == nil {
+			err = os.WriteFile(outPath, []byte(msg+"\n"), 0o644)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return newReply("failed", 1, msg, "summary", "uncommitted changes", "checks", []any{}, "output_path", outPath), nil
+	}
 	var full, short strings.Builder
 	var checks []any
 	var failed []string
@@ -351,8 +354,34 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	return newReply("failed", exit, short.String(), "summary", summary, "checks", checks, "output_path", outPath), nil
 }
 
-// head is the sha the run's worktree is at.
+// dirty says what the run's worktree holds that no commit does, or "". A
+// run with no worktree has nothing to say.
+func (e *Engine) dirty(st *State, req string) (string, error) {
+	if st.Worktree == "" {
+		return "", nil
+	}
+	r, err := e.git(st, st.Worktree, "status", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	if r.exit != 0 {
+		return fmt.Sprintf("%s: git status: exit %d: %s", req, r.exit, r.stdout+r.stderr), nil
+	}
+	if out := strings.TrimRight(r.stdout, "\n"); out != "" {
+		return fmt.Sprintf("%s: %s has uncommitted changes; commit or remove them:\n%s", req, st.Worktree, out), nil
+	}
+	return "", nil
+}
+
+// head is the sha the run's worktree is at. It fails while the worktree
+// holds uncommitted changes, which the sha doesn't have.
 func (e *Engine) head(st *State) (map[string]any, error) {
+	if msg, err := e.dirty(st, "head"); err != nil || msg != "" {
+		if err != nil {
+			return nil, err
+		}
+		return newReply("failed", 1, msg), nil
+	}
 	r, err := e.git(st, e.workDir(st), "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
@@ -365,13 +394,31 @@ func (e *Engine) head(st *State) (map[string]any, error) {
 
 // openPR pushes the run's branch to origin and opens a pull request into
 // the main branch, or returns the one already open, so a resumed run or a
-// fix after review updates the same PR.
+// fix after review updates the same PR. It pushes only a clean worktree
+// with commits the main branch lacks.
 func (e *Engine) openPR(st *State, title, body string) (map[string]any, error) {
 	if st.Branch == "" || st.Worktree == "" {
 		return newReply("failed", 1, "open pr: the run has no branch; run worktree add first"), nil
 	}
 	dir := st.Worktree
-	r, err := e.git(st, dir, "push", "-u", "origin", st.Branch)
+	if msg, err := e.dirty(st, "open pr"); err != nil || msg != "" {
+		if err != nil {
+			return nil, err
+		}
+		return newReply("failed", 1, msg), nil
+	}
+	base := e.setup().MainBranch
+	r, err := e.git(st, dir, "rev-list", "--count", base+"..HEAD")
+	if err != nil {
+		return nil, err
+	}
+	if r.exit != 0 {
+		return newReply("failed", r.exit, "open pr: git rev-list "+base+"..HEAD: "+r.stdout+r.stderr), nil
+	}
+	if strings.TrimSpace(r.stdout) == "0" {
+		return newReply("failed", 1, fmt.Sprintf("open pr: %s has no commits beyond %s", st.Branch, base)), nil
+	}
+	r, err = e.git(st, dir, "push", "-u", "origin", st.Branch)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +442,7 @@ func (e *Engine) openPR(st *State, title, body string) (map[string]any, error) {
 	if body == "" {
 		body = fmt.Sprintf("Ticket %s.\n\nOpened by maestro-play run %s.", st.Ticket, st.ID)
 	}
-	r, err = e.gh(st, dir, "pr", "create", "--head", st.Branch, "--base", e.setup().MainBranch, "--title", title, "--body", body)
+	r, err = e.gh(st, dir, "pr", "create", "--head", st.Branch, "--base", base, "--title", title, "--body", body)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +461,7 @@ func (e *Engine) openPR(st *State, title, body string) (map[string]any, error) {
 
 // findPR is the open PR from the run's branch, or nil.
 func (e *Engine) findPR(st *State, dir string) (map[string]any, map[string]any, error) {
-	r, err := e.gh(st, dir, "pr", "list", "--head", st.Branch, "--state", "open", "--json", "number,url", "--limit", "1")
+	r, err := e.gh(st, dir, "pr", "list", "--head", st.Branch, "--state", "open", "--json", "number,url,isCrossRepository")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -425,43 +472,11 @@ func (e *Engine) findPR(st *State, dir string) (map[string]any, map[string]any, 
 	if decodeJSON([]byte(r.stdout), &list) != nil {
 		return nil, newReply("failed", 1, "gh pr list: not JSON: "+r.stdout), nil
 	}
-	if len(list) == 0 {
-		return nil, nil, nil
+	// --head matches a fork's branch of the same name too; skip those.
+	for _, v := range list {
+		if m, _ := v.(map[string]any); m != nil && m["isCrossRepository"] != true {
+			return m, nil, nil
+		}
 	}
-	m, _ := list[0].(map[string]any)
-	return m, nil, nil
-}
-
-// prStatus reads a PR's state (open, closed or merged), head sha, merge
-// sha and url.
-func (e *Engine) prStatus(st *State, target string) (map[string]any, error) {
-	if target == "" {
-		return newReply("failed", 1, "pr status: the run has no branch; name a PR"), nil
-	}
-	if strings.HasPrefix(target, "-") {
-		return refused("pr status: %q", target), nil
-	}
-	r, err := e.gh(st, e.workDir(st), "pr", "view", target, "--json", "state,headRefOid,mergeCommit,url")
-	if err != nil {
-		return nil, err
-	}
-	if r.exit != 0 {
-		return newReply("failed", r.exit, "gh pr view: "+r.stdout+r.stderr), nil
-	}
-	var v struct {
-		State       string `json:"state"`
-		HeadRefOid  string `json:"headRefOid"`
-		URL         string `json:"url"`
-		MergeCommit *struct {
-			Oid string `json:"oid"`
-		} `json:"mergeCommit"`
-	}
-	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
-		return newReply("failed", 1, "gh pr view: not JSON: "+r.stdout), nil
-	}
-	merged := ""
-	if v.MergeCommit != nil {
-		merged = v.MergeCommit.Oid
-	}
-	return newReply("ok", 0, "", "state", strings.ToLower(v.State), "sha", v.HeadRefOid, "merge_sha", merged, "url", v.URL), nil
+	return nil, nil, nil
 }

@@ -96,18 +96,25 @@ func TestWorkEndToEnd(t *testing.T) {
 			t.Skip("builds maestro-ticket")
 		}
 		w := newWorldAt(t, "testdata/work")
-		bin := filepath.Join(w.dir, "bin", "maestro-ticket-real")
-		build := exec.Command("go", "build", "-o", bin, "./cmd/maestro-ticket")
-		build.Dir = "../../maestro-ticket"
-		if out, err := build.CombinedOutput(); err != nil {
-			t.Fatalf("build maestro-ticket: %v\n%s", err, out)
-		}
-		w.e.cfg.TicketBin = bin
-		rt := realTickets{w, bin}
+		rt := useRealTickets(t, w)
 		id := str(rt.call("create", "--title", "Add --json", "--body", "Type: feature\nCriteria: C1", "--role", "engineer",
 			"--status", "todo", "--actor", "chief-of-staff")["id"])
 		workEndToEnd(t, w, rt, id)
 	})
+}
+
+// useRealTickets builds maestro-ticket from ../../maestro-ticket and points
+// the world's engine at it.
+func useRealTickets(t *testing.T, w *world) realTickets {
+	t.Helper()
+	bin := filepath.Join(w.dir, "bin", "maestro-ticket-real")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/maestro-ticket")
+	build.Dir = "../../maestro-ticket"
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build maestro-ticket: %v\n%s", err, out)
+	}
+	w.e.cfg.TicketBin = bin
+	return realTickets{w, bin}
 }
 
 func workEndToEnd(t *testing.T, w *world, store ticketStore, id string) {
@@ -224,29 +231,6 @@ func TestWorktreeAddReuses(t *testing.T) {
 	}
 }
 
-// pr status reads gh's state, head and merge commit.
-func TestPRStatus(t *testing.T) {
-	w := newWorld(t)
-	w.script(fakeConfig{Replies: map[string][]map[string]any{"gh pr view": {
-		{"state": "MERGED", "headRefOid": "abc1234", "mergeCommit": map[string]any{"oid": "def5678"}, "url": "u"},
-		{"exit": 1, "stderr": "no pull requests found"},
-	}}})
-	st := &State{ID: "r1", Branch: "maestro/T-1"}
-	r, err := w.e.prStatus(st, st.Branch)
-	if err != nil || r["status"] != "ok" || r["state"] != "merged" || r["sha"] != "abc1234" || r["merge_sha"] != "def5678" || r["url"] != "u" {
-		t.Fatalf("pr status %v %v", r, err)
-	}
-	if r, _ := w.e.prStatus(st, "7"); r["status"] != "failed" || !strings.Contains(str(r["output"]), "no pull requests") {
-		t.Errorf("missing PR: %v", r)
-	}
-	if r, _ := w.e.prStatus(&State{ID: "r1"}, ""); r["status"] != "failed" {
-		t.Errorf("no branch: %v", r)
-	}
-	if r, _ := w.e.openPR(&State{ID: "r1"}, "", ""); r["status"] != "failed" || !strings.Contains(str(r["output"]), "worktree add first") {
-		t.Errorf("open pr with no branch: %v", r)
-	}
-}
-
 // A check that isn't listed, or a setup with no checks, fails the step.
 func TestCheckNeedsChecks(t *testing.T) {
 	w := newWorld(t)
@@ -315,5 +299,137 @@ func TestHarnessReplies(t *testing.T) {
 	s := w.sessions()[1:] // after the claude call
 	if len(s) != 2 || resumed(s[0]) || !resumed(s[1]) || s[1].Args[2] != "codex-thread-1" || hasFlag(s[0].Args, "-m") {
 		t.Errorf("codex calls %+v", s)
+	}
+}
+
+// check, head and open pr fail on a worktree with uncommitted changes, so
+// no check passes and no sha or PR goes out for files the branch lacks.
+// open pr also needs a commit beyond the main branch, and skips a fork's
+// PR from a branch of the same name.
+func TestDirtyWorktreeFailsCheckHeadAndOpenPR(t *testing.T) {
+	w := newWorld(t)
+	if r, _ := w.e.openPR(&State{ID: "r1"}, "", ""); r["status"] != "failed" || !strings.Contains(str(r["output"]), "worktree add first") {
+		t.Errorf("open pr with no branch: %v", r)
+	}
+	st := &State{ID: "r1", Ticket: "T-1"}
+	wt, err := w.e.worktreeAdd(st, "T-1", "main")
+	if err != nil || wt["status"] != "ok" {
+		t.Fatalf("worktree add %v %v", wt, err)
+	}
+	st.Worktree, st.Branch = str(wt["path"]), str(wt["branch"])
+	if r, _ := w.e.openPR(st, "", ""); r["status"] != "failed" || !strings.Contains(str(r["output"]), "maestro/T-1 has no commits beyond main") {
+		t.Errorf("open pr with nothing to push: %v", r)
+	}
+	os.WriteFile(filepath.Join(st.Worktree, "stray.txt"), []byte("x\n"), 0o644)
+	check, _ := w.e.check(st, "all")
+	head, _ := w.e.head(st)
+	pr, _ := w.e.openPR(st, "", "")
+	for name, r := range map[string]map[string]any{"check": check, "head": head, "open pr": pr} {
+		if r["status"] != "failed" || !strings.Contains(str(r["output"]), name+": "+st.Worktree+" has uncommitted changes") ||
+			!strings.Contains(str(r["output"]), "?? stray.txt") {
+			t.Errorf("%s on a dirty worktree: %v", name, r)
+		}
+	}
+	if b, _ := os.ReadFile(str(check["output_path"])); !strings.Contains(string(b), "?? stray.txt") {
+		t.Errorf("check output %q", b)
+	}
+	if n, m := len(w.find("check")), len(w.find("git", "push")); n != 0 || m != 0 {
+		t.Errorf("%d checks and %d pushes ran on a dirty worktree", n, m)
+	}
+	w.git(st.Worktree, "add", "stray.txt")
+	w.git(st.Worktree, "commit", "-q", "-m", "stray")
+	w.script(fakeConfig{PRs: []fakePR{{Number: 3, URL: "https://github.com/fork/r/pull/3", Head: "maestro/T-1", State: "OPEN", Fork: true}}})
+	if r, _ := w.e.check(st, "all"); r["status"] != "ok" {
+		t.Errorf("check on a clean worktree: %v", r)
+	}
+	if r, _ := w.e.head(st); r["status"] != "ok" || r["sha"] != w.git(st.Worktree, "rev-parse", "HEAD") {
+		t.Errorf("head on a clean worktree: %v", r)
+	}
+	if r, _ := w.e.openPR(st, "", ""); r["status"] != "ok" || r["url"] != "https://github.com/o/r/pull/8" || len(w.find("gh", "pr", "create")) != 1 {
+		t.Errorf("open pr beside a fork's PR: %v", r)
+	}
+}
+
+// blockedReplies are a plan step that blocks and the escalation's reply.
+var blockedReplies = []map[string]any{
+	{"reply": map[string]any{"status": "blocked", "summary": "which flag name?"}},
+	reply("done", map[string]any{"happened": "no flag name"}),
+}
+
+// The store takes only the three roles, so an escalation to an owner who
+// is a person moves the ticket to blocked under its own role. A move the
+// store refuses fails the run, which still drops the lease.
+func TestEscalationToAPersonKeepsTheRole(t *testing.T) {
+	newTicket := func() *fakeTicketT {
+		return &fakeTicketT{ID: "T-1", Title: "Add --json", Body: "Type: feature", Type: "ship", Status: "todo", Role: "engineer",
+			Owner: "paul", Version: 1}
+	}
+	t.Run("fake store", func(t *testing.T) {
+		w := newWorldAt(t, "testdata/work", newTicket())
+		w.script(fakeConfig{Harness: blockedReplies})
+		r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+		if r.Status != StatusBlocked || strings.Contains(r.Reason, "write failed") {
+			t.Fatalf("result %+v", r)
+		}
+		tk := w.ticket("T-1")
+		if tk.Status != "blocked" || tk.Role != "engineer" || tk.Claim != nil {
+			t.Errorf("ticket %s role %s claim %+v", tk.Status, tk.Role, tk.Claim)
+		}
+		if move := w.find("ticket", "transition", "T-1", "--to", "blocked"); len(move) != 1 || hasFlag(move[0].Args, "--role") {
+			t.Errorf("move %+v", move)
+		}
+	})
+	t.Run("refused move", func(t *testing.T) {
+		w := newWorldAt(t, "testdata/work", newTicket())
+		w.script(fakeConfig{Harness: blockedReplies, Replies: map[string][]map[string]any{
+			"ticket transition": {{}, {"exit": 2, "code": "invalid"}}, // start passes, the escalation's move fails
+		}})
+		r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+		if r.Status != StatusFailed || r.ExitCode() != 1 || !strings.Contains(r.Reason, "escalation write failed: escalate-move: exit 2") {
+			t.Fatalf("result %+v", r)
+		}
+		if tk := w.ticket("T-1"); tk.Status != "in_progress" || tk.Claim != nil {
+			t.Errorf("ticket %s claim %+v, want in_progress and released", tk.Status, tk.Claim)
+		}
+	})
+	t.Run("real store", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("builds maestro-ticket")
+		}
+		w := newWorldAt(t, "testdata/work")
+		rt := useRealTickets(t, w)
+		id := str(rt.call("create", "--title", "Add --json", "--body", "Type: feature", "--role", "engineer",
+			"--status", "todo", "--owner", "paul", "--actor", "chief-of-staff")["id"])
+		w.script(fakeConfig{Harness: blockedReplies})
+		r := w.run(RunOpts{Ref: "engineer/work", Ticket: id})
+		if r.Status != StatusBlocked || strings.Contains(r.Reason, "write failed") {
+			t.Fatalf("result %+v", r)
+		}
+		tk := rt.get(id)
+		if tk["status"] != "blocked" || tk["role"] != "engineer" || tk["claim"] != nil {
+			t.Errorf("ticket %v role %v claim %v", tk["status"], tk["role"], tk["claim"])
+		}
+	})
+}
+
+// A start that fails may still have made the session, so the retry starts
+// a new one with a new id instead of resuming.
+func TestFailedStartRetriesWithANewSession(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	w.script(fakeConfig{Harness: []map[string]any{{"is_error": true, "result": "overloaded"}, workReplies("x")[0]}})
+	st := w.e.newState(&playbookStub, "eng-1", "", nil)
+	if r, err := w.e.session(st, "plan", "prompt", []string{"plan"}, "mid", "", false); err != nil || r["status"] != "failed" || st.SessionStarted {
+		t.Fatalf("failed start %v %v, started %v", r, err, st.SessionStarted)
+	}
+	if r, err := w.e.session(st, "plan.try1", "prompt", []string{"plan"}, "mid", "", false); err != nil || r["status"] != "ok" {
+		t.Fatalf("retry %v %v", r, err)
+	}
+	s := w.sessions()
+	if len(s) != 2 || resumed(s[0]) || resumed(s[1]) {
+		t.Fatalf("sessions %+v", s)
+	}
+	first, second := flagValue(s[0].Args, "--session-id"), flagValue(s[1].Args, "--session-id")
+	if first == "" || second == "" || first == second {
+		t.Errorf("session ids %q then %q, want two new ones", first, second)
 	}
 }

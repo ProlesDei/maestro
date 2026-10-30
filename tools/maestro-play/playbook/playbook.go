@@ -49,7 +49,6 @@ const (
 	KindRun    = "run"
 	KindPrompt = "prompt"
 	KindGate   = "gate"
-	KindWait   = "wait"
 	KindAsk    = "ask"
 )
 
@@ -195,7 +194,6 @@ type Step struct {
 	Run    Lines  `yaml:"run"`
 	Prompt string `yaml:"prompt"`
 	Gate   string `yaml:"gate"`
-	Wait   *Wait  `yaml:"wait"`
 	Ask    *Ask   `yaml:"ask"`
 
 	When  *When             `yaml:"when"`
@@ -248,9 +246,6 @@ func (s *Step) Kind() string {
 	if s.Gate != "" {
 		kinds = append(kinds, KindGate)
 	}
-	if s.Wait != nil {
-		kinds = append(kinds, KindWait)
-	}
 	if s.Ask != nil {
 		kinds = append(kinds, KindAsk)
 	}
@@ -266,30 +261,6 @@ func (s *Step) Tier() string {
 		return "mid"
 	}
 	return s.Model
-}
-
-// Wait re-runs a run or ticket step until a condition holds.
-type Wait struct {
-	Step    string `yaml:"step"`
-	Until   string `yaml:"until"`
-	Every   string `yaml:"every"`   // default 1m
-	Timeout string `yaml:"timeout"` // default 30m
-}
-
-// Durations parses every and timeout, with their defaults.
-func (w *Wait) Durations() (every, timeout time.Duration, err error) {
-	every, timeout = time.Minute, 30*time.Minute
-	if w.Every != "" {
-		if every, err = time.ParseDuration(w.Every); err != nil || every <= 0 {
-			return 0, 0, fmt.Errorf("every %q: want a positive duration like 1m", w.Every)
-		}
-	}
-	if w.Timeout != "" {
-		if timeout, err = time.ParseDuration(w.Timeout); err != nil || timeout <= 0 {
-			return 0, 0, fmt.Errorf("timeout %q: want a positive duration like 30m", w.Timeout)
-		}
-	}
-	return every, timeout, nil
 }
 
 // Ask pauses the run for the bot's answer.

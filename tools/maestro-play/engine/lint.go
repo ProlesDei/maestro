@@ -234,8 +234,6 @@ func outcomes(s *playbook.Step) (fixed []string, exitN bool) {
 		return playbook.ReplyStatuses, false
 	case playbook.KindGate:
 		return []string{"ok", "fail"}, false
-	case playbook.KindWait:
-		return []string{"ok", "timeout"}, false
 	case playbook.KindAsk:
 		return s.Ask.Choices, false
 	}
@@ -246,7 +244,7 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 	path := p.Path
 	kind := s.Kind()
 	if kind == "" {
-		l.add(path, s.ID, "want exactly one of ticket, run, prompt, gate, wait, ask")
+		l.add(path, s.ID, "want exactly one of ticket, run, prompt, gate, ask")
 		return
 	}
 	if kind != playbook.KindPrompt {
@@ -281,9 +279,6 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 		l.template(p, s, "body", s.Body, schema)
 	}
 	if s.Each != "" {
-		if kind == playbook.KindWait {
-			l.add(path, s.ID, "each: a wait step runs once")
-		}
 		l.template(p, s, "each", "{{"+s.Each+"}}", schema)
 	}
 	if s.Block != nil {
@@ -328,22 +323,6 @@ func (l *linter) step(p *playbook.Playbook, s *playbook.Step, schema map[string]
 		l.promptStep(p, s, schema)
 	case playbook.KindGate:
 		l.boolTemplate(p, s, "gate", s.Gate, schema)
-	case playbook.KindWait:
-		w := s.Wait
-		target := p.Step(w.Step)
-		switch {
-		case target == nil:
-			l.add(path, s.ID, fmt.Sprintf("wait.step: no step %q", w.Step))
-		case target.Kind() != playbook.KindRun && target.Kind() != playbook.KindTicket:
-			l.add(path, s.ID, fmt.Sprintf("wait.step %q: want a run or ticket step", w.Step))
-		}
-		if strings.TrimSpace(w.Until) == "" {
-			l.add(path, s.ID, "wait.until is empty")
-		}
-		l.boolTemplate(p, s, "wait.until", w.Until, schema)
-		if _, _, err := w.Durations(); err != nil {
-			l.add(path, s.ID, "wait: "+err.Error())
-		}
 	case playbook.KindAsk:
 		a := s.Ask
 		if strings.TrimSpace(a.Question) == "" {

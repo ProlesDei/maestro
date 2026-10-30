@@ -35,7 +35,7 @@ func TestLintFixturesClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Playbooks != 11 || len(res.Problems) != 0 {
+	if res.Playbooks != 8 || len(res.Problems) != 0 {
 		t.Fatalf("%d playbooks, problems: %v", res.Playbooks, res.Problems)
 	}
 }
@@ -53,7 +53,7 @@ func TestLintCatches(t *testing.T) {
 		{"two step types", head + "steps:\n  - id: a\n    run: check all\n    gate: 'true'\n", "want exactly one of"},
 		{"bad id", head + "steps:\n  - id: Write-Tests\n    run: check all\n", "id \"Write-Tests\""},
 		{"duplicate id", head + "steps:\n  - id: a\n    run: check all\n  - id: a\n    run: check all\n", "duplicate id"},
-		{"unknown request", head + "steps:\n  - id: a\n    run: deploy-everything now\n", "not a built-in request (want worktree add, check, head, open pr, pr status)"},
+		{"unknown request", head + "steps:\n  - id: a\n    run: deploy-everything now\n", "not a built-in request (want worktree add, check, head, open pr)"},
 		{"engine request", head + "steps:\n  - id: a\n    run: session start\n", "the engine sends this itself"},
 		{"removed request", head + "steps:\n  - id: a\n    run: merge {{.ticket.id}}\n", `run "merge": not a built-in request`},
 		{"unknown flag", head + "steps:\n  - id: a\n    run: worktree add {{.ticket.id}} --from main --force\n", "run worktree add takes no --force (want worktree add <ticket> --from <branch>)"},
@@ -69,8 +69,6 @@ func TestLintCatches(t *testing.T) {
 		{"on target", head + "steps:\n  - id: a\n    run: check all\n    on: {fail: nowhere}\n", "no step \"nowhere\""},
 		{"on outcome", head + "steps:\n  - id: a\n    run: check all\n    on: {done: next}\n", "\"done\" isn't an outcome of a run step"},
 		{"exit outcome ok", head + "steps:\n  - id: a\n    run: check all\n    on: {exit:3: next, exit:x: next}\n", "\"exit:x\" isn't an outcome"},
-		{"wait on a prompt", head + "steps:\n  - id: a\n    prompt: plan\n  - id: b\n    wait: {step: a, until: 'true'}\n", "want a run or ticket step"},
-		{"wait duration", head + "steps:\n  - id: a\n    run: check all\n  - id: b\n    wait: {step: a, until: 'true', every: soon}\n", "every \"soon\""},
 		{"ask no choices", head + "steps:\n  - id: a\n    ask: {question: q, choices: []}\n", "want one or more"},
 		{"missing prompt", head + "steps:\n  - id: a\n    prompt: nope\n", "prompt \"nope\": no"},
 		{"partial prompt", head + "steps:\n  - id: a\n    prompt: _contract\n", "partials are added by the engine"},

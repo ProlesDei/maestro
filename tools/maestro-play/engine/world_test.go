@@ -96,7 +96,6 @@ func newWorldAt(t *testing.T, fixture string, tickets ...*fakeTicketT) *world {
 		Limits:  map[string]any{"step_visits": 3, "retries": 0},
 		Environ: environ,
 		Now:     func() time.Time { return w.now },
-		Sleep:   func(d time.Duration) { w.now = w.now.Add(d) },
 	})
 	if err != nil {
 		t.Fatal(err)
