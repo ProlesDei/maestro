@@ -47,11 +47,10 @@ for dir in "$skills"/*/; do
 		same "$dir" "$repo/$harness/skills/$name"
 	done
 done
-[ -d "$repo/.maestro/project" ] && [ -d "$repo/.maestro/local" ] || fail ".maestro dirs missing"
 cmp -s "$template" "$repo/.maestro/project/project-setup.md" || fail "project-setup.md isn't the template"
 grep -qxF '*.log' "$repo/.git/info/exclude" || fail "the user's exclude line was changed"
-[ "$(grep -cxF '.maestro/local/' "$repo/.git/info/exclude")" = 1 ] || fail ".maestro/local/ not excluded once"
-touch "$repo/.maestro/local/environment.md"
+grep -qxF "add to your shell profile: export MAESTRO_PLAYBOOKS=$(cd "$here/.." && pwd)/playbooks" "$tmp/out" ||
+	{ cat "$tmp/out"; fail "install didn't print the MAESTRO_PLAYBOOKS line"; }
 seen=$(git -C "$repo" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/project-setup.md" ] || fail "git should see only project-setup.md: $seen"
 [ "$(cat "$STUB_LOG")" = "$(cd "$repo" && pwd -P) doctor" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
@@ -114,6 +113,7 @@ cp -R "$team" "$tmp/t-extra"
 mkdir "$tmp/t-extra/review"
 refuses "may hold only create-ticket/ and work/" "$tmp/bad" --tickets "$tmp/t-extra" "$tmp/bad"
 refuses "usage:" "$tmp/bad" --tickets
+refuses "--tickets needs a directory" "$tmp/bad" --tickets "" "$tmp/bad"
 [ "$(wc -l <"$STUB_LOG")" -eq 4 ] || fail "doctor ran for a refused install: $(cat "$STUB_LOG")"
 
 git init -q "$tmp/nostore"

@@ -28,9 +28,8 @@ Run each command at the repo's root. `-p` runs one headless turn; `--output-form
 1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
 3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run `/work <id>` again.
-4. **Answer and resume.** When `/work` stops on a question, classify it first. Answer what you can with `claude -p --resume <session_id> "<answer>"`. If that session is gone, `maestro-play resume <run-id>` (the run id is in the reply) picks the run up where it stopped.
-5. **Review on another model family.** When you can, run `/review` on a different model family from the one that wrote the code: Codex if Claude built it. The installer puts the skills in `.agents/skills/` for that.
-6. **Unblock.** For an escalation, pick one of its options when the call is yours and easy to undo, record it on the ticket, and run `/work <id>` again. Otherwise bring it to the owner.
+4. **Unblock.** Classify the escalation first. When the call is yours and easy to undo, pick one of its options and follow [Unblock](../../skills/work/SKILL.md#unblock). Otherwise bring it to the owner as a card, then answer the same way.
+5. **Review on another model family when one is installed.** Codex if Claude built it: `codex exec '$review <pr>'` at the repo's root runs the [review](../../skills/review/SKILL.md) skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$review` alone.
 
 ## How you talk to the owner
 

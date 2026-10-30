@@ -4,10 +4,10 @@
 #   scripts/install.sh [--tickets <dir>] <target-repo>
 #
 # Copies every skills/<name>/ into <target>/.claude/skills/ (Claude Code)
-# and <target>/.agents/skills/ (Codex, Grok), creates .maestro/project/
-# and .maestro/local/, writes .maestro/project/project-setup.md from
-# templates/ if it's missing, hides the skill folders and .maestro/local/
-# from git through .git/info/exclude, and creates the ticket store if
+# and <target>/.agents/skills/ (Codex, Grok), writes
+# .maestro/project/project-setup.md from templates/ if it's missing, hides
+# the skill folders from git through .git/info/exclude, and creates the
+# ticket store if
 # maestro-ticket is on PATH. <target-repo> must be the top of a git work
 # tree. If any skill folder already exists it refuses and writes nothing;
 # if a later step fails it removes what it wrote.
@@ -32,6 +32,7 @@ usage="usage: scripts/install.sh [--tickets <dir>] <target-repo>"
 tickets=
 if [ "${1-}" = --tickets ]; then
 	[ $# -ge 2 ] || die "$usage"
+	[ -n "$2" ] || die "--tickets needs a directory"
 	tickets=$2
 	shift 2
 fi
@@ -141,7 +142,6 @@ for harness in .claude .agents; do
 	done
 done
 mkd "$target/.maestro/project"
-mkd "$target/.maestro/local"
 # The project's file once written: never overwritten.
 conf=$target/.maestro/project/project-setup.md
 if [ ! -e "$conf" ] && [ ! -L "$conf" ]; then
@@ -151,7 +151,7 @@ fi
 
 mkdir -p "$(dirname "$exclude")"
 [ ! -s "$exclude" ] || [ -z "$(tail -c1 "$exclude")" ] || echo >>"$exclude"
-lines=(.maestro/local/)
+lines=()
 for name in "${names[@]}"; do
 	lines+=(".claude/skills/$name/" ".agents/skills/$name/")
 done
@@ -166,3 +166,4 @@ else
 fi
 [ -z "$tickets" ] || echo "ticket method from $tickets"
 echo "installed ${#names[@]} skills into $target"
+echo "add to your shell profile: export MAESTRO_PLAYBOOKS=$root/playbooks"

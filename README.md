@@ -10,9 +10,12 @@ Needs git 2.31+, Go 1.26+, `gh`, and Claude Code or Codex.
 (cd tools/maestro-ticket && go install ./cmd/maestro-ticket)
 (cd tools/maestro-play && go install ./cmd/maestro-play)
 scripts/install.sh <target-repo>
+export MAESTRO_PLAYBOOKS=<maestro>/playbooks
 ```
 
 The installer copies each folder in `skills/` into the target's `.claude/skills/` and `.agents/skills/`, writes `.maestro/project/project-setup.md` from [templates/project-setup.md](templates/project-setup.md), creates the ticket store and hides its copies from git. It refuses, writing nothing, if a skill folder already exists. Fill in `project-setup.md`: the main branch and the check commands `/work` runs.
+
+`maestro-play` finds the playbook through `MAESTRO_PLAYBOOKS`, the full path to this repo's `playbooks/` folder. Put the `export` in your shell profile; `/work` stops without it.
 
 To use your own ticket method, add `--tickets <dir>`: a folder with your own `create-ticket` skill, and a `work` skill if your tickets live elsewhere. The installer copies those in place of Maestro's.
 
@@ -21,8 +24,8 @@ To use your own ticket method, add `--tickets <dir>`: a folder with your own `cr
 In the target repo, in Claude Code (or headless: `claude -p "/work T-12" --output-format json`):
 
 - `/create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
-- `/work <id>` runs `maestro-play run engineer/work --ticket <id>`. It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. `/work` relays the run's questions to you and stops when it blocks.
-- `/review <pr>` reviews the PR at its head sha, best from a different model family than the author. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `/work <id>` starts again at build with that feedback.
+- `/work <id>` runs `maestro-play run engineer/work --ticket <id>`. It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [skills/work](skills/work/SKILL.md#unblock) shows.
+- `/review <pr>` reviews the PR at its head sha, from another model family than the author when one is installed. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `/work <id>` starts again at build with that feedback.
 
 ## Your own skills
 

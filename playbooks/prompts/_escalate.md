@@ -1,6 +1,6 @@
 {{/* _escalate: the built-in block renders this in the same session; the engine adds where, Tries and Skipped. */ -}}
 # Escalate
-This run can't go on. Write it up so whoever reads it can decide in one go.
+This run can't go on. Write it up so whoever reads it can decide at once.
 1. If you changed files on the branch, commit the work in progress there. Never discard it.
 2. Say what happened in one or two sentences.
 3. List each thing you tried, with its failing output line. Never a secret's value.
