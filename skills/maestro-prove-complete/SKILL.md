@@ -10,7 +10,7 @@ description: "Use before you call any work done, when the user asks \"is it done
 ## 1. Pin what you prove
 
 - **The commit.** In the worktree, `git status --porcelain` prints nothing; your sha is `git rev-parse HEAD`. Proof from a dirty tree or another sha doesn't count.
-- **The claims.** Number each acceptance criterion from `maestro-ticket get <id> --json`. Read `## Conventions` in `.maestro/project/project-setup.md` for how the project runs.
+- **The claims.** Number each acceptance criterion from `maestro-ticket get <id> --json`. Read `## Run` in `.maestro/project/project-setup.md` for how the project runs, else the README and the build files.
 - **The place.** In your own session, save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/`. In a step, the reply carries the evidence.
 
 ## 2. Pick the strongest proof for each claim

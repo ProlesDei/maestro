@@ -1,6 +1,6 @@
 ---
 name: maestro-swarm
-description: "Use for /maestro-swarm, 'swarm this', 'fan this out', or 'race these approaches'. Runs N parallel workers on separate slices of one job, or on rival approaches to one problem, reruns every proof they bring back, and returns one report."
+description: "Use when the user types /maestro-swarm or says 'swarm this', 'fan this out', or 'race these approaches'. Runs N parallel workers on separate slices of one job, or on rival approaches to one problem, reruns every proof they bring back, and returns one report."
 argument-hint: "<task> [--n 3] [--race] [--slices a,b,c]"
 disable-model-invocation: true
 ---
@@ -14,7 +14,7 @@ You split the work, launch the workers, check what they return, and write one re
 1. State what done looks like and what the swarm must hand back.
 2. Pick the shape. **Slices** are separate parts of one job. No two slices may write the same file: two paths clash if they match or one sits inside the other. Merge clashing slices or run them one after the other. **Race** (`--race`) gives each worker the same task with a different approach. Name each approach and the judge (the test, benchmark or rule that picks the winner) before any worker starts. No judge, no race.
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, run `/maestro-work <id>` on each instead.
+4. If the slices are Maestro tickets, brief no workers: run `maestro-play run engineer/work --ticket <id> --bot "${MAESTRO_BOT:-user}"` for each ticket, as [maestro-work](../maestro-work/SKILL.md) does, and report each run's JSON.
 
 ## 2. Brief and launch
 

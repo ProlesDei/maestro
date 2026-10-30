@@ -48,6 +48,6 @@ Each text does one job. If it does two, split it and link the parts.
 
 ## 5. Check before you hand it on
 
-Read it once as the reader. Can they act or decide without asking you? Did you run each command and copy it from that run? Does each term mean one thing? Is each sentence still needed? If a rule makes a sentence worse, fix the sentence another way. [references/example.md](references/example.md) shows one rewrite. Last, run `/maestro-unslop` on it.
+Read it once as the reader. Can they act or decide without asking you? Did you run each command and copy it from that run? Does each term mean one thing? Is each sentence still needed? If a rule makes a sentence worse, fix the sentence another way. [references/example.md](references/example.md) shows one rewrite. Last, read the installed `maestro-unslop` skill (`.claude/skills/maestro-unslop/SKILL.md`, or `.agents/skills/` in Codex) and follow it on the text.
 
 Reply: the finished text, then one line for each rule you broke on purpose and why, or "no exceptions".

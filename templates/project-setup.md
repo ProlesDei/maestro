@@ -23,7 +23,7 @@ main
 
 ## Run
 
-<how to start the app locally, and the URL or command to check it works; the QA lead uses this>
+<how to start the app locally, and the URL or command to check it works; `/maestro-qa-lead` and `maestro-prove-complete` read this>
 
 ## Conventions
 

@@ -1,6 +1,6 @@
 ---
 name: maestro-refactor-code
-description: "Use for /maestro-refactor-code, 'refactor X', 'restructure this module', or 'clean this up without changing behaviour'. Pins current behaviour with tests proven able to fail, then makes small named refactorings with the tests green after each. Never mixes in a behaviour change."
+description: "Use when the user types /maestro-refactor-code or says 'refactor X', 'restructure this module', or 'clean this up without changing behaviour'. Pins current behaviour with tests proven able to fail, then makes small named refactorings with the tests green after each. Never mixes in a behaviour change."
 argument-hint: "<what to refactor and why> [ticket id]"
 disable-model-invocation: true
 ---

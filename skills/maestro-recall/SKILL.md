@@ -1,7 +1,7 @@
 ---
 name: maestro-recall
-description: "Use for /maestro-recall, 'recall my work on X', 'catch me up on X', 'where did I leave off', or before you start or resume work on a topic. Rebuilds your recent context from chat history, tickets, git and PRs, checks it against the repo as it is now, and returns a short brief. Read only."
-argument-hint: "<topic> [--since 7d]"
+description: "Use when the user types /maestro-recall or says 'recall my work on X', 'catch me up on X', 'where did I leave off', or before you start or resume work on a topic. Rebuilds your recent context from chat history, tickets, git and PRs, checks it against the repo as it is now, and returns a short brief. Read only."
+argument-hint: "<topic> [--since <days>]"
 disable-model-invocation: true
 ---
 
@@ -11,7 +11,7 @@ Rebuild what you knew about a topic, check it against the repo as it is now, and
 
 ## 1. Set the scope
 
-The window is the last 7 days unless `--since` says otherwise. The workspace is the current repo; never read another project's history unless asked. Search for the topic's words and its likely names: ticket ids, branch names, file names, people.
+The window is the last `<n>` days: 7, or the number `--since` gives. The workspace is the current repo; never read another project's history unless asked. Search for the topic's words and its likely names: ticket ids, branch names, file names, people.
 
 ## 2. Search, newest first
 
@@ -20,7 +20,7 @@ The window is the last 7 days unless `--since` says otherwise. The workspace is 
    - Codex: `~/.codex/sessions/`.
    - Other harnesses: their own session store, if you know where it is. If you don't, skip it and say so.
 2. **Tickets.** `maestro-ticket list --json`, then `maestro-ticket get <id> --json` and `maestro-ticket events --ticket <id> --json` for each match.
-3. **Git.** `git log --since=<window> --all --oneline -- <paths>`, `git branch -a`, `git worktree list`.
+3. **Git.** `git log --since="<n> days ago" --all --oneline -- <paths>`, `git branch -a`, `git worktree list`.
 4. **PRs.** `gh pr list --search <topic>`.
 5. **Decisions.** The repo's decision log or ADR folder, if it has one.
 
