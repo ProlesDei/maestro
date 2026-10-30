@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, three skills and three bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
+Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, seven skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
 
 ## Install
 
@@ -27,20 +27,26 @@ To use your own ticket method, add `--tickets <dir>`: a folder with `maestro-cre
 
 In the target repo, in Claude Code (or headless: `claude -p "/maestro-work T-12" --output-format json`):
 
+- `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets and creates them. Given a ticket id, it splits or rewrites that ticket.
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-work <id>` runs `maestro-play run engineer/work --ticket <id>`. It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [skills/maestro-work](skills/maestro-work/SKILL.md#unblock) shows.
+- `/maestro-qa-lead <pr>` starts the app at the PR's head sha, walks each criterion and adds a `QA: pass` or `QA: fail` comment with evidence. It moves no ticket; `/maestro-review` reads the comment as evidence.
 - `/maestro-review <pr>` reviews the PR at its head sha, from another model family than the author when one is installed. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `/maestro-work <id>` starts again at build with that feedback.
+- `/maestro-chief-of-staff <id>` settles a blocked ticket: answers what the facts settle and puts it back, or writes up the owner's call.
+- `/maestro-software-engineer <id or change>` makes a change by hand in your own session: plan, test first, self-review. It writes no ticket.
 
 ## Your own skills
 
-`skills/` is your slot. Maestro ships `maestro-work`, `maestro-create-ticket` and `maestro-review`; the prefix keeps them clear of your own skills. Add `skills/<name>/SKILL.md` and name it in `skills/use.yaml` to have prompt steps use it. See [skills/README.md](skills/README.md).
+`skills/` is your slot. Maestro ships seven skills, all commands you call: `maestro-planner`, `maestro-create-ticket`, `maestro-work`, `maestro-software-engineer`, `maestro-qa-lead`, `maestro-review` and `maestro-chief-of-staff`; the prefix keeps them clear of your own skills. Add `skills/<name>/SKILL.md` and name it in `skills/use.yaml` to have prompt steps use it. See [skills/README.md](skills/README.md).
 
 ## Personas
 
-[bot-profiles/](bot-profiles/README.md) holds three personas for bot tools such as Grok Bot, plus the [team rules](bot-profiles/team-rules.md) every bot follows:
+[bot-profiles/](bot-profiles/README.md) holds five personas for bot tools such as Grok Bot, plus the [team rules](bot-profiles/team-rules.md) every bot follows:
 
-- `chief-of-staff`: the one agent the owner talks to. Drives Claude with `/maestro-create-ticket`, `/maestro-work` and `/maestro-review`; never touches code.
+- `chief-of-staff`: the one agent the owner talks to. Drives Claude with the commands above; settles blocked tickets with `/maestro-chief-of-staff`; never touches code.
+- `planner`: turns a goal into tickets with `/maestro-planner` and `/maestro-create-ticket`.
 - `engineer`: runs `/maestro-work` and unblocks a run that stops.
+- `qa-lead`: tests a PR in the running app with `/maestro-qa-lead` before review.
 - `reviewer`: runs `/maestro-review` on PRs another model family wrote.
 
 ## Tools
