@@ -270,8 +270,134 @@ func TestParseSetupTemplate(t *testing.T) {
 		t.Errorf("setup %+v", s)
 	}
 	s = parseSetup("## Project\n- **Name:** tiny\n## Main branch\n`trunk`\n## Checks\n- **unit**: `go test ./...`\n- not a check\n* vet: `go vet ./...`\n")
-	if s.Name != "tiny" || s.MainBranch != "trunk" || len(s.Checks) != 2 || s.Checks[0].Name != "unit" || s.Checks[1].Command != "go vet ./..." {
+	if s.Name != "tiny" || s.MainBranch != "trunk" || len(s.Checks) != 2 || s.Checks[0].Name != "unit" || s.Checks[1].Command != "go vet ./..." ||
+		s.BadCheck != "line 7: - not a check" {
 		t.Errorf("setup %+v", s)
+	}
+	if s = parseSetup("## Checks\n\nNone yet.\n\n## Run\n\n- make run\n"); len(s.Checks) != 0 || s.BadCheck != "" {
+		t.Errorf("prose under ## Checks: %+v", s)
+	}
+}
+
+// A bullet under ## Checks that isn't a check fails check all and names
+// the line, so a typo can't pass as no checks; prose there is no checks.
+func TestCheckBadBullet(t *testing.T) {
+	w := newWorld(t)
+	st := &State{ID: "r1"}
+	path := filepath.Join(w.repo, SetupPath)
+	os.WriteFile(path, []byte("# Project setup\n\n## Checks\n\n- lint: `fake-check lint`\n- test: make test\n"), 0o644)
+	for _, name := range []string{"all", "lint"} {
+		r, err := w.e.check(st, name)
+		if err != nil || r["status"] != "failed" || r["summary"] != "bad ## Checks line" ||
+			!strings.Contains(str(r["output"]), path+": line 6: - test: make test: under ## Checks, want - <name>: `<command>`") {
+			t.Errorf("check %s: %v %v", name, r, err)
+		}
+	}
+	if n := len(w.find("check")); n != 0 {
+		t.Errorf("%d checks ran", n)
+	}
+	os.WriteFile(path, []byte("# Project setup\n\n## Checks\n\nNone yet.\n"), 0o644)
+	if r, _ := w.e.check(st, "all"); r["status"] != "ok" || r["summary"] != "no checks listed" {
+		t.Errorf("prose: %v", r)
+	}
+}
+
+// A check that exits, leaving a background child holding its output,
+// passes at once, and the child dies with it.
+func TestCheckLeavesNoChild(t *testing.T) {
+	w := newWorld(t)
+	os.WriteFile(filepath.Join(w.repo, SetupPath),
+		[]byte("## Checks\n\n- bg: `sleep 30 & echo $! > \"$FAKE_DIR/child.pid\"; echo ok`\n"), 0o644)
+	start := time.Now()
+	r, err := w.e.check(&State{ID: "r1"}, "all")
+	if err != nil || r["status"] != "ok" || r["summary"] != "1 passed" || !strings.Contains(str(r["output"]), "ok") {
+		t.Fatalf("check %v %v", r, err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("check took %v", d)
+	}
+	if !w.childGone() {
+		t.Errorf("the check's background child outlived it")
+	}
+}
+
+// git and gh calls can't stop on a prompt: they get GIT_TERMINAL_PROMPT=0,
+// GH_PROMPT_DISABLED=1 and a batch-mode ssh, unless the user set an ssh
+// command of their own.
+func TestGitAndGhNeverPrompt(t *testing.T) {
+	for _, c := range []struct {
+		env, config, want string
+	}{
+		{"GIT_SSH_COMMAND=", "", "0|1|ssh -o BatchMode=yes"},
+		{"GIT_SSH_COMMAND=ssh -i key", "", "0|1|ssh -i key"},
+		{"GIT_SSH=my-ssh", "", "0|1|"},
+		{"GIT_SSH_COMMAND=", "ssh -i key", "0|1|"},
+	} {
+		w := newWorld(t)
+		if c.config != "" {
+			w.git(w.repo, "config", "core.sshCommand", c.config)
+		}
+		w.e.cfg.Environ = append(w.e.cfg.Environ, "GIT_SSH_COMMAND=", "GIT_SSH=", c.env)
+		st := &State{ID: "r1"}
+		if r, err := w.e.head(st); err != nil || r["status"] != "ok" {
+			t.Fatalf("head %v %v", r, err)
+		}
+		w.e.gh(st, w.repo, "pr", "list")
+		calls := append(w.find("git", "rev-parse"), w.find("gh", "pr")...)
+		if len(calls) != 2 {
+			t.Fatalf("calls %+v", calls)
+		}
+		for _, call := range calls {
+			if call.NoPrompt != c.want {
+				t.Errorf("%s %v with %s, core.sshCommand %q: %q, want %q", call.Bin, call.Args, c.env, c.config, call.NoPrompt, c.want)
+			}
+		}
+	}
+}
+
+// An interrupt to the engine reaches its command's process group, which
+// no longer shares the engine's, and still stops the engine.
+func TestForwardSignals(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cmd := exec.Command(self, "-test.run=^$")
+	cmd.Env = append(os.Environ(), "FAKE_SIGNAL_DIR="+dir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	read := func(name string) string {
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil && len(b) > 0 {
+				return strings.TrimSpace(string(b))
+			}
+		}
+		return ""
+	}
+	pid, _ := strconv.Atoi(read("ready"))
+	if pid <= 0 {
+		cmd.Process.Kill()
+		t.Fatal("the command never started")
+	}
+	t.Cleanup(func() { syscall.Kill(-pid, syscall.SIGKILL) })
+	time.Sleep(100 * time.Millisecond) // the engine listens just after the command starts
+	cmd.Process.Signal(os.Interrupt)
+	select {
+	case <-done:
+		if ws := cmd.ProcessState.Sys().(syscall.WaitStatus); !ws.Signaled() || ws.Signal() != syscall.SIGINT {
+			t.Errorf("engine exited %v, want killed by SIGINT", cmd.ProcessState)
+		}
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the interrupt didn't stop the engine")
+	}
+	if got := read("got"); got != "INT" {
+		t.Errorf("the command's group got %q, want INT", got)
 	}
 }
 
@@ -498,8 +624,10 @@ func TestSessionPermissions(t *testing.T) {
 	}{
 		{"claude", "", true}, {"claude", "--model x", true}, {"claude", "--permission-mode=plan", false},
 		{"claude", "--dangerously-skip-permissions", false}, {"claude", "--allowedTools Edit", false},
+		{"claude", "--settings perms.json", false}, {"claude", "--settings=perms.json", false},
 		{"codex", "", true}, {"codex", "-c model=x", true}, {"codex", "-s read-only", false},
 		{"codex", "--sandbox=workspace-write", false}, {"codex", "--config=approval_policy=never", false},
+		{"codex", "-p work", false}, {"codex", "--profile=work", false},
 	} {
 		got := permissionArgs(c.h, strings.Fields(c.user))
 		if ours := len(got) > len(strings.Fields(c.user)); ours != c.ours {
@@ -512,7 +640,7 @@ func TestSessionPermissions(t *testing.T) {
 // exited.
 func (w *world) childGone() bool {
 	b, err := os.ReadFile(filepath.Join(w.dir, "child.pid"))
-	pid, _ := strconv.Atoi(string(b))
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
 	if err != nil || pid <= 0 {
 		w.t.Fatalf("no child.pid: %v", err)
 	}

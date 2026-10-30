@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,9 +25,9 @@ type execResult struct {
 const timedOutExit = 124
 
 // run starts bin and waits, with no time limit: maestro-ticket calls are
-// short, and a claim's keepalive shares the call's process group. The
-// error is only for a binary that can't start; a non-zero exit is in the
-// result.
+// short, and a claim's keepalive runs in a session of its own (maestro-
+// ticket starts it with setsid), so it outlives the call. The error is
+// only for a binary that can't start; a non-zero exit is in the result.
 func (e *Engine) run(dir, bin string, args ...string) (execResult, error) {
 	return e.exec(dir, bin, nil, "", -1, args...)
 }
@@ -34,7 +35,9 @@ func (e *Engine) run(dir, bin string, args ...string) (execResult, error) {
 // exec is run with extra environment variables, stdin and a time limit (a
 // negative one is none). The command gets its own process group, so a
 // timeout kills what it started too; the result then has exit 124 and
-// stderr ends "timed out after <d>". A signal that would stop this
+// stderr ends "timed out after <d>". Once the command exits, the engine
+// kills what it left in the group, so a background child can neither hold
+// the output open nor outlive the call. A signal that would stop this
 // process goes to the group first.
 func (e *Engine) exec(dir, bin string, extra []string, stdin string, timeout time.Duration, args ...string) (execResult, error) {
 	ctx := context.Background()
@@ -49,17 +52,52 @@ func (e *Engine) exec(dir, bin string, extra []string, stdin string, timeout tim
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
+	// Our own pipes: with an *os.File for stdout and stderr, Wait returns
+	// when the command exits, not when the last child holding them does.
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		return execResult{}, err
+	}
+	defer outR.Close()
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		outW.Close()
+		return execResult{}, err
+	}
+	defer errR.Close()
+	cmd.Stdout, cmd.Stderr = outW, errW
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 5 * time.Second // a child that left the group may hold the pipes
-	if err := cmd.Start(); err != nil {
+	cmd.WaitDelay = 5 * time.Second // a child that left the group may hold stdin
+	err = cmd.Start()
+	outW.Close()
+	errW.Close()
+	if err != nil {
 		return execResult{}, fmt.Errorf("%s: %w", bin, err)
 	}
+	var out, errb bytes.Buffer
+	copied := make(chan struct{}, 2)
+	for _, p := range []struct {
+		dst *bytes.Buffer
+		src *os.File
+	}{{&out, outR}, {&errb, errR}} {
+		go func() { io.Copy(p.dst, p.src); copied <- struct{}{} }()
+	}
 	stop := forwardSignals(cmd.Process.Pid)
-	err := cmd.Wait()
+	err = cmd.Wait()
 	stop()
+	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	// A child that left the group may still hold the pipes: read 5s more.
+	late := time.After(5 * time.Second)
+	for range 2 {
+		select {
+		case <-copied:
+		case <-late:
+			outR.Close()
+			errR.Close()
+			<-copied
+		}
+	}
 	res := execResult{stdout: out.String(), stderr: errb.String()}
 	var ee *exec.ExitError
 	switch {
@@ -68,6 +106,8 @@ func (e *Engine) exec(dir, bin string, extra []string, stdin string, timeout tim
 		res.stderr += fmt.Sprintf("\ntimed out after %s\n", timeout)
 	case errors.As(err, &ee):
 		res.exit = ee.ExitCode()
+	case errors.Is(err, exec.ErrWaitDelay): // it exited; a child held stdin
+		res.exit = cmd.ProcessState.ExitCode()
 	case err != nil:
 		return res, fmt.Errorf("%s: %w", bin, err)
 	}

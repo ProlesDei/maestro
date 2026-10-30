@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
@@ -50,6 +51,9 @@ type Config struct {
 type Engine struct {
 	cfg  Config
 	uses *playbook.Uses
+	// userSSH says the user set their own ssh command (noPromptEnv).
+	userSSH bool
+	sshOnce sync.Once
 }
 
 // New checks the config and reads skills/use.yaml.
