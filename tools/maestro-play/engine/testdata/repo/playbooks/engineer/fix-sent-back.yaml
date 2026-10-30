@@ -1,5 +1,5 @@
 name: fix-sent-back
-role: senior-software-engineer
+role: engineer
 description: Fix what review or QA sent back, then submit again.
 intake: {category: sent-back, status: in_progress}
 claim: true

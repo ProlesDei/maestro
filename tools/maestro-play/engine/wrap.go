@@ -74,7 +74,7 @@ func (e *Engine) finish(p *playbook.Playbook, st *State) error {
 			return fail(fmt.Sprintf("done.to rendered %q, not a status", to))
 		}
 		if to == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-			return fail(fmt.Sprintf("%s/%s may not move a ticket to done (0760)", p.Role, p.Name))
+			return fail(fmt.Sprintf("%s/%s may not move a ticket to done; /review does", p.Role, p.Name))
 		}
 		role, err := e.render(p, st, "done.role", p.Done.Role)
 		if err != nil {
@@ -208,7 +208,7 @@ func (e *Engine) escalate(p *playbook.Playbook, st *State) error {
 	}
 	moveTo := blk.MoveTo(to)
 	if moveTo == "blocked" && str(t["status"]) == "blocked" {
-		moveTo = "keep" // the store has no blocked -> blocked move: note and release (0435)
+		moveTo = "keep" // the store has no blocked -> blocked move: note and release
 	}
 	ok, msg, err := e.write(st, "escalate", "comment", st.Ticket, "--body", e.escalationNote(p, st, to))
 	if err != nil || !ok {
@@ -248,7 +248,7 @@ func (e *Engine) escalate(p *playbook.Playbook, st *State) error {
 
 // escalateAlone is block for a run with no ticket: a blocked chore ticket
 // for the run's role, with the Escalation (chief-of-staff): note, so the
-// Chief of Staff's intake finds it like any other (0756).
+// Chief of Staff finds it like any other.
 func (e *Engine) escalateAlone(p *playbook.Playbook, st *State) error {
 	if st.Escalation == nil && !st.NoPrompt && st.SessionStarted {
 		if err := e.escalatePrompt(p, st); err != nil {
@@ -344,8 +344,8 @@ func (e *Engine) escalatePrompt(p *playbook.Playbook, st *State) error {
 func (e *Engine) escalationNote(p *playbook.Playbook, st *State, to string) string {
 	esc := st.Escalation
 	var b strings.Builder
-	// Every value from a reply or the runner is flattened to one line, so
-	// none can start a line a trailer reader would take (0746).
+	// Every value from a reply or a command is flattened to one line, so
+	// none can start a line a trailer reader would take.
 	happened := flat(str(esc["happened"]))
 	if happened == "" {
 		happened = flat(st.StopReason)
@@ -453,7 +453,9 @@ func logged(path, runID string) bool {
 }
 
 // cleanup kills the processes replies listed while their command still
-// matches, removes the worktree if it's clean, and closes the session.
+// matches and removes the worktree if it's clean. The branch stays, so a
+// later run reuses it. The harness keeps the session's transcript; there
+// is nothing to close.
 func (e *Engine) cleanup(st *State) {
 	for _, pr := range st.Processes {
 		if cmdline(pr.PID) == pr.Command && pr.PID != os.Getpid() {
@@ -462,19 +464,13 @@ func (e *Engine) cleanup(st *State) {
 	}
 	st.Processes = nil
 	if st.Worktree != "" {
-		if out, err := exec.Command("git", "-C", st.Worktree, "status", "--porcelain").Output(); err == nil && len(strings.TrimSpace(string(out))) == 0 {
-			cmd := exec.Command("git", "worktree", "remove", st.Worktree)
-			cmd.Dir = e.cfg.Dir
-			if cmd.Run() == nil {
+		if r, err := e.git(st, st.Worktree, "status", "--porcelain"); err == nil && r.exit == 0 && strings.TrimSpace(r.stdout) == "" {
+			if r, err := e.git(st, e.cfg.Dir, "worktree", "remove", st.Worktree); err == nil && r.exit == 0 {
 				st.Worktree = ""
 			}
 		}
 	}
-	if st.SessionStarted {
-		if r, err := e.runner(st, "session", "close", "--session", st.Session); err == nil && r["status"] == "ok" {
-			st.SessionStarted = false
-		}
-	}
+	st.SessionStarted = false
 }
 
 // cmdline is the process's command line, space-joined, or "".

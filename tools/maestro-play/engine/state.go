@@ -22,7 +22,7 @@ const (
 	StatusBlocked = "blocked"
 	StatusLost    = "lost"    // the lease was lost; nothing more was written
 	StatusStopped = "stopped" // the stop file exists; resume later
-	StatusFailed  = "failed"  // the engine couldn't go on (preflight, a bad playbook)
+	StatusFailed  = "failed"  // the engine couldn't go on (no harness, a bad playbook)
 	StatusIdle    = "idle"    // run --next found nothing to do
 )
 
@@ -45,10 +45,13 @@ type State struct {
 	Holder   string `json:"holder"`
 	Ticket   string `json:"ticket,omitempty"`
 	Token    int64  `json:"token,omitempty"` // 0 when the run holds no lease
-	// Session is the harness session id; SessionStarted says whether the
-	// next prompt resumes it.
+	// Session is the session id; SessionStarted says whether the next
+	// prompt resumes it. Harness runs it (claude or codex), under its own
+	// id HarnessSession (claude takes ours; codex picks one).
 	Session        string `json:"session"`
 	SessionStarted bool   `json:"session_started,omitempty"`
+	Harness        string `json:"harness,omitempty"`
+	HarnessSession string `json:"harness_session,omitempty"`
 
 	Status string `json:"status"`
 	Phase  string `json:"phase"`
@@ -67,8 +70,7 @@ type State struct {
 
 	StoppedAt  string `json:"stopped_at,omitempty"`
 	StopReason string `json:"stop_reason,omitempty"`
-	// NoPrompt is set when the block reason forbids another prompt (the
-	// budget ran out, the lease was lost).
+	// NoPrompt is set when the block reason forbids another prompt.
 	NoPrompt bool `json:"no_prompt,omitempty"`
 
 	// Input is run --input's text; ClaimRole the ticket's role when the run

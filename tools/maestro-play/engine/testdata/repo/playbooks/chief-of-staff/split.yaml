@@ -1,9 +1,9 @@
 name: split
-role: planner
+role: chief-of-staff
 description: Draft tickets for a plan, create them, and confirm each one.
 intake:
   - {category: request, status: todo, title: "Plan:"}
-  - {category: sent-back, status: in_progress, owner: planner}
+  - {category: sent-back, status: in_progress, owner: chief-of-staff}
 claim: true
 input: optional
 cursor: {name: split, save: '{{add .cursor 1}}'}

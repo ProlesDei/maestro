@@ -1,69 +1,36 @@
 # maestro-play
 
-The playbook engine (decision 0700). A playbook is a YAML file of typed steps under `playbooks/<role>/<job>.yaml`. The engine claims the ticket, runs each step as a `maestro-ticket` call, a runner request or a harness prompt, keeps every output in the run state, and does the wrap-up, the escalation and the clean-up itself. It's the runner's `play` request (`docs/runner.md`).
-
-Go, single static binary, no cgo. One dependency: `gopkg.in/yaml.v3`.
-
-## Build, test, install
-
-From `tools/maestro-play/`:
+Runs a playbook (`playbooks/<role>/<job>.yaml`) step by step: it claims the ticket, runs each step as a `maestro-ticket` call, a built-in request or a harness prompt, saves every output in the run state, and writes the handoff or escalation note itself. Sessions it starts never write tickets. Go, no cgo; build with `go build -o bin/maestro-play ./cmd/maestro-play`. `go test -race ./...` here also lints and renders `../../playbooks`.
 
 ```sh
-go build -o bin/maestro-play ./cmd/maestro-play   # build
-go test -race ./...                               # unit and fake-binary tests, and the repo's playbooks lint
-gofmt -l . && go vet ./...                        # lint
-go install ./cmd/maestro-play                     # put maestro-play on $GOBIN
-```
-
-`go test ./...` is the playbook check: `lint_test.go` lints `../../playbooks`, its prompt templates and `../../skills/use.yaml`.
-
-## Commands
-
-```sh
-maestro-play run <role>/<job> --ticket <id> --bot <bot-id> [--input <text>]
-maestro-play run <role>[/<job>] --next --bot <bot-id>
-maestro-play run <role>/<job> --bot <bot-id> [--input <text>]   # claim: false, no ticket
-maestro-play resume <run-id> [--choice <c> [--text <t>]]
-maestro-play render <role>/<job> --step <id> [--ticket <id> | --ticket-file <f>] [--env <f>] [--input <t>]
+maestro-play run engineer/work --ticket <id> --bot <bot-id>   # also: run <role> --next, run <role>/<job> with no ticket
+maestro-play resume <run-id> [--choice <c> [--text <t>]]      # after a crash, a stop or an ask step
+maestro-play render <role>/<job> --step <id|done|escalate> [--ticket <id> | --ticket-file <f>] [--env <f>]
 maestro-play lint [<playbooks-dir>]
 ```
 
-Every command takes `--playbooks` (`$MAESTRO_PLAYBOOKS`, else `./playbooks`), `--skills` (`$MAESTRO_SKILLS`, else `<playbooks>/../skills`), `--common` (`$MAESTRO_COMMON`, else `$(git rev-parse --git-common-dir)/maestro`), `--ticket-bin` (`$MAESTRO_TICKET_BIN`, else `maestro-ticket`) and `--runner-bin` (`$MAESTRO_RUNNER_BIN`, else `maestro-runner`).
+`run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused), and for `waiting` also `question`, `choices` and `evidence`. Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 5 idle, 6 waiting, 7 stopped (`<common>/STOP` exists). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
 
-`run` and `resume` print one JSON object, the `run:` block of the runner's `play` reply: `id`, `state`, `playbook`, `ticket`, `step`, `reason`, and for a waiting run `question`, `choices` and `evidence`.
+Flags: `--playbooks` (`$MAESTRO_PLAYBOOKS`, else `./playbooks`), `--skills` (`$MAESTRO_SKILLS`), `--common` (`$MAESTRO_COMMON`, else `<git common dir>/maestro`), `--ticket-bin` (`$MAESTRO_TICKET_BIN`), `--harness claude|codex` (`$MAESTRO_HARNESS`, default claude). `MAESTRO_GIT_BIN`, `MAESTRO_GH_BIN`, `MAESTRO_CLAUDE_BIN` and `MAESTRO_CODEX_BIN` pick the binaries; `MAESTRO_MODEL_MID` and `MAESTRO_MODEL_FRONTIER` the models (claude default: sonnet, opus); `MAESTRO_CLAUDE_ARGS` and `MAESTRO_CODEX_ARGS` add session flags, such as `--permission-mode acceptEdits`. Without them, your own harness settings decide what a session may do.
 
-| Exit | `state` | Meaning |
+## Built-in requests
+
+A `run:` step names one of these, or a list of them run in order until one fails. Every reply has `status` (`ok`, `failed` or `refused`), `exit_code` and `output`, plus:
+
+| Request | Runs | Reply fields |
 |---|---|---|
-| 0 | `done` | the run finished (through `done:` or `end`); lint: no problems |
-| 1 | `failed` | the run couldn't start or go on (preflight, a claim conflict, a bad playbook); lint: problems |
-| 2 | | usage |
-| 3 | `blocked` | the run escalated and released the ticket |
-| 4 | `lost` | the lease was lost; nothing more was written |
-| 5 | `idle` | `--next` found nothing to do |
-| 6 | `waiting` | an `ask` step waits for `resume --choice` |
-| 7 | `stopped` | the stop file exists; `resume` continues later |
+| `worktree add <ticket> --from <branch>` | `git worktree add -b maestro/<ticket> .maestro/worktrees/<ticket> <branch>`; reuses the branch, or the worktree, if it exists | `path`, `branch` |
+| `check all`, `check <name>` | each `` - <name>: `<command>` `` under `## Checks` in `.maestro/project/project-setup.md`, with `sh -c` in the worktree; all run, so every failure shows | `summary`, `checks` (name, command, exit_code, status), `output_path` |
+| `head` | `git rev-parse HEAD` in the worktree | `sha` |
+| `open pr [--title <t>] [--body <b>]` | `git push -u origin <branch>`, then `gh pr create --base <main branch>`, or returns the PR already open | `url`, `number` |
+| `pr status [<number, url or branch>]` | `gh pr view --json state,headRefOid,mergeCommit,url` (the run's branch by default) | `state`, `sha`, `merge_sha`, `url` |
 
-`run --ticket` checks only the ticket's status against the intake, so a bot can resume a ticket that waits on someone. `render` is a dry run for evals: it prints a prompt step's full prompt, a ticket or run step's arguments, a gate's value or an ask's question, and writes nothing. `--step done` renders the handoff note, `--step escalate` the escalation prompt. Steps that haven't run have empty records.
+A bad request (an unknown flag, a ticket that isn't a plain id) is `refused` and blocks the step. A failed one is outcome `exit:<n>`, which `on: {fail: ...}` catches; `.steps.<id>.status` is `failed`. `## Main branch` in the same file is `.project.main_branch` (default `main`).
 
-## The playbook format
+Engine-only: `session start` runs `claude -p --output-format json --session-id <id> --json-schema <schema> --model <tier's model> --append-system-prompt <playbooks/rules.md>` with the prompt on stdin, in the worktree; `session resume` is the same with `--resume <id>`. The prompt is `_contract.md`, the skills `skills/use.yaml` names, then the step's template; the schema asks for `status` and `summary`, the `_contract.md` fields and the step's `out:` fields, and the reply is the result's `structured_output`. With `--harness codex`, or for a `family: not-author` step whose author's family is the harness's own, it is `codex exec --json --output-schema <file> -o <file>` (and `codex exec resume <thread>`), with the rules ahead of the first prompt. `session close` does nothing: the harness keeps the transcript. Every command and session gets `MAESTRO_RUN_ID`, and `run` refuses to start inside one.
 
-The format, the step types and keys, the template data and functions, and the built-in `done`, `end`, `block` and clean-up are in [playbooks/README.md](../../playbooks/README.md), the one place they're written down. `playbook/` holds the schema and `engine/lint.go` checks it.
+## Template data and run state
 
-## Run state and resume
+Templates see `.ticket` (the `get --json` ticket plus `kind`, `latest` and `trailers`), `.project` (`name`, `summary`, `main_branch`, `setup`, `checks`), `.env` (`harness`, `family`), `.limits` (`step_visits` 5, `retries` 1), `.run` (`id`, `branch`, `worktree`, `scratch`, `evidence_dir`, `skipped`, ...), `.steps.<id>` (`status`, `outcome`, `output`, the reply fields above, `reply` for a prompt step), `.step.with`, `.item`/`.index` in an `each:` step, `.input.text`, `.cursor` and `.retry`. Functions: `json`, `join`, `int`, `add`, `index`, `quote`, `latest`, `line`, `latestLine`, `hasPrefix`, `contains`, `trim`, `lower`, `default`.
 
-`<common>/runs/<run-id>.json` holds the holder, the token, the cursor, each step's record, the skips and the wrap-up parts done. It's saved before and after every step. Prompt and schema files go in `<common>/runs/<run-id>.d/`. Both go after a `done` run; a blocked or lost run keeps them for housekeeping.
-
-`resume` re-runs preflight, gets the lease back (a heartbeat with the old token and a new `maestro-ticket keepalive` for this process if the lease is live, else a new claim with `--keepalive`; another holder means `lost`), and starts at the step that was running. Idempotency keys are `<run-id>:<step>`, with `:<n>` from a step's second visit on, so a loop never replays an old write. A replayed write the store refuses as `idempotency_conflict` after a re-claim landed before the crash and counts as done. `run --next` resumes the bot's oldest crashed or stopped run of the role first. A process holds `<run-id>.d/lock` (an flock, freed if it dies) while it drives a run, so `resume` of a run another process is driving fails, and `--next` passes over it.
-
-## The runner, as the engine calls it
-
-`docs/runner.md` ("Playbook runs") gives the command line, the session flags, the reply fields and `MAESTRO_RUN_ID`, which the engine sets on every runner call once a run has an id. `run` and `resume` refuse to start while their own environment has it, so a session a run started can never start another run (decision 0787). `refused` blocks the step; `stopped` stops the run. Preflight's reply is the environment: `harness`, `family`, `project`, `limits` and the rest.
-
-## Layout
-
-| Path | What |
-|---|---|
-| `playbook/` | The schema, the runner request table and the ticket subcommands playbooks may run. No I/O beyond reading files. |
-| `engine/` | Run, resume, render, lint, run state, templates. Tests use fake `maestro-ticket` and runner binaries (`fake_test.go`) and the playbooks in `engine/testdata/repo`. |
-| `cli/` | Flags and output. |
-| `cmd/maestro-play/` | `main`. |
+`<common>/runs/<run-id>.json` holds the lease, the cursor and every step's record; prompts, schemas and check output go in `<run-id>.d/`. `resume` gets the lease back and starts at the step that was running; writes reuse their idempotency keys, so a replay is safe. A done run deletes both and removes a clean worktree; the branch stays.

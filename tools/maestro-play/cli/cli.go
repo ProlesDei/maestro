@@ -31,14 +31,20 @@ Flags for every command:
   --skills DIR      skills folder with use.yaml ($MAESTRO_SKILLS, else <playbooks>/../skills)
   --common DIR      Maestro's state folder ($MAESTRO_COMMON, else $(git rev-parse --git-common-dir)/maestro)
   --ticket-bin P    maestro-ticket ($MAESTRO_TICKET_BIN, else maestro-ticket)
-  --runner-bin P    the runner ($MAESTRO_RUNNER_BIN, else maestro-runner)
+  --harness H       claude or codex runs prompt steps ($MAESTRO_HARNESS, else claude)
+
+Environment: MAESTRO_GIT_BIN, MAESTRO_GH_BIN, MAESTRO_CLAUDE_BIN and
+MAESTRO_CODEX_BIN set the binaries; MAESTRO_MODEL_MID and
+MAESTRO_MODEL_FRONTIER the models per tier; MAESTRO_CLAUDE_ARGS and
+MAESTRO_CODEX_ARGS extra session flags, split on spaces (for example
+"--permission-mode acceptEdits").
 
 run and resume print one JSON object: id, state, playbook, ticket, step,
 reason, and for a waiting run question, choices and evidence.
 
 Exit codes: 0 done (lint: clean), 1 failed (lint: problems), 2 usage,
 3 blocked, 4 lease lost, 5 idle (--next found nothing), 6 waiting on an
-ask step, 7 stopped (the stop file exists).
+ask step, 7 stopped (<common>/STOP exists).
 `
 
 // Env is what the CLI reads from outside.
@@ -70,7 +76,7 @@ func Main(env Env) int {
 	c.fs.StringVar(&c.skills, "skills", env.Getenv("MAESTRO_SKILLS"), "skills folder")
 	c.fs.StringVar(&c.common, "common", env.Getenv("MAESTRO_COMMON"), "Maestro's state folder")
 	c.fs.StringVar(&c.ticketBin, "ticket-bin", env.Getenv("MAESTRO_TICKET_BIN"), "maestro-ticket binary")
-	c.fs.StringVar(&c.runnerBin, "runner-bin", env.Getenv("MAESTRO_RUNNER_BIN"), "runner binary")
+	c.fs.StringVar(&c.harness, "harness", env.Getenv("MAESTRO_HARNESS"), "claude or codex")
 	switch env.Args[0] {
 	case "run":
 		return c.run()
@@ -86,10 +92,10 @@ func Main(env Env) int {
 }
 
 type cmd struct {
-	env                                             Env
-	fs                                              *flag.FlagSet
-	playbooks, skills, common, ticketBin, runnerBin string
-	args                                            []string
+	env                                           Env
+	fs                                            *flag.FlagSet
+	playbooks, skills, common, ticketBin, harness string
+	args                                          []string
 }
 
 // parse allows flags before and after the positional arguments.
@@ -118,9 +124,24 @@ func (c *cmd) config() (engine.Config, error) {
 	if dir == "" {
 		dir, _ = os.Getwd()
 	}
+	// Commands run from the top of the checkout, where .maestro/ lives.
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output(); err == nil {
+		if top := strings.TrimSpace(string(out)); top != "" {
+			dir = top
+		}
+	}
+	get := c.env.Getenv
+	models := map[string]string{}
+	for tier, key := range map[string]string{"mid": "MAESTRO_MODEL_MID", "frontier": "MAESTRO_MODEL_FRONTIER"} {
+		if v := get(key); v != "" {
+			models[tier] = v
+		}
+	}
 	cfg := engine.Config{
 		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: dir,
-		TicketBin: c.ticketBin, RunnerBin: c.runnerBin,
+		TicketBin: c.ticketBin, GitBin: get("MAESTRO_GIT_BIN"), GhBin: get("MAESTRO_GH_BIN"),
+		ClaudeBin: get("MAESTRO_CLAUDE_BIN"), CodexBin: get("MAESTRO_CODEX_BIN"), Harness: c.harness,
+		Models: models, ClaudeArgs: strings.Fields(get("MAESTRO_CLAUDE_ARGS")), CodexArgs: strings.Fields(get("MAESTRO_CODEX_ARGS")),
 	}
 	if cfg.Playbooks == "" {
 		cfg.Playbooks = filepath.Join(dir, "playbooks")
@@ -215,7 +236,7 @@ func (c *cmd) render() int {
 	c.fs.StringVar(&o.Step, "step", "", "step id, done (the note) or escalate (required)")
 	c.fs.StringVar(&o.Ticket, "ticket", "", "ticket id, read from the store")
 	c.fs.StringVar(&o.TicketFile, "ticket-file", "", "a maestro-ticket get --json document instead of the store")
-	c.fs.StringVar(&o.EnvFile, "env", "", "a preflight reply (JSON) for .env, .project and .limits")
+	c.fs.StringVar(&o.EnvFile, "env", "", "JSON laid over .env, with project and limits keys for .project and .limits")
 	c.fs.StringVar(&o.Bot, "bot", "", "bot id for .run (default render)")
 	c.fs.StringVar(&o.Input, "input", "", "text for .input.text")
 	if err := c.parse(); err != nil {

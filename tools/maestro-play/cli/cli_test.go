@@ -27,8 +27,8 @@ func TestLint(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "playbooks", "planner"), 0o755)
-	os.WriteFile(filepath.Join(dir, "playbooks", "planner", "x.yaml"), []byte("name: x\nrole: planner\ndescription: d\nsteps: []\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "playbooks", "engineer"), 0o755)
+	os.WriteFile(filepath.Join(dir, "playbooks", "engineer", "x.yaml"), []byte("name: x\nrole: engineer\ndescription: d\nsteps: []\n"), 0o644)
 	code, out, _ = run(t, nil, "lint", "--playbooks", filepath.Join(dir, "playbooks"))
 	if code != 1 || !strings.Contains(out, "no steps") || !strings.Contains(out, "missing _contract.md") {
 		t.Fatalf("exit %d: %s", code, out)
@@ -38,11 +38,11 @@ func TestLint(t *testing.T) {
 func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"frob"},
-		{"run", "senior-software-engineer/build-ticket"},
-		{"run", "--bot", "b", "--ticket", "T-1", "--next", "senior-software-engineer"},
+		{"run", "engineer/build-ticket"},
+		{"run", "--bot", "b", "--ticket", "T-1", "--next", "engineer"},
 		{"resume"},
 		{"resume", "r1", "--text", "x"},
-		{"render", "senior-software-engineer/build-ticket"},
+		{"render", "engineer/build-ticket"},
 		{"lint", "a", "b"},
 		{"run", "--nope"},
 	} {
@@ -63,7 +63,7 @@ func TestRenderFromFiles(t *testing.T) {
 	tf := filepath.Join(dir, "t.json")
 	os.WriteFile(tf, []byte(`{"id":"T-3","status":"todo","body":"Type: chore"}`), 0o644)
 	env := map[string]string{"MAESTRO_PLAYBOOKS": fixture + "/playbooks", "MAESTRO_COMMON": dir}
-	code, out, errs := run(t, env, "render", "senior-software-engineer/build-ticket", "--step", "verify", "--ticket-file", tf)
+	code, out, errs := run(t, env, "render", "engineer/build-ticket", "--step", "verify", "--ticket-file", tf)
 	if code != 0 || !strings.Contains(out, "Ticket T-3 (chore)") {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
@@ -73,15 +73,20 @@ func TestRunReportsJSON(t *testing.T) {
 	dir := t.TempDir()
 	env := map[string]string{
 		"MAESTRO_PLAYBOOKS": fixture + "/playbooks", "MAESTRO_COMMON": dir,
-		"MAESTRO_RUNNER_BIN": filepath.Join(dir, "no-such-runner"),
+		"MAESTRO_CLAUDE_BIN": filepath.Join(dir, "no-such-claude"),
 	}
-	code, out, _ := run(t, env, "run", "senior-software-engineer/build-ticket", "--ticket", "T-1", "--bot", "sse-1")
+	code, out, _ := run(t, env, "run", "engineer/build-ticket", "--ticket", "T-1", "--bot", "eng-1")
 	var r map[string]any
-	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 1 || r["state"] != "failed" {
+	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 1 || r["state"] != "failed" || !strings.Contains(out, "no-such-claude not found") {
 		t.Fatalf("exit %d: %s", code, out)
 	}
+	env["MAESTRO_HARNESS"] = "codex"
+	env["MAESTRO_CODEX_BIN"] = filepath.Join(dir, "no-such-codex")
+	if code, out, _ = run(t, env, "run", "engineer/build-ticket", "--ticket", "T-1", "--bot", "eng-1"); code != 1 || !strings.Contains(out, "no-such-codex not found") {
+		t.Fatalf("codex: exit %d: %s", code, out)
+	}
 	os.WriteFile(filepath.Join(dir, "STOP"), nil, 0o644)
-	code, out, _ = run(t, env, "run", "senior-software-engineer/build-ticket", "--ticket", "T-1", "--bot", "sse-1")
+	code, out, _ = run(t, env, "run", "engineer/build-ticket", "--ticket", "T-1", "--bot", "eng-1")
 	if code != 7 || !strings.Contains(out, `"state":"stopped"`) {
 		t.Fatalf("with the stop file: exit %d: %s", code, out)
 	}
