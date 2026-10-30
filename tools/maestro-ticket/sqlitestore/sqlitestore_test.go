@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -576,6 +577,27 @@ func TestDoctorFlagsBadSettings(t *testing.T) {
 	if rep.OK() {
 		t.Fatal("doctor should flag a wrong schema version")
 	}
+}
+
+func TestDoctorFlagsUnknownStatus(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "t.db"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Create(ctx, ticket.CreateRequest{Title: "stale"})
+	s.w.Exec("UPDATE tickets SET status = 'in_qa' WHERE id = 1")
+	rep, _ := s.Doctor(ctx)
+	for _, c := range rep.Checks {
+		if c.Name == "statuses" {
+			if c.OK || !strings.Contains(c.Detail, "T-1 (in_qa)") {
+				t.Fatalf("statuses check: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("no statuses check: %+v", rep)
 }
 
 func TestReopenKeepsData(t *testing.T) {

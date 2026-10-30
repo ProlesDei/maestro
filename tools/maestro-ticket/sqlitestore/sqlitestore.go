@@ -1424,7 +1424,7 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	if len(badRole) == 0 {
 		add("roles", true, "every open ticket has a known role or none")
 	} else {
-		add("roles", false, "unknown role on %s (want %s; fix with transition --role)",
+		add("roles", false, "unknown role on %s (want %s; fix: transition it to another status with --role, then back)",
 			strings.Join(badRole, ", "), strings.Join(ticket.Roles, ", "))
 	}
 
