@@ -26,14 +26,14 @@ Read `<maestro>/playbooks/README.md` and start from a copy of `<maestro>/playboo
 | reads or writes a ticket | `ticket:`; the engine adds the lease and the idempotency key |
 | runs `worktree add`, `check all`, `head` or `open pr` | `run:` |
 | decides from a value, such as a sha or a reply field | `gate:`, a template that renders true or false; it costs no tokens |
-| needs a human choice | `ask:` with a `question` and its `choices` |
+| needs a human choice | a `prompt:` step that replies `blocked` with the question; the engine blocks the ticket with an `Escalation:` note |
 | needs judgment | `prompt:`, reusing a template in `<maestro>/playbooks/prompts/`, with `with: {mode: ...}` if one fits |
 
 Write a new prompt template only when none fits, in the shape `playbooks/README.md` gives. For each prompt step, `out:` lists the reply fields the next step needs, `retry:` asks once more on a missing field, `on:` routes every outcome, and `model:` stays `mid` unless the job needs `frontier`.
 
 ## 4. Make it auditable
 
-- Put a `gate` before each action that can't be undone: a merge, a deploy, a delete, a call outside the repo. Add an `ask` there when a human must agree.
+- Put a `gate` before each action that can't be undone: a merge, a deploy, a delete, a call outside the repo. When a human must agree, let a prompt step reply `blocked` there.
 - Give every `when:` a `reason:`, so the run state logs each skip.
 - Loop back to an earlier step through `on:`, and let `.limits.step_visits` cap it. Never keep a counter in the playbook.
 - Never name a skill or a model id in a playbook or a template.
