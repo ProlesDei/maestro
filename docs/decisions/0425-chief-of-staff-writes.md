@@ -1,6 +1,0 @@
-# 0425 What the Chief of Staff writes
-
-- **Context:** 0407 says the Chief of Staff never writes or edits tickets, but triage creates `Plan:` tickets (0507) and escalations need answers. After setup, a changed definition of done needed a commit and a pull request, which only Ops could open. During setup, `definition-of-done` wrote `project-setup.md` again just after `setup-project` had written it, and `install write` refuses to overwrite.
-- **Choice:** The Chief of Staff writes only `Plan:` tickets, which stand in for workstreams until the store has them (0504), and `Approved:` / `Declined:` answers to escalations it holds. Small asks go to `small-tasks`. During setup, `definition-of-done` runs on the setup draft before the one write. After setup, `install write --branch maestro/dod-<date>` commits the change and the Chief of Staff opens its pull request, the only one it may open. Its sessions may read the repo, for the setup drafts.
-- **Alternatives:** Route definition-of-done changes through Ops (a ticket for the Chief of Staff to hand over, against 0407); let `install write` overwrite (it could clobber the user's edits).
-- **Why:** The user already confirmed the content, a human merges the pull request, and the Chief of Staff still never manages tickets.

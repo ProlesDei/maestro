@@ -1,0 +1,10 @@
+name: answer
+role: chief-of-staff
+description: Answer an escalation on a blocked ticket; one it can't answer goes on to the owner.
+intake: {category: request, status: blocked, latest: "Escalation:"}
+claim: true
+steps:
+  - id: decide
+    prompt: tickets
+    with: {goal: '{{.ticket.title}}'}
+    out: [tickets]

@@ -1,0 +1,60 @@
+name: work
+role: engineer
+description: Take a ticket from todo, or back from review with a Kickback note, to an open PR at in_review, with a test for each criterion.
+intake:
+  - {category: new-work, status: todo}
+  - {category: sent-back, status: in_progress, latest: "Kickback:"}   # /review's NO-GO
+  - {category: sent-back, status: in_progress, latest: "Answer:"}     # unblocked: see skills/work/SKILL.md#unblock
+claim: true
+session: ticket
+steps:
+  - id: start
+    when: '{{if eq .ticket.status "todo"}}true{{else}}false{{end}}'
+    reason: already in_progress
+    ticket: transition {{.ticket.id}} --to in_progress --from todo
+  - id: worktree                  # reuses the ticket's worktree and branch if they exist
+    run: worktree add {{.ticket.id}} --from {{.project.main_branch}}
+  - id: plan                      # a Kickback re-enters at build with the feedback
+    when: '{{if hasPrefix .ticket.latest "Kickback:"}}false{{else}}true{{end}}'
+    reason: sent back by review; build reads the Kickback note
+    prompt: plan
+    model: frontier
+    with: &mode                   # the ticket's Type: line picks the mode; anything else is feature
+      mode: '{{if or (eq .ticket.kind "bug") (eq .ticket.kind "refactor") (eq .ticket.kind "perf")}}{{.ticket.kind}}{{else}}feature{{end}}'
+    out: [plan, risks]
+  - id: build
+    prompt: build
+    model: frontier
+    with: *mode
+    retry: {max: 1, tier_up: false}
+    out: [commit, files, tests, items]
+  - id: checks
+    run: check all
+    on: {fail: build}             # failing checks aren't a try; step_visits caps the loop
+  - id: verify
+    prompt: verify
+    model: mid
+    out: [criteria, failures]
+    on: {failed: build}
+  - id: head
+    run: head
+  - id: pr
+    run: open pr
+done:
+  to: in_review
+  note: |
+    Handoff: PR {{.steps.pr.url}} from {{.run.branch}} at {{.steps.head.sha}}.
+    Checks: {{json .steps.checks.summary}}
+    Criteria:{{range .steps.verify.reply.criteria}}
+    - {{json .}}{{end}}
+    {{- with .steps.build.reply.items}}
+    Kickback items:{{range .}}
+    - {{json .}}{{end}}{{end}}
+    {{- with .steps.plan.reply.risks}}
+    Risks: {{json .}}{{end}}
+    {{.run.skipped}}Tries: {{.ticket.tries}}
+    branch: {{.run.branch}}
+    sha: {{.steps.head.sha}}
+    pr: {{.steps.pr.url}}
+    author-family: {{.env.family}}
+    author-role: {{.run.role}}

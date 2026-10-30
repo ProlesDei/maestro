@@ -95,7 +95,7 @@ func checkIntact(t *testing.T, s *Store) {
 }
 
 // A process killed inside a write transaction leaves nothing behind: no
-// ticket, no event, no outbox row, and the write lock is free again.
+// ticket, no event, and the write lock is free again.
 func TestKillMidTransaction(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")

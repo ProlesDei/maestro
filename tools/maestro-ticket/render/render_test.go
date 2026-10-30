@@ -14,7 +14,7 @@ import (
 func sample() []ticket.Ticket {
 	exp := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
 	return []ticket.Ticket{
-		{ID: 1, Title: "Pipe | and\nnewline", Status: ticket.StatusTodo, Role: "junior-software-engineer", Priority: 1, Version: 1},
+		{ID: 1, Title: "Pipe | and\nnewline", Status: ticket.StatusTodo, Role: "engineer", Priority: 1, Version: 1},
 		{ID: 2, Title: "Live", Status: ticket.StatusInProgress, Priority: 0, Version: 3,
 			Claim: &ticket.Claim{Holder: "sse/s1", ExpiresAt: exp}},
 		{ID: 3, Title: "Stale", Status: ticket.StatusInProgress, Priority: 2, Version: 2,
@@ -30,7 +30,7 @@ func TestBacklog(t *testing.T) {
 	for _, want := range []string{
 		"at event seq 42",
 		"| todo | 1 |", "| in_progress | 2 |", "| done | 0 |",
-		"| T-1 | P1 | Pipe \\| and newline | junior-software-engineer |  | 1 |",
+		"| T-1 | P1 | Pipe \\| and newline | engineer |  | 1 |",
 		"sse/s1 until 2026-10-28 10:00Z",
 		"jse/s9 (expired)",
 	} {

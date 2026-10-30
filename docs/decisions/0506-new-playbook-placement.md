@@ -1,6 +1,0 @@
-# 0506 Where the new playbooks live and how one is picked
-
-- **Context:** G5.4 asks for bug fix, refactor, performance, scout, setup, definition of done, verification skill, memory curation, housekeeping, and the digest and recap. The brief doesn't say which role owns each or how a ticket picks one.
-- **Choice:** Bug fix, refactor, performance and scout under the Senior Engineer; the Junior's `build-ticket` gains a reproduce step for routine bugs. Setup and definition of done under the Chief of Staff (they need the user); the verification skill under QA. Memory curation and housekeeping under Operations. Digest and recap are two Chief of Staff playbooks; `status-brief` stays as the scheduled push. Added `planner/answer-escalation` (0503) and `planner/accept-report` (0009). Frontmatter gains `types`, and a body line `Playbook: refactor|performance` picks between playbooks for the same type.
-- **Alternatives:** A junior copy of bug-fix (duplicate text; the skill carries the procedure anyway); one digest-and-recap playbook (two different outputs); a ticket type per playbook (changes the settled type list).
-- **Why:** Each playbook sits with the role that has the authority it needs, and routing stays mechanical.

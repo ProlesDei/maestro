@@ -6,4 +6,4 @@ input: optional
 claim: false
 steps:
   - id: summary
-    run: summary
+    run: [head, check unit, head]

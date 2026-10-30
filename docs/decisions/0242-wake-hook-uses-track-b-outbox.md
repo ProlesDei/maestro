@@ -1,6 +1,0 @@
-# 0242 The wake hook reads track B's outbox, and the sweep is `reap`
-
-- **Context:** 0600 was written against the store before track B. It says the `events` table is the outbox and only a delivery cursor is missing (c3), and that an expired lease writes no event, so a separate `sweep` must find expiries (c4). Track B, merged here, added an `outbox` table with one row per event in the same transaction, with `attempts`, `next_attempt_at` and `delivered_at` (0222), and made `reap` and every write log `lease_expired` events (0220).
-- **Choice:** 0600's design stands, with two changes. The deliverer reads undelivered `outbox` rows instead of keeping its own cursor table; it groups them by the bot each event wakes, sends one POST per bot, and marks every row in the group delivered on a `200` (on a retry it bumps `attempts` and `next_attempt_at`). 0600's `sweep` is `maestro-ticket reap --every 30s`: an expiry is now an event, so it reaches the hook like any other change. Retrying failed deliveries stays with the deliverer.
-- **Alternatives:** A per-bot cursor over `events` as 0600 proposed (a second bookkeeping table that duplicates the outbox's columns).
-- **Why:** The outbox already holds what the cursor table would, and is written in the same transaction, so there's nothing to keep in step.

@@ -19,21 +19,18 @@ import (
 )
 
 // Roles are the bot-profile folder names a playbook can belong to.
-var Roles = []string{
-	"chief-of-staff", "planner", "senior-software-engineer", "junior-software-engineer",
-	"code-reviewer", "qa-lead", "operations-manager",
-}
+var Roles = []string{"chief-of-staff", "engineer", "reviewer"}
 
 // Statuses are maestro-ticket's statuses (tools/maestro-ticket/ticket).
 var Statuses = []string{
-	"backlog", "todo", "in_progress", "in_review", "in_qa", "ready_to_release", "done", "blocked", "cancelled",
+	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
 
 // Categories are the intake categories, in the order --next tries them.
 var Categories = []string{"request", "sent-back", "new-work", "scheduled"}
 
 // Tiers are the model tiers a prompt step can ask for, cheapest first. The
-// runner maps them to model ids; playbooks never name a model.
+// engine maps them to model names; playbooks never name a model.
 var Tiers = []string{"mid", "frontier"}
 
 // ReplyStatuses are the statuses a prompt step's reply can carry; each one is
@@ -52,7 +49,6 @@ const (
 	KindRun    = "run"
 	KindPrompt = "prompt"
 	KindGate   = "gate"
-	KindWait   = "wait"
 	KindAsk    = "ask"
 )
 
@@ -171,7 +167,7 @@ type Intake struct {
 	// filter when "any".
 	Role         string   `yaml:"role"`
 	Type         string   `yaml:"type"`  // ship or scout; empty for both
-	Kinds        []string `yaml:"kinds"` // the body's "Type: <kind>" line (0430)
+	Kinds        []string `yaml:"kinds"` // the body's "Type: <kind>" line
 	Latest       string   `yaml:"latest"`
 	UnlessLatest string   `yaml:"unless_latest"`
 	Body         string   `yaml:"body"`        // some body line starts with it
@@ -198,7 +194,6 @@ type Step struct {
 	Run    Lines  `yaml:"run"`
 	Prompt string `yaml:"prompt"`
 	Gate   string `yaml:"gate"`
-	Wait   *Wait  `yaml:"wait"`
 	Ask    *Ask   `yaml:"ask"`
 
 	When  *When             `yaml:"when"`
@@ -251,9 +246,6 @@ func (s *Step) Kind() string {
 	if s.Gate != "" {
 		kinds = append(kinds, KindGate)
 	}
-	if s.Wait != nil {
-		kinds = append(kinds, KindWait)
-	}
 	if s.Ask != nil {
 		kinds = append(kinds, KindAsk)
 	}
@@ -269,30 +261,6 @@ func (s *Step) Tier() string {
 		return "mid"
 	}
 	return s.Model
-}
-
-// Wait re-runs a run or ticket step until a condition holds.
-type Wait struct {
-	Step    string `yaml:"step"`
-	Until   string `yaml:"until"`
-	Every   string `yaml:"every"`   // default 1m
-	Timeout string `yaml:"timeout"` // default 30m
-}
-
-// Durations parses every and timeout, with their defaults.
-func (w *Wait) Durations() (every, timeout time.Duration, err error) {
-	every, timeout = time.Minute, 30*time.Minute
-	if w.Every != "" {
-		if every, err = time.ParseDuration(w.Every); err != nil || every <= 0 {
-			return 0, 0, fmt.Errorf("every %q: want a positive duration like 1m", w.Every)
-		}
-	}
-	if w.Timeout != "" {
-		if timeout, err = time.ParseDuration(w.Timeout); err != nil || timeout <= 0 {
-			return 0, 0, fmt.Errorf("timeout %q: want a positive duration like 30m", w.Timeout)
-		}
-	}
-	return every, timeout, nil
 }
 
 // Ask pauses the run for the bot's answer.
@@ -395,7 +363,7 @@ func (b Block) MoveTo(to string) string {
 	return "todo"
 }
 
-// Lines is a run: step's runner request: one line, or a list of them,
+// Lines is a run: step's built-in request: one line, or a list of them,
 // sent in order until one fails.
 type Lines []string
 
@@ -513,12 +481,12 @@ func LoadRole(dir, role string) ([]*Playbook, error) {
 	return out, nil
 }
 
-// Uses is skills/use.yaml (B3). Missing or empty means no skill is named.
+// Uses is skills/use.yaml. Missing or empty means no skill is named.
 type Uses struct {
 	Prompts map[string][]string `yaml:"prompts"`
 	Bots    map[string][]string `yaml:"bots"`
 	// Commands are skills the user starts as /<name>. The installer copies
-	// them; a prompt never names one (0781, 0788).
+	// them; a prompt never names one.
 	Commands []string `yaml:"commands"`
 }
 

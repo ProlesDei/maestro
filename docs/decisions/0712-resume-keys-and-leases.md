@@ -1,6 +1,0 @@
-# 0712 Resume keeps the token when it can; keys count visits; an ask stretches the lease
-
-- **Context:** 0700 says resume restarts at the first unfinished step with the same idempotency keys `<run>:<step>`. The store hashes the token into the request, every claim makes a new token, a looped step writes again, and nothing heartbeats while a run waits on an `ask`.
-- **Choice:** On resume the engine first heartbeats with the saved token, so a live lease keeps its token and every replay matches. Only if the lease expired does it claim again. Another holder means the run is `lost`, with no writes. When a step that was in flight is replayed under a new token and the store answers `idempotency_conflict`, the write counts as done: the key is the run's own, so the write landed before the crash. Keys get `:<n>` from a step's second visit on. An `ask` step heartbeats with `--ttl` (`ask.timeout`, default 4h) before the run exits waiting, so the ticket stays out of other bots' intake.
-- **Alternatives:** Always re-claim (every replay after a crash conflicts); release at `ask` (another engineer's `--next` picks up a half-done ticket); one key per step for all visits (the second pass of a loop replays the first pass's comment).
-- **Why:** A crash or a wait costs nothing extra and never writes twice or loses work to another bot.

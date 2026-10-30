@@ -2,52 +2,38 @@ package playbook
 
 import "strings"
 
-// Request is one row of the runner's request table (docs/runner.md).
+// Request is one built-in request a run: step can send. The engine runs
+// each one itself (engine/builtin.go); there is no other binary.
 type Request struct {
 	Name string
-	// Roles that may send it; nil means every role.
-	Roles []string
-	// Engine marks requests only the engine sends. A playbook's run: step
-	// can't name them: the engine does preflight, sessions and ticket calls
-	// itself.
+	// Engine marks requests only the engine sends: a run: step can't name
+	// them.
 	Engine bool
+	// Usage is the request's shape, for error messages.
+	Usage string
+	// MinArgs and MaxArgs bound the words after the name that aren't
+	// flags or flag values.
+	MinArgs, MaxArgs int
+	// Flags are the flags the request takes; Need, the ones it must have.
+	// Any other flag is refused.
+	Flags, Need []string
 	// Fields the reply carries besides status, exit_code and output. Each
 	// run step's record starts with them set to nil, so templates can name
 	// them before the step runs and lint catches a misspelled one.
 	Fields []string
 }
 
-var builders = []string{"senior-software-engineer", "junior-software-engineer", "qa-lead", "operations-manager"}
-
-// Requests mirrors docs/runner.md. Keep the two in step.
+// Requests are the built-in requests. README.md lists what each one runs.
 var Requests = []Request{
-	{Name: "preflight", Engine: true},
 	{Name: "session start", Engine: true},
 	{Name: "session resume", Engine: true},
-	{Name: "session close", Engine: true},
-	{Name: "ticket", Engine: true},
-	{Name: "play", Fields: []string{"run"}},
-	{Name: "usage check", Fields: []string{"level", "scopes"}},
-	{Name: "trust", Fields: []string{"level", "risk", "risk_class", "merge", "deploy", "needs_user"}},
-	{Name: "head", Fields: []string{"sha"}},
-	{Name: "summary", Roles: []string{"chief-of-staff", "planner"}, Fields: []string{"goals", "workstreams", "spend", "next_seq"}},
-	{Name: "worktree add", Roles: builders, Fields: []string{"path", "branch"}},
-	{Name: "check", Roles: builders, Fields: []string{"summary", "output_path", "checks"}},
-	{Name: "install detect", Roles: []string{"chief-of-staff", "qa-lead"}, Fields: []string{"harnesses"}},
-	{Name: "install status", Roles: []string{"chief-of-staff", "qa-lead"}, Fields: []string{"files"}},
-	{Name: "install write", Roles: []string{"chief-of-staff", "qa-lead"}, Fields: []string{"path", "branch", "commit"}},
-	{Name: "open pr", Roles: []string{"operations-manager", "chief-of-staff"}, Fields: []string{"url", "number"}},
-	{Name: "pr status", Roles: []string{"operations-manager"}, Fields: []string{"state", "sha", "merge_sha", "url"}},
-	{Name: "merge", Roles: []string{"operations-manager"}, Fields: []string{"sha", "merge_sha"}},
-	{Name: "deploy", Roles: []string{"operations-manager"}},
-	{Name: "rollback", Roles: []string{"operations-manager"}},
-	{Name: "smoke", Roles: []string{"operations-manager"}},
-	{Name: "logs", Roles: []string{"operations-manager"}, Fields: []string{"count", "files", "cursor", "new_lines", "due", "next_cursor"}},
-	{Name: "memory scan", Roles: []string{"operations-manager"}, Fields: []string{"proposals", "changed", "flagged", "size", "budget", "over_budget"}},
-	{Name: "housekeep", Roles: []string{"operations-manager"}, Fields: []string{"plan", "items", "snapshot_recent", "snapshot"}},
-	{Name: "evals", Roles: []string{"operations-manager"}, Fields: []string{"results", "passed", "failed"}},
-	{Name: "stop", Roles: []string{"chief-of-staff"}},
-	{Name: "resume", Roles: []string{"chief-of-staff"}},
+	{Name: "worktree add", Usage: "worktree add <ticket> --from <branch>", MinArgs: 1, MaxArgs: 1,
+		Flags: []string{"--from"}, Need: []string{"--from"}, Fields: []string{"path", "branch"}},
+	{Name: "check", Usage: "check all, or check <name>", MinArgs: 1, MaxArgs: 1,
+		Fields: []string{"summary", "checks", "output_path"}},
+	{Name: "head", Usage: "head", Fields: []string{"sha"}},
+	{Name: "open pr", Usage: "open pr [--title <t>] [--body <b>]", Flags: []string{"--title", "--body"},
+		Fields: []string{"url", "number"}},
 }
 
 // FindRequest matches the longest request name at the start of words.
@@ -71,11 +57,6 @@ func FindRequest(words []string) *Request {
 		}
 	}
 	return best
-}
-
-// Allows reports whether role may send the request.
-func (r *Request) Allows(role string) bool {
-	return r.Roles == nil || Contains(r.Roles, role)
 }
 
 // TicketSub describes what a ticket: step may run and which flags the
@@ -108,7 +89,3 @@ var TicketSubs = map[string]TicketSub{
 // run's role is always the actor role; the store and files on disk are not
 // a playbook's to pick (body: is the step's body).
 var EngineTicketFlags = []string{"--json", "--holder", "--token", "--idempotency-key", "--actor", "--actor-role", "--store", "--body-file"}
-
-// RunnerFlags are the flags the engine puts before a runner request's
-// words; a run: step must not set them.
-var RunnerFlags = []string{"--json", "--bot", "--role", "--ticket", "--run"}

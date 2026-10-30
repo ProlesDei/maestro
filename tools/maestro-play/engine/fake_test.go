@@ -1,34 +1,47 @@
 package engine
 
-// Fake maestro-ticket and runner binaries. The test binary is symlinked as
-// maestro-ticket and maestro-runner in a temp dir; TestMain dispatches on
-// the name it was started as. Both keep their state in $FAKE_DIR:
+// Fake maestro-ticket, claude, codex, gh, git and check binaries. The test
+// binary is symlinked under each name in a temp dir; TestMain dispatches on
+// the name it was started as. git logs the call and runs the real git. All
+// keep their state in $FAKE_DIR:
 //
 //	tickets.json  the store: tickets with claims and comments, idempotency keys
-//	runner.json   scripted runner replies, by request name (first is used and
-//	              dropped, the last one sticks); "session" replies come from
-//	              the fake harness list
-//	calls.jsonl   every call: the binary, its args, and the prompt it sent
+//	fake.json     scripted replies (fakeConfig) and the open PRs
+//	calls.jsonl   every call: the binary, its args, its directory, and the
+//	              prompt a session got
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
 
 func TestMain(m *testing.M) {
 	switch filepath.Base(os.Args[0]) {
 	case "maestro-ticket":
 		os.Exit(fakeTicket(os.Args[1:]))
-	case "maestro-runner":
-		os.Exit(fakeRunner(os.Args[1:]))
+	case "claude":
+		os.Exit(fakeClaude(os.Args[1:]))
+	case "codex":
+		os.Exit(fakeCodex(os.Args[1:]))
+	case "gh":
+		os.Exit(fakeGh(os.Args[1:]))
+	case "git":
+		os.Exit(fakeGit(os.Args[1:]))
+	case "fake-check":
+		os.Exit(fakeCheck(os.Args[1:]))
 	}
 	os.Exit(m.Run())
 }
@@ -97,12 +110,12 @@ func logCall(bin string, args []string, extra map[string]any) {
 
 // fakeFlags splits args into positionals and --flag values.
 func fakeFlags(args []string) ([]string, map[string]string) {
-	bools := map[string]bool{"--json": true, "--unclaimed": true, "--claimed": true, "--release": true, "--next": true}
+	bools := map[string]bool{"--json": true, "--unclaimed": true, "--claimed": true, "--release": true, "--next": true, "-p": true}
 	flags := map[string]string{}
 	var pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if strings.HasPrefix(a, "--") {
+		if strings.HasPrefix(a, "-") && a != "-" {
 			if bools[a] {
 				flags[a] = "true"
 			} else if i+1 < len(args) {
@@ -136,6 +149,15 @@ func fakeTicket(args []string) int {
 			return fail("lease_lost", 4)
 		}
 		return 0
+	}
+	// fake.json may fail a subcommand ("ticket transition"); a reply with
+	// no exit lets the call through.
+	if cfg := loadFake(); cfg.Replies != nil {
+		r := cfg.pop("ticket " + args[0])
+		saveJSON("fake.json", cfg)
+		if n := toInt(r["exit"]); n != 0 {
+			return fail(fmt.Sprint(r["code"]), n)
+		}
 	}
 	if s.Keys == nil {
 		s.Keys, s.Results = map[string]string{}, map[string]string{}
@@ -296,6 +318,9 @@ func fakeTicket(args []string) int {
 		if f := fl["--from"]; f != "" && f != t.Status {
 			return fail("status_conflict", 4)
 		}
+		if r := fl["--role"]; r != "" && !contains(playbook.Roles, r) {
+			return fail("invalid", 2) // the store's: unknown role
+		}
 		to := fl["--to"]
 		if to == "blocked" {
 			if t.Status == "blocked" {
@@ -303,7 +328,7 @@ func fakeTicket(args []string) int {
 			}
 			t.BlockedFrom = t.Status
 		}
-		if to == "in_progress" && (t.Status == "in_review" || t.Status == "in_qa") {
+		if to == "in_progress" && t.Status == "in_review" {
 			t.Tries++
 		}
 		t.Status = to
@@ -326,110 +351,268 @@ func fakeTicket(args []string) int {
 	return fail("usage", 2)
 }
 
-type fakeRunnerConfig struct {
+// fakeConfig scripts the fakes. Harness replies feed claude and codex in
+// order; Replies are by command ("gh pr view", "git rev-parse", "check",
+// "check unit"): the first is used and dropped, the last one sticks.
+type fakeConfig struct {
+	Harness []map[string]any            `json:"harness"`
 	Replies map[string][]map[string]any `json:"replies"`
-	// Harness replies for session start and resume, in order.
-	Harness []map[string]any `json:"harness"`
+	PRs     []fakePR                    `json:"prs"`
 }
 
-var twoWord = map[string]bool{
-	"session": true, "usage": true, "worktree": true, "install": true, "open": true, "pr": true, "memory": true,
+type fakePR struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	Head   string `json:"head"`
+	Base   string `json:"base"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	State  string `json:"state"`
+	Fork   bool   `json:"fork"`
 }
 
-func fakeRunner(args []string) int {
-	var bot, role, ticketID string
-	i := 0
-	for ; i < len(args); i++ {
-		switch args[i] {
-		case "--json":
-		case "--bot":
-			i++
-			bot = args[i]
-		case "--role":
-			i++
-			role = args[i]
-		case "--ticket":
-			i++
-			ticketID = args[i]
-		case "--run":
-			i++
-		default:
-			goto done
-		}
-	}
-done:
-	words := args[i:]
-	name := words[0]
-	if twoWord[name] && len(words) > 1 {
-		name += " " + words[1]
-	}
-	_, fl := fakeFlags(words)
-	extra := map[string]any{"bot": bot, "role": role, "run_env": os.Getenv(RunEnv)}
-	if p := fl["--prompt-file"]; p != "" {
-		b, _ := os.ReadFile(p)
-		extra["prompt"] = string(b)
-	}
-	logCall("runner", words, extra)
+func loadFake() *fakeConfig {
+	var cfg fakeConfig
+	loadJSON("fake.json", &cfg)
+	return &cfg
+}
 
-	var cfg fakeRunnerConfig
-	loadJSON("runner.json", &cfg)
-	defer saveJSON("runner.json", &cfg)
-	pop := func(list *[]map[string]any) map[string]any {
-		if len(*list) == 0 {
-			return nil
-		}
-		r := (*list)[0]
-		if len(*list) > 1 {
-			*list = (*list)[1:]
-		}
-		return r
+func (cfg *fakeConfig) pop(name string) map[string]any {
+	list := cfg.Replies[name]
+	if len(list) == 0 {
+		return nil
 	}
-	var reply map[string]any
-	if name == "session start" || name == "session resume" {
-		h := pop(&cfg.Harness)
-		if h == nil {
-			h = map[string]any{"reply": map[string]any{"status": "failed", "summary": "no scripted reply"}}
-		}
-		reply = map[string]any{"status": "ok", "exit_code": 0, "output": "", "family": "claude"}
-		for k, v := range h {
-			reply[k] = v
-		}
-	} else if list, ok := cfg.Replies[name]; ok {
-		reply = pop(&list)
-		cfg.Replies[name] = list
+	r := list[0]
+	if len(list) > 1 {
+		cfg.Replies[name] = list[1:]
 	}
-	if reply == nil {
-		reply = map[string]any{"status": "ok", "exit_code": 0, "output": ""}
-		switch name {
-		case "preflight":
-			reply["harness"], reply["family"] = "claude-code", "claude"
-			reply["project"] = map[string]any{"main_branch": "main"}
-			reply["limits"] = map[string]any{"step_visits": 3, "retries": 0}
-		case "worktree add":
-			reply["path"] = filepath.Join(fakeDir(), "wt", ticketID)
-			reply["branch"] = "maestro/" + ticketID + "-x"
-		case "check":
-			reply["summary"] = "3 passed"
-			reply["output_path"] = ""
-		}
+	return r
+}
+
+func (cfg *fakeConfig) popHarness() map[string]any {
+	if len(cfg.Harness) == 0 {
+		return map[string]any{"reply": map[string]any{"status": "failed", "summary": "no scripted reply"}}
 	}
-	if reply["steal"] == true {
+	h := cfg.Harness[0]
+	if len(cfg.Harness) > 1 {
+		cfg.Harness = cfg.Harness[1:]
+	}
+	return h
+}
+
+func cwd() string { d, _ := os.Getwd(); return d }
+
+// sideEffects runs a harness reply's test hooks: steal takes the lease,
+// stop_file makes the stop file, commit makes a commit in the session's
+// directory and puts its sha in the reply.
+func sideEffects(h map[string]any, rep map[string]any) {
+	if h["steal"] == true {
 		var s fakeStore
 		loadJSON("tickets.json", &s)
-		if t := s.Tickets[ticketID]; t != nil {
-			s.NextToken++
-			t.Claim = &fakeClaim{Holder: "thief/1", Token: s.NextToken}
+		for _, t := range s.Tickets {
+			if t.Claim != nil {
+				s.NextToken++
+				t.Claim = &fakeClaim{Holder: "thief/1", Token: s.NextToken}
+			}
 		}
 		saveJSON("tickets.json", &s)
-		delete(reply, "steal")
 	}
-	if reply["stop_file"] == true {
+	if h["stop_file"] == true {
 		os.WriteFile(filepath.Join(os.Getenv("FAKE_COMMON"), "STOP"), nil, 0o644)
-		delete(reply, "stop_file")
 	}
-	b, _ := json.Marshal(reply)
+	if msg, ok := h["commit"].(string); ok && rep != nil {
+		os.WriteFile(filepath.Join(cwd(), "change.txt"), []byte(msg+"\n"), 0o644)
+		git := os.Getenv("FAKE_GIT")
+		exec.Command(git, "add", "change.txt").Run()
+		exec.Command(git, "commit", "-q", "-m", msg).Run()
+		out, _ := exec.Command(git, "rev-parse", "HEAD").Output()
+		rep["commit"] = strings.TrimSpace(string(out))
+	}
+}
+
+// fakeClaude answers claude -p --output-format json the way claude does:
+// one JSON result with the structured reply in structured_output.
+func fakeClaude(args []string) int {
+	prompt, _ := io.ReadAll(os.Stdin)
+	logCall("claude", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	cfg := loadFake()
+	h := cfg.popHarness()
+	saveJSON("fake.json", cfg)
+	_, fl := fakeFlags(args)
+	id := fl["--session-id"] + fl["--resume"]
+	rep, _ := h["reply"].(map[string]any)
+	sideEffects(h, rep)
+	out := map[string]any{"type": "result", "subtype": "success", "is_error": h["is_error"] == true,
+		"result": fmt.Sprint(h["result"]), "session_id": id, "structured_output": rep, "total_cost_usd": 0.01}
+	if h["text_reply"] == true { // the reply as text, not structured
+		b, _ := json.Marshal(rep)
+		out["result"], out["structured_output"] = "Here it is:\n```json\n"+string(b)+"\n```", nil
+	}
+	b, _ := json.Marshal(out)
 	fmt.Println(string(b))
+	if h["is_error"] == true {
+		return 1
+	}
 	return 0
+}
+
+// fakeCodex answers codex exec --json -o <file> like codex: events on
+// stdout, the last message's text in the file. Like codex-cli 0.162, it
+// refuses an --output-schema that isn't strict.
+func fakeCodex(args []string) int {
+	prompt, _ := io.ReadAll(os.Stdin)
+	logCall("codex", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	_, fl := fakeFlags(args)
+	if f := fl["--output-schema"]; f != "" {
+		var schema any
+		b, _ := os.ReadFile(f)
+		if err := json.Unmarshal(b, &schema); err != nil {
+			fmt.Fprintln(os.Stderr, "invalid_json_schema:", err)
+			return 1
+		}
+		if msg := strictSchema("schema", schema); msg != "" {
+			fmt.Fprintln(os.Stderr, "invalid_json_schema: "+msg)
+			return 1
+		}
+	}
+	cfg := loadFake()
+	h := cfg.popHarness()
+	saveJSON("fake.json", cfg)
+	rep, _ := h["reply"].(map[string]any)
+	sideEffects(h, rep)
+	thread := "codex-thread-1"
+	if len(args) > 2 && args[1] == "resume" {
+		thread = args[2]
+	}
+	fmt.Printf(`{"type":"thread.started","thread_id":%q}`+"\n", thread)
+	b, _ := json.Marshal(rep)
+	os.WriteFile(fl["-o"], []byte("Done.\n"+string(b)+"\n"), 0o644)
+	return 0
+}
+
+// strictSchema is what strict mode refuses in a schema, or "": an object
+// without additionalProperties false or with a key not in required, or a
+// field with no type.
+func strictSchema(at string, v any) string {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return at + ": want an object"
+	}
+	if m["type"] == nil && m["enum"] == nil && m["anyOf"] == nil {
+		return at + ": no type"
+	}
+	if props, ok := m["properties"].(map[string]any); ok || m["type"] == "object" {
+		if m["additionalProperties"] != false {
+			return "'" + at + ".additionalProperties' is required to be supplied and to be false when strict is true"
+		}
+		req, _ := m["required"].([]any)
+		for k, p := range props {
+			if !contains(anyStrings(req), k) {
+				return at + ": " + k + " is not in required"
+			}
+			if msg := strictSchema(at+"."+k, p); msg != "" {
+				return msg
+			}
+		}
+	}
+	if items, ok := m["items"]; ok {
+		return strictSchema(at+".items", items)
+	}
+	return ""
+}
+
+func anyStrings(list []any) []string {
+	out := make([]string, len(list))
+	for i, v := range list {
+		out[i] = fmt.Sprint(v)
+	}
+	return out
+}
+
+// fakeGh is gh pr list, create and view over the PRs in fake.json.
+func fakeGh(args []string) int {
+	logCall("gh", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	cfg := loadFake()
+	defer saveJSON("fake.json", cfg)
+	if len(args) < 2 || args[0] != "pr" {
+		return 2
+	}
+	pos, fl := fakeFlags(args[2:])
+	print := func(v any) int {
+		b, _ := json.Marshal(v)
+		fmt.Println(string(b))
+		return 0
+	}
+	if r := cfg.pop("gh pr " + args[1]); r != nil {
+		if n := toInt(r["exit"]); n != 0 {
+			fmt.Fprintln(os.Stderr, r["stderr"])
+			return n
+		}
+		return print(r)
+	}
+	switch args[1] {
+	case "list":
+		out := []any{}
+		for _, p := range cfg.PRs {
+			if p.Head == fl["--head"] && p.State == "OPEN" {
+				out = append(out, map[string]any{"number": p.Number, "url": p.URL, "isCrossRepository": p.Fork})
+			}
+		}
+		return print(out)
+	case "create":
+		n := 7 + len(cfg.PRs)
+		p := fakePR{Number: n, URL: fmt.Sprintf("https://github.com/o/r/pull/%d", n), Head: fl["--head"], Base: fl["--base"],
+			Title: fl["--title"], Body: fl["--body"], State: "OPEN"}
+		cfg.PRs = append(cfg.PRs, p)
+		fmt.Println(p.URL)
+		return 0
+	case "view":
+		for _, p := range cfg.PRs {
+			if len(pos) > 0 && (fmt.Sprint(p.Number) == pos[0] || p.URL == pos[0] || p.Head == pos[0]) {
+				return print(map[string]any{"state": p.State, "headRefOid": "", "mergeCommit": nil, "url": p.URL})
+			}
+		}
+		fmt.Fprintln(os.Stderr, "no pull requests found")
+		return 1
+	}
+	return 2
+}
+
+// fakeGit logs the call, fails it if fake.json says so, else runs git.
+func fakeGit(args []string) int {
+	logCall("git", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	if len(args) > 0 {
+		cfg := loadFake()
+		r := cfg.pop("git " + args[0])
+		saveJSON("fake.json", cfg)
+		if r != nil {
+			fmt.Fprintln(os.Stderr, r["stderr"])
+			return toInt(r["exit"])
+		}
+	}
+	git := os.Getenv("FAKE_GIT")
+	if err := syscall.Exec(git, append([]string{git}, args...), os.Environ()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	return 1
+}
+
+// fakeCheck is a project check: it passes unless fake.json scripts
+// "check <name>" or "check" with exit and output.
+func fakeCheck(args []string) int {
+	logCall("check", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	cfg := loadFake()
+	defer saveJSON("fake.json", cfg)
+	r := cfg.pop("check " + strings.Join(args, " "))
+	if r == nil {
+		r = cfg.pop("check")
+	}
+	if r == nil {
+		fmt.Println("ok")
+		return 0
+	}
+	fmt.Println(r["output"])
+	return toInt(r["exit"])
 }
 
 func contains(list []string, s string) bool {

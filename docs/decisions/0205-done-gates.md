@@ -1,6 +1,0 @@
-# 0205 Who may set Done, and how the store knows the role
-
-- **Context:** F6. Anyone could set done. The brief says only the Operations Manager sets Done, after release; 0009 limits that to ship tickets and has the owner close scouts. Actors and holders are free strings (holders look like `jse-1/<session>`), so the store couldn't tell a role from them.
-- **Choice:** `transition` takes `--actor-role R` (default `$MAESTRO_TICKET_ROLE`), self-declared like `--actor` (0010). Moving a ship ticket to done needs actor role `operations-manager`, the bot-profile folder name. Moving a scout ticket to done needs `--actor` equal to its owner (0202); the actor role doesn't matter, so Ops can't close a scout. A refused move fails with the new code `forbidden` on exit 2, writes nothing, and comes after the workflow check, so a skipped step reports `invalid_transition` first. Cancelled stays ungated.
-- **Alternatives:** Infer the role from the holder's bot-id (bot-ids aren't role names); a new exit code for forbidden (exit 2 already means "the request isn't allowed", and bots branch on the JSON code).
-- **Why:** The same trust model as the rest of the store: it stops a confused session from closing work, not a hostile one.

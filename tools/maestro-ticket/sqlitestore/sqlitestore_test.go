@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func newStore(t *testing.T) (*Store, *clock) {
 
 func mustCreate(t *testing.T, s *Store, title, role string, prio int) ticket.Ticket {
 	t.Helper()
-	tk, err := s.Create(context.Background(), ticket.CreateRequest{Title: title, Role: role, Priority: &prio, Actor: "planner"})
+	tk, err := s.Create(context.Background(), ticket.CreateRequest{Title: title, Role: role, Priority: &prio, Actor: "cos"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,9 +54,9 @@ func wantErr(t *testing.T, err, want error) {
 func TestCreateGetList(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	a := mustCreate(t, s, "a", "junior-software-engineer", 2)
-	b := mustCreate(t, s, "b", "senior-software-engineer", 0)
-	if a.ID != 1 || b.ID != 2 || a.Version != 1 || a.Status != ticket.StatusTodo || a.CreatedBy != "planner" {
+	a := mustCreate(t, s, "a", "engineer", 2)
+	b := mustCreate(t, s, "b", "reviewer", 0)
+	if a.ID != 1 || b.ID != 2 || a.Version != 1 || a.Status != ticket.StatusTodo || a.CreatedBy != "cos" {
 		t.Fatalf("unexpected tickets %+v %+v", a, b)
 	}
 	d, err := s.Get(ctx, a.ID)
@@ -69,7 +70,7 @@ func TestCreateGetList(t *testing.T) {
 	if len(all) != 2 || all[0].ID != b.ID {
 		t.Fatalf("List should order by priority: %+v", all)
 	}
-	jse, _ := s.List(ctx, ticket.ListFilter{Role: "junior-software-engineer"})
+	jse, _ := s.List(ctx, ticket.ListFilter{Role: "engineer"})
 	if len(jse) != 1 || jse[0].ID != a.ID {
 		t.Fatalf("role filter: %+v", jse)
 	}
@@ -87,7 +88,7 @@ func TestListOrderPriorityThenID(t *testing.T) {
 	ctx := context.Background()
 	prios := []int{2, 1, 2, 0, 1, 2, 2, 2, 2, 2, 1}
 	for i, p := range prios {
-		mustCreate(t, s, fmt.Sprint("t", i+1), "planner", p)
+		mustCreate(t, s, fmt.Sprint("t", i+1), "chief-of-staff", p)
 	}
 	all, err := s.List(ctx, ticket.ListFilter{})
 	if err != nil {
@@ -110,11 +111,11 @@ func TestListOrderPriorityThenID(t *testing.T) {
 func TestClaimNextOrderAndFilters(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	mustCreate(t, s, "low", "junior-software-engineer", 3)
-	urgent := mustCreate(t, s, "urgent", "junior-software-engineer", 0)
-	mustCreate(t, s, "senior", "senior-software-engineer", 0)
+	mustCreate(t, s, "low", "engineer", 3)
+	urgent := mustCreate(t, s, "urgent", "engineer", 0)
+	mustCreate(t, s, "senior", "reviewer", 0)
 
-	got, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", Role: "junior-software-engineer"})
+	got, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", Role: "engineer"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +129,11 @@ func TestClaimNextOrderAndFilters(t *testing.T) {
 		t.Fatalf("expires %v; want %v", got.Claim.ExpiresAt, want)
 	}
 	// Same bot, second session, gets the next one.
-	got2, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s2", Role: "junior-software-engineer"})
+	got2, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s2", Role: "engineer"})
 	if err != nil || got2.Title != "low" {
 		t.Fatalf("second claim %+v, %v", got2, err)
 	}
-	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s3", Role: "junior-software-engineer"})
+	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s3", Role: "engineer"})
 	wantErr(t, err, ticket.ErrNoWork)
 
 	// Status filter: nothing in review yet.
@@ -154,7 +155,7 @@ func TestClaimNextOrderAndFilters(t *testing.T) {
 func TestClaimByID(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	tk := mustCreate(t, s, "x", "junior-software-engineer", 2)
+	tk := mustCreate(t, s, "x", "engineer", 2)
 
 	got, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1"})
 	if err != nil || got.Claim.Holder != "jse/s1" || got.Claim.Token != 1 {
@@ -164,7 +165,7 @@ func TestClaimByID(t *testing.T) {
 	wantErr(t, err, ticket.ErrClaimed)
 
 	// Re-claiming your own live lease refreshes it under a new lease token
-	// and version, so writes with the old token are fenced (F3).
+	// and version, so writes with the old token are fenced.
 	again, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1", TTL: time.Hour})
 	if err != nil || again.Version != got.Version+1 || again.Claim.Token != got.Claim.Token+1 ||
 		!again.Claim.ExpiresAt.After(got.Claim.ExpiresAt) {
@@ -176,9 +177,9 @@ func TestClaimByID(t *testing.T) {
 	if len(evs) != 2 || data["renewed"] != true || data["token"] != float64(2) {
 		t.Fatalf("re-claim events %d, last %v", len(evs), data)
 	}
-	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1", Statuses: []ticket.Status{ticket.StatusInQA}})
+	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1", Statuses: []ticket.Status{ticket.StatusInReview}})
 	wantErr(t, err, ticket.ErrStatusConflict)
-	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1", Role: "qa-lead"})
+	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1", Role: "reviewer"})
 	wantErr(t, err, ticket.ErrStatusConflict)
 	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: 404, Holder: "jse/s1"})
 	wantErr(t, err, ticket.ErrNotFound)
@@ -228,7 +229,7 @@ func TestLeaseExpiryAndHeartbeat(t *testing.T) {
 	if fmt.Sprint(types) != fmt.Sprint(want) {
 		t.Fatalf("events %v; want %v", types, want)
 	}
-	// F12: the store expired the lease, not the session that claimed next.
+	// The store expired the lease, not the session that claimed next.
 	var data map[string]any
 	json.Unmarshal(evs[2].Data, &data)
 	if evs[2].Actor != ticket.SystemActor || data["holder"] != "jse/crashed" || data["token"] != float64(tok) || data["expiries"] != float64(1) {
@@ -314,7 +315,7 @@ func TestRelease(t *testing.T) {
 func TestTransitionChecks(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	tk := mustCreate(t, s, "x", "junior-software-engineer", 2)
+	tk := mustCreate(t, s, "x", "engineer", 2)
 	c, _ := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1"})
 
 	// Claimed by someone else, or no holder given.
@@ -324,7 +325,7 @@ func TestTransitionChecks(t *testing.T) {
 	wantErr(t, err, ticket.ErrClaimed)
 	// Wrong from / version / disallowed transition.
 	tok := c.Claim.Token
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, From: ticket.StatusInQA, To: ticket.StatusInProgress, Holder: "jse/s1", Token: tok})
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, From: ticket.StatusInReview, To: ticket.StatusInProgress, Holder: "jse/s1", Token: tok})
 	wantErr(t, err, ticket.ErrStatusConflict)
 	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusInProgress, Holder: "jse/s1", Token: tok, ExpectVersion: 1})
 	wantErr(t, err, ticket.ErrVersionConflict)
@@ -344,16 +345,16 @@ func TestTransitionChecks(t *testing.T) {
 	}
 	// Escalation: back to todo, reassigned, claim dropped in the same write.
 	esc, err := s.Transition(ctx, ticket.TransitionRequest{
-		ID: tk.ID, To: ticket.StatusTodo, Holder: "jse/s1", Token: tok, Role: "senior-software-engineer",
+		ID: tk.ID, To: ticket.StatusTodo, Holder: "jse/s1", Token: tok, Role: "chief-of-staff",
 		Note: "2 failed tries", Release: true,
 	})
-	if err != nil || esc.Role != "senior-software-engineer" || esc.Claim != nil {
+	if err != nil || esc.Role != "chief-of-staff" || esc.Claim != nil {
 		t.Fatalf("escalate %+v, %v", esc, err)
 	}
 	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: tk.ID, Type: ticket.EventTransitioned})
 	var data map[string]any
 	json.Unmarshal(evs[len(evs)-1].Data, &data)
-	if data["note"] != "2 failed tries" || data["role"] != "senior-software-engineer" || data["released"] != "jse/s1" {
+	if data["note"] != "2 failed tries" || data["role"] != "chief-of-staff" || data["released"] != "jse/s1" {
 		t.Fatalf("event data %v", data)
 	}
 }
@@ -374,7 +375,7 @@ func TestTerminalTransitionClearsLease(t *testing.T) {
 func TestFullWorkflow(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	tk := mustCreate(t, s, "ship it", "senior-software-engineer", 1)
+	tk := mustCreate(t, s, "ship it", "engineer", 1)
 	steps := []struct {
 		holder string
 		from   ticket.Status
@@ -385,9 +386,7 @@ func TestFullWorkflow(t *testing.T) {
 		{"sse/s1", ticket.StatusInProgress, ticket.StatusInReview, ""},
 		{"cr/s1", ticket.StatusInReview, ticket.StatusInProgress, ""}, // changes requested
 		{"sse/s2", ticket.StatusInProgress, ticket.StatusInReview, ""},
-		{"cr/s2", ticket.StatusInReview, ticket.StatusInQA, ""},
-		{"qa/s1", ticket.StatusInQA, ticket.StatusReadyToRelease, ""},
-		{"ops/s1", ticket.StatusReadyToRelease, ticket.StatusDone, ticket.RoleOperationsManager},
+		{"cr/s2", ticket.StatusInReview, ticket.StatusDone, ticket.RoleReviewer},
 	}
 	for _, st := range steps {
 		cur, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: st.holder, Statuses: []ticket.Status{st.from}})
@@ -580,6 +579,27 @@ func TestDoctorFlagsBadSettings(t *testing.T) {
 	}
 }
 
+func TestDoctorFlagsUnknownStatus(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "t.db"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Create(ctx, ticket.CreateRequest{Title: "stale"})
+	s.w.Exec("UPDATE tickets SET status = 'in_qa' WHERE id = 1")
+	rep, _ := s.Doctor(ctx)
+	for _, c := range rep.Checks {
+		if c.Name == "statuses" {
+			if c.OK || !strings.Contains(c.Detail, "T-1 (in_qa)") {
+				t.Fatalf("statuses check: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("no statuses check: %+v", rep)
+}
+
 func TestReopenKeepsData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.db")
 	ctx := context.Background()
@@ -612,7 +632,7 @@ type busyErr struct{}
 func (busyErr) Error() string { return "database is locked (5) (test)" }
 func (busyErr) Code() int     { return 5 }
 
-// F7: a busy retry after a full scan must not repeat rows.
+// A busy retry after a full scan must not repeat rows.
 func TestReadRetryDoesNotDuplicate(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
@@ -656,11 +676,11 @@ func openV1(t *testing.T) string {
 	exp := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
 	for _, q := range []string{
 		schemaV1,
-		`INSERT INTO tickets (title, status, priority, created_by, created_at, updated_at) VALUES ('a', 'todo', 2, 'planner', 1, 1)`,
+		`INSERT INTO tickets (title, status, priority, created_by, created_at, updated_at) VALUES ('a', 'todo', 2, 'cos', 1, 1)`,
 		`INSERT INTO tickets (title, status, priority, created_by, created_at, updated_at) VALUES ('b', 'blocked', 2, 'cos', 1, 1)`,
 		`INSERT INTO tickets (title, status, priority, created_by, version, lease_holder, lease_expires_at, created_at, updated_at)
-			VALUES ('c', 'in_progress', 1, 'planner', 3, 'jse/s1', ` + fmt.Sprint(exp) + `, 1, 1)`,
-		`INSERT INTO events (ticket_id, type, actor, created_at) VALUES (1, 'created', 'planner', 1)`,
+			VALUES ('c', 'in_progress', 1, 'cos', 3, 'jse/s1', ` + fmt.Sprint(exp) + `, 1, 1)`,
+		`INSERT INTO events (ticket_id, type, actor, created_at) VALUES (1, 'created', 'cos', 1)`,
 		"PRAGMA user_version = 1",
 	} {
 		if _, err := db.Exec(q); err != nil {
@@ -718,6 +738,99 @@ func TestMigrateV1(t *testing.T) {
 	}
 }
 
+// A v4 store with tickets in removed statuses and old role names migrates
+// to in_review and the three roles, logs each change, and loses the outbox.
+// A role with no mapping stays for doctor to report.
+func TestMigrateV5(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := append([]string{}, migrations[:4]...)
+	stmts = append(stmts,
+		`INSERT INTO tickets (title, status, role, priority, created_by, version, created_at, updated_at) VALUES
+			('qa', 'in_qa', 'qa-lead', 2, 'cos', 2, 1, 1),
+			('rel', 'ready_to_release', 'operations-manager', 2, 'cos', 1, 1, 1),
+			('custom', 'todo', 'designer', 2, 'cos', 1, 1, 1),
+			('old', 'done', 'junior-software-engineer', 2, 'cos', 1, 1, 1)`,
+		`INSERT INTO tickets (title, status, blocked_from, role, priority, created_by, created_at, updated_at)
+			VALUES ('blk', 'blocked', 'in_qa', 'senior-software-engineer', 2, 'cos', 1, 1)`,
+		`INSERT INTO events (ticket_id, type, actor, created_at) VALUES (1, 'created', 'cos', 1)`,
+		`INSERT INTO outbox (event_id, kind, payload, next_attempt_at) VALUES (1, 'created', '{}', 1)`,
+		"PRAGMA user_version = 4",
+	)
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	db.Close()
+
+	ctx := context.Background()
+	s, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	want := []struct {
+		status, blockedFrom ticket.Status
+		role                string
+		version             int64
+	}{
+		{ticket.StatusInReview, "", ticket.RoleReviewer, 3},
+		{ticket.StatusInReview, "", ticket.RoleReviewer, 2},
+		{ticket.StatusTodo, "", "designer", 1},
+		{ticket.StatusDone, "", ticket.RoleEngineer, 1},
+		{ticket.StatusBlocked, ticket.StatusInReview, ticket.RoleEngineer, 1},
+	}
+	for i, w := range want {
+		d, err := s.Get(ctx, ticket.ID(i+1))
+		if err != nil || d.Status != w.status || d.BlockedFrom != w.blockedFrom || d.Role != w.role || d.Version != w.version {
+			t.Errorf("T-%d: %s from %q role %q v%d, %v; want %+v", i+1, d.Status, d.BlockedFrom, d.Role, d.Version, err, w)
+		}
+	}
+	evs, _ := s.Events(ctx, ticket.EventFilter{})
+	var moves, updates int
+	for _, e := range evs {
+		if e.Actor != ticket.SystemActor {
+			continue
+		}
+		var d map[string]any
+		json.Unmarshal(e.Data, &d)
+		switch {
+		case e.Type == ticket.EventTransitioned && d["to"] == "in_review":
+			moves++
+		case e.Type == ticket.EventUpdated && (d["role"] != nil || d["blocked_from"] == "in_review"):
+			updates++
+		default:
+			t.Errorf("unexpected migration event %+v", e)
+		}
+	}
+	if moves != 2 || updates != 5 {
+		t.Errorf("migration logged %d moves, %d updates; want 2, 5", moves, updates)
+	}
+	var outbox int
+	s.r.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'outbox'").Scan(&outbox)
+	if outbox != 0 {
+		t.Error("outbox table survived v5")
+	}
+
+	rep, err := s.Doctor(ctx)
+	if err != nil || rep.OK() {
+		t.Fatalf("doctor should flag the unknown role: %+v, %v", rep, err)
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 3, To: ticket.StatusBacklog, Role: ticket.RoleEngineer}); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := s.Doctor(ctx); err != nil || !rep.OK() {
+		t.Fatalf("doctor after fixing the role: %+v, %v", rep, err)
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 1, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+		t.Fatalf("reviewer done after migration: %v", err)
+	}
+}
+
 // move runs one unclaimed transition and fails the test on error.
 func move(t *testing.T, s *Store, id ticket.ID, to ticket.Status) ticket.Ticket {
 	t.Helper()
@@ -728,18 +841,18 @@ func move(t *testing.T, s *Store, id ticket.ID, to ticket.Status) ticket.Ticket 
 	return got
 }
 
-// R1 (F1): blocked was a shortcut past review and QA. A blocked ticket now
+// Blocked was once a shortcut past review. A blocked ticket now
 // returns only to the status it was blocked from.
 func TestBlockedReturnsOnlyToOrigin(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	tk := mustCreate(t, s, "x", "junior-software-engineer", 2)
+	tk := mustCreate(t, s, "x", "engineer", 2)
 	move(t, s, tk.ID, ticket.StatusInProgress)
 	b := move(t, s, tk.ID, ticket.StatusBlocked)
 	if b.BlockedFrom != ticket.StatusInProgress {
 		t.Fatalf("blocked_from %q; want in_progress", b.BlockedFrom)
 	}
-	for _, to := range []ticket.Status{ticket.StatusReadyToRelease, ticket.StatusInQA, ticket.StatusInReview, ticket.StatusTodo, ticket.StatusDone} {
+	for _, to := range []ticket.Status{ticket.StatusInReview, ticket.StatusTodo, ticket.StatusDone} {
 		_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: to, Actor: "jse"})
 		wantErr(t, err, ticket.ErrInvalidTransition)
 	}
@@ -747,10 +860,10 @@ func TestBlockedReturnsOnlyToOrigin(t *testing.T) {
 	if back.BlockedFrom != "" {
 		t.Fatalf("blocked_from should clear on unblock: %q", back.BlockedFrom)
 	}
-	// Blocked from review goes back to review, not to QA or release.
+	// Blocked from review goes back to review, not on to done.
 	move(t, s, tk.ID, ticket.StatusInReview)
 	move(t, s, tk.ID, ticket.StatusBlocked)
-	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusInQA})
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
 	wantErr(t, err, ticket.ErrInvalidTransition)
 	if got := move(t, s, tk.ID, ticket.StatusInReview); got.Tries != 0 {
 		t.Fatalf("unblocking is not a send-back: tries %d", got.Tries)
@@ -767,14 +880,14 @@ func TestBlockedReturnsOnlyToOrigin(t *testing.T) {
 	move(t, s, nb.ID, ticket.StatusTodo)
 }
 
-func TestTriesCountReviewAndQASendBacks(t *testing.T) {
+func TestTriesCountReviewSendBacks(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	for _, to := range []ticket.Status{
 		ticket.StatusInProgress, ticket.StatusInReview, ticket.StatusInProgress, // review send-back: 1
-		ticket.StatusInReview, ticket.StatusInQA, ticket.StatusInProgress, // QA send-back: 2
-		ticket.StatusInReview, ticket.StatusInQA, ticket.StatusReadyToRelease, ticket.StatusInProgress, // release send-back: not a try
+		ticket.StatusInReview, ticket.StatusInProgress, // review send-back: 2
+		ticket.StatusBlocked, ticket.StatusInProgress, // unblock: not a try
 		ticket.StatusTodo, ticket.StatusInProgress, // escalation: not a try
 	} {
 		move(t, s, tk.ID, to)
@@ -797,12 +910,12 @@ func TestTriesCountReviewAndQASendBacks(t *testing.T) {
 	}
 }
 
-// An owner sending a scout report back is not a try (decision 0502).
+// An owner sending a scout report back is not a try.
 func TestScoutSendBackIsNotATry(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	p := 2
-	sc, err := s.Create(ctx, ticket.CreateRequest{Title: "why", Type: ticket.TypeScout, Priority: &p, Actor: "planner"})
+	sc, err := s.Create(ctx, ticket.CreateRequest{Title: "why", Type: ticket.TypeScout, Priority: &p, Actor: "cos"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,12 +933,12 @@ func TestBacklogAndScoutTickets(t *testing.T) {
 	p := 0
 	sc, err := s.Create(ctx, ticket.CreateRequest{
 		Title: "why is CI slow", Type: ticket.TypeScout, Status: ticket.StatusBacklog, Priority: &p,
-		Actor: "planner", Owner: "chief-of-staff",
+		Actor: "cos", Owner: "chief-of-staff",
 	})
-	if err != nil || sc.Type != ticket.TypeScout || sc.Status != ticket.StatusBacklog || sc.Owner != "chief-of-staff" || sc.CreatedBy != "planner" {
+	if err != nil || sc.Type != ticket.TypeScout || sc.Status != ticket.StatusBacklog || sc.Owner != "chief-of-staff" || sc.CreatedBy != "cos" {
 		t.Fatalf("create scout %+v, %v", sc, err)
 	}
-	if def := mustCreate(t, s, "ship", "", 3); def.Type != ticket.TypeShip || def.Owner != "planner" {
+	if def := mustCreate(t, s, "ship", "", 3); def.Type != ticket.TypeShip || def.Owner != "cos" {
 		t.Fatalf("defaults %+v", def)
 	}
 	// --next never hands out backlog, even when it is the most urgent.
@@ -836,20 +949,20 @@ func TestBacklogAndScoutTickets(t *testing.T) {
 	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s2", Statuses: []ticket.Status{ticket.StatusBacklog}})
 	wantErr(t, err, ticket.ErrInvalid)
 	// Grooming claims by id.
-	g, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: sc.ID, Holder: "planner/s1"})
+	g, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: sc.ID, Holder: "cos/s1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusInProgress, Holder: "planner/s1", Token: g.Claim.Token})
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusInProgress, Holder: "cos/s1", Token: g.Claim.Token})
 	wantErr(t, err, ticket.ErrInvalidTransition)
-	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusTodo, Holder: "planner/s1", Token: g.Claim.Token, Release: true}); err != nil {
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusTodo, Holder: "cos/s1", Token: g.Claim.Token, Release: true}); err != nil {
 		t.Fatal(err)
 	}
-	// A scout ends at in_review: no QA, no release.
+	// A scout ends at in_review, and only its owner moves it on to done.
 	move(t, s, sc.ID, ticket.StatusInProgress)
 	move(t, s, sc.ID, ticket.StatusInReview)
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusInQA})
-	wantErr(t, err, ticket.ErrInvalidTransition)
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
+	wantErr(t, err, ticket.ErrForbidden)
 	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: sc.ID, Type: ticket.EventCreated})
 	var d map[string]any
 	json.Unmarshal(evs[0].Data, &d)
@@ -858,7 +971,7 @@ func TestBacklogAndScoutTickets(t *testing.T) {
 	}
 }
 
-// R3 (F3): a session whose lease expired could comment while another held
+// A session whose lease expired could comment while another held
 // the lease, and transition once the new holder released. Both are fenced.
 func TestStaleSessionIsFenced(t *testing.T) {
 	s, clk := newStore(t)
@@ -933,7 +1046,7 @@ func TestReclaimFencesOldToken(t *testing.T) {
 	}
 }
 
-// R2 (F2): replaying a claim key after the lease was lost reported success
+// Replaying a claim key after the lease was lost reported success
 // with the old holder while the store said someone else held it.
 func TestClaimReplayAfterLeaseLoss(t *testing.T) {
 	s, clk := newStore(t)
@@ -1001,52 +1114,51 @@ func TestClaimReplayAfterLeaseLoss(t *testing.T) {
 	wantErr(t, err, ticket.ErrLeaseLost)
 }
 
-// R5 (F6): a junior moved an unclaimed ticket to in_progress, then straight
-// to done. Ship tickets now reach done only from ready_to_release, and only
-// by the Operations Manager.
-func TestOnlyOpsSetsShipDone(t *testing.T) {
+// An engineer once moved an unclaimed ticket to in_progress, then straight
+// to done. Ship tickets reach done only from in_review, and only by the
+// reviewer.
+func TestOnlyReviewerSetsShipDone(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
-	tk := mustCreate(t, s, "x", "junior-software-engineer", 2)
+	tk := mustCreate(t, s, "x", "engineer", 2)
 	move(t, s, tk.ID, ticket.StatusInProgress)
-	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "junior", ActorRole: "junior-software-engineer"})
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "eng", ActorRole: "engineer"})
 	wantErr(t, err, ticket.ErrInvalidTransition)
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "ops", ActorRole: ticket.RoleOperationsManager})
-	wantErr(t, err, ticket.ErrInvalidTransition) // not even Ops skips review and QA
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleReviewer})
+	wantErr(t, err, ticket.ErrInvalidTransition) // not even the reviewer skips review
 
-	for _, to := range []ticket.Status{ticket.StatusInReview, ticket.StatusInQA, ticket.StatusReadyToRelease} {
-		move(t, s, tk.ID, to)
-	}
+	move(t, s, tk.ID, ticket.StatusInReview)
 	before, _ := s.LastSeq(ctx)
-	for _, role := range []string{"", "junior-software-engineer", "qa-lead", "chief-of-staff"} {
+	for _, role := range []string{"", "engineer", "chief-of-staff"} {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "x", ActorRole: role})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
 	if after, _ := s.LastSeq(ctx); after != before {
 		t.Fatal("forbidden move wrote an event")
 	}
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: "Bad Role"})
-	wantErr(t, err, ticket.ErrInvalid)
-	// Anyone may still cancel, and Ops sets done.
-	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "ops", ActorRole: ticket.RoleOperationsManager})
+	for _, role := range []string{"Bad Role", "qa-lead"} {
+		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: role})
+		wantErr(t, err, ticket.ErrInvalid)
+	}
+	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleReviewer})
 	if err != nil || done.Status != ticket.StatusDone {
-		t.Fatalf("ops done %+v, %v", done, err)
+		t.Fatalf("reviewer done %+v, %v", done, err)
 	}
 	// The log records the role the closer declared.
 	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: tk.ID, Type: ticket.EventTransitioned})
 	var data map[string]any
 	json.Unmarshal(evs[len(evs)-1].Data, &data)
-	if data["to"] != "done" || data["actor_role"] != ticket.RoleOperationsManager {
-		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleOperationsManager)
+	if data["to"] != "done" || data["actor_role"] != ticket.RoleReviewer {
+		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleReviewer)
 	}
 }
 
-// 0009: a scout ticket's owner sets it done from in_review; Ops can't.
+// A scout ticket's owner sets it done from in_review; the reviewer can't.
 func TestScoutDoneByOwner(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	p := 2
-	sc, err := s.Create(ctx, ticket.CreateRequest{Title: "scout", Type: ticket.TypeScout, Priority: &p, Actor: "planner", Owner: "chief-of-staff"})
+	sc, err := s.Create(ctx, ticket.CreateRequest{Title: "scout", Type: ticket.TypeScout, Priority: &p, Actor: "cos", Owner: "chief-of-staff"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1057,12 +1169,12 @@ func TestScoutDoneByOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The engineer who wrote the report can't close it, even claiming Ops.
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Holder: "sse/s1", Token: tok, ActorRole: ticket.RoleOperationsManager})
+	// The engineer who wrote the report can't close it, even claiming reviewer.
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Holder: "sse/s1", Token: tok, ActorRole: ticket.RoleReviewer})
 	wantErr(t, err, ticket.ErrForbidden)
 	s.Release(ctx, ticket.ReleaseRequest{ID: sc.ID, Holder: "sse/s1", Token: tok})
-	for _, actor := range []string{"ops", "planner", ""} {
-		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Actor: actor, ActorRole: ticket.RoleOperationsManager})
+	for _, actor := range []string{"ops", "cos", ""} {
+		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Actor: actor, ActorRole: ticket.RoleReviewer})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
 	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "chief-of-staff"})
@@ -1071,7 +1183,7 @@ func TestScoutDoneByOwner(t *testing.T) {
 	}
 }
 
-// R4 (F4): an expired lease must log lease_expired without waiting for
+// An expired lease must log lease_expired without waiting for
 // someone to re-claim. The reaper frees it, logs it and counts it.
 func TestExpiredLeaseLogsEvent(t *testing.T) {
 	s, clk := newStore(t)

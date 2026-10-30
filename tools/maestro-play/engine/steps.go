@@ -205,8 +205,6 @@ func (e *Engine) one(p *playbook.Playbook, st *State, s *playbook.Step, c call) 
 			return stepOut{outcome: "ok"}, nil
 		}
 		return stepOut{outcome: "fail"}, nil
-	case playbook.KindWait:
-		return e.waitStep(p, st, s)
 	case playbook.KindAsk:
 		return e.askStep(p, st, s, c)
 	}
@@ -349,17 +347,6 @@ func isFlag(arg, flag string) bool {
 	return false
 }
 
-// runnerFlags refuses a run: line that sets a flag the engine sends the
-// runner itself, which a runner reading flags anywhere would take.
-func runnerFlags(args []string) error {
-	for _, f := range playbook.RunnerFlags {
-		if hasFlag(args, f) {
-			return fmt.Errorf("run: the engine sends %s itself", f)
-		}
-	}
-	return nil
-}
-
 // ticketArgs adds the flags the engine owns to a ticket: step's arguments.
 func (e *Engine) ticketArgs(st *State, args []string, idemKey string) ([]string, error) {
 	sub, ok := playbook.TicketSubs[args[0]]
@@ -403,7 +390,7 @@ func (e *Engine) ticketStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 		return blockOut("step %s: ticket: nothing to run", c.label(s)), nil
 	}
 	if args[0] == "transition" && flagArg(args, "--to") == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		return blockOut("step %s: %s/%s may not move a ticket to done (0760)", c.label(s), p.Role, p.Name), nil
+		return blockOut("step %s: %s/%s may not move a ticket to done; /review does", c.label(s), p.Role, p.Name), nil
 	}
 	if s.Body != "" {
 		body, err := renderTemplate(c.label(s)+".body", s.Body, d)
@@ -521,30 +508,20 @@ func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c ca
 		return blockOut("step %s: %v", c.label(s), err), nil
 	}
 	req := playbook.FindRequest(args)
-	if err := runnerFlags(args); err != nil {
-		return blockOut("step %s: %v", c.label(s), err), nil
-	}
 	switch {
 	case req == nil:
-		return blockOut("step %s: %q isn't a runner request", c.label(s), strings.Join(args, " ")), nil
+		return blockOut("step %s: %q isn't a built-in request", c.label(s), strings.Join(args, " ")), nil
 	case req.Engine:
 		return blockOut("step %s: the engine sends %s itself", c.label(s), req.Name), nil
-	case req.Name == "play":
-		return blockOut("step %s: a run never starts another run (0787)", c.label(s)), nil
-	case !req.Allows(st.Role):
-		return blockOut("step %s: %s isn't allowed for %s", c.label(s), req.Name, st.Role), nil
 	}
-	reply, err := e.runner(st, args...)
+	reply, err := e.request(st, req, args[len(strings.Fields(req.Name)):])
 	if err != nil {
 		return stepOut{}, err
 	}
 	merge(c.rec, reply)
 	c.rec["json"] = reply
-	switch reply["status"] {
-	case "stopped":
-		return stepOut{status: StatusStopped}, nil
-	case "refused":
-		return blockOut("step %s: runner refused %s: %v", c.label(s), req.Name, reply["output"]), nil
+	if reply["status"] == "refused" {
+		return blockOut("step %s: %s refused: %v", c.label(s), req.Name, reply["output"]), nil
 	}
 	if req.Name == "worktree add" && reply["status"] == "ok" {
 		if v, ok := reply["path"].(string); ok && v != "" {
@@ -562,59 +539,6 @@ func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c ca
 		exit = 1
 	}
 	return exitOutcome(c.rec, exit), nil
-}
-
-func (e *Engine) waitStep(p *playbook.Playbook, st *State, s *playbook.Step) (stepOut, error) {
-	w := s.Wait
-	target := p.Step(w.Step)
-	if target == nil || (target.Kind() != playbook.KindRun && target.Kind() != playbook.KindTicket) {
-		return blockOut("step %s: wait.step %q isn't a run or ticket step", s.ID, w.Step), nil
-	}
-	every, timeout, err := w.Durations()
-	if err != nil {
-		return blockOut("step %s: %v", s.ID, err), nil
-	}
-	rec := st.Steps[s.ID]
-	deadline := e.now().Add(timeout)
-	for polls := 1; ; polls++ {
-		trec := zeroRecord(target)
-		tc := call{rec: trec, index: -1}
-		var out stepOut
-		if target.Kind() == playbook.KindRun {
-			out, err = e.runStep(p, st, target, tc)
-		} else {
-			args, rerr := renderArgs(target.ID, target.Ticket, e.data(p, st, target, nil))
-			if rerr != nil {
-				return blockOut("step %s: %v", s.ID, rerr), nil
-			}
-			out, err = e.ticketCall(st, target, tc, args, key(st, s.ID, fmt.Sprintf("%s:%d", target.ID, polls)))
-		}
-		if err != nil || out.status != "" {
-			return out, err
-		}
-		trec["outcome"], trec["visits"] = out.outcome, st.Visits[target.ID]
-		st.Steps[target.ID] = trec
-		rec["polls"] = polls
-		ok, err := renderBool(s.ID+".until", w.Until, e.data(p, st, s, nil))
-		if err != nil {
-			return blockOut("step %s: until: %v", s.ID, err), nil
-		}
-		if ok {
-			rec["status"] = "ok"
-			return stepOut{outcome: "ok"}, nil
-		}
-		if !e.now().Add(every).Before(deadline) {
-			rec["status"] = "timeout"
-			return stepOut{outcome: "timeout"}, nil
-		}
-		if err := e.save(st); err != nil {
-			return stepOut{}, err
-		}
-		e.cfg.Sleep(every)
-		if e.stopped() {
-			return stepOut{status: StatusStopped}, nil
-		}
-	}
 }
 
 func (e *Engine) askStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {

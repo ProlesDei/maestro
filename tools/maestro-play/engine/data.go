@@ -14,10 +14,11 @@ import (
 //	.ticket   the ticket as maestro-ticket get --json prints it, plus kind
 //	          (the body's "Type:" line), latest (the latest comment's body)
 //	          and trailers (every "Key: value" comment line, latest wins)
-//	.project  preflight's project section (main_branch, environments, ...)
-//	.env      preflight's environment (harness, family, ...); family is the
-//	          model family of the last session
-//	.limits   preflight's limits (step_visits, retries, ...)
+//	.project  project-setup.md: name, summary, main_branch, setup (its
+//	          path) and checks ([{name, command}])
+//	.env      harness (claude-code or codex) and family, the model family
+//	          of the last session
+//	.limits   step_visits and retries
 //	.run      this run (id, date, branch, worktree, scratch, evidence_dir, ...)
 //	.steps    one record per step id (zeroRecord)
 //	.step     this step: id, mode, with (the rendered with: or vars:), vars
@@ -37,15 +38,15 @@ func zeroTicket() map[string]any {
 }
 
 func defaultProject() map[string]any {
-	return map[string]any{"main_branch": "main", "name": "", "setup": ".maestro/project/project-setup.md", "environments": nil}
+	return map[string]any{"main_branch": "main", "name": "", "summary": "", "setup": SetupPath, "checks": nil}
 }
 
 func defaultEnv() map[string]any {
-	return map[string]any{"harness": "", "family": "", "families": nil, "trust": nil, "budgets": nil}
+	return map[string]any{"harness": "", "family": ""}
 }
 
 func defaultLimits() map[string]any {
-	return map[string]any{"step_visits": 5, "retries": 1, "step_budget": nil}
+	return map[string]any{"step_visits": 5, "retries": 1}
 }
 
 func zeroRun() map[string]any {
@@ -96,7 +97,7 @@ func zeroReply(out []string) map[string]any {
 }
 
 // plainWords is the words before the first template action, enough to find
-// the runner request a line names.
+// the request a line names.
 func plainWords(words []word) []string {
 	var out []string
 	for _, w := range words {
@@ -143,7 +144,7 @@ func merge(dst, src map[string]any) map[string]any {
 var trailerRE = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(\S.*)$`)
 
 // trailers are latestLine for every key that a "Key: value" comment line
-// names (0740, 0756).
+// names.
 func trailers(t map[string]any) map[string]any {
 	out := map[string]any{}
 	cs := comments(t)

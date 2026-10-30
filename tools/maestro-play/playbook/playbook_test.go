@@ -9,7 +9,7 @@ import (
 
 func TestParse(t *testing.T) {
 	src := `name: x
-role: planner
+role: chief-of-staff
 description: d
 intake: {category: request, status: "todo, blocked"}
 steps:
@@ -30,7 +30,7 @@ steps:
 	if p.Steps[0].When.If != "{{true}}" || p.Steps[1].When.Reason != "why" {
 		t.Errorf("when %+v %+v", p.Steps[0].When, p.Steps[1].When)
 	}
-	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindAsk || p.Ref() != "planner/x" || p.Index("b") != 1 {
+	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindAsk || p.Ref() != "chief-of-staff/x" || p.Index("b") != 1 {
 		t.Errorf("kinds %q %q", p.Steps[0].Kind(), p.Steps[1].Kind())
 	}
 	for _, bad := range []string{
@@ -46,8 +46,8 @@ steps:
 
 func TestFindRequest(t *testing.T) {
 	for words, want := range map[string]string{
-		"check all": "check", "worktree add T-1": "worktree add", "pr status T-1": "pr status",
-		"session start --x": "session start", "resume": "resume", "frob": "",
+		"check all": "check", "worktree add T-1": "worktree add", "pr status T-1": "",
+		"session start --x": "session start", "open pr --title x": "open pr", "head": "head", "resume": "", "merge": "", "frob": "",
 	} {
 		r := FindRequest(strings.Fields(words))
 		got := ""
@@ -58,30 +58,24 @@ func TestFindRequest(t *testing.T) {
 			t.Errorf("%q: %q, want %q", words, got, want)
 		}
 	}
-	if r := FindRequest([]string{"merge"}); r.Allows("senior-software-engineer") || !r.Allows("operations-manager") {
-		t.Errorf("merge roles")
-	}
 }
 
 func TestDefaults(t *testing.T) {
 	if Prefix("owner") != "Escalation:" || Prefix("chief-of-staff") != "Escalation (chief-of-staff):" {
 		t.Errorf("prefixes")
 	}
-	for to, want := range map[string]string{"": "blocked", "owner": "blocked", "chief-of-staff": "blocked", "senior-software-engineer": "todo"} {
+	for to, want := range map[string]string{"": "blocked", "owner": "blocked", "chief-of-staff": "blocked", "engineer": "todo"} {
 		if got := (Block{}).MoveTo(to); got != want {
 			t.Errorf("MoveTo(%q) = %q, want %q", to, got, want)
 		}
 	}
-	if (Block{Status: "keep"}).MoveTo("qa-lead") != "keep" {
+	if (Block{Status: "keep"}).MoveTo("reviewer") != "keep" {
 		t.Errorf("status overrides")
-	}
-	if e, to, err := (&Wait{}).Durations(); err != nil || e.String() != "1m0s" || to.String() != "30m0s" {
-		t.Errorf("wait defaults %v %v %v", e, to, err)
 	}
 	if _, err := (&Ask{Timeout: "48h"}).LeaseTTL(); err == nil {
 		t.Errorf("48h lease should fail")
 	}
-	if (&Intake{Role: "any"}).TicketRole("qa-lead") != "" || (&Intake{}).TicketRole("qa-lead") != "qa-lead" {
+	if (&Intake{Role: "any"}).TicketRole("reviewer") != "" || (&Intake{}).TicketRole("reviewer") != "reviewer" {
 		t.Errorf("intake role")
 	}
 }

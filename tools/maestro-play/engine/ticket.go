@@ -50,7 +50,7 @@ func ticketData(m map[string]any) map[string]any {
 	return t
 }
 
-// kind is the body's "Type: <kind>" line (0430).
+// kind is the body's "Type: <kind>" line.
 func kind(body string) string {
 	for _, line := range strings.Split(body, "\n") {
 		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "Type:"); ok {
@@ -70,7 +70,7 @@ func bodyHasLine(body, prefix string) bool {
 }
 
 // statusMismatch says why run --ticket can't take a ticket, or "": it
-// checks only the intake's statuses (0750), so a bot can resume a ticket
+// checks only the intake's statuses, so a bot can resume a ticket
 // that waits on someone.
 func statusMismatch(p *playbook.Playbook, t map[string]any) string {
 	var want []string
@@ -190,7 +190,7 @@ func (e *Engine) reclaim(p *playbook.Playbook, st *State) *Result {
 	}
 	// The lease lapsed, so someone else may have moved the ticket on. A run
 	// that took it back then would drive a ticket in a state it never saw,
-	// and its notes would land after newer ones (red team R7).
+	// and its notes would land after newer ones.
 	was := str(st.TicketD["status"])
 	st.Token = 0
 	if t, res := e.readTicket(st); res != nil {

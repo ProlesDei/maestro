@@ -43,12 +43,11 @@ func TestTransitions(t *testing.T) {
 		t  Ticket
 		to Status
 	}{
-		{ship(StatusTodo), StatusInProgress}, {ship(StatusInProgress), StatusInReview}, {ship(StatusInReview), StatusInQA},
-		{ship(StatusInQA), StatusReadyToRelease}, {ship(StatusReadyToRelease), StatusDone},
-		{ship(StatusInReview), StatusInProgress}, {ship(StatusInQA), StatusInProgress}, {blocked(TypeShip, StatusTodo), StatusTodo},
+		{ship(StatusTodo), StatusInProgress}, {ship(StatusInProgress), StatusInReview}, {ship(StatusInReview), StatusDone},
+		{ship(StatusInReview), StatusInProgress}, {blocked(TypeShip, StatusTodo), StatusTodo},
 		{ship(StatusInProgress), StatusTodo}, {ship(StatusTodo), StatusCancelled},
 		{ship(StatusBacklog), StatusTodo}, {ship(StatusTodo), StatusBacklog},
-		{blocked(TypeShip, StatusInReview), StatusInReview}, {blocked(TypeShip, StatusInQA), StatusCancelled},
+		{blocked(TypeShip, StatusInReview), StatusInReview}, {blocked(TypeShip, StatusInReview), StatusCancelled},
 		{scout(StatusInProgress), StatusInReview}, {scout(StatusInReview), StatusDone}, {scout(StatusInReview), StatusInProgress},
 		{blocked(TypeScout, StatusInReview), StatusInReview},
 		{blocked(TypeShip, ""), StatusTodo}, // a blocked ticket with no origin returns to todo
@@ -62,16 +61,17 @@ func TestTransitions(t *testing.T) {
 		t  Ticket
 		to Status
 	}{
-		{ship(StatusTodo), StatusDone}, {ship(StatusInReview), StatusDone}, {ship(StatusInQA), StatusDone}, {ship(StatusTodo), StatusInReview},
+		{ship(StatusTodo), StatusDone}, {ship(StatusTodo), StatusInReview}, {ship(StatusInProgress), StatusInProgress},
 		{ship(StatusDone), StatusTodo}, {ship(StatusCancelled), StatusTodo}, {ship(StatusTodo), StatusTodo},
-		{ship(StatusInProgress), StatusDone}, // ship tickets reach done only through release
+		{ship(StatusInProgress), StatusDone}, // ship tickets reach done only through review
 		{ship(StatusBacklog), StatusInProgress},
 		{blocked(TypeShip, StatusTodo), StatusDone},
-		// F1: blocked returns only to where it came from.
-		{blocked(TypeShip, StatusInProgress), StatusReadyToRelease}, {blocked(TypeShip, StatusInProgress), StatusInQA},
+		// Blocked returns only to where it came from.
+		{blocked(TypeShip, StatusInProgress), StatusInReview}, {blocked(TypeShip, StatusInReview), StatusDone},
 		{blocked(TypeShip, StatusInProgress), StatusTodo}, {blocked(TypeShip, StatusInReview), StatusInProgress},
-		// Scouts have no QA or release.
-		{scout(StatusInReview), StatusInQA}, {scout(StatusInProgress), StatusDone}, {blocked(TypeScout, StatusInReview), StatusDone},
+		{scout(StatusInProgress), StatusDone}, {blocked(TypeScout, StatusInReview), StatusDone},
+		// Unknown statuses, such as removed ones, have no moves.
+		{ship("released"), StatusDone}, {ship("released"), StatusCancelled},
 		{Ticket{Status: StatusTodo}, StatusInProgress}, // unknown type has no moves
 	}
 	for _, p := range denied {
@@ -93,12 +93,6 @@ func TestTransitions(t *testing.T) {
 			if s == StatusBlocked {
 				continue
 			}
-			if typ == TypeScout && (s == StatusInQA || s == StatusReadyToRelease) {
-				if len(tk.NextStatuses()) != 0 {
-					t.Errorf("scout tickets never reach %s", s)
-				}
-				continue
-			}
 			if !tk.CanMove(StatusBlocked) {
 				t.Errorf("%s %s cannot be blocked", typ, s)
 			}
@@ -113,9 +107,22 @@ func TestTransitions(t *testing.T) {
 	if !StatusDone.Terminal() || !StatusCancelled.Terminal() || StatusBlocked.Terminal() || StatusBacklog.Terminal() {
 		t.Error("terminal set wrong")
 	}
-	if !IsSendBack(StatusInReview, StatusInProgress) || !IsSendBack(StatusInQA, StatusInProgress) ||
-		IsSendBack(StatusReadyToRelease, StatusInProgress) || IsSendBack(StatusBlocked, StatusInProgress) {
+	if !IsSendBack(StatusInReview, StatusInProgress) || IsSendBack(StatusTodo, StatusInProgress) ||
+		IsSendBack(StatusBlocked, StatusInProgress) {
 		t.Error("send-back set wrong")
+	}
+}
+
+func TestValidateRole(t *testing.T) {
+	for _, r := range []string{"", "chief-of-staff", "engineer", "reviewer"} {
+		if err := ValidateRole(r); err != nil {
+			t.Errorf("ValidateRole(%q) = %v", r, err)
+		}
+	}
+	for _, r := range []string{"cos", "planner", "qa-lead", "Engineer", "engineer "} {
+		if err := ValidateRole(r); !errors.Is(err, ErrInvalid) {
+			t.Errorf("ValidateRole(%q) = %v; want ErrInvalid", r, err)
+		}
 	}
 }
 
@@ -130,7 +137,7 @@ func TestValidateHolder(t *testing.T) {
 			t.Errorf("ValidateHolder(%q) = %v; want ErrInvalid", h, err)
 		}
 	}
-	if HolderBot("qa-lead/abc") != "qa-lead" {
+	if HolderBot("reviewer/abc") != "reviewer" {
 		t.Error("HolderBot")
 	}
 }
@@ -155,8 +162,8 @@ func TestCreateValidate(t *testing.T) {
 		r.Type != TypeShip || r.Owner != "unknown" {
 		t.Errorf("defaults not applied: %+v", r)
 	}
-	r = CreateRequest{Title: "x", Type: TypeScout, Status: StatusBacklog, Actor: "planner"}
-	if err := r.Validate(); err != nil || r.Owner != "planner" {
+	r = CreateRequest{Title: "x", Type: TypeScout, Status: StatusBacklog, Actor: "cos"}
+	if err := r.Validate(); err != nil || r.Owner != "cos" {
 		t.Errorf("scout owner should default to the actor: %+v, %v", r, err)
 	}
 	bad := []CreateRequest{
@@ -173,22 +180,22 @@ func TestCreateValidate(t *testing.T) {
 }
 
 func TestClaimValidate(t *testing.T) {
-	r := ClaimRequest{Holder: "qa-lead/s1"}
+	r := ClaimRequest{Holder: "reviewer/s1"}
 	if err := r.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Statuses) != 1 || r.Statuses[0] != StatusTodo || r.TTL != DefaultTTL || r.Actor != "qa-lead" {
+	if len(r.Statuses) != 1 || r.Statuses[0] != StatusTodo || r.TTL != DefaultTTL || r.Actor != "reviewer" {
 		t.Errorf("defaults not applied: %+v", r)
 	}
-	r = ClaimRequest{Holder: "qa-lead/s1", Statuses: []Status{StatusDone}}
+	r = ClaimRequest{Holder: "reviewer/s1", Statuses: []Status{StatusDone}}
 	if err := r.Validate(); !errors.Is(err, ErrInvalid) {
 		t.Errorf("claiming done should be invalid, got %v", err)
 	}
-	r = ClaimRequest{Holder: "planner/s1", Statuses: []Status{StatusTodo, StatusBacklog}}
+	r = ClaimRequest{Holder: "cos/s1", Statuses: []Status{StatusTodo, StatusBacklog}}
 	if err := r.Validate(); !errors.Is(err, ErrInvalid) {
 		t.Errorf("claim --next from backlog should be invalid, got %v", err)
 	}
-	r = ClaimRequest{ID: 3, Holder: "planner/s1", Statuses: []Status{StatusBacklog}}
+	r = ClaimRequest{ID: 3, Holder: "cos/s1", Statuses: []Status{StatusBacklog}}
 	if err := r.Validate(); err != nil {
 		t.Errorf("claiming a backlog ticket by id: %v", err)
 	}
@@ -249,7 +256,7 @@ func TestCheckFence(t *testing.T) {
 }
 
 func TestCheckGate(t *testing.T) {
-	ship := Ticket{Type: TypeShip, Owner: "planner"}
+	ship := Ticket{Type: TypeShip, Owner: "chief-of-staff"}
 	scout := Ticket{Type: TypeScout, Owner: "chief-of-staff"}
 	cases := []struct {
 		name        string
@@ -258,13 +265,14 @@ func TestCheckGate(t *testing.T) {
 		actor, role string
 		ok          bool
 	}{
-		{"ops sets ship done", ship, StatusDone, "ops-1", RoleOperationsManager, true},
-		{"junior can't", ship, StatusDone, "jse", "junior-software-engineer", false},
-		{"owner of a ship ticket can't", ship, StatusDone, "planner", "planner", false},
-		{"no role can't", ship, StatusDone, "ops", "", false},
+		{"reviewer sets ship done", ship, StatusDone, "rev-1", RoleReviewer, true},
+		{"engineer can't", ship, StatusDone, "eng", RoleEngineer, false},
+		{"owner of a ship ticket can't", ship, StatusDone, "chief-of-staff", RoleChiefOfStaff, false},
+		{"old release role can't", ship, StatusDone, "ops", "qa-lead", false},
+		{"no role can't", ship, StatusDone, "rev", "", false},
 		{"other moves ungated", ship, StatusCancelled, "jse", "", true},
 		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},
-		{"ops can't close a scout", scout, StatusDone, "ops", RoleOperationsManager, false},
+		{"reviewer can't close a scout", scout, StatusDone, "rev", RoleReviewer, false},
 		{"scout with no owner", Ticket{Type: TypeScout, Owner: "unknown"}, StatusDone, "unknown", "", false},
 	}
 	for _, c := range cases {
@@ -278,7 +286,7 @@ func TestCheckGate(t *testing.T) {
 	}
 }
 
-// F13: the numeric path accepted 0 and negative ids.
+// The numeric path accepted 0 and negative ids.
 func TestIDUnmarshalRejectsNonPositive(t *testing.T) {
 	for _, in := range []string{`0`, `-3`, `"T-0"`, `"-1"`} {
 		var id ID
@@ -298,7 +306,7 @@ func TestAreas(t *testing.T) {
 		t.Fatalf("normalize %v, %v", got, err)
 	}
 	for _, bad := range []string{"/abs", "..", "a/../b", "a//b", ".", "a b", "a,b",
-		// Spellings of another path would slip past the overlap check (0244).
+		// Spellings of another path would slip past the overlap check.
 		"./tools/x", "tools/x/..", "tools/x/.", "tools/./x", "../x"} {
 		if _, err := NormalizeAreas([]string{bad}); err == nil {
 			t.Errorf("%q accepted", bad)

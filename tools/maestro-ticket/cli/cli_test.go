@@ -114,15 +114,15 @@ func TestHelpAndUsage(t *testing.T) {
 
 func TestLifecycleJSON(t *testing.T) {
 	h := newHarness(t)
-	h.env["MAESTRO_TICKET_ACTOR"] = "planner"
+	h.env["MAESTRO_TICKET_ACTOR"] = "cos"
 	var a tk
-	h.ok(&a, "create", "--title", "Build login", "--role", "junior-software-engineer", "--priority", "1")
+	h.ok(&a, "create", "--title", "Build login", "--role", "engineer", "--priority", "1")
 	if a.ID != "T-1" || a.Status != "todo" || a.Version != 1 {
 		t.Fatalf("create %+v", a)
 	}
 
 	var c tk
-	h.ok(&c, "claim", "--next", "--holder", "jse/s1", "--role", "junior-software-engineer", "--ttl", "10m")
+	h.ok(&c, "claim", "--next", "--holder", "jse/s1", "--role", "engineer", "--ttl", "10m")
 	if c.ID != "T-1" || c.Claim == nil || c.Claim.Holder != "jse/s1" || c.Claim.Token != 1 || c.Version != 2 {
 		t.Fatalf("claim %+v", c)
 	}
@@ -145,7 +145,7 @@ func TestLifecycleJSON(t *testing.T) {
 	if code := h.fails(4, "transition", "1", "--from", "todo", "--to", "in_review", "--holder", "jse/s1", "--token", "1"); code != "status_conflict" {
 		t.Fatalf("status conflict code %q", code)
 	}
-	if code := h.fails(2, "transition", "1", "--to", "in_qa", "--holder", "jse/s1", "--token", "1"); code != "invalid_transition" {
+	if code := h.fails(2, "transition", "1", "--to", "done", "--holder", "jse/s1", "--token", "1"); code != "invalid_transition" {
 		t.Fatalf("invalid transition code %q", code)
 	}
 	if code := h.fails(2, "transition", "1", "--holder", "jse/s1"); code != "usage" {
@@ -188,7 +188,7 @@ func TestLifecycleJSON(t *testing.T) {
 	var got tk
 	h.ok(&got, "get", "T-1")
 	if got.Status != "in_review" || got.Claim != nil || len(got.Comments) != 1 ||
-		got.Comments[0].Body != "handoff via stdin\n" || got.Comments[0].Author != "planner" {
+		got.Comments[0].Body != "handoff via stdin\n" || got.Comments[0].Author != "cos" {
 		t.Fatalf("get %+v", got)
 	}
 	if code := h.fails(3, "get", "T-99"); code != "not_found" {
@@ -197,7 +197,7 @@ func TestLifecycleJSON(t *testing.T) {
 	h.fails(2, "get", "nonsense")
 
 	var list struct{ Tickets []tk }
-	h.ok(&list, "list", "--status", "in_review,in_qa", "--unclaimed")
+	h.ok(&list, "list", "--status", "in_review,blocked", "--unclaimed")
 	if len(list.Tickets) != 1 {
 		t.Fatalf("list %+v", list)
 	}
@@ -236,7 +236,7 @@ func TestEventsCursor(t *testing.T) {
 	cursor := page.NextSeq
 	h.ok(&page, "events", "--since", fmt.Sprint(cursor))
 	if len(page.Events) != 0 || page.NextSeq != cursor {
-		t.Fatalf("idle wake gate should see nothing: %+v", page)
+		t.Fatalf("an unchanged cursor should see nothing: %+v", page)
 	}
 	h.ok(nil, "comment", "T-1", "--body", "hi")
 	h.ok(&page, "events", "--since", fmt.Sprint(cursor))
@@ -250,12 +250,12 @@ func TestEventsCursor(t *testing.T) {
 
 func TestHumanOutput(t *testing.T) {
 	h := newHarness(t)
-	code, out, _ := h.run("", "create", "--title", "Readable", "--role", "qa-lead")
+	code, out, _ := h.run("", "create", "--title", "Readable", "--role", "reviewer")
 	if code != 0 || !strings.HasPrefix(out, "created T-1 [todo] P2 v1 Readable") {
 		t.Fatalf("create: %q", out)
 	}
 	_, out, _ = h.run("", "list")
-	if !strings.Contains(out, "ID") || !strings.Contains(out, "qa-lead") {
+	if !strings.Contains(out, "ID") || !strings.Contains(out, "reviewer") {
 		t.Fatalf("list: %q", out)
 	}
 	code, _, errs := h.run("", "get", "T-9")
@@ -323,7 +323,7 @@ func TestGitDefaultsSharedAcrossWorktrees(t *testing.T) {
 		t.Fatalf("doctor %+v", doc)
 	}
 
-	// F8: render from an agent branch's worktree writes next to the store,
+	// Render from an agent branch's worktree writes next to the store,
 	// in the git common dir, and leaves every work tree clean.
 	var r struct{ Path string }
 	linked.ok(&r, "render")
@@ -452,8 +452,8 @@ func TestCreateTypeOwnerBacklog(t *testing.T) {
 		ID, Type, Status, Owner string
 		CreatedBy               string `json:"created_by"`
 	}
-	h.ok(&sc, "create", "--title", "investigate", "--type", "scout", "--status", "backlog", "--owner", "chief-of-staff", "--actor", "planner")
-	if sc.Type != "scout" || sc.Status != "backlog" || sc.Owner != "chief-of-staff" || sc.CreatedBy != "planner" {
+	h.ok(&sc, "create", "--title", "investigate", "--type", "scout", "--status", "backlog", "--owner", "chief-of-staff", "--actor", "cos")
+	if sc.Type != "scout" || sc.Status != "backlog" || sc.Owner != "chief-of-staff" || sc.CreatedBy != "cos" {
 		t.Fatalf("create scout %+v", sc)
 	}
 	if code := h.fails(2, "create", "--title", "x", "--type", "epic"); code != "invalid" {
@@ -462,8 +462,8 @@ func TestCreateTypeOwnerBacklog(t *testing.T) {
 	if code := h.fails(2, "create", "--title", "x", "--type", "scout"); code != "invalid" {
 		t.Fatalf("scout without owner code %q", code)
 	}
-	h.fails(2, "claim", "--next", "--status", "backlog", "--holder", "planner/s1")
-	h.fails(5, "claim", "--next", "--holder", "planner/s1")
+	h.fails(2, "claim", "--next", "--status", "backlog", "--holder", "cos/s1")
+	h.fails(5, "claim", "--next", "--holder", "cos/s1")
 	var blk struct {
 		Status      string
 		BlockedFrom string `json:"blocked_from"`
@@ -483,24 +483,27 @@ func TestCreateTypeOwnerBacklog(t *testing.T) {
 func TestDoneGateFlags(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "ship it")
-	for _, to := range []string{"in_progress", "in_review", "in_qa", "ready_to_release"} {
+	for _, to := range []string{"in_progress", "in_review"} {
 		h.ok(nil, "transition", "T-1", "--to", to)
 	}
-	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "qa-lead"); code != "forbidden" {
-		t.Fatalf("non-ops done code %q", code)
+	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "engineer"); code != "forbidden" {
+		t.Fatalf("engineer done code %q", code)
 	}
-	h.env["MAESTRO_TICKET_ROLE"] = "operations-manager"
+	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "release-manager"); code != "invalid" {
+		t.Fatalf("unknown role code %q", code)
+	}
+	h.env["MAESTRO_TICKET_ROLE"] = "reviewer"
 	var d tk
-	h.ok(&d, "transition", "T-1", "--to", "done")
+	h.ok(&d, "transition", "T-1", "--to", "done", "--from", "in_review", "--note", "merged abc123")
 	if d.Status != "done" {
-		t.Fatalf("ops done %+v", d)
+		t.Fatalf("reviewer done %+v", d)
 	}
 
 	h.ok(nil, "create", "--title", "scout", "--type", "scout", "--owner", "chief-of-staff")
 	h.ok(nil, "transition", "T-2", "--to", "in_progress")
 	h.ok(nil, "transition", "T-2", "--to", "in_review")
-	if code := h.fails(2, "transition", "T-2", "--to", "done", "--actor", "ops"); code != "forbidden" {
-		t.Fatalf("ops closing a scout code %q", code)
+	if code := h.fails(2, "transition", "T-2", "--to", "done", "--actor", "rev"); code != "forbidden" {
+		t.Fatalf("reviewer closing a scout code %q", code)
 	}
 	h.ok(&d, "transition", "T-2", "--to", "done", "--actor", "chief-of-staff")
 	if d.Status != "done" {
@@ -529,10 +532,9 @@ func TestReapCommand(t *testing.T) {
 	if code, out, _ := h.run("", "reap"); code != 0 || !strings.Contains(out, "reaped 0") {
 		t.Fatalf("human reap: %d %q", code, out)
 	}
-	h.fails(2, "reap", "--every", "10ms")
 }
 
-// F9: the git default refused nothing. A bare repo got a store and doctor
+// The git default refused nothing. A bare repo got a store and doctor
 // said ok; a submodule silently got its own store.
 func TestGitDefaultRefusesBareAndSubmodule(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -567,7 +569,7 @@ func TestGitDefaultRefusesBareAndSubmodule(t *testing.T) {
 	top.ok(nil, "list")
 }
 
-// F13: a relative --store resolved against the process directory, not the
+// A relative --store resolved against the process directory, not the
 // directory the CLI was asked to run in.
 func TestRelativeStoreFromDir(t *testing.T) {
 	h := &harness{t: t, dir: t.TempDir(), env: map[string]string{}}
@@ -590,38 +592,6 @@ func TestRelativeStoreFromDir(t *testing.T) {
 	if !doc.OK || !names["filesystem"] || !names["locks"] {
 		t.Fatalf("doctor checks %+v", doc.Checks)
 	}
-}
-
-// A watcher blocks on events --wait instead of polling with tokens.
-func TestEventsWait(t *testing.T) {
-	h := newHarness(t)
-	h.ok(nil, "create", "--title", "a")
-	var page struct {
-		Events  []struct{ Seq int64 }
-		NextSeq int64 `json:"next_seq"`
-	}
-	start := time.Now()
-	h.ok(&page, "events", "--since", "1", "--wait", "300ms")
-	if len(page.Events) != 0 || page.NextSeq != 1 || time.Since(start) < 300*time.Millisecond {
-		t.Fatalf("timeout after %s: %+v", time.Since(start), page)
-	}
-	// Already there: no wait.
-	start = time.Now()
-	h.ok(&page, "events", "--since", "0", "--wait", "1m")
-	if len(page.Events) != 1 || time.Since(start) > 5*time.Second {
-		t.Fatalf("existing event after %s: %+v", time.Since(start), page)
-	}
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		h2 := &harness{t: t, dir: h.dir, env: h.env}
-		h2.run("", "comment", "T-1", "--body", "wake")
-	}()
-	start = time.Now()
-	h.ok(&page, "events", "--since", "1", "--wait", "1m")
-	if len(page.Events) != 1 || page.NextSeq != 2 || time.Since(start) > 10*time.Second {
-		t.Fatalf("woken after %s: %+v", time.Since(start), page)
-	}
-	h.fails(2, "events", "--wait", "-1s")
 }
 
 func TestBackupAndExport(t *testing.T) {
@@ -657,10 +627,9 @@ func TestBackupAndExport(t *testing.T) {
 	// Same name twice is refused, not overwritten.
 	clock = clock.Add(-time.Hour)
 	h.fails(2, "backup")
-	h.fails(2, "backup", "--every", "1s")
 
 	// Pruning touches only snapshot names: not a store or another file that
-	// happens to match tickets-*.db in the same folder (0244).
+	// happens to match tickets-*.db in the same folder.
 	data := filepath.Join(h.dir, "data")
 	os.MkdirAll(data, 0o755)
 	os.WriteFile(filepath.Join(data, "tickets-archive-2019.db"), []byte("x"), 0o644)
@@ -787,7 +756,7 @@ func TestKeepalive(t *testing.T) {
 
 	done := make(chan int, 1)
 	go func() {
-		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "1", "--pid", fmt.Sprint(sl.Process.Pid), "--ttl", "6s", "--every", "200ms")
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "1", "--pid", fmt.Sprint(sl.Process.Pid), "--ttl", "6s", "--interval", "200ms")
 		done <- code
 	}()
 	time.Sleep(1200 * time.Millisecond)
@@ -809,7 +778,7 @@ func TestKeepalive(t *testing.T) {
 	// A released lease stops the keepalive with lease_lost.
 	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
 	go func() {
-		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(os.Getpid()), "--ttl", "6s", "--every", "200ms")
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(os.Getpid()), "--ttl", "6s", "--interval", "200ms")
 		done <- code
 	}()
 	time.Sleep(300 * time.Millisecond)
@@ -825,7 +794,7 @@ func TestKeepalive(t *testing.T) {
 	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2")
 	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "999999999")
 	// PID 1 never exits, and a process we may not signal isn't the
-	// session's: either would keep the lease forever (0244).
+	// session's: either would keep the lease forever.
 	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "1")
 	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", "1")
 }
@@ -861,7 +830,7 @@ func TestClaimStartsKeepalive(t *testing.T) {
 
 // claim --ttl 0 means the default TTL for the keepalive too. Passing the
 // raw 0 on made the detached keepalive exit at once with a usage error
-// nobody saw, while the claim reported success (0244).
+// nobody saw, while the claim reported success.
 func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -888,7 +857,7 @@ func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
 	}
 }
 
-// F9: a store on an unsafe filesystem is refused before it's opened, by
+// A store on an unsafe filesystem is refused before it's opened, by
 // every command; doctor reports why; the override lets it through.
 func TestUnsafeFilesystemRefused(t *testing.T) {
 	h := newHarness(t)

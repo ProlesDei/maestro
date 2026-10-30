@@ -1,6 +1,0 @@
-# 0434 The doc check fails on a ticket write without its token
-
-- **Context:** The token flags were dropped once already when Phase 4 rewrote the skills (0431). Nothing would catch it again.
-- **Choice:** `evals/check.py` finds every `maestro-ticket` or runner `ticket` `transition`, `comment`, `release` and `create` in playbooks, skills and bot profiles, in code spans and fenced commands (env prefixes, extra spaces and `\` continuations included; reply evidence lines with `→` are skipped). A write with flags needs `--holder` and `--token`, and a move that can reach done needs `--actor-role`, unless its line says the ticket is unheld ("nobody holds", "unclaimed"); a bare mention needs that line. It also fails on `--add-try`, on `--type` values the store doesn't have, on a scout create without `--owner`, and when it finds fewer writes than `MIN_TICKET_WRITES`, so a write it stops seeing can't pass silently. Writes described only in prose aren't seen, so skills spell ticket writes out as commands.
-- **Alternatives:** A golden task that runs the commands against a real store (the right end state, but the eval runner doesn't exist yet).
-- **Why:** The check already parses every playbook and skill, so this is a few lines and runs on every change.

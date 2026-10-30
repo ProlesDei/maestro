@@ -416,7 +416,7 @@ func TestRaceExpiryVsHeartbeat(t *testing.T) {
 	t.Logf("%d leases, %d heartbeats, %d expired under load", tickets, beats, expired)
 }
 
-// F14 (M10): many processes opening a new store at once all migrate it
+// Many processes opening a new store at once all migrate it
 // once, to the current version.
 func TestRaceFirstOpenMigrates(t *testing.T) {
 	const n = 30

@@ -22,10 +22,10 @@ func create(t *testing.T, s *Store, req ticket.CreateRequest) ticket.Ticket {
 
 func shipToDone(t *testing.T, s *Store, id ticket.ID) {
 	t.Helper()
-	for _, to := range []ticket.Status{ticket.StatusInProgress, ticket.StatusInReview, ticket.StatusInQA, ticket.StatusReadyToRelease} {
+	for _, to := range []ticket.Status{ticket.StatusInProgress, ticket.StatusInReview} {
 		move(t, s, id, to)
 	}
-	if _, err := s.Transition(context.Background(), ticket.TransitionRequest{ID: id, To: ticket.StatusDone, ActorRole: ticket.RoleOperationsManager}); err != nil {
+	if _, err := s.Transition(context.Background(), ticket.TransitionRequest{ID: id, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -66,7 +66,7 @@ func TestClaimWaitsOnDeps(t *testing.T) {
 
 	// Backlog tickets are claimed by id to groom, whatever they wait on.
 	bl := create(t, s, ticket.CreateRequest{Title: "later", Status: ticket.StatusBacklog, DependsOn: []ticket.ID{top.ID}})
-	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: bl.ID, Holder: "planner/s1"}); err != nil {
+	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: bl.ID, Holder: "cos/s1"}); err != nil {
 		t.Fatalf("grooming claim: %v", err)
 	}
 }
@@ -138,8 +138,8 @@ func TestClaimSkipsBusyAreas(t *testing.T) {
 	wantErr(t, err, ticket.ErrNoWork)
 	// A grooming claim on a backlog ticket doesn't hold its areas.
 	groom := create(t, s, ticket.CreateRequest{Title: "groom", Status: ticket.StatusBacklog, Areas: []string{"docs"}})
-	docs := create(t, s, ticket.CreateRequest{Title: "docs work", Areas: []string{"docs/decisions"}})
-	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: groom.ID, Holder: "planner/s1"}); err != nil {
+	docs := create(t, s, ticket.CreateRequest{Title: "docs work", Areas: []string{"docs/guide"}})
+	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: groom.ID, Holder: "cos/s1"}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/6"}); err != nil || got.ID != docs.ID {
@@ -213,7 +213,7 @@ func TestRaceAreaLocks(t *testing.T) {
 
 // A claim on a backlog ticket skips the dependency and area checks, since
 // grooming does no work. Its holder can't then move it out of backlog into
-// work past them (0243).
+// work past them.
 func TestBacklogClaimCantStartPastChecks(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
@@ -260,7 +260,7 @@ func TestBacklogClaimCantStartPastChecks(t *testing.T) {
 }
 
 // The holder of a working ticket can't widen its areas onto another live
-// claim's (0243).
+// claim's.
 func TestUpdateAreasChecksLiveClaims(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
@@ -279,7 +279,7 @@ func TestUpdateAreasChecksLiveClaims(t *testing.T) {
 	if got, _ := s.Get(ctx, b.ID); fmt.Sprint(got.Areas) != "[docs]" {
 		t.Fatalf("areas changed to %v after a refused update", got.Areas)
 	}
-	other := []string{"docs", "evals"}
+	other := []string{"docs", "scripts"}
 	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: b.ID, Areas: &other, Holder: "jse/2", Token: bc.Claim.Token}); err != nil {
 		t.Fatalf("free areas: %v", err)
 	}
@@ -292,8 +292,8 @@ func TestUpdateAreasChecksLiveClaims(t *testing.T) {
 }
 
 // Only work that writes code (todo, in_progress) waits on dependencies and
-// areas, or holds areas. Review, QA, release and answering an escalation
-// neither wait for nor block an engineer on the same code (0245).
+// areas, or holds areas. Review and answering an escalation
+// neither wait for nor block an engineer on the same code.
 func TestOnlyWorkClaimsUseAreasAndDeps(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()

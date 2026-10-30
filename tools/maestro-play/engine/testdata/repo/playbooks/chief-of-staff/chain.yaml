@@ -1,0 +1,14 @@
+name: chain
+role: chief-of-staff
+description: Draft tickets and create them; each one can name the ones before it.
+intake: {category: request, status: todo, title: "Chain:"}
+steps:
+  - id: draft
+    prompt: tickets
+    with: {goal: '{{.ticket.title}}'}
+    out: [tickets]
+  - id: create
+    each: .steps.draft.reply.tickets
+    when: '{{ne .item.title ""}}'
+    ticket: create --title {{quote .item.title}} --type ship --role chief-of-staff
+    body: 'after {{len $.steps.create.results}}{{with index $.steps.create.results 0}} {{.json.id}}{{end}}'

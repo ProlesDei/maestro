@@ -16,7 +16,8 @@ type RenderOpts struct {
 	Ticket string // read with maestro-ticket get
 	// TicketFile is a get --json document to use instead of the store.
 	TicketFile string
-	// EnvFile is a preflight reply to use instead of asking the runner.
+	// EnvFile is JSON laid over the run's .env, with .project and .limits
+	// as its project and limits keys.
 	EnvFile string
 	Bot     string
 	Input   string
@@ -31,11 +32,19 @@ func (e *Engine) Render(o RenderOpts) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	env := map[string]any{}
+	env := e.environment()
 	if o.EnvFile != "" {
-		if err := readJSON(o.EnvFile, &env); err != nil {
+		over := map[string]any{}
+		if err := readJSON(o.EnvFile, &over); err != nil {
 			return "", err
 		}
+		for _, k := range []string{"project", "limits"} {
+			if m, ok := over[k].(map[string]any); ok {
+				merge(env[k].(map[string]any), m)
+				delete(over, k)
+			}
+		}
+		merge(env, over)
 	}
 	bot := o.Bot
 	if bot == "" {
@@ -111,9 +120,6 @@ func (e *Engine) Render(o RenderOpts) (string, error) {
 		return out.String(), nil
 	case playbook.KindGate:
 		ok, err := renderBool(s.ID+".gate", s.Gate, d)
-		return fmt.Sprintln(ok), err
-	case playbook.KindWait:
-		ok, err := renderBool(s.ID+".until", s.Wait.Until, d)
 		return fmt.Sprintln(ok), err
 	case playbook.KindAsk:
 		q, err := renderTemplate(s.ID+".question", s.Ask.Question, d)
