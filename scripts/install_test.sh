@@ -51,6 +51,7 @@ for dir in "$skills"/*/; do
 done
 cmp -s "$template" "$repo/.maestro/project/project-setup.md" || fail "project-setup.md isn't the template"
 grep -qxF '*.log' "$repo/.git/info/exclude" || fail "the user's exclude line was changed"
+mkdir -p "$repo/.maestro/worktrees/fix-typo" && touch "$repo/.maestro/worktrees/fix-typo/a"
 grep -qxF "add to your shell profile: export MAESTRO_PLAYBOOKS=$(cd "$here/.." && pwd)/playbooks" "$tmp/out" ||
 	{ cat "$tmp/out"; fail "install didn't print the MAESTRO_PLAYBOOKS line"; }
 seen=$(git -C "$repo" status --porcelain --untracked-files=all)

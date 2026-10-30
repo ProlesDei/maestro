@@ -151,7 +151,8 @@ fi
 
 mkdir -p "$(dirname "$exclude")"
 [ ! -s "$exclude" ] || [ -z "$(tail -c1 "$exclude")" ] || echo >>"$exclude"
-lines=()
+# Worktrees made by hand stay out of git too; maestro-play adds the same line.
+lines=("/.maestro/worktrees/")
 for name in "${names[@]}"; do
 	lines+=(".claude/skills/$name/" ".agents/skills/$name/")
 done
