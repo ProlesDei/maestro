@@ -32,27 +32,44 @@ type LintResult struct {
 	Problems  []Problem
 }
 
-// Lint checks every playbooks/<role>/<job>.yaml under dir, the prompt
-// templates in dir/prompts and skillsDir/use.yaml: the schema, step types,
-// built-in request names and flags, ticket subcommands, outcome targets,
-// template syntax and variables, and that every listed skill has a folder.
+// Lint checks every playbooks/<name>/playbook.yaml under dir, the prompt
+// templates beside each one and at dir, and skillsDir/use.yaml: the schema,
+// step types, built-in request names and flags, ticket subcommands, outcome
+// targets, template syntax and variables, and that every listed skill has a
+// folder.
 func Lint(dir, skillsDir string) (LintResult, error) {
 	var res LintResult
-	paths, err := filepath.Glob(filepath.Join(dir, "*", "*.yaml"))
+	l := &linter{dir: dir, prompts: map[string]string{}}
+	if err := l.loadPrompts(dir, "README.md", "rules.md"); err != nil {
+		return res, err
+	}
+	// The old layout: playbooks/<role>/<job>.yaml and playbooks/prompts/.
+	strays, err := filepath.Glob(filepath.Join(dir, "*", "*.yaml"))
+	if err != nil {
+		return res, err
+	}
+	for _, path := range strays {
+		if filepath.Base(path) != playbook.File {
+			l.add(path, "", fmt.Sprintf("a playbook is %s, with its templates beside it", filepath.Join(dir, "<name>", playbook.File)))
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "prompts")); err == nil && fi.IsDir() {
+		l.add(filepath.Join(dir, "prompts"), "", "templates live beside the playbook that uses them, or at "+dir+" when shared")
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*", playbook.File))
 	if err != nil {
 		return res, err
 	}
 	sort.Strings(paths)
-	l := &linter{dir: dir, prompts: map[string]string{}}
-	if err := l.loadPrompts(); err != nil {
-		return res, err
-	}
 	for _, path := range paths {
-		folder := filepath.Base(filepath.Dir(path))
-		if strings.HasPrefix(folder, "_") || folder == "prompts" {
+		folder := filepath.Dir(path)
+		if strings.HasPrefix(filepath.Base(folder), "_") {
 			continue
 		}
 		res.Playbooks++
+		if err := l.loadPrompts(folder, "README.md"); err != nil {
+			return res, err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return res, err
@@ -62,12 +79,12 @@ func Lint(dir, skillsDir string) (LintResult, error) {
 			l.add(path, "", err.Error())
 			continue
 		}
-		l.playbook(p, folder)
+		l.playbook(p)
 	}
 	if res.Playbooks > 0 {
 		for _, name := range []string{"_contract", "_escalate"} {
-			if _, ok := l.prompts[name]; !ok {
-				l.add(filepath.Join(dir, "prompts"), "", "missing "+name+".md")
+			if _, ok := l.prompts[filepath.Join(dir, name+".md")]; !ok {
+				l.add(dir, "", "missing "+name+".md")
 			}
 		}
 	}
@@ -78,7 +95,7 @@ func Lint(dir, skillsDir string) (LintResult, error) {
 
 type linter struct {
 	dir     string
-	prompts map[string]string // template name -> text
+	prompts map[string]string // template path -> text
 	probs   []Problem
 }
 
@@ -86,32 +103,54 @@ func (l *linter) add(path, step, msg string) {
 	l.probs = append(l.probs, Problem{path, step, msg})
 }
 
-func (l *linter) loadPrompts() error {
-	paths, err := filepath.Glob(filepath.Join(l.dir, "prompts", "*.md"))
+// loadPrompts reads the templates in one folder: every .md but skip.
+func (l *linter) loadPrompts(folder string, skip ...string) error {
+	paths, err := filepath.Glob(filepath.Join(folder, "*.md"))
 	if err != nil {
 		return err
 	}
 	for _, path := range paths {
+		if playbook.Contains(skip, filepath.Base(path)) {
+			continue
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		name := strings.TrimSuffix(filepath.Base(path), ".md")
-		l.prompts[name] = string(b)
-		if _, err := parseTemplate(name, string(b)); err != nil {
+		l.prompts[path] = string(b)
+		if _, err := parseTemplate(filepath.Base(path), string(b)); err != nil {
 			l.add(path, "", err.Error())
 		}
 	}
 	return nil
 }
 
-func (l *linter) playbook(p *playbook.Playbook, folder string) {
-	path := p.Path
-	if job := strings.TrimSuffix(filepath.Base(path), ".yaml"); p.Name != job {
-		l.add(path, "", fmt.Sprintf("name %q must match the file name %q", p.Name, job))
+// prompt finds a playbook's template the way the engine does: beside the
+// playbook, else at the playbooks folder.
+func (l *linter) prompt(p *playbook.Playbook, name string) (string, bool) {
+	if text, ok := l.prompts[filepath.Join(p.Dir(), name+".md")]; ok {
+		return text, true
 	}
-	if p.Role != folder {
-		l.add(path, "", fmt.Sprintf("role %q must match the folder %q", p.Role, folder))
+	text, ok := l.prompts[filepath.Join(l.dir, name+".md")]
+	return text, ok
+}
+
+// templateNames are the step template names any playbook can use.
+func (l *linter) templateNames() []string {
+	var names []string
+	for path := range l.prompts {
+		if n := strings.TrimSuffix(filepath.Base(path), ".md"); !strings.HasPrefix(n, "_") && !playbook.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (l *linter) playbook(p *playbook.Playbook) {
+	path := p.Path
+	if folder := filepath.Base(p.Dir()); p.Name != folder {
+		l.add(path, "", fmt.Sprintf("name %q must match the folder %q", p.Name, folder))
 	}
 	if !playbook.Contains(playbook.Roles, p.Role) {
 		l.add(path, "", fmt.Sprintf("unknown role %q", p.Role))
@@ -162,7 +201,7 @@ func (l *linter) playbook(p *playbook.Playbook, folder string) {
 		}
 	}
 	l.block(p, "", p.Block, schema)
-	if text, ok := l.prompts["_escalate"]; ok {
+	if text, ok := l.prompt(p, "_escalate"); ok {
 		l.template(p, nil, "_escalate.md", text, schema)
 	}
 }
@@ -443,12 +482,12 @@ func (l *linter) promptStep(p *playbook.Playbook, s *playbook.Step, schema map[s
 			l.add(p.Path, s.ID, fmt.Sprintf("out %q: every reply needs it already", f))
 		}
 	}
-	text, ok := l.prompts[s.Prompt]
+	text, ok := l.prompt(p, s.Prompt)
 	if !ok {
-		l.add(p.Path, s.ID, fmt.Sprintf("prompt %q: no %s", s.Prompt, filepath.Join(l.dir, "prompts", s.Prompt+".md")))
+		l.add(p.Path, s.ID, fmt.Sprintf("prompt %q: no %s or %s", s.Prompt, filepath.Join(p.Dir(), s.Prompt+".md"), filepath.Join(l.dir, s.Prompt+".md")))
 		return
 	}
-	if c, ok := l.prompts["_contract"]; ok {
+	if c, ok := l.prompt(p, "_contract"); ok {
 		l.template(p, s, "_contract.md", c, schema)
 	}
 	l.template(p, s, s.Prompt+".md", text, schema)
@@ -533,7 +572,7 @@ func (l *linter) uses(skillsDir string) {
 		}
 	}
 	for _, key := range sortedKeys(u.Prompts) {
-		if _, ok := l.prompts[key]; key != "all" && (!ok || strings.HasPrefix(key, "_")) {
+		if key != "all" && !playbook.Contains(l.templateNames(), key) {
 			l.add(path, "", fmt.Sprintf("prompts.%s: no prompt template %q", key, key))
 		}
 		check("prompts", key, u.Prompts[key])
@@ -615,10 +654,10 @@ func (l *linter) commands(path, skillsDir string, u *playbook.Uses) {
 	sort.Strings(names)
 	call := regexp.MustCompile(`(^|[^\w/.$-])[/$](` + strings.Join(names, "|") + `)\b`)
 	// A prompt template is always a step, so it never calls a command.
-	for _, name := range sortedKeys(toLists(l.prompts)) {
-		for i, line := range strings.Split(l.prompts[name], "\n") {
+	for _, path := range sortedKeys(toLists(l.prompts)) {
+		for i, line := range strings.Split(l.prompts[path], "\n") {
 			if m := call.FindStringSubmatch(line); m != nil {
-				l.add(filepath.Join(l.dir, "prompts", name+".md"), "", fmt.Sprintf("line %d calls the command /%s; a step can't start one", i+1, m[2]))
+				l.add(path, "", fmt.Sprintf("line %d calls the command /%s; a step can't start one", i+1, m[2]))
 			}
 		}
 	}

@@ -88,7 +88,7 @@ func TestWorkEndToEnd(t *testing.T) {
 			Type: "ship", Status: "todo", Role: "engineer", Owner: "chief-of-staff", Version: 1})
 		workEndToEnd(t, w, fakeTickets{w}, "T-1")
 	})
-	// The repo's own playbooks/engineer/work.yaml and prompts, on the same
+	// The repo's own playbooks/work/ and shared templates, on the same
 	// path.
 	t.Run("repo playbook", func(t *testing.T) {
 		w := newWorldAt(t, "../../..", &fakeTicketT{ID: "T-1", Title: "Add --json", Body: "Type: feature\nCriteria: C1",
@@ -123,7 +123,7 @@ func useRealTickets(t *testing.T, w *world) realTickets {
 
 func workEndToEnd(t *testing.T, w *world, store ticketStore, id string) {
 	w.script(fakeConfig{Harness: workReplies("Add --json")})
-	r := w.run(RunOpts{Ref: "engineer/work", Ticket: id})
+	r := w.run(RunOpts{Ref: "work", Ticket: id})
 	if r.Status != StatusDone {
 		t.Fatalf("result %+v", r)
 	}
@@ -168,7 +168,7 @@ func workEndToEnd(t *testing.T, w *world, store ticketStore, id string) {
 	store.sendBack(id, "Kickback: C1 prints a trailing comma.")
 	w.script(fakeConfig{Harness: workReplies("Drop the trailing comma")[1:], PRs: w.fake().PRs})
 	before := len(w.calls())
-	r = w.run(RunOpts{Ref: "engineer/work", Ticket: id})
+	r = w.run(RunOpts{Ref: "work", Ticket: id})
 	if r.Status != StatusDone {
 		t.Fatalf("second run %+v", r)
 	}
@@ -498,7 +498,7 @@ func TestEscalationToAPersonKeepsTheRole(t *testing.T) {
 	t.Run("fake store", func(t *testing.T) {
 		w := newWorldAt(t, "testdata/work", newTicket())
 		w.script(fakeConfig{Harness: blockedReplies})
-		r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+		r := w.run(RunOpts{Ref: "work", Ticket: "T-1"})
 		if r.Status != StatusBlocked || strings.Contains(r.Reason, "write failed") {
 			t.Fatalf("result %+v", r)
 		}
@@ -515,7 +515,7 @@ func TestEscalationToAPersonKeepsTheRole(t *testing.T) {
 		w.script(fakeConfig{Harness: blockedReplies, Replies: map[string][]map[string]any{
 			"ticket transition": {{}, {"exit": 2, "code": "invalid"}}, // start passes, the escalation's move fails
 		}})
-		r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+		r := w.run(RunOpts{Ref: "work", Ticket: "T-1"})
 		if r.Status != StatusFailed || r.ExitCode() != 1 || !strings.Contains(r.Reason, "escalation write failed: escalate-move: exit 2") {
 			t.Fatalf("result %+v", r)
 		}
@@ -532,7 +532,7 @@ func TestEscalationToAPersonKeepsTheRole(t *testing.T) {
 		id := str(rt.call("create", "--title", "Add --json", "--body", "Type: feature", "--role", "engineer",
 			"--status", "todo", "--owner", "paul", "--actor", "chief-of-staff")["id"])
 		w.script(fakeConfig{Harness: blockedReplies})
-		r := w.run(RunOpts{Ref: "engineer/work", Ticket: id})
+		r := w.run(RunOpts{Ref: "work", Ticket: id})
 		if r.Status != StatusBlocked || strings.Contains(r.Reason, "write failed") {
 			t.Fatalf("result %+v", r)
 		}
@@ -572,7 +572,7 @@ func TestNoChecksStillOpensThePR(t *testing.T) {
 		Type: "ship", Status: "todo", Role: "engineer", Owner: "chief-of-staff", Version: 1})
 	os.WriteFile(filepath.Join(w.repo, SetupPath), []byte("# Project setup\n\n## Main branch\n\nmain\n\n## Checks\n\nNone yet.\n"), 0o644)
 	w.script(fakeConfig{Harness: workReplies("Add --json")})
-	r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+	r := w.run(RunOpts{Ref: "work", Ticket: "T-1"})
 	if r.Status != StatusDone {
 		t.Fatalf("result %+v", r)
 	}
@@ -688,7 +688,7 @@ func TestSessionTimesOutAndEscalates(t *testing.T) {
 	hung := reply("done", map[string]any{"plan": "p", "risks": "r"})
 	hung["sleep"] = "30s"
 	w.script(fakeConfig{Harness: []map[string]any{hung, reply("done", map[string]any{"happened": "plan hung"})}})
-	r := w.run(RunOpts{Ref: "engineer/build-ticket", Ticket: "T-1"})
+	r := w.run(RunOpts{Ref: "build-ticket", Ticket: "T-1"})
 	if r.Status != StatusBlocked || r.Step != "plan" || !strings.Contains(r.Reason, "session failed: timed out after 300ms") {
 		t.Fatalf("result %+v", r)
 	}
@@ -726,4 +726,55 @@ func TestPushTimesOut(t *testing.T) {
 	if !w.childGone() {
 		t.Errorf("the push's child outlived the timeout")
 	}
+}
+
+// TestRunNext: run with no --ticket takes the first unclaimed ticket intake
+// matches, entry by entry: a sent-back ticket before new work, and past a
+// ticket whose claim fails.
+func TestRunNext(t *testing.T) {
+	ticket := func(id, status string, priority int, latest string) *fakeTicketT {
+		tk := &fakeTicketT{ID: id, Title: "t " + id, Body: "Type: feature", Type: "ship", Status: status, Role: "engineer",
+			Owner: "chief-of-staff", Priority: priority, Version: 1}
+		if latest != "" {
+			tk.Comments = []fakeComment{{ID: 1, Author: "reviewer", Body: latest}}
+		}
+		return tk
+	}
+	t.Run("sent back first", func(t *testing.T) {
+		held := ticket("T-4", "in_progress", 0, "Kickback: 1 blocker")
+		held.Claim = &fakeClaim{Holder: "eng-2/s", Token: 9}
+		w := newWorldAt(t, "testdata/work",
+			ticket("T-1", "todo", 0, ""),
+			ticket("T-2", "in_progress", 2, "Kickback: 1 blocker"),
+			ticket("T-3", "in_progress", 1, "Handoff: PR 7"), // not sent back
+			held)
+		w.script(fakeConfig{Harness: blockedReplies})
+		r := w.run(RunOpts{Ref: "work"})
+		if r.Ticket != "T-2" {
+			t.Fatalf("took %q, want T-2: %+v", r.Ticket, r)
+		}
+		if c := w.find("ticket", "claim"); len(c) != 1 || c[0].Args[1] != "T-2" {
+			t.Errorf("claims %+v", c)
+		}
+	})
+	t.Run("past a lost race", func(t *testing.T) {
+		w := newWorldAt(t, "testdata/work", ticket("T-1", "todo", 0, ""), ticket("T-2", "todo", 1, ""))
+		w.script(fakeConfig{Harness: blockedReplies, Replies: map[string][]map[string]any{
+			"ticket claim": {{"exit": 4, "code": "claimed"}, {}}, // the last reply repeats; {} lets it through
+		}})
+		r := w.run(RunOpts{Ref: "work"})
+		if r.Ticket != "T-2" {
+			t.Fatalf("took %q, want T-2: %+v", r.Ticket, r)
+		}
+	})
+	t.Run("nothing to take", func(t *testing.T) {
+		w := newWorldAt(t, "testdata/work", ticket("T-1", "in_review", 0, ""))
+		r := w.run(RunOpts{Ref: "work"})
+		if r.Status != StatusFailed || !strings.Contains(r.Reason, "no unclaimed ticket matches") {
+			t.Errorf("result %+v", r)
+		}
+		if n := len(w.find("ticket", "claim")); n != 0 {
+			t.Errorf("%d claims", n)
+		}
+	})
 }

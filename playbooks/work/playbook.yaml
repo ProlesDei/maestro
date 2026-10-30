@@ -1,10 +1,10 @@
 name: work
 role: engineer
 description: Take a ticket from todo, or back from review with a Kickback note, to an open PR at in_review, with a test for each criterion.
-intake:
-  - {category: new-work, status: todo}
+intake:                           # run with no --ticket tries these in order: finish sent-back work first
   - {category: sent-back, status: in_progress, latest: "Kickback:"}   # /maestro-review's NO-GO
-  - {category: sent-back, status: in_progress, latest: "Answer:"}     # unblocked: see skills/maestro-work/SKILL.md#unblock
+  - {category: sent-back, status: in_progress, latest: "Answer:"}     # unblocked: skills/maestro-chief-of-staff/SKILL.md#unblock
+  - {category: new-work, status: todo}
 claim: true
 session: ticket
 steps:

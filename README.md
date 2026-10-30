@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 18 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
+Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 17 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
 
 ## Install
 
@@ -13,31 +13,38 @@ scripts/install.sh <target-repo>
 export MAESTRO_PLAYBOOKS=<maestro>/playbooks
 ```
 
-The installer copies each folder in `skills/` into the target's `.claude/skills/` and `.agents/skills/`, writes `.maestro/project/project-setup.md` from [templates/project-setup.md](templates/project-setup.md), creates the ticket store and hides its copies from git. It refuses, writing nothing, if a skill folder already exists. Fill in `project-setup.md`: the main branch and the check commands `/maestro-work` runs.
+The installer copies each folder in `skills/` into the target's `.claude/skills/` and `.agents/skills/`, writes `.maestro/project/project-setup.md` from [templates/project-setup.md](templates/project-setup.md), creates the ticket store and hides its copies from git. It refuses, writing nothing, if a skill folder already exists. Fill in `project-setup.md`: the main branch and the check commands the work playbook runs.
 
-`maestro-play` finds the playbook through `MAESTRO_PLAYBOOKS`, the full path to this repo's `playbooks/` folder. Put the `export` in your shell profile; `/maestro-work` stops without it.
+`maestro-play` finds the playbook through `MAESTRO_PLAYBOOKS`, the full path to this repo's `playbooks/` folder. Put the `export` in your shell profile; `maestro-play run work` stops without it.
 
 Sessions run with all permissions. To limit them, set `MAESTRO_CLAUDE_ARGS` or `MAESTRO_CODEX_ARGS`.
 
 Runs time out: a session after 30m, a check after 15m, a git or gh call after 5m. Set `MAESTRO_SESSION_TIMEOUT` and `MAESTRO_CHECK_TIMEOUT` to change them; details in [tools/maestro-play](tools/maestro-play/README.md).
 
-To use your own ticket method, add `--tickets <dir>`: a folder with `maestro-create-ticket/` and, if your tickets live elsewhere, `maestro-work/`, each with a `SKILL.md`. The installer copies them in place of Maestro's. Keep those names: the personas call them.
+To use your own ticket method, add `--tickets <dir>`: a folder with `maestro-create-ticket/` and its `SKILL.md`. The installer copies it in place of Maestro's. Keep that name: the personas call it.
 
 ## Use
 
-In the target repo, in Claude Code (or headless: `claude -p "/maestro-work T-12" --output-format json`):
+Build a ticket from the shell in the target repo. It's a playbook, so no Claude session wraps it:
+
+```sh
+maestro-play run work --ticket T-12   # or no --ticket: the next one, sent back first, then todo
+```
+
+It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [Unblock](skills/maestro-chief-of-staff/SKILL.md#unblock) shows. [playbooks/work](playbooks/work/README.md) has the steps and exit codes.
+
+The other jobs are skills, in Claude Code (or headless: `claude -p "/maestro-review 12" --output-format json`):
 
 - `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets and creates them. Given a ticket id, it splits or rewrites that ticket.
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
-- `/maestro-work <id>` runs `maestro-play run engineer/work --ticket <id>`. It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [skills/maestro-work](skills/maestro-work/SKILL.md#unblock) shows.
 - `/maestro-qa-lead <pr>` starts the app at the PR's head sha, walks each criterion and adds a `QA: pass` or `QA: fail` comment with evidence. It moves no ticket; `/maestro-review` reads the comment as evidence.
-- `/maestro-review <pr>` reviews the PR at its head sha, from another model family than the author when one is installed. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `/maestro-work <id>` starts again at build with that feedback.
+- `/maestro-review <pr>` reviews the PR at its head sha, from another model family than the author when one is installed. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `maestro-play run work` takes it first and starts again at build with that feedback.
 - `/maestro-chief-of-staff <id>` settles a blocked ticket: answers what the facts settle and puts it back, or writes up the owner's call.
 - `/maestro-software-engineer <id or change>` makes a change by hand in your own session: plan, test first, self-review. It writes no ticket.
 
 ## Your own skills
 
-Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket-to-merge commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and three that prompt steps load. [skills/README.md](skills/README.md) lists them. To add your own, put `skills/<name>/SKILL.md` here and name it in `skills/use.yaml` if prompt steps should load it.
+Maestro ships 17 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and three that prompt steps load. [skills/README.md](skills/README.md) lists them. To add your own, put `skills/<name>/SKILL.md` here and name it in `skills/use.yaml` if prompt steps should load it.
 
 ## Personas
 
@@ -45,7 +52,7 @@ Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of y
 
 - `chief-of-staff`: the one agent the owner talks to. Drives Claude with the commands above; settles blocked tickets with `/maestro-chief-of-staff`; never touches code.
 - `planner`: turns a goal into tickets with `/maestro-planner` and `/maestro-create-ticket`.
-- `engineer`: runs `/maestro-work` and unblocks a run that stops.
+- `engineer`: runs the work playbook and unblocks a run that stops.
 - `qa-lead`: tests a PR in the running app with `/maestro-qa-lead` before review.
 - `reviewer`: runs `/maestro-review` on PRs another model family wrote.
 
@@ -62,9 +69,9 @@ flowchart TD
     Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
-    Eng["<b>Engineer</b><br/>/maestro-work &lt;id&gt;"]
+    Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
 
-    subgraph Work ["maestro-play run engineer/work: one ticket to one PR"]
+    subgraph Work ["playbooks/work: one ticket to one PR"]
         Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
         Build["<b>Build</b><br/>Frontier<br/>Test first (perf: measure first)<br/>mode: feature, bug, refactor, perf"]
         Checks["<b>Project checks</b><br/>Checks list in project-setup.md<br/>No tokens · none listed passes"]
@@ -127,12 +134,12 @@ flowchart TD
     class L5 note
 ```
 
-How each bot works, and what one `/maestro-work` run does:
+How each bot works, and what one `maestro-play run work` does:
 
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Runs maestro-play run work to build a ticket,<br/>claude -p /maestro-&lt;skill&gt; for the other jobs,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
@@ -141,14 +148,14 @@ flowchart TD
 
     subgraph Installed ["Their repo after install.sh"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>17 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]
 
-    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
+    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs playbooks/work/playbook.yaml step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
 
-    subgraph Run ["One /maestro-work run"]
+    subgraph Run ["One maestro-play run work"]
         B1["<b>Claim</b><br/>Lease and fencing token<br/>A keepalive holds the lease"]
         B2["<b>Worktree</b><br/>.maestro/worktrees/&lt;id&gt; on maestro/&lt;id&gt;<br/>Reused on a Kickback"]
         B3["<b>Next step</b><br/>ticket · run · prompt · gate<br/>No tokens unless it's a prompt"]
@@ -159,7 +166,7 @@ flowchart TD
         B8(["Run ends<br/>maestro-play resume &lt;run-id&gt; after a crash"])
     end
 
-    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
+    Prompt["<b>Every prompt</b><br/>playbooks/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template from playbooks/work/<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
 
     Step["<b>Step session</b>, headless<br/>claude -p --json-schema or codex exec<br/>All permissions unless MAESTRO_CLAUDE_ARGS<br/>or MAESTRO_CODEX_ARGS set limits<br/>Never writes tickets: the engine does"]
 
@@ -167,13 +174,14 @@ flowchart TD
 
     subgraph Roles ["Same anatomy, different profiles: what each bot starts"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts the others"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>/maestro-work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts the others"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
     end
 
     Runtime -->|"loads the profile it's configured for"| Profile
     Runtime ==>|"claude -p in their repo"| H
     Installed --> H
-    H -->|"/maestro-work: maestro-play run engineer/work"| Engine
+    Runtime ==>|"maestro-play run work in their repo"| Engine
+    Engine -.->|"one JSON object, read by the bot"| Runtime
     H -.->|"result, read by the bot"| Runtime
     Engine --> B1 --> B2 --> B3
     Guard -.-> B3
@@ -212,5 +220,5 @@ flowchart TD
 
 ## Tools
 
-- [tools/maestro-play](tools/maestro-play/README.md): the playbook engine. Runs, resumes, renders and lints playbooks. The one playbook is [playbooks/engineer/work.yaml](playbooks/engineer/work.yaml); the format is in [playbooks/README.md](playbooks/README.md).
+- [tools/maestro-play](tools/maestro-play/README.md): the playbook engine. Runs, resumes, renders and lints playbooks. The one playbook is [playbooks/work](playbooks/work/README.md); the format is in [playbooks/README.md](playbooks/README.md).
 - [tools/maestro-ticket](tools/maestro-ticket/README.md): the ticket store and CLI. SQLite, leases and fencing tokens.

@@ -2,13 +2,12 @@
 # To add your own: put skills/<name>/SKILL.md here, then list it, e.g.
 #   prompts:
 #     all: [my-style]        # every prompt step
-#     build: [my-tdd]        # one step, by template name in playbooks/prompts/
+#     build: [my-tdd]        # one step, by template name: playbooks/<playbook>/build.md
 prompts:
   all: [maestro-working-principles]
   build: [maestro-tdd]
   verify: [maestro-prove-complete]
 commands:                    # you call these; no prompt names them
-  - maestro-work
   - maestro-create-ticket
   - maestro-review
   - maestro-planner

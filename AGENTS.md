@@ -8,8 +8,8 @@ Maestro: tooling that takes a ticket to a merged PR with coding agents. Nothing 
 
 Layout:
 - `bot-profiles/`: the five personas (`chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
-- `playbooks/`: `engineer/work.yaml`, its step templates in `playbooks/prompts/`, and `playbooks/rules.md`, the rules every session gets. Format in `playbooks/README.md`.
-- `skills/`: Maestro's 18 `maestro-*` skills and the user's own; `skills/use.yaml` names them. List in `skills/README.md`.
+- `playbooks/`: one folder per playbook (`work/playbook.yaml` with its step templates beside it), plus the shared `rules.md` (the rules every session gets), `_contract.md` and `_escalate.md`. Format in `playbooks/README.md`.
+- `skills/`: Maestro's 17 `maestro-*` skills and the user's own; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
 - `scripts/install.sh`: the installer. `scripts/install_test.sh` is its test.
 - `tools/maestro-play/`: the playbook engine. `tools/maestro-ticket/`: the ticket store and CLI.

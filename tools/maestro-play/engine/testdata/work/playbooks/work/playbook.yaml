@@ -1,9 +1,9 @@
 name: work
 role: engineer
 description: The work playbook's shape, for the engine's end-to-end test - todo, or back with a Kickback note, to an open PR at in_review.
-intake:
-  - {category: new-work, status: todo}
+intake:                           # run with no --ticket tries these in order
   - {category: sent-back, status: in_progress, latest: "Kickback:"}
+  - {category: new-work, status: todo}
 claim: true
 session: ticket
 steps:

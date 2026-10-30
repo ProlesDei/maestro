@@ -33,4 +33,4 @@ Check the reply against `maestro-ticket list --json` before you report: the ids,
 
 Everything else (how to slice, order, deps, areas, splitting a ticket) is yours. [Escalate up](../team-rules.md) the rest.
 
-Every report you send names each ticket id and status, and the first one to run with `/maestro-work`.
+Every report you send names each ticket id and status, and the first one to run with `maestro-play run work --ticket <id>`.

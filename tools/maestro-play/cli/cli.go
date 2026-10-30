@@ -20,11 +20,15 @@ import (
 const usage = `maestro-play runs Maestro playbooks.
 
 Usage:
-  maestro-play run <role>/<job> --ticket <id> --bot <bot-id> [--input <text>]
-  maestro-play run <role>/<job> --bot <bot-id> [--input <text>]   (claim: false, no ticket)
+  maestro-play run <playbook> [--ticket <id>] [--bot <bot-id>] [--input <text>]
   maestro-play resume <run-id>
-  maestro-play render <role>/<job> --step <id> [--ticket <id> | --ticket-file <f>] [--env <f>] [--input <t>]
+  maestro-play render <playbook> --step <id> [--ticket <id> | --ticket-file <f>] [--env <f>] [--input <t>]
   maestro-play lint [<playbooks-dir>]
+
+<playbook> is a folder in the playbooks folder: work runs
+playbooks/work/playbook.yaml. On a playbook that claims a ticket, run with
+no --ticket takes the first unclaimed ticket its intake matches. --bot
+defaults to $MAESTRO_BOT, else user.
 
 Flags for every command:
   --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else ./playbooks)
@@ -209,17 +213,20 @@ func (c *cmd) report(r engine.Result, err error) int {
 }
 
 func (c *cmd) run() int {
-	ticketID := c.fs.String("ticket", "", "ticket id")
-	bot := c.fs.String("bot", "", "bot id (required)")
+	ticketID := c.fs.String("ticket", "", "ticket id; empty takes the next one intake matches")
+	bot := c.fs.String("bot", "", "bot id ($MAESTRO_BOT, else user)")
 	input := c.fs.String("input", "", "text for a playbook with input: (.input.text)")
 	if err := c.parse(); err != nil {
 		return 2
 	}
 	if len(c.args) != 1 {
-		return c.usageErr("want one <role>/<job>")
+		return c.usageErr("want one <playbook>")
 	}
 	if *bot == "" {
-		return c.usageErr("--bot is required")
+		*bot = c.env.Getenv("MAESTRO_BOT")
+	}
+	if *bot == "" {
+		*bot = "user"
 	}
 	e, code := c.engine()
 	if e == nil {
@@ -254,7 +261,7 @@ func (c *cmd) render() int {
 		return 2
 	}
 	if len(c.args) != 1 || o.Step == "" {
-		return c.usageErr("want <role>/<job> --step <id>")
+		return c.usageErr("want <playbook> --step <id>")
 	}
 	o.Ref = c.args[0]
 	e, code := c.engine()

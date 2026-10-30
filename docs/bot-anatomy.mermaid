@@ -1,5 +1,5 @@
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Starts a session with claude -p /maestro-&lt;skill&gt;,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
+    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Runs maestro-play run work to build a ticket,<br/>claude -p /maestro-&lt;skill&gt; for the other jobs,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
 
     subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
         direction LR
@@ -8,14 +8,14 @@ flowchart TD
 
     subgraph Installed ["Their repo after install.sh"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>17 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]
 
-    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs engineer/work step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
+    Engine["<b>maestro-play</b> · the playbook engine, no tokens<br/>Runs playbooks/work/playbook.yaml step by step, keeps the run state<br/>Built in: worktree add · check · head · open pr<br/>git and gh never prompt · git, gh, checks and sessions time out"]
 
-    subgraph Run ["One /maestro-work run"]
+    subgraph Run ["One maestro-play run work"]
         B1["<b>Claim</b><br/>Lease and fencing token<br/>A keepalive holds the lease"]
         B2["<b>Worktree</b><br/>.maestro/worktrees/&lt;id&gt; on maestro/&lt;id&gt;<br/>Reused on a Kickback"]
         B3["<b>Next step</b><br/>ticket · run · prompt · gate<br/>No tokens unless it's a prompt"]
@@ -26,7 +26,7 @@ flowchart TD
         B8(["Run ends<br/>maestro-play resume &lt;run-id&gt; after a crash"])
     end
 
-    Prompt["<b>Every prompt</b><br/>playbooks/prompts/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
+    Prompt["<b>Every prompt</b><br/>playbooks/_contract.md first,<br/>then the skills use.yaml names,<br/>then the step's template from playbooks/work/<br/>playbooks/rules.md as the system prompt<br/>(codex: at the start of the first prompt)"]
 
     Step["<b>Step session</b>, headless<br/>claude -p --json-schema or codex exec<br/>All permissions unless MAESTRO_CLAUDE_ARGS<br/>or MAESTRO_CODEX_ARGS set limits<br/>Never writes tickets: the engine does"]
 
@@ -34,13 +34,14 @@ flowchart TD
 
     subgraph Roles ["Same anatomy, different profiles: what each bot starts"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts the others"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>/maestro-work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts the others"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
     end
 
     Runtime -->|"loads the profile it's configured for"| Profile
     Runtime ==>|"claude -p in their repo"| H
     Installed --> H
-    H -->|"/maestro-work: maestro-play run engineer/work"| Engine
+    Runtime ==>|"maestro-play run work in their repo"| Engine
+    Engine -.->|"one JSON object, read by the bot"| Runtime
     H -.->|"result, read by the bot"| Runtime
     Engine --> B1 --> B2 --> B3
     Guard -.-> B3

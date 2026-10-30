@@ -3,7 +3,6 @@
 package maestroplay_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/engine"
@@ -13,8 +12,8 @@ import (
 const playbooks, skills = "../../playbooks", "../../skills"
 
 func TestRepoPlaybooksLint(t *testing.T) {
-	if _, err := playbook.Load(playbooks, "engineer/work"); err != nil {
-		t.Fatalf("engineer/work, the playbook /maestro-work runs: %v", err)
+	if _, err := playbook.Load(playbooks, "work"); err != nil {
+		t.Fatalf("work, the playbook that takes a ticket to a PR: %v", err)
 	}
 	res, err := engine.Lint(playbooks, skills)
 	if err != nil {
@@ -34,32 +33,30 @@ func TestRepoPromptsRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pbs, err := playbook.LoadAll(playbooks)
+	if err != nil {
+		t.Fatal(err)
+	}
 	n := 0
-	for _, role := range playbook.Roles {
-		pbs, err := playbook.LoadRole(playbooks, role)
-		if err != nil {
-			if strings.Contains(err.Error(), "no playbooks") {
-				continue
+	for _, p := range pbs {
+		steps := []string{"done", "escalate"}
+		for _, s := range p.Steps {
+			if s.Kind() == playbook.KindPrompt {
+				steps = append(steps, s.ID)
 			}
-			t.Fatal(err)
 		}
-		for _, p := range pbs {
-			steps := []string{"done", "escalate"}
-			for _, s := range p.Steps {
-				if s.Kind() == playbook.KindPrompt {
-					steps = append(steps, s.ID)
-				}
-			}
-			for _, ticket := range []string{"testdata/tiny-cli-ticket.json", "testdata/tiny-cli-kickback.json"} {
-				for _, step := range steps {
-					n++
-					_, err := e.Render(engine.RenderOpts{Ref: p.Ref(), Step: step, TicketFile: ticket, EnvFile: "testdata/tiny-cli-env.json"})
-					if err != nil {
-						t.Errorf("render %s --step %s on %s: %v", p.Ref(), step, ticket, err)
-					}
+		for _, ticket := range []string{"testdata/tiny-cli-ticket.json", "testdata/tiny-cli-kickback.json"} {
+			for _, step := range steps {
+				n++
+				_, err := e.Render(engine.RenderOpts{Ref: p.Ref(), Step: step, TicketFile: ticket, EnvFile: "testdata/tiny-cli-env.json"})
+				if err != nil {
+					t.Errorf("render %s --step %s on %s: %v", p.Ref(), step, ticket, err)
 				}
 			}
 		}
+	}
+	if n == 0 {
+		t.Fatal("no playbooks rendered")
 	}
 	t.Logf("%d renders", n)
 }

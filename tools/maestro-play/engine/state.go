@@ -36,7 +36,7 @@ const (
 // output live here, so resume starts at the first unfinished step.
 type State struct {
 	ID       string `json:"id"`
-	Playbook string `json:"playbook"` // <role>/<job>
+	Playbook string `json:"playbook"` // its folder name
 	Role     string `json:"role"`
 	Bot      string `json:"bot"`
 	Holder   string `json:"holder"`
