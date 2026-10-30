@@ -38,9 +38,8 @@ type Config struct {
 	Environ []string
 	// PID is the process the ticket lease stays alive with (claim
 	// --keepalive); the engine's own by default.
-	PID   int
-	Now   func() time.Time
-	Sleep func(time.Duration)
+	PID int
+	Now func() time.Time
 }
 
 // Engine runs playbooks.
@@ -72,9 +71,6 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if cfg.Sleep == nil {
-		cfg.Sleep = time.Sleep
 	}
 	if cfg.Environ == nil {
 		cfg.Environ = os.Environ()

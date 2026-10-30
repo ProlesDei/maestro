@@ -27,7 +27,6 @@ type Request struct {
 var Requests = []Request{
 	{Name: "session start", Engine: true},
 	{Name: "session resume", Engine: true},
-	{Name: "session close", Engine: true},
 	{Name: "worktree add", Usage: "worktree add <ticket> --from <branch>", MinArgs: 1, MaxArgs: 1,
 		Flags: []string{"--from"}, Need: []string{"--from"}, Fields: []string{"path", "branch"}},
 	{Name: "check", Usage: "check all, or check <name>", MinArgs: 1, MaxArgs: 1,
@@ -35,8 +34,6 @@ var Requests = []Request{
 	{Name: "head", Usage: "head", Fields: []string{"sha"}},
 	{Name: "open pr", Usage: "open pr [--title <t>] [--body <b>]", Flags: []string{"--title", "--body"},
 		Fields: []string{"url", "number"}},
-	{Name: "pr status", Usage: "pr status [<number, url or branch>]", MaxArgs: 1,
-		Fields: []string{"state", "sha", "merge_sha", "url"}},
 }
 
 // FindRequest matches the longest request name at the start of words.

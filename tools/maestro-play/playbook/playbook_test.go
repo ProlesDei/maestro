@@ -46,7 +46,7 @@ steps:
 
 func TestFindRequest(t *testing.T) {
 	for words, want := range map[string]string{
-		"check all": "check", "worktree add T-1": "worktree add", "pr status T-1": "pr status",
+		"check all": "check", "worktree add T-1": "worktree add", "pr status T-1": "",
 		"session start --x": "session start", "open pr --title x": "open pr", "head": "head", "resume": "", "merge": "", "frob": "",
 	} {
 		r := FindRequest(strings.Fields(words))
@@ -71,9 +71,6 @@ func TestDefaults(t *testing.T) {
 	}
 	if (Block{Status: "keep"}).MoveTo("reviewer") != "keep" {
 		t.Errorf("status overrides")
-	}
-	if e, to, err := (&Wait{}).Durations(); err != nil || e.String() != "1m0s" || to.String() != "30m0s" {
-		t.Errorf("wait defaults %v %v %v", e, to, err)
 	}
 	if _, err := (&Ask{Timeout: "48h"}).LeaseTTL(); err == nil {
 		t.Errorf("48h lease should fail")

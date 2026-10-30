@@ -78,7 +78,7 @@ func (e *Engine) harness(st *State, c sessionCall) (map[string]any, error) {
 		return nil, err
 	}
 	if c.harness == "codex" {
-		return e.codex(st, c, rules)
+		return e.codex(st, c, rules, schema)
 	}
 	args := []string{"-p", "--output-format", "json", "--json-schema", string(schema)}
 	if m := e.model(c.harness, c.tier); m != "" {
@@ -123,12 +123,15 @@ func (e *Engine) harness(st *State, c sessionCall) (map[string]any, error) {
 }
 
 // codex runs codex exec, or codex exec resume. Codex has no flag for extra
-// rules, so the first prompt of a session starts with them.
-func (e *Engine) codex(st *State, c sessionCall, rules string) (map[string]any, error) {
+// rules, so the first prompt of a session starts with them. Its
+// --output-schema wants a strict schema (every key required, no other
+// keys), which out: fields of any type can't be, so the prompt ends with
+// the schema and the reply is read from the last message's text.
+func (e *Engine) codex(st *State, c sessionCall, rules string, schema []byte) (map[string]any, error) {
 	last := strings.TrimSuffix(c.schemaFile, ".schema.json") + ".last.json"
 	os.Remove(last)
 	var args []string
-	prompt := c.prompt
+	prompt := c.prompt + "\nEnd with one JSON object that matches this JSON schema, and nothing after it:\n" + string(schema) + "\n"
 	if c.resume {
 		args = []string{"exec", "resume", st.HarnessSession}
 	} else {
@@ -137,7 +140,7 @@ func (e *Engine) codex(st *State, c sessionCall, rules string) (map[string]any, 
 			prompt = rules + "\n\n" + prompt
 		}
 	}
-	args = append(args, "--json", "--output-schema", c.schemaFile, "-o", last)
+	args = append(args, "--json", "-o", last)
 	if m := e.model(c.harness, c.tier); m != "" {
 		args = append(args, "-m", m)
 	}

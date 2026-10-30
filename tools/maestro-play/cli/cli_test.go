@@ -23,7 +23,7 @@ func run(t *testing.T, env map[string]string, args ...string) (int, string, stri
 
 func TestLint(t *testing.T) {
 	code, out, _ := run(t, nil, "lint", fixture+"/playbooks", "--skills", fixture+"/skills")
-	if code != 0 || out != "11 playbooks, 0 problems\n" {
+	if code != 0 || out != "8 playbooks, 0 problems\n" {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	dir := t.TempDir()

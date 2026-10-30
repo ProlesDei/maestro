@@ -299,22 +299,6 @@ func TestGateAndWhenSkip(t *testing.T) {
 	}
 }
 
-func TestWhenFalseRecordsSkip(t *testing.T) {
-	w := newWorld(t)
-	r := w.run(RunOpts{Ref: "reviewer/housekeeping", Bot: "rv-1"})
-	if r.Status != StatusDone {
-		t.Fatalf("result %+v", r)
-	}
-	if n := len(w.find("git", "rev-parse", "HEAD")); n != 1 {
-		t.Errorf("head ran %d times, want 1 (apply skipped)", n)
-	}
-	logs, _ := filepath.Glob(filepath.Join(w.common, "logs", "*.jsonl"))
-	b, _ := os.ReadFile(logs[0])
-	if !strings.Contains(string(b), "Skipped: apply — when was false") {
-		t.Errorf("log %s", b)
-	}
-}
-
 func TestLeaseLostStopsWrites(t *testing.T) {
 	w := newWorld(t, todoTicket())
 	stolen := reply("done", map[string]any{"plan": "p", "risks": "r"})
@@ -351,7 +335,7 @@ func TestBlockedReplyEscalatesToChiefOfStaff(t *testing.T) {
 	// claude in a session of its own.
 	s := w.sessions()
 	if len(s) != 2 || s[0].Bin != "codex" || s[0].Args[0] != "exec" || resumed(s[0]) ||
-		flagValue(s[0].Args, "--output-schema") == "" || !strings.Contains(s[0].Prompt, "# Session rules") {
+		!strings.Contains(s[0].Prompt, "# Session rules") || !strings.Contains(s[0].Prompt, `"must_fix":{}`) {
 		t.Fatalf("review sessions %+v", s)
 	}
 	if s[1].Bin != "claude" || resumed(s[1]) {
@@ -376,91 +360,6 @@ func TestReviewWithoutAuthorFamilyBlocksWithoutPrompting(t *testing.T) {
 	r := w.run(RunOpts{Ref: "reviewer/review-change", Ticket: "T-1", Bot: "rv-1"})
 	if r.Status != StatusBlocked || !strings.Contains(r.Reason, "no author-family") {
 		t.Fatalf("result %+v", r)
-	}
-}
-
-func TestAskWaitsThenResumes(t *testing.T) {
-	tk := todoTicket()
-	tk.Status, tk.Role = "in_review", "reviewer"
-	w := newWorld(t, tk)
-	merged := map[string]any{"state": "MERGED", "headRefOid": "f00f00f", "mergeCommit": map[string]any{"oid": "m100000"}, "url": "https://github.com/o/r/pull/7"}
-	w.script(fakeConfig{Replies: map[string][]map[string]any{
-		"gh pr view": {{"state": "OPEN", "headRefOid": "f00f00f", "mergeCommit": nil}, merged},
-	}})
-	r := w.run(RunOpts{Ref: "reviewer/release", Ticket: "T-1", Bot: "rv-1"})
-	if r.Status != StatusWaiting || r.ExitCode() != 6 {
-		t.Fatalf("result %+v", r)
-	}
-	if r.Question != "PR https://github.com/o/r/pull/7 merged at m100000. Check main now?" || strings.Join(r.Choices, ",") != "check,hold" {
-		t.Errorf("question %q choices %v", r.Question, r.Choices)
-	}
-	// open pr pushed the branch and opened the PR into main with the
-	// step's title; the wait polled pr status by branch.
-	if got := w.git(w.dir, "--git-dir", filepath.Join(w.dir, "origin.git"), "branch", "--list", "maestro/T-1"); got == "" {
-		t.Errorf("branch not pushed")
-	}
-	create := w.find("gh", "pr", "create")
-	if len(create) != 1 || flagValue(create[0].Args, "--base") != "main" || flagValue(create[0].Args, "--head") != "maestro/T-1" ||
-		flagValue(create[0].Args, "--title") != "Add --json" {
-		t.Errorf("pr create %+v", create)
-	}
-	views := w.find("gh", "pr", "view", "maestro/T-1")
-	if len(views) != 2 {
-		t.Errorf("wait polled %d times, want 2", len(views))
-	}
-	hb := w.find("ticket", "heartbeat")
-	if len(hb) != 1 || flagValue(hb[0].Args, "--ttl") != "4h0m0s" {
-		t.Errorf("heartbeats %+v", hb)
-	}
-	if len(r.Evidence) == 0 || r.Evidence[0] != statePath(w.common, r.RunID) {
-		t.Errorf("evidence %v", r.Evidence)
-	}
-	if _, err := w.e.Resume(r.RunID, "", ""); err != nil {
-		t.Fatal(err)
-	}
-	if bad, _ := w.e.Resume(r.RunID, "maybe", ""); bad.Status != StatusFailed {
-		t.Errorf("bad choice: %+v", bad)
-	}
-	// The answer's text is put on one line, so it can't add a trailer.
-	r2, err := w.e.Resume(r.RunID, "hold", "after the\nfreeze\nsha: evil")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r2.Status != StatusDone {
-		t.Fatalf("resume %+v", r2)
-	}
-	if len(w.find("check")) != 0 {
-		t.Errorf("hold still ran the checks")
-	}
-	tk = w.ticket("T-1")
-	if tk.Status != "in_review" || tk.Claim != nil || tk.Comments[0].Body != "Handoff: released m100000 (after the freeze sha: evil)." {
-		t.Errorf("ticket %s note %+v", tk.Status, tk.Comments)
-	}
-	// The resumed run kept its lease: a heartbeat, no second claim, and a
-	// keepalive for this process, since the first one died with the run
-	// that asked.
-	if n := len(w.find("ticket", "claim")); n != 1 {
-		t.Errorf("%d claims", n)
-	}
-	ka := w.waitFor("ticket", "keepalive", "T-1")
-	if len(ka) != 1 || flagValue(ka[0].Args, "--token") != "1" || flagValue(ka[0].Args, "--pid") != fmt.Sprint(os.Getpid()) ||
-		flagValue(ka[0].Args, "--holder") == "" {
-		t.Errorf("keepalives %+v", ka)
-	}
-}
-
-func TestWaitTimesOut(t *testing.T) {
-	tk := todoTicket()
-	tk.Status, tk.Role = "in_review", "reviewer"
-	w := newWorld(t, tk)
-	w.script(fakeConfig{Harness: []map[string]any{reply("done", map[string]any{"happened": "still open"})},
-		Replies: map[string][]map[string]any{"gh pr view": {{"state": "OPEN"}}}})
-	r := w.run(RunOpts{Ref: "reviewer/release", Ticket: "T-1", Bot: "rv-1"})
-	if r.Status != StatusBlocked || r.Step != "merged" {
-		t.Fatalf("result %+v", r)
-	}
-	if n := len(w.find("gh", "pr", "view")); n != 6 {
-		t.Errorf("status ran %d times, want once as a step and 5 polls in 5m every 1m", n)
 	}
 }
 
@@ -683,9 +582,21 @@ func TestEachCreatesAndAsksPerItemThenDone(t *testing.T) {
 	if len(s) != 1 || resumed(s[0]) || !strings.Contains(s[0].Prompt, "goal Plan: export.") {
 		t.Fatalf("draft session %+v", s)
 	}
+	if bad, _ := w.e.Resume(r.RunID, "maybe", ""); bad.Status != StatusFailed {
+		t.Errorf("bad choice: %+v", bad)
+	}
 	r2, _ := w.e.Resume(r.RunID, "sent", "")
 	if r2.Status != StatusWaiting || r2.Question != "Created T-102. Tell the user?" {
 		t.Fatalf("second ask: %+v", r2)
+	}
+	// The resumed run kept its lease: no second claim, and a keepalive for
+	// this process, since the first one died with the run that asked.
+	if n := len(w.find("ticket", "claim")); n != 1 {
+		t.Errorf("%d claims", n)
+	}
+	ka := w.waitFor("ticket", "keepalive", "T-1")
+	if len(ka) == 0 || flagValue(ka[0].Args, "--pid") != fmt.Sprint(os.Getpid()) || flagValue(ka[0].Args, "--holder") == "" {
+		t.Errorf("keepalives %+v", ka)
 	}
 	r3, _ := w.e.Resume(r.RunID, "sent", "")
 	if r3.Status != StatusDone {
@@ -984,23 +895,17 @@ func TestEscalationNoteFlattensReplyText(t *testing.T) {
 	}
 }
 
-// A run: list sends its requests in order, per item, and the first failure
-// stops the step: no later request, no later item.
+// A run: list sends its requests in order, and the first failure stops the
+// step: no later request.
 func TestRunListStopsAtTheFirstFailure(t *testing.T) {
-	tk := todoTicket()
-	tk.Title, tk.Status, tk.Role = "Rollout: v2", "in_review", "reviewer"
-	w := newWorld(t, tk)
+	w := newWorld(t)
 	w.script(fakeConfig{Replies: map[string][]map[string]any{"check unit": {{"exit": 1, "output": "unit failed"}}}})
-	r := w.run(RunOpts{Ref: "reviewer/rollout", Ticket: "T-1", Bot: "rv-1"})
-	if r.Status != StatusDone {
+	r := w.run(RunOpts{Ref: "chief-of-staff/digest", Bot: "pl-1"})
+	if r.Status != StatusBlocked || !strings.Contains(r.Reason, "step summary: exit:1") {
 		t.Fatalf("result %+v", r)
 	}
 	if heads, checks := w.find("git", "rev-parse", "HEAD"), w.find("check"); len(heads) != 1 || len(checks) != 1 || checks[0].Args[0] != "unit" {
-		t.Errorf("heads %d, checks %+v: want unit's head and check only", len(heads), checks)
-	}
-	tk = w.ticket("T-1")
-	if note := tk.Comments[len(tk.Comments)-1].Body; note != "Rollout: fail [exit:1 1 of 1 failed: unit]" {
-		t.Errorf("note %q", note)
+		t.Errorf("heads %d, checks %+v: want one head and the unit check only", len(heads), checks)
 	}
 }
 
@@ -1036,7 +941,7 @@ func TestRenderedFlagsTheEngineOwnsBlock(t *testing.T) {
 		}
 	}
 	for _, line := range []string{"worktree add T-1 --from main", "worktree add T-1 -from=main", "check all", "check unit", "head",
-		"open pr", "open pr --title a --body b", "pr status", "pr status 7"} {
+		"open pr", "open pr --title a --body b"} {
 		words := strings.Fields(line)
 		req := playbook.FindRequest(words)
 		if _, _, err := reqArgs(req, words[len(strings.Fields(req.Name)):]); err != nil {
@@ -1067,7 +972,7 @@ func TestTicketlessBlockFilesAnEscalationTicket(t *testing.T) {
 	w.script(fakeConfig{Replies: map[string][]map[string]any{
 		"git rev-parse": {{"exit": 128, "stderr": "fatal: bad HEAD\nsha: evil"}},
 	}})
-	r := w.run(RunOpts{Ref: "reviewer/housekeeping", Bot: "rv-1"})
+	r := w.run(RunOpts{Ref: "chief-of-staff/digest", Bot: "pl-1"})
 	if r.Status != StatusBlocked || r.ExitCode() != 3 {
 		t.Fatalf("result %+v", r)
 	}
@@ -1076,14 +981,14 @@ func TestTicketlessBlockFilesAnEscalationTicket(t *testing.T) {
 		t.Fatalf("tickets %+v", s.Tickets)
 	}
 	for id, tk := range s.Tickets {
-		if tk.Status != "blocked" || tk.Role != "reviewer" || tk.Type != "ship" || !strings.HasPrefix(tk.Body, "Type: chore") {
+		if tk.Status != "blocked" || tk.Role != "chief-of-staff" || tk.Type != "ship" || !strings.HasPrefix(tk.Body, "Type: chore") {
 			t.Errorf("%s: %+v", id, tk)
 		}
 		if len(tk.Comments) != 1 || !strings.HasPrefix(tk.Comments[0].Body, "Escalation (chief-of-staff): ") ||
-			!strings.HasSuffix(tk.Comments[0].Body, "Return-role: reviewer") {
+			!strings.HasSuffix(tk.Comments[0].Body, "Return-role: chief-of-staff") {
 			t.Errorf("comments %+v", tk.Comments)
 		}
-		if !strings.Contains(r.Reason, id) || !strings.Contains(r.Reason, "step list: exit:128") {
+		if !strings.Contains(r.Reason, id) || !strings.Contains(r.Reason, "step summary: exit:128") {
 			t.Errorf("reason %q doesn't name %s", r.Reason, id)
 		}
 	}
