@@ -38,7 +38,7 @@ Open a todo list with one item per phase below.
 
 ## Phase D: Prove it
 
-1. Run every command under `## Checks` in `.maestro/project/project-setup.md`, or the repo's build and tests if that file is missing.
+1. Run the repo's own build, lint and tests, as its README, build files or CI config name them.
 2. On a hot path, measure again the same way. If it got slower beyond the spread, find the step that did it and say so.
 
 ```
