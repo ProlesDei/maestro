@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, seven skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
+Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 18 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
 
 ## Install
 
@@ -37,7 +37,7 @@ In the target repo, in Claude Code (or headless: `claude -p "/maestro-work T-12"
 
 ## Your own skills
 
-`skills/` is your slot. Maestro ships seven skills, all commands you call: `maestro-planner`, `maestro-create-ticket`, `maestro-work`, `maestro-software-engineer`, `maestro-qa-lead`, `maestro-review` and `maestro-chief-of-staff`; the prefix keeps them clear of your own skills. Add `skills/<name>/SKILL.md` and name it in `skills/use.yaml` to have prompt steps use it. See [skills/README.md](skills/README.md).
+Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket-to-merge commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and three that prompt steps load. [skills/README.md](skills/README.md) lists them. To add your own, put `skills/<name>/SKILL.md` here and name it in `skills/use.yaml` if prompt steps should load it.
 
 ## Personas
 

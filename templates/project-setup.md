@@ -21,6 +21,10 @@ main
 - lint: `make lint`
 - test: `make test`
 
+## Run
+
+<how to start the app locally, and the URL or command to check it works; the QA lead uses this>
+
 ## Conventions
 
 <branch and commit style, where tests live, files never to touch>

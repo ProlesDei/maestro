@@ -4,5 +4,21 @@
 #     all: [my-style]        # every prompt step
 #     build: [my-tdd]        # one step, by template name in playbooks/prompts/
 prompts:
-  all: []
-commands: [maestro-work, maestro-create-ticket, maestro-review]   # you call these; no prompt names them
+  all: [maestro-working-principles]
+  build: [maestro-tdd]
+  verify: [maestro-prove-complete]
+commands:                    # you call these; no prompt names them
+  - maestro-work
+  - maestro-create-ticket
+  - maestro-review
+  - maestro-planner
+  - maestro-qa-lead
+  - maestro-software-engineer
+  - maestro-chief-of-staff
+  - maestro-figure-it-out
+  - maestro-swarm
+  - maestro-sharpen
+  - maestro-recall
+  - maestro-unslop
+  - maestro-prune
+  - maestro-refactor-code
