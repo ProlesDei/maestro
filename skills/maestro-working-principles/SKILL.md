@@ -1,11 +1,11 @@
 ---
 name: maestro-working-principles
-description: "Sets how any bot or person changes files in a Maestro repo: a worktree for every change, the ticket when there is one, small checked commits with nothing left uncommitted, a pause note to resume from, and proof before claims; plus the session rules every other skill points to. Use before you create, edit or delete a file, for 'work on T-12 by hand', 'fix this in the repo', 'pick up where I left off', and in every Maestro playbook step. Not for how to build or prove the change: the maestro-tdd and maestro-prove-complete skills own that."
+description: "Sets the day-to-day habits for changing files in a Maestro repo: when and how to use a worktree, how to commit and write the message, when to open a PR, how to clean up after yourself, and the session rules every other skill points to. Use before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off', and in every Maestro playbook step. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills) or taking a ticket to a PR (`maestro-play run work --ticket <id>`)."
 ---
 
 # Working principles
 
-Every file change gets its own worktree and lands in small commits, with nothing left uncommitted. Use the ticket when there is one, prove before you claim, and ask only what a run can't answer. This skill owns the session rules below, which hold in a playbook step and in your own session; other skills point here and never restate them.
+How you change files day to day: in a worktree, in small checked commits, through a PR that review merges, leaving nothing behind. This skill owns the session rules below, which hold in a playbook step and in your own session; other skills point here and never restate them. You never edit the main checkout.
 
 ## Session rules
 
@@ -15,45 +15,42 @@ Every file change gets its own worktree and lands in small commits, with nothing
 - **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never find another way to run it.
 - **Obey the kill switch.** If `$(git rev-parse --git-common-dir)/maestro/STOP` exists, stop now. In a step, reply `blocked` with `summary: kill switch is on`.
 
-## Phase A: Check where you are
+## Worktrees
 
-Each piece of work has one worktree, `.maestro/worktrees/<name>` on branch `maestro/<name>`. `<name>` is the ticket id, else a short slug of the task such as `fix-login-typo`. The main checkout stays on the main branch and nobody edits it.
+- Every change to tracked files gets a worktree. Reading, answering and reviewing need none.
+- One per piece of work: `.maestro/worktrees/<name>` on branch `maestro/<name>`, where `<name>` is the ticket id, else a short slug such as `fix-login-typo`.
+- In a playbook step (your prompt starts "You are one step of a Maestro playbook"), the engine made yours. Work only there; your launch flags beat this file.
+- In your own session, from the main checkout: `git worktree add .maestro/worktrees/<name> -b maestro/<name> <main branch>`, with the branch from `## Main branch` in `.maestro/project/project-setup.md`. If the branch exists, drop `-b`.
+- If the worktree exists, go into it and read the trail before you change anything: `git log <main branch>..HEAD`, the newest `wip:` commit's body, and the ticket's comments. Go on from where it stopped.
+- Never work in another session's worktree. When main moves under you, `git merge <main branch>`; never rebase a pushed branch.
 
-| Where you are | Who set it up | What you do |
-|---|---|---|
-| A playbook step: your prompt starts "You are one step of a Maestro playbook" | The engine claimed the ticket, made the worktree and makes every ticket write | Only the step; your launch flags beat this file. Skip phases B and D |
-| Your own session, already in this work's worktree (`git rev-parse --show-toplevel` ends in `.maestro/worktrees/<name>`) | You or another session, earlier | Read the trail, then phases C and D |
-| Your own session, anywhere else | Nobody yet | Phases B to D |
+## Commits
 
-**Read the trail** before you change anything in a worktree someone started: `git log <main branch>..HEAD`, the newest `wip:` commit's body, and the ticket's comments. Go on from where it stopped and redo nothing it records as done; phase D proves all of it again.
-
-In your own session, open a todo list with the phases you run. To have the playbook take a ticket to a PR instead, run `maestro-play run work --ticket <id>`.
-
-## Phase B: Start
-
-1. **Find the ticket.** Take the one the user named, else look for one that covers this work. With none, go on without one.
-2. **Claim it** the way `## Tickets` in `.maestro/project/project-setup.md` says. With `maestro-ticket`: `maestro-ticket claim <id> --holder <you>/<session> --ttl 8h --json`, and keep `claim.token` for every later write on the ticket. Exit 4 means another holder, unmet dependencies or a busy area: stop and tell the user. If the ticket is in `todo`, run `maestro-ticket transition <id> --to in_progress --from todo --holder <holder> --token <token>`.
-3. **Make the worktree** from the main checkout, with the branch from `## Main branch` in `project-setup.md`: `git worktree add .maestro/worktrees/<name> -b maestro/<name> <main branch>`. If the branch exists, drop `-b`. If the worktree exists, go into it and read the trail. Make every change inside it.
-4. **Read the task:** the ticket and its acceptance criteria, or the user's request. Before you edit, write in two sentences the goal in your own words and the smallest change that meets it. If the code shows the ask won't meet the goal, show the evidence and stop. Find the closest file that does the same kind of thing, and match it.
-
-## Phase C: Work
-
-- Work in small steps. Run the check that covers a step before you start the next, then commit it: one reason per commit, and the message says what changed and why. Before you pause or reply, `git status --porcelain` prints nothing.
+- Work in small steps. Run the check that covers a step, then commit it: one reason per commit. Before you pause or reply, `git status --porcelain` prints nothing.
 - Stage by path: `git add <paths>`, never `git add -A` unread. Never commit generated files, secrets or another session's files.
-- Touch only what the task needs. Note a problem outside it as a possible ticket and leave the file alone.
-- Making the same edit in many places? Write a script that makes it, and put the command in the commit message so review can rerun it.
+- Follow the commit style under `## Conventions` in `project-setup.md`. Else: a subject line under 72 characters that says what changed, then a body that says why. Claim only what you ran. Write it the way the **maestro-technical-writing** skill says.
+- Making the same edit in many places? Write a script that makes it, and put the command in the body so review can rerun it.
+- Never amend or rebase a commit you pushed. Fix it with a new commit.
+- Stopping before you finish? Commit as `wip: <step>`, with a body that says what is done and checked, what is next, and the first command to run on resume.
+
+## Pull requests
+
+- In a step, never push or open a PR: the engine does both.
+- In your own session, open one when the work is done: `## Checks` in `project-setup.md` pass and the **maestro-prove-complete** skill shows each thing asked for. Run `git push -u origin maestro/<name>`, then `gh pr create --base <main branch>`, unless `## Conventions` names another tool.
+- One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks.
+- Never push the main branch, merge or deploy. Review merges. Answer review with new commits on the same branch.
+
+## Clean up
+
+- Stop every process you started. In a step, list each under `processes`.
+- Put throwaway files in `mktemp -d` and remove them when done. Never leave them in the worktree.
+- After the merge, `git worktree remove <path>`, only if it is clean.
+
+## Ask, prove, get unstuck
+
 - **Ask or act.** If running something can answer the question (behaviour, output, timing), run it and let the result decide. Make reversible calls yourself and name each one in your reply. Ask the user only a taste or product call no run can settle, or before anything you can't undo. Asked for your view, give it, even when it's no.
-- A check you didn't run hasn't passed. Quote the command and its exit code. Mark every other claim as run, read or guessed. "Should work" is not a status.
-- Never push, merge or deploy unless the user asks: `maestro-play` opens the PR and review merges it.
-- Two fixes built on the same idea failed? Write down that idea and test it on its own before a third fix. Still stuck? Stop. Write what happened, each try with its failing output line, two or three options, and the one question that unblocks you. In a step, reply `blocked` with that question.
-- Stopping before you finish? Commit as `wip: <step>`, with a body that says what is done and checked, what is next, and the first command to run on resume. That body is the note the next session reads.
+- A check you didn't run hasn't passed. Quote the command and its exit code. Mark every other claim as run, read or guessed.
+- Touch only what the task needs. Note a problem outside it in your reply and leave the file alone.
+- Two fixes built on the same idea failed? Test that idea on its own before a third. Still stuck? Stop. Write what happened, each try with its failing output line, two or three options, and the one question that unblocks you. In a step, reply `blocked` with that question.
 
-## Phase D: Finish
-
-1. Run each command under `## Checks` in `project-setup.md`. Quote each result.
-2. Prove each acceptance criterion, or each thing the user asked for, with the **maestro-prove-complete** skill.
-3. Leave the worktree clean, with everything committed on `maestro/<name>`.
-4. With a ticket, post a handoff the team's way: `Handoff: <sha, checks, evidence paths, risks>`. With `maestro-ticket`: `maestro-ticket comment <id> --holder <holder> --token <token> --body 'Handoff: ...'`. Then, if the user had you open a PR, `maestro-ticket transition <id> --to in_review --holder <holder> --token <token> --release`; else `maestro-ticket release <id> --holder <holder> --token <token>`.
-5. After the merge, `git worktree remove <path>`, only if it is clean.
-
-**Reply:** in a step, the step's own reply. In your own session, a reply that stands alone: the goal in one line and whether it is met, the ticket id and status (or "no ticket"), the branch and sha, each check with its exit code, the evidence paths, each call you made for the user, open risks.
+**Reply:** in a step, the step's own reply. In your own session: what changed and whether it does what was asked, the branch and sha, each check with its exit code, the PR link if you opened one, each call you made for the user, open risks.
