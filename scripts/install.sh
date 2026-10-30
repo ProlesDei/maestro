@@ -12,10 +12,11 @@
 # tree. If any skill folder already exists it refuses and writes nothing;
 # if a later step fails it removes what it wrote.
 #
-# --tickets <dir>: a team's own ticket method. <dir> holds create-ticket/
-# and, if the team wants, work/, each with a SKILL.md. They are installed
-# in place of Maestro's folders of the same name. Any other entry in <dir>
-# is refused; dot files are skipped.
+# --tickets <dir>: a team's own ticket method. <dir> holds
+# maestro-create-ticket/ and, if the team wants, maestro-work/, each with a
+# SKILL.md. They are installed in place of Maestro's folders of the same
+# name, the names the personas call. Any other entry in <dir> is refused;
+# dot files are skipped.
 #
 # Uninstall, from the target repo. The first line removes the skills; the
 # second removes your project files and the ticket store, with every ticket:
@@ -73,12 +74,12 @@ done
 if [ -n "$tickets" ]; then
 	[ -d "$tickets" ] || die "--tickets $tickets is not a directory"
 	tickets=$(cd -- "$tickets" && pwd)
-	[ -e "$tickets/create-ticket" ] || die "--tickets $tickets has no create-ticket/"
+	[ -e "$tickets/maestro-create-ticket" ] || die "--tickets $tickets has no maestro-create-ticket/"
 	for entry in "$tickets"/*; do
 		name=$(basename "$entry")
 		case $name in
-		create-ticket | work) skill "$entry" "--tickets $entry" ;;
-		*) die "--tickets $tickets may hold only create-ticket/ and work/, not $name" ;;
+		maestro-create-ticket | maestro-work) skill "$entry" "--tickets $entry" ;;
+		*) die "--tickets $tickets may hold only maestro-create-ticket/ and maestro-work/, not $name" ;;
 		esac
 		for i in "${!names[@]}"; do
 			[ "${names[i]}" != "$name" ] || from[i]=$entry

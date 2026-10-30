@@ -739,8 +739,9 @@ func TestMigrateV1(t *testing.T) {
 }
 
 // A v4 store with tickets in removed statuses and old role names migrates
-// to in_review and the three roles, logs each change, and loses the outbox.
-// A role with no mapping stays for doctor to report.
+// to in_review and current roles, logs each change, and loses the outbox.
+// planner and qa-lead stay as they are. A role with no mapping stays for
+// doctor to report.
 func TestMigrateV5(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v4.db")
 	db, err := sql.Open("sqlite", path)
@@ -756,6 +757,9 @@ func TestMigrateV5(t *testing.T) {
 			('old', 'done', 'junior-software-engineer', 2, 'cos', 1, 1, 1)`,
 		`INSERT INTO tickets (title, status, blocked_from, role, priority, created_by, created_at, updated_at)
 			VALUES ('blk', 'blocked', 'in_qa', 'senior-software-engineer', 2, 'cos', 1, 1)`,
+		`INSERT INTO tickets (title, status, role, priority, created_by, version, created_at, updated_at) VALUES
+			('plan', 'todo', 'planner', 2, 'cos', 1, 1, 1),
+			('rev', 'in_review', 'code-reviewer', 2, 'cos', 1, 1, 1)`,
 		`INSERT INTO events (ticket_id, type, actor, created_at) VALUES (1, 'created', 'cos', 1)`,
 		`INSERT INTO outbox (event_id, kind, payload, next_attempt_at) VALUES (1, 'created', '{}', 1)`,
 		"PRAGMA user_version = 4",
@@ -778,11 +782,13 @@ func TestMigrateV5(t *testing.T) {
 		role                string
 		version             int64
 	}{
-		{ticket.StatusInReview, "", ticket.RoleReviewer, 3},
+		{ticket.StatusInReview, "", ticket.RoleQALead, 3},
 		{ticket.StatusInReview, "", ticket.RoleReviewer, 2},
 		{ticket.StatusTodo, "", "designer", 1},
 		{ticket.StatusDone, "", ticket.RoleEngineer, 1},
 		{ticket.StatusBlocked, ticket.StatusInReview, ticket.RoleEngineer, 1},
+		{ticket.StatusTodo, "", ticket.RolePlanner, 1},
+		{ticket.StatusInReview, "", ticket.RoleReviewer, 1},
 	}
 	for i, w := range want {
 		d, err := s.Get(ctx, ticket.ID(i+1))
@@ -808,7 +814,7 @@ func TestMigrateV5(t *testing.T) {
 		}
 	}
 	if moves != 2 || updates != 5 {
-		t.Errorf("migration logged %d moves, %d updates; want 2, 5", moves, updates)
+		t.Errorf("migration logged %d moves, %d updates; want 2, 5 (4 roles, 1 blocked_from)", moves, updates)
 	}
 	var outbox int
 	s.r.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'outbox'").Scan(&outbox)
@@ -1129,14 +1135,14 @@ func TestOnlyReviewerSetsShipDone(t *testing.T) {
 
 	move(t, s, tk.ID, ticket.StatusInReview)
 	before, _ := s.LastSeq(ctx)
-	for _, role := range []string{"", "engineer", "chief-of-staff"} {
+	for _, role := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead"} {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "x", ActorRole: role})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
 	if after, _ := s.LastSeq(ctx); after != before {
 		t.Fatal("forbidden move wrote an event")
 	}
-	for _, role := range []string{"Bad Role", "qa-lead"} {
+	for _, role := range []string{"Bad Role", "code-reviewer"} {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: role})
 		wantErr(t, err, ticket.ErrInvalid)
 	}

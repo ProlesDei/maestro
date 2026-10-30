@@ -19,16 +19,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
 
 func TestMain(m *testing.M) {
+	if d := os.Getenv("FAKE_SIGNAL_DIR"); d != "" {
+		os.Exit(signalEngine(d))
+	}
 	switch filepath.Base(os.Args[0]) {
 	case "maestro-ticket":
 		os.Exit(fakeTicket(os.Args[1:]))
@@ -72,8 +74,6 @@ type fakeTicketT struct {
 	BlockedFrom string        `json:"blocked_from,omitempty"`
 	Claim       *fakeClaim    `json:"claim"`
 	Comments    []fakeComment `json:"comments"`
-	// WaitingOnDeps makes claim fail with waiting_on_deps.
-	WaitingOnDeps bool `json:"waiting_on_deps,omitempty"`
 }
 
 type fakeStore struct {
@@ -110,7 +110,7 @@ func logCall(bin string, args []string, extra map[string]any) {
 
 // fakeFlags splits args into positionals and --flag values.
 func fakeFlags(args []string) ([]string, map[string]string) {
-	bools := map[string]bool{"--json": true, "--unclaimed": true, "--claimed": true, "--release": true, "--next": true, "-p": true}
+	bools := map[string]bool{"--json": true, "--unclaimed": true, "--claimed": true, "--release": true, "-p": true}
 	flags := map[string]string{}
 	var pos []string
 	for i := 0; i < len(args); i++ {
@@ -170,46 +170,6 @@ func fakeTicket(args []string) int {
 		return 0
 	}
 	sub := args[0]
-	if sub == "list" {
-		var list []*fakeTicketT
-		statuses := strings.Split(fl["--status"], ",")
-		for _, t := range s.Tickets {
-			if fl["--status"] != "" && !contains(statuses, t.Status) {
-				continue
-			}
-			if fl["--role"] != "" && t.Role != fl["--role"] {
-				continue
-			}
-			if fl["--unclaimed"] == "true" && t.Claim != nil && !t.Claim.Expired {
-				continue
-			}
-			latest := ""
-			if len(t.Comments) > 0 {
-				latest = t.Comments[len(t.Comments)-1].Body
-			}
-			if p := fl["--latest-prefix"]; p != "" && !strings.HasPrefix(latest, p) {
-				continue
-			}
-			if p := fl["--not-latest-prefix"]; p != "" && strings.HasPrefix(latest, p) {
-				continue
-			}
-			c := *t
-			c.Comments = nil
-			list = append(list, &c)
-		}
-		sort.Slice(list, func(i, j int) bool {
-			if list[i].Priority != list[j].Priority {
-				return list[i].Priority < list[j].Priority
-			}
-			a, _ := strconv.Atoi(strings.TrimPrefix(list[i].ID, "T-"))
-			b, _ := strconv.Atoi(strings.TrimPrefix(list[j].ID, "T-"))
-			return a < b
-		})
-		if list == nil {
-			list = []*fakeTicketT{}
-		}
-		return out(map[string]any{"tickets": list})
-	}
 	if _, replay := s.Keys[fl["--idempotency-key"]]; sub == "create" && !replay {
 		pos = []string{fmt.Sprintf("T-%d", len(s.Tickets)+100)}
 		status := fl["--status"]
@@ -285,9 +245,6 @@ func fakeTicket(args []string) int {
 	case "claim":
 		if t.Claim != nil && !t.Claim.Expired && t.Claim.Holder != fl["--holder"] {
 			return fail("claimed", 4)
-		}
-		if t.WaitingOnDeps {
-			return fail("waiting_on_deps", 4)
 		}
 		s.NextToken++
 		t.Claim = &fakeClaim{Holder: fl["--holder"], Token: s.NextToken}
@@ -402,10 +359,45 @@ func (cfg *fakeConfig) popHarness() map[string]any {
 
 func cwd() string { d, _ := os.Getwd(); return d }
 
-// sideEffects runs a harness reply's test hooks: steal takes the lease,
-// stop_file makes the stop file, commit makes a commit in the session's
-// directory and puts its sha in the reply.
+// noPrompt is the call's GIT_TERMINAL_PROMPT, GH_PROMPT_DISABLED and
+// GIT_SSH_COMMAND, joined by |.
+func noPrompt() string {
+	return os.Getenv("GIT_TERMINAL_PROMPT") + "|" + os.Getenv("GH_PROMPT_DISABLED") + "|" + os.Getenv("GIT_SSH_COMMAND")
+}
+
+// signalEngine is an engine whose command, a shell, writes its pid to
+// dir/ready, then waits; an interrupt makes it write dir/got and exit.
+// TestForwardSignals interrupts the engine. It returns only if the
+// interrupt didn't stop it.
+func signalEngine(dir string) int {
+	e := &Engine{cfg: Config{Environ: os.Environ()}}
+	script := `trap 'echo INT > got; exit 0' INT; echo $$ > ready; while :; do sleep 0.1; done`
+	e.exec(dir, "sh", nil, "", -1, "-c", script)
+	return 0
+}
+
+// hang runs a scripted reply's sleep: it starts a child that sleeps a
+// minute, writes its pid to $FAKE_DIR/child.pid, then sleeps itself for
+// the duration given. A timeout must kill both.
+func hang(r map[string]any) {
+	d, err := time.ParseDuration(fmt.Sprint(r["sleep"]))
+	if err != nil {
+		return
+	}
+	child := exec.Command("sleep", "60")
+	if child.Start() == nil {
+		os.WriteFile(filepath.Join(fakeDir(), "child.pid"), []byte(fmt.Sprint(child.Process.Pid)), 0o644)
+	}
+	time.Sleep(d)
+}
+
+// sideEffects runs a harness reply's test hooks: sleep hangs, steal takes
+// the lease, stop_file makes the stop file, commit makes a commit in the
+// session's directory and puts its sha in the reply.
 func sideEffects(h map[string]any, rep map[string]any) {
+	if h["sleep"] != nil {
+		hang(h)
+	}
 	if h["steal"] == true {
 		var s fakeStore
 		loadJSON("tickets.json", &s)
@@ -531,7 +523,7 @@ func anyStrings(list []any) []string {
 
 // fakeGh is gh pr list, create and view over the PRs in fake.json.
 func fakeGh(args []string) int {
-	logCall("gh", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("gh", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv), "no_prompt": noPrompt()})
 	cfg := loadFake()
 	defer saveJSON("fake.json", cfg)
 	if len(args) < 2 || args[0] != "pr" {
@@ -580,11 +572,14 @@ func fakeGh(args []string) int {
 
 // fakeGit logs the call, fails it if fake.json says so, else runs git.
 func fakeGit(args []string) int {
-	logCall("git", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("git", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv), "no_prompt": noPrompt()})
 	if len(args) > 0 {
 		cfg := loadFake()
 		r := cfg.pop("git " + args[0])
 		saveJSON("fake.json", cfg)
+		if r != nil && r["sleep"] != nil {
+			hang(r)
+		}
 		if r != nil {
 			fmt.Fprintln(os.Stderr, r["stderr"])
 			return toInt(r["exit"])
@@ -610,6 +605,10 @@ func fakeCheck(args []string) int {
 	if r == nil {
 		fmt.Println("ok")
 		return 0
+	}
+	if r["sleep"] != nil {
+		saveJSON("fake.json", cfg)
+		hang(r)
 	}
 	fmt.Println(r["output"])
 	return toInt(r["exit"])

@@ -3,8 +3,8 @@ role: engineer
 description: Take a ticket from todo, or back from review with a Kickback note, to an open PR at in_review, with a test for each criterion.
 intake:
   - {category: new-work, status: todo}
-  - {category: sent-back, status: in_progress, latest: "Kickback:"}   # /review's NO-GO
-  - {category: sent-back, status: in_progress, latest: "Answer:"}     # unblocked: see skills/work/SKILL.md#unblock
+  - {category: sent-back, status: in_progress, latest: "Kickback:"}   # /maestro-review's NO-GO
+  - {category: sent-back, status: in_progress, latest: "Answer:"}     # unblocked: see skills/maestro-work/SKILL.md#unblock
 claim: true
 session: ticket
 steps:

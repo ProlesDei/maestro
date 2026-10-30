@@ -92,8 +92,8 @@ func (e *Engine) harness(st *State, c sessionCall) (map[string]any, error) {
 	} else {
 		args = append(args, "--session-id", st.HarnessSession)
 	}
-	args = append(args, e.cfg.ClaudeArgs...)
-	r, err := e.exec(e.workDir(st), e.cfg.ClaudeBin, e.runEnv(st), c.prompt, args...)
+	args = append(args, permissionArgs("claude", e.cfg.ClaudeArgs)...)
+	r, err := e.exec(e.workDir(st), e.cfg.ClaudeBin, e.runEnv(st), c.prompt, e.cfg.SessionTimeout, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +144,8 @@ func (e *Engine) codex(st *State, c sessionCall, rules string, schema []byte) (m
 	if m := e.model(c.harness, c.tier); m != "" {
 		args = append(args, "-m", m)
 	}
-	args = append(append(args, e.cfg.CodexArgs...), "-")
-	r, err := e.exec(e.workDir(st), e.cfg.CodexBin, e.runEnv(st), prompt, args...)
+	args = append(append(args, permissionArgs("codex", e.cfg.CodexArgs)...), "-")
+	r, err := e.exec(e.workDir(st), e.cfg.CodexBin, e.runEnv(st), prompt, e.cfg.SessionTimeout, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +167,52 @@ func (e *Engine) codex(st *State, c sessionCall, rules string, schema []byte) (m
 	}
 	return newReply(status, r.exit, string(b)+r.stderr, "reply", replyFromText(string(b)), "family", familyOf(c.harness),
 		"session", st.HarnessSession), nil
+}
+
+// A session runs headless, so nothing can answer a permission prompt: by
+// default it may do anything. The user's own permission flag in
+// MAESTRO_CLAUDE_ARGS or MAESTRO_CODEX_ARGS wins, and then the engine adds
+// none.
+var (
+	allowAll = map[string][]string{
+		"claude": {"--permission-mode", "bypassPermissions"},
+		"codex":  {"--dangerously-bypass-approvals-and-sandbox"},
+	}
+	// permFlags set permissions; a claude settings file or codex profile
+	// may too.
+	permFlags = map[string][]string{
+		"claude": {"--permission-mode", "--dangerously-skip-permissions", "--allowedTools", "--allowed-tools",
+			"--disallowedTools", "--disallowed-tools", "--restricted", "--settings"},
+		"codex": {"--dangerously-bypass-approvals-and-sandbox", "--sandbox", "-s", "--approve-for-me", "--profile", "-p"},
+	}
+	// permKeys are codex -c keys that set permissions.
+	permKeys = []string{"sandbox_mode", "approval_policy"}
+)
+
+// permissionArgs is the user's args for harness h, after allowAll unless
+// they hold a permission flag of their own.
+func permissionArgs(h string, user []string) []string {
+	for i, a := range user {
+		for _, f := range permFlags[h] {
+			if a == f || strings.HasPrefix(a, f+"=") {
+				return user
+			}
+		}
+		var v string // a codex -c key=value
+		switch {
+		case h != "codex":
+		case (a == "-c" || a == "--config") && i+1 < len(user):
+			v = user[i+1]
+		case strings.HasPrefix(a, "-c="), strings.HasPrefix(a, "--config="):
+			_, v, _ = strings.Cut(a, "=")
+		}
+		for _, k := range permKeys {
+			if strings.HasPrefix(v, k) {
+				return user
+			}
+		}
+	}
+	return append(append([]string(nil), allowAll[h]...), user...)
 }
 
 // replyFromText finds the JSON object in a reply's text: the whole text, a

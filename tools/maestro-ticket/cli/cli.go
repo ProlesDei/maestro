@@ -98,7 +98,7 @@ stops when the lease is lost or released.
 Expired leases: reap frees them, logs lease_expired and checkpoints the
 WAL; any write to the ticket frees its expired lease too.
 
-Roles: chief-of-staff engineer reviewer
+Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
 Ship:  backlog -> todo -> in_progress -> in_review -> done (by the reviewer)
 Scout: backlog -> todo -> in_progress -> in_review -> done (by the owner)

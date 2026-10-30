@@ -25,6 +25,9 @@ type projectSetup struct {
 	Summary    string
 	MainBranch string
 	Checks     []projectCheck
+	// BadCheck is the first bullet under ## Checks that isn't a check, as
+	// "line <n>: <text>", or "".
+	BadCheck string
 }
 
 type projectCheck struct {
@@ -32,14 +35,18 @@ type projectCheck struct {
 	Command string `json:"command"`
 }
 
-var checkRE = regexp.MustCompile("^[-*]\\s+([^:`]+?):\\s*`([^`]+)`\\s*$")
+var (
+	checkRE  = regexp.MustCompile("^[-*]\\s+([^:`]+?):\\s*`([^`]+)`\\s*$")
+	bulletRE = regexp.MustCompile(`^([-*+]|\d+[.)])\s`)
+)
 
 // parseSetup reads the ## Project, ## Main branch and ## Checks sections.
-// A check is a bullet line: - <name>: `<command>`.
+// A check is a bullet line: - <name>: `<command>`. Any other bullet there
+// is BadCheck, so a typo can't pass as no checks; prose is skipped.
 func parseSetup(text string) projectSetup {
 	s := projectSetup{}
 	section := ""
-	for _, line := range strings.Split(text, "\n") {
+	for n, line := range strings.Split(text, "\n") {
 		t := strings.TrimSpace(line)
 		if h, ok := strings.CutPrefix(t, "## "); ok {
 			section = strings.ToLower(strings.TrimSpace(h))
@@ -68,6 +75,8 @@ func parseSetup(text string) projectSetup {
 		case "checks":
 			if m := checkRE.FindStringSubmatch(t); m != nil {
 				s.Checks = append(s.Checks, projectCheck{Name: strings.Trim(m[1], "* "), Command: m[2]})
+			} else if s.BadCheck == "" && bulletRE.MatchString(t) {
+				s.BadCheck = fmt.Sprintf("line %d: %s", n+1, t)
 			}
 		}
 	}
@@ -194,11 +203,35 @@ func (e *Engine) request(st *State, req *playbook.Request, words []string) (map[
 
 // git runs git in dir.
 func (e *Engine) git(st *State, dir string, args ...string) (execResult, error) {
-	return e.exec(dir, e.cfg.GitBin, e.runEnv(st), "", args...)
+	return e.exec(dir, e.cfg.GitBin, e.noPromptEnv(st), "", e.cfg.GitTimeout, args...)
 }
 
 func (e *Engine) gh(st *State, dir string, args ...string) (execResult, error) {
-	return e.exec(dir, e.cfg.GhBin, e.runEnv(st), "", args...)
+	return e.exec(dir, e.cfg.GhBin, e.noPromptEnv(st), "", e.cfg.GitTimeout, args...)
+}
+
+// noPromptEnv is runEnv for git and gh. A command in its own process group
+// stops when it reads the terminal, so a password or host-key prompt would
+// hang it until the git timeout; these make git, ssh and gh fail at once
+// instead. The user's own ssh command (GIT_SSH_COMMAND, GIT_SSH or
+// core.sshCommand) stays.
+func (e *Engine) noPromptEnv(st *State) []string {
+	env := append(e.runEnv(st), "GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1")
+	e.sshOnce.Do(func() {
+		for _, kv := range e.cfg.Environ {
+			k, v, _ := strings.Cut(kv, "=")
+			if (k == "GIT_SSH_COMMAND" || k == "GIT_SSH") && v != "" {
+				e.userSSH = true
+				return
+			}
+		}
+		r, err := e.exec(e.cfg.Dir, e.cfg.GitBin, env, "", e.cfg.GitTimeout, "config", "--get", "core.sshCommand")
+		e.userSSH = err == nil && r.exit == 0 && strings.TrimSpace(r.stdout) != ""
+	})
+	if !e.userSSH {
+		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
+	}
+	return env
 }
 
 // workDir is where a run's commands run: its worktree, else the main
@@ -285,10 +318,16 @@ func (e *Engine) hideWorktrees(st *State) {
 }
 
 // check runs the project's checks, all of them or the one named, in order,
-// in the run's worktree. Every check runs, so the reply lists every
-// failure; the full output goes to output_path.
+// in the run's worktree, each for at most CheckTimeout. Every check runs,
+// so the reply lists every failure; the full output goes to output_path.
+// A project may have no checks: check all then passes with none run. A
+// bullet under ## Checks that isn't a check fails every check request.
 func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	s := e.setup()
+	if s.BadCheck != "" {
+		return newReply("failed", 1, fmt.Sprintf("%s: %s: under ## Checks, want - <name>: `<command>`", s.Path, s.BadCheck),
+			"summary", "bad ## Checks line", "checks", []any{}, "output_path", ""), nil
+	}
 	var run []projectCheck
 	for _, c := range s.Checks {
 		if name == "all" || c.Name == name {
@@ -296,11 +335,11 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 		}
 	}
 	if len(run) == 0 {
-		what := "no checks"
-		if name != "all" {
-			what = "no check " + name
+		if name == "all" {
+			return newReply("ok", 0, "no checks under ## Checks in "+s.Path, "summary", "no checks listed",
+				"checks", []any{}, "output_path", ""), nil
 		}
-		return newReply("failed", 1, fmt.Sprintf("%s under ## Checks in %s", what, s.Path)), nil
+		return newReply("failed", 1, fmt.Sprintf("no check %s under ## Checks in %s", name, s.Path)), nil
 	}
 	dir := runDir(e.cfg.Common, st.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -328,7 +367,7 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	var failed []string
 	exit := 0
 	for _, c := range run {
-		r, err := e.exec(e.workDir(st), "sh", e.runEnv(st), "", "-c", c.Command)
+		r, err := e.exec(e.workDir(st), "sh", e.runEnv(st), "", e.cfg.CheckTimeout, "-c", c.Command)
 		if err != nil {
 			return nil, err
 		}

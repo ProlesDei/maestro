@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
@@ -30,9 +31,13 @@ type Config struct {
 	Harness string
 	// Models maps a tier (mid, frontier) to the harness's model name.
 	Models map[string]string
-	// ClaudeArgs and CodexArgs go on every session call, such as a
-	// permission mode.
+	// ClaudeArgs and CodexArgs go on every session call. Sessions may do
+	// anything unless they hold a permission flag (permissionArgs).
 	ClaudeArgs, CodexArgs []string
+	// SessionTimeout, CheckTimeout and GitTimeout bound one session, one
+	// project check and one git or gh call (defaults 30m, 15m, 5m); a
+	// negative one is no limit.
+	SessionTimeout, CheckTimeout, GitTimeout time.Duration
 	// Limits override the default limits (step_visits, retries).
 	Limits  map[string]any
 	Environ []string
@@ -46,6 +51,9 @@ type Config struct {
 type Engine struct {
 	cfg  Config
 	uses *playbook.Uses
+	// userSSH says the user set their own ssh command (noPromptEnv).
+	userSSH bool
+	sshOnce sync.Once
 }
 
 // New checks the config and reads skills/use.yaml.
@@ -72,6 +80,16 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	for _, t := range []struct {
+		d   *time.Duration
+		def time.Duration
+	}{
+		{&cfg.SessionTimeout, 30 * time.Minute}, {&cfg.CheckTimeout, 15 * time.Minute}, {&cfg.GitTimeout, 5 * time.Minute},
+	} {
+		if *t.d == 0 {
+			*t.d = t.def
+		}
+	}
 	if cfg.Environ == nil {
 		cfg.Environ = os.Environ()
 	}
@@ -89,21 +107,17 @@ func (e *Engine) now() time.Time { return e.cfg.Now() }
 
 // Result is what run and resume report.
 type Result struct {
-	RunID    string   `json:"id,omitempty"`
-	Status   string   `json:"state"`
-	Playbook string   `json:"playbook,omitempty"`
-	Ticket   string   `json:"ticket,omitempty"`
-	Step     string   `json:"step,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
-	Question string   `json:"question,omitempty"`
-	Choices  []string `json:"choices,omitempty"`
-	Evidence []string `json:"evidence,omitempty"`
+	RunID    string `json:"id,omitempty"`
+	Status   string `json:"state"`
+	Playbook string `json:"playbook,omitempty"`
+	Ticket   string `json:"ticket,omitempty"`
+	Step     string `json:"step,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // Exit codes of run and resume, by status.
 var exitCodes = map[string]int{
-	StatusDone: 0, StatusFailed: 1, StatusBlocked: 3, StatusLost: 4, StatusIdle: 5,
-	StatusWaiting: 6, StatusStopped: 7,
+	StatusDone: 0, StatusFailed: 1, StatusBlocked: 3, StatusLost: 4, StatusStopped: 7,
 }
 
 // ExitCode is the process exit code for the result.
@@ -120,9 +134,8 @@ func failed(format string, args ...any) Result {
 
 // RunOpts selects what run does.
 type RunOpts struct {
-	Ref    string // <role>/<job>, or <role> with Next
+	Ref    string // <role>/<job>
 	Ticket string
-	Next   bool
 	Bot    string
 	Input  string // .input.text, for playbooks with input:
 }
@@ -147,21 +160,15 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 		return failed("%s", msg), nil
 	}
 	env := e.environment()
-	if o.Next {
-		if r, ok, err := e.resumeUnfinished(o.Bot, role); ok || err != nil {
-			return r, err
-		}
-		return e.runNext(role, job, o.Bot, o.Input, env)
-	}
 	if job == "" {
-		return failed("run %s: name a playbook, or pass --next", o.Ref), nil
+		return failed("run %s: want <role>/<job>", o.Ref), nil
 	}
 	p, err := playbook.Load(e.cfg.Playbooks, o.Ref)
 	if err != nil {
 		return failed("%v", err), nil
 	}
 	if o.Ticket == "" && p.Claim {
-		return failed("%s claims a ticket: pass --ticket or --next", p.Ref()), nil
+		return failed("%s claims a ticket: pass --ticket", p.Ref()), nil
 	}
 	if p.Input == "required" && strings.TrimSpace(o.Input) == "" {
 		return failed("%s needs --input", p.Ref()), nil
@@ -211,9 +218,6 @@ func (e *Engine) newState(p *playbook.Playbook, bot, ticketID string, env map[st
 	if len(p.Steps) > 0 {
 		st.Cursor = p.Steps[0].ID
 	}
-	if p.Cursor != nil {
-		st.Cursor0 = e.loadCursor(bot, p.Cursor.Name)
-	}
 	return st
 }
 
@@ -224,33 +228,26 @@ func (e *Engine) stopped() bool {
 	return err == nil
 }
 
-// Resume continues a run after a crash, a stop or an ask step.
-func (e *Engine) Resume(id, choice, text string) (Result, error) {
+// Resume continues a run after a crash or a stop.
+func (e *Engine) Resume(id string) (Result, error) {
 	if in := e.insideRun(); in != "" {
 		return failed("refused: this process belongs to run %s, and a run never resumes another", in), nil
 	}
-	r, _, err := e.resume(id, choice, text)
-	return r, err
-}
-
-// resume is Resume; busy reports that another process is driving the run.
-func (e *Engine) resume(id, choice, text string) (r Result, busy bool, err error) {
 	if _, err := e.LoadState(id); err != nil {
-		return failed("%v", err), false, nil
+		return failed("%v", err), nil
 	}
 	unlock, ok, err := e.lockRun(id)
 	if err != nil {
-		return Result{}, false, err
+		return Result{}, err
 	}
 	if !ok {
-		return Result{RunID: id, Status: StatusFailed, Reason: "another maestro-play process is driving run " + id}, true, nil
+		return Result{RunID: id, Status: StatusFailed, Reason: "another maestro-play process is driving run " + id}, nil
 	}
 	defer unlock()
-	r, err = e.resumeLocked(id, choice, text)
-	return r, false, err
+	return e.resumeLocked(id)
 }
 
-func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
+func (e *Engine) resumeLocked(id string) (Result, error) {
 	st, err := e.LoadState(id)
 	if err != nil {
 		return failed("%v", err), nil
@@ -259,22 +256,7 @@ func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
 	if err != nil {
 		return failed("%v", err), nil
 	}
-	switch st.Status {
-	case StatusWaiting:
-		if choice == "" {
-			return failed("run %s waits on %s: pass --choice (%s)", id, st.Ask.Step, strings.Join(st.Ask.Choices, ", ")), nil
-		}
-		if !playbook.Contains(st.Ask.Choices, choice) {
-			return failed("--choice %q: want one of %s", choice, strings.Join(st.Ask.Choices, ", ")), nil
-		}
-		// The answer's text goes into notes, so it's one line: it can never
-		// add a trailer line of its own.
-		st.Ask.Choice, st.Ask.Text, st.Ask.Answered = choice, flat(text), true
-	case StatusRunning, StatusStopped:
-		if choice != "" {
-			return failed("run %s isn't waiting on a question", id), nil
-		}
-	default:
+	if st.Status != StatusRunning && st.Status != StatusStopped {
 		return Result{RunID: id, Status: st.Status, Playbook: st.Playbook, Ticket: st.Ticket, Reason: "run already " + st.Status}, nil
 	}
 	if e.stopped() {
@@ -300,25 +282,6 @@ func (e *Engine) resumeLocked(id, choice, text string) (Result, error) {
 		}
 	}
 	return e.drive(p, st)
-}
-
-// resumeUnfinished resumes this bot's oldest crashed or stopped run of the
-// role, the first category --next tries.
-func (e *Engine) resumeUnfinished(bot, role string) (Result, bool, error) {
-	runs, err := e.unfinished(bot)
-	if err != nil {
-		return Result{}, false, err
-	}
-	for _, st := range runs {
-		if st.Role == role {
-			r, busy, err := e.resume(st.ID, "", "")
-			if busy {
-				continue // a live run, not a crashed one
-			}
-			return r, true, err
-		}
-	}
-	return Result{}, false, nil
 }
 
 // start drives a new run under its lock.
@@ -383,30 +346,12 @@ func (e *Engine) drive(p *playbook.Playbook, st *State) (Result, error) {
 func (e *Engine) result(st *State) Result {
 	r := Result{RunID: st.ID, Status: st.Status, Playbook: st.Playbook, Ticket: st.Ticket}
 	switch st.Status {
-	case StatusWaiting:
-		r.Step, r.Question, r.Choices = st.Ask.Step, st.Ask.Question, st.Ask.Choices
-		r.Evidence = e.evidence(st)
 	case StatusBlocked, StatusLost, StatusFailed:
 		r.Step, r.Reason = st.StoppedAt, st.StopReason
 	case StatusStopped:
 		r.Step, r.Reason = st.Cursor, "the stop file exists"
 	}
 	return r
-}
-
-// evidence points the bot at what a waiting run has: its state, the
-// evidence folder and every output path a step recorded.
-func (e *Engine) evidence(st *State) []string {
-	out := []string{statePath(e.cfg.Common, st.ID)}
-	if st.Ticket != "" {
-		out = append(out, e.evidenceDir(st))
-	}
-	for _, rec := range st.Steps {
-		if p, ok := rec["output_path"].(string); ok && p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 func (e *Engine) evidenceDir(st *State) string {

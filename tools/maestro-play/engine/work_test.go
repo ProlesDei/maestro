@@ -2,11 +2,15 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
@@ -231,7 +235,8 @@ func TestWorktreeAddReuses(t *testing.T) {
 	}
 }
 
-// A check that isn't listed, or a setup with no checks, fails the step.
+// A check that isn't listed fails the step; check all with no checks
+// listed, or no setup, passes with none run.
 func TestCheckNeedsChecks(t *testing.T) {
 	w := newWorld(t)
 	st := &State{ID: "r1"}
@@ -242,7 +247,7 @@ func TestCheckNeedsChecks(t *testing.T) {
 		t.Errorf("one check: %v", r)
 	}
 	os.Remove(filepath.Join(w.repo, SetupPath))
-	if r, _ := w.e.check(st, "all"); r["status"] != "failed" || !strings.Contains(str(r["output"]), "no checks under ## Checks") {
+	if r, _ := w.e.check(st, "all"); r["status"] != "ok" || r["summary"] != "no checks listed" || len(r["checks"].([]any)) != 0 {
 		t.Errorf("no setup: %v", r)
 	}
 	if e := w.e.environment(); e["project"].(map[string]any)["main_branch"] != "main" {
@@ -265,8 +270,134 @@ func TestParseSetupTemplate(t *testing.T) {
 		t.Errorf("setup %+v", s)
 	}
 	s = parseSetup("## Project\n- **Name:** tiny\n## Main branch\n`trunk`\n## Checks\n- **unit**: `go test ./...`\n- not a check\n* vet: `go vet ./...`\n")
-	if s.Name != "tiny" || s.MainBranch != "trunk" || len(s.Checks) != 2 || s.Checks[0].Name != "unit" || s.Checks[1].Command != "go vet ./..." {
+	if s.Name != "tiny" || s.MainBranch != "trunk" || len(s.Checks) != 2 || s.Checks[0].Name != "unit" || s.Checks[1].Command != "go vet ./..." ||
+		s.BadCheck != "line 7: - not a check" {
 		t.Errorf("setup %+v", s)
+	}
+	if s = parseSetup("## Checks\n\nNone yet.\n\n## Run\n\n- make run\n"); len(s.Checks) != 0 || s.BadCheck != "" {
+		t.Errorf("prose under ## Checks: %+v", s)
+	}
+}
+
+// A bullet under ## Checks that isn't a check fails check all and names
+// the line, so a typo can't pass as no checks; prose there is no checks.
+func TestCheckBadBullet(t *testing.T) {
+	w := newWorld(t)
+	st := &State{ID: "r1"}
+	path := filepath.Join(w.repo, SetupPath)
+	os.WriteFile(path, []byte("# Project setup\n\n## Checks\n\n- lint: `fake-check lint`\n- test: make test\n"), 0o644)
+	for _, name := range []string{"all", "lint"} {
+		r, err := w.e.check(st, name)
+		if err != nil || r["status"] != "failed" || r["summary"] != "bad ## Checks line" ||
+			!strings.Contains(str(r["output"]), path+": line 6: - test: make test: under ## Checks, want - <name>: `<command>`") {
+			t.Errorf("check %s: %v %v", name, r, err)
+		}
+	}
+	if n := len(w.find("check")); n != 0 {
+		t.Errorf("%d checks ran", n)
+	}
+	os.WriteFile(path, []byte("# Project setup\n\n## Checks\n\nNone yet.\n"), 0o644)
+	if r, _ := w.e.check(st, "all"); r["status"] != "ok" || r["summary"] != "no checks listed" {
+		t.Errorf("prose: %v", r)
+	}
+}
+
+// A check that exits, leaving a background child holding its output,
+// passes at once, and the child dies with it.
+func TestCheckLeavesNoChild(t *testing.T) {
+	w := newWorld(t)
+	os.WriteFile(filepath.Join(w.repo, SetupPath),
+		[]byte("## Checks\n\n- bg: `sleep 30 & echo $! > \"$FAKE_DIR/child.pid\"; echo ok`\n"), 0o644)
+	start := time.Now()
+	r, err := w.e.check(&State{ID: "r1"}, "all")
+	if err != nil || r["status"] != "ok" || r["summary"] != "1 passed" || !strings.Contains(str(r["output"]), "ok") {
+		t.Fatalf("check %v %v", r, err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("check took %v", d)
+	}
+	if !w.childGone() {
+		t.Errorf("the check's background child outlived it")
+	}
+}
+
+// git and gh calls can't stop on a prompt: they get GIT_TERMINAL_PROMPT=0,
+// GH_PROMPT_DISABLED=1 and a batch-mode ssh, unless the user set an ssh
+// command of their own.
+func TestGitAndGhNeverPrompt(t *testing.T) {
+	for _, c := range []struct {
+		env, config, want string
+	}{
+		{"GIT_SSH_COMMAND=", "", "0|1|ssh -o BatchMode=yes"},
+		{"GIT_SSH_COMMAND=ssh -i key", "", "0|1|ssh -i key"},
+		{"GIT_SSH=my-ssh", "", "0|1|"},
+		{"GIT_SSH_COMMAND=", "ssh -i key", "0|1|"},
+	} {
+		w := newWorld(t)
+		if c.config != "" {
+			w.git(w.repo, "config", "core.sshCommand", c.config)
+		}
+		w.e.cfg.Environ = append(w.e.cfg.Environ, "GIT_SSH_COMMAND=", "GIT_SSH=", c.env)
+		st := &State{ID: "r1"}
+		if r, err := w.e.head(st); err != nil || r["status"] != "ok" {
+			t.Fatalf("head %v %v", r, err)
+		}
+		w.e.gh(st, w.repo, "pr", "list")
+		calls := append(w.find("git", "rev-parse"), w.find("gh", "pr")...)
+		if len(calls) != 2 {
+			t.Fatalf("calls %+v", calls)
+		}
+		for _, call := range calls {
+			if call.NoPrompt != c.want {
+				t.Errorf("%s %v with %s, core.sshCommand %q: %q, want %q", call.Bin, call.Args, c.env, c.config, call.NoPrompt, c.want)
+			}
+		}
+	}
+}
+
+// An interrupt to the engine reaches its command's process group, which
+// no longer shares the engine's, and still stops the engine.
+func TestForwardSignals(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cmd := exec.Command(self, "-test.run=^$")
+	cmd.Env = append(os.Environ(), "FAKE_SIGNAL_DIR="+dir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	read := func(name string) string {
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil && len(b) > 0 {
+				return strings.TrimSpace(string(b))
+			}
+		}
+		return ""
+	}
+	pid, _ := strconv.Atoi(read("ready"))
+	if pid <= 0 {
+		cmd.Process.Kill()
+		t.Fatal("the command never started")
+	}
+	t.Cleanup(func() { syscall.Kill(-pid, syscall.SIGKILL) })
+	time.Sleep(100 * time.Millisecond) // the engine listens just after the command starts
+	cmd.Process.Signal(os.Interrupt)
+	select {
+	case <-done:
+		if ws := cmd.ProcessState.Sys().(syscall.WaitStatus); !ws.Signaled() || ws.Signal() != syscall.SIGINT {
+			t.Errorf("engine exited %v, want killed by SIGINT", cmd.ProcessState)
+		}
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the interrupt didn't stop the engine")
+	}
+	if got := read("got"); got != "INT" {
+		t.Errorf("the command's group got %q, want INT", got)
 	}
 }
 
@@ -431,5 +562,168 @@ func TestFailedStartRetriesWithANewSession(t *testing.T) {
 	first, second := flagValue(s[0].Args, "--session-id"), flagValue(s[1].Args, "--session-id")
 	if first == "" || second == "" || first == second {
 		t.Errorf("session ids %q then %q, want two new ones", first, second)
+	}
+}
+
+// A project with no checks still gets its PR: check all passes with none
+// run, and the Handoff note says so.
+func TestNoChecksStillOpensThePR(t *testing.T) {
+	w := newWorldAt(t, "testdata/work", &fakeTicketT{ID: "T-1", Title: "Add --json", Body: "Type: feature\nCriteria: C1",
+		Type: "ship", Status: "todo", Role: "engineer", Owner: "chief-of-staff", Version: 1})
+	os.WriteFile(filepath.Join(w.repo, SetupPath), []byte("# Project setup\n\n## Main branch\n\nmain\n\n## Checks\n\nNone yet.\n"), 0o644)
+	w.script(fakeConfig{Harness: workReplies("Add --json")})
+	r := w.run(RunOpts{Ref: "engineer/work", Ticket: "T-1"})
+	if r.Status != StatusDone {
+		t.Fatalf("result %+v", r)
+	}
+	tk := w.ticket("T-1")
+	if note := tk.Comments[len(tk.Comments)-1].Body; tk.Status != "in_review" || !strings.Contains(note, `Checks: "no checks listed"`) {
+		t.Errorf("ticket %s, note:\n%s", tk.Status, note)
+	}
+	if n := len(w.find("check")); n != 0 {
+		t.Errorf("%d checks ran", n)
+	}
+}
+
+// Sessions may do anything unless the user's own args set permissions;
+// then the engine adds none. Codex gets the flag on resume too.
+func TestSessionPermissions(t *testing.T) {
+	session := func(w *world, st *State) fakeCall {
+		t.Helper()
+		if _, err := w.e.session(st, "plan", "prompt", []string{"plan"}, "mid", "", false); err != nil {
+			t.Fatal(err)
+		}
+		s := w.sessions()
+		return s[len(s)-1]
+	}
+	w := newWorld(t)
+	w.script(fakeConfig{Harness: []map[string]any{workReplies("x")[0]}})
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); flagValue(c.Args, "--permission-mode") != "bypassPermissions" {
+		t.Errorf("claude default %q", c.Args)
+	}
+	w.e.cfg.ClaudeArgs = []string{"--permission-mode", "acceptEdits"}
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); strings.Contains(strings.Join(c.Args, " "), "bypassPermissions") ||
+		flagValue(c.Args, "--permission-mode") != "acceptEdits" {
+		t.Errorf("claude with the user's mode %q", c.Args)
+	}
+	w.e.cfg.Harness = "codex"
+	st := w.e.newState(&playbookStub, "eng-1", "", nil)
+	for _, c := range []fakeCall{session(w, st), session(w, st)} {
+		if !hasFlag(c.Args, "--dangerously-bypass-approvals-and-sandbox") {
+			t.Errorf("codex default %q", c.Args)
+		}
+	}
+	w.e.cfg.CodexArgs = []string{"-c", "sandbox_mode=workspace-write"}
+	if c := session(w, w.e.newState(&playbookStub, "eng-1", "", nil)); hasFlag(c.Args, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Errorf("codex with the user's sandbox %q", c.Args)
+	}
+	for _, c := range []struct {
+		h    string
+		user string
+		ours bool
+	}{
+		{"claude", "", true}, {"claude", "--model x", true}, {"claude", "--permission-mode=plan", false},
+		{"claude", "--dangerously-skip-permissions", false}, {"claude", "--allowedTools Edit", false},
+		{"claude", "--settings perms.json", false}, {"claude", "--settings=perms.json", false},
+		{"codex", "", true}, {"codex", "-c model=x", true}, {"codex", "-s read-only", false},
+		{"codex", "--sandbox=workspace-write", false}, {"codex", "--config=approval_policy=never", false},
+		{"codex", "-p work", false}, {"codex", "--profile=work", false},
+	} {
+		got := permissionArgs(c.h, strings.Fields(c.user))
+		if ours := len(got) > len(strings.Fields(c.user)); ours != c.ours {
+			t.Errorf("permissionArgs(%s, %q) = %q", c.h, c.user, got)
+		}
+	}
+}
+
+// childGone reports, within 5s, that the child a hung fake started has
+// exited.
+func (w *world) childGone() bool {
+	b, err := os.ReadFile(filepath.Join(w.dir, "child.pid"))
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		w.t.Fatalf("no child.pid: %v", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return true
+		}
+		if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+			if f := strings.Fields(string(b)); len(f) > 2 && f[2] == "Z" {
+				return true // dead, not yet reaped
+			}
+		}
+	}
+	return false
+}
+
+// A check that hangs is killed with what it started; it fails with
+// "timed out after", and the other checks still run.
+func TestCheckTimesOut(t *testing.T) {
+	w := newWorld(t)
+	w.e.cfg.CheckTimeout = 300 * time.Millisecond
+	w.script(fakeConfig{Replies: map[string][]map[string]any{"check unit": {{"sleep": "30s"}}}})
+	start := time.Now()
+	r, err := w.e.check(&State{ID: "r1"}, "all")
+	if err != nil || r["status"] != "failed" || r["summary"] != "1 of 2 failed: unit" || toInt(r["exit_code"]) != 124 ||
+		!strings.Contains(str(r["output"]), "timed out after 300ms") {
+		t.Fatalf("check %v %v", r, err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("check took %v", d)
+	}
+	if n := len(w.find("check", "lint")); n != 1 {
+		t.Errorf("lint ran %d times", n)
+	}
+	if !w.childGone() {
+		t.Errorf("the check's child outlived the timeout")
+	}
+}
+
+// A session that hangs times out, and the run escalates as for any other
+// failed step.
+func TestSessionTimesOutAndEscalates(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	w.e.cfg.SessionTimeout = 300 * time.Millisecond
+	hung := reply("done", map[string]any{"plan": "p", "risks": "r"})
+	hung["sleep"] = "30s"
+	w.script(fakeConfig{Harness: []map[string]any{hung, reply("done", map[string]any{"happened": "plan hung"})}})
+	r := w.run(RunOpts{Ref: "engineer/build-ticket", Ticket: "T-1"})
+	if r.Status != StatusBlocked || r.Step != "plan" || !strings.Contains(r.Reason, "session failed: timed out after 300ms") {
+		t.Fatalf("result %+v", r)
+	}
+	tk := w.ticket("T-1")
+	if tk.Status != "blocked" || tk.Claim != nil || !strings.HasPrefix(tk.Comments[len(tk.Comments)-1].Body, "Escalation: plan hung") {
+		t.Errorf("ticket %s claim %+v comments %+v", tk.Status, tk.Claim, tk.Comments)
+	}
+	if !w.childGone() {
+		t.Errorf("the session's child outlived the timeout")
+	}
+}
+
+// A push that hangs fails open pr with "timed out after", and no PR opens.
+func TestPushTimesOut(t *testing.T) {
+	w := newWorld(t)
+	st := &State{ID: "r1", Ticket: "T-1"}
+	wt, err := w.e.worktreeAdd(st, "T-1", "main")
+	if err != nil || wt["status"] != "ok" {
+		t.Fatalf("worktree add %v %v", wt, err)
+	}
+	st.Worktree, st.Branch = str(wt["path"]), str(wt["branch"])
+	os.WriteFile(filepath.Join(st.Worktree, "change.txt"), []byte("x\n"), 0o644)
+	w.git(st.Worktree, "add", "change.txt")
+	w.git(st.Worktree, "commit", "-q", "-m", "change")
+	w.e.cfg.GitTimeout = 300 * time.Millisecond
+	w.script(fakeConfig{Replies: map[string][]map[string]any{"git push": {{"sleep": "30s"}}}})
+	r, err := w.e.openPR(st, "", "")
+	if err != nil || r["status"] != "failed" || toInt(r["exit_code"]) != 124 ||
+		!strings.HasPrefix(str(r["output"]), "git push: ") || !strings.Contains(str(r["output"]), "timed out after 300ms") {
+		t.Fatalf("open pr %v %v", r, err)
+	}
+	if n := len(w.find("gh", "pr", "create")); n != 0 {
+		t.Errorf("%d PRs created", n)
+	}
+	if !w.childGone() {
+		t.Errorf("the push's child outlived the timeout")
 	}
 }

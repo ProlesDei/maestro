@@ -148,14 +148,14 @@ CREATE TABLE IF NOT EXISTS areas (
 ) WITHOUT ROWID;
 `
 
-// schemaV5 cuts the store to three roles and one review step, and drops
+// schemaV5 cuts the store to five roles and one review step, and drops
 // the outbox, which nothing reads any more.
 //
 // Tickets in the removed statuses in_qa and ready_to_release go back to
 // in_review, the last step they had passed, where the reviewer sets them
 // done; blocked tickets that came from one return there too. Old role
-// names map onto the three roles; any other role is left for doctor to
-// report. Each change is logged as an event by maestro-ticket, so the log
+// names map onto current ones (planner and qa-lead stay as they are); any
+// other role is left for doctor to report. Each change is logged as an event by maestro-ticket, so the log
 // still explains every ticket's state. A status move bumps version, as a
 // transition does.
 const schemaV5 = `
@@ -177,9 +177,8 @@ UPDATE tickets SET blocked_from = 'in_review', updated_at = CAST(unixepoch('subs
 
 CREATE TEMP TABLE v5_roles (old TEXT PRIMARY KEY, new TEXT NOT NULL);
 INSERT INTO v5_roles VALUES
-	('planner', 'chief-of-staff'),
 	('senior-software-engineer', 'engineer'), ('junior-software-engineer', 'engineer'),
-	('code-reviewer', 'reviewer'), ('qa-lead', 'reviewer'), ('operations-manager', 'reviewer');
+	('code-reviewer', 'reviewer'), ('operations-manager', 'reviewer');
 INSERT INTO events (ticket_id, type, actor, data, created_at)
 	SELECT t.id, 'updated', 'maestro-ticket',
 		json_object('role', r.new, 'note', 'schema v5: role ' || r.old || ' renamed'),

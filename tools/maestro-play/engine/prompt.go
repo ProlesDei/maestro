@@ -246,14 +246,11 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 	tier := s.Tier()
 	fresh := p.Session == "step" || s.Session == "fresh"
 	for try := 0; ; try++ {
-		prompt, err := e.compose(s.Prompt, e.data(p, st, s, c.extra), str(st.Env["harness"]))
+		prompt, err := e.compose(s.Prompt, e.data(p, st, s), str(st.Env["harness"]))
 		if err != nil {
-			return blockOut("step %s: render %s: %v", c.label(s), s.Prompt, err), nil
+			return blockOut("step %s: render %s: %v", s.ID, s.Prompt, err), nil
 		}
 		name := s.ID
-		if c.suffix != "" {
-			name += "." + c.suffix
-		}
 		if try > 0 {
 			name = fmt.Sprintf("%s.try%d", name, try)
 		}
@@ -263,8 +260,9 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 		}
 		reply := harnessReply(r)
 		miss := checkReply(reply, s.Out)
-		if r["status"] != "ok" && miss == "" {
-			miss = fmt.Sprintf("session %v: %v", r["status"], r["output"])
+		if r["status"] != "ok" {
+			// A session that failed or timed out says why on its last line.
+			miss = fmt.Sprintf("session %v: %s", r["status"], lastLine(str(r["output"])))
 		}
 		rec["session"], rec["tier"] = st.Session, tier
 		if f := str(r["family"]); f != "" {
@@ -283,7 +281,7 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 				st.Processes = append(st.Processes, ps...)
 			}
 			if status == "blocked" {
-				return blockOut("step %s: %s%s", c.label(s), str(reply["summary"]), questions(reply)), nil
+				return blockOut("step %s: %s%s", s.ID, str(reply["summary"]), questions(reply)), nil
 			}
 			return stepOut{outcome: status}, nil
 		}
@@ -293,7 +291,7 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 			if reply != nil {
 				rec["reply"] = merge(zeroReply(s.Out), reply)
 			}
-			return blockOut("step %s: the reply still missed %s after %d tries", c.label(s), miss, try+1), nil
+			return blockOut("step %s: the reply still missed %s after %d tries", s.ID, miss, try+1), nil
 		}
 		st.Retry = map[string]any{"reason": miss, "n": try + 1}
 		if retry.TierUp {
@@ -303,6 +301,12 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 			return stepOut{}, err
 		}
 	}
+}
+
+// lastLine is the last line of s that isn't blank.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func questions(reply map[string]any) string {

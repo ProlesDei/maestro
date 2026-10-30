@@ -2,7 +2,7 @@
 # Verify
 Show from the running code whether the ticket does what it says. Reading code is not proof. Fix nothing.
 1. In the worktree, `git status --porcelain` prints nothing. The sha you test is `git rev-parse HEAD`.
-2. Read the acceptance criteria (`maestro-ticket get <id> --json`) and `## Conventions` in
+2. Read the acceptance criteria (`maestro-ticket get <id> --json`) and `## Run` and `## Conventions` in
    `.maestro/project/project-setup.md`.
 3. Check each criterion on the real thing: run the command, call the API, drive the CLI or page. Keep the command,
    exit code and an excerpt of output, never a whole log. A bug's test now passes; perf meets its target.

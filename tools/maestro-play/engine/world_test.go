@@ -146,6 +146,8 @@ type fakeCall struct {
 	Prompt string   `json:"prompt"`
 	Cwd    string   `json:"cwd"`
 	RunEnv string   `json:"run_env"`
+	// NoPrompt is a git or gh call's prompt settings (noPrompt).
+	NoPrompt string `json:"no_prompt"`
 }
 
 func (w *world) calls() []fakeCall {

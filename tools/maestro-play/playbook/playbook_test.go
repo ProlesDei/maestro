@@ -18,7 +18,7 @@ steps:
     run: summary
   - id: b
     when: {if: '{{false}}', reason: why}
-    ask: {question: q, choices: [y, n]}
+    gate: '{{true}}'
 `
 	p, err := Parse("x.yaml", []byte(src))
 	if err != nil {
@@ -30,13 +30,15 @@ steps:
 	if p.Steps[0].When.If != "{{true}}" || p.Steps[1].When.Reason != "why" {
 		t.Errorf("when %+v %+v", p.Steps[0].When, p.Steps[1].When)
 	}
-	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindAsk || p.Ref() != "chief-of-staff/x" || p.Index("b") != 1 {
+	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindGate || p.Ref() != "chief-of-staff/x" || p.Index("b") != 1 {
 		t.Errorf("kinds %q %q", p.Steps[0].Kind(), p.Steps[1].Kind())
 	}
 	for _, bad := range []string{
 		"name: x\nsteps:\n  - id: a\n    when: {if: x, unless: y}\n",
 		"name: x\nnope: 1\n",
 		"name: x\nintake: {status: {a: b}}\n",
+		"name: x\nsteps:\n  - id: a\n    run: [head, head]\n",
+		"name: x\nintake: {category: new-work, kinds: [bug]}\n",
 	} {
 		if _, err := Parse("bad.yaml", []byte(bad)); err == nil {
 			t.Errorf("Parse(%q) should fail", bad)
@@ -71,12 +73,6 @@ func TestDefaults(t *testing.T) {
 	}
 	if (Block{Status: "keep"}).MoveTo("reviewer") != "keep" {
 		t.Errorf("status overrides")
-	}
-	if _, err := (&Ask{Timeout: "48h"}).LeaseTTL(); err == nil {
-		t.Errorf("48h lease should fail")
-	}
-	if (&Intake{Role: "any"}).TicketRole("reviewer") != "" || (&Intake{}).TicketRole("reviewer") != "reviewer" {
-		t.Errorf("intake role")
 	}
 }
 
