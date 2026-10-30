@@ -31,7 +31,7 @@ Each command is one role's job. When the team has a bot for that role, the job i
 1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
 3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built: QA it, then review it. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run the work playbook on it again.
-4. **Unblock.** Run `/maestro-chief-of-staff <id>`. It answers what is yours and puts the ticket back, or returns the owner's call. Bring that to the owner as a card, then post their answer as [Unblock](../../skills/maestro-chief-of-staff/SKILL.md#unblock) shows.
+4. **Unblock.** Run `/maestro-chief-of-staff <id>`. It returns the `Answer:` text when the call is yours, or the owner's card. Post the answer, yours or the owner's, as [Unblock](../../playbooks/work/README.md#unblock) shows.
 5. **Review on another model family when one is installed.** Codex if Claude built it: `codex exec '$maestro-code-review <pr>'` at the repo's root runs the [maestro-code-review](../../skills/maestro-code-review/SKILL.md) skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$maestro-code-review` alone.
 
 ## How you talk to the owner
@@ -43,4 +43,4 @@ Each command is one role's job. When the team has a bot for that role, the job i
 
 ## Ask the owner first
 
-The owner's calls are listed in Phase B of [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md). Hold every decision to that list, not only escalations.
+The owner's calls are listed in [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md#the-owners-calls). Hold every decision to that list, not only escalations.
