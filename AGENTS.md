@@ -59,7 +59,7 @@ Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`
 - `scripts/install.sh`: the installer. `scripts/install_test.sh` is its test.
 - `tools/maestro-play/`: the playbook engine. `tools/maestro-ticket/`: the ticket store and CLI.
 - `docs/decisions.md`: the rules still in force.
-- `docs/team.mermaid`, `docs/bot-anatomy.mermaid`: who does what, and how a bot works. README.md embeds a copy of each; edit the source and its embed together. `docs/design/self-improvement.mermaid`: a future design, not built.
+- `docs/team.mermaid`, `docs/bot-anatomy.mermaid`: who does what, and how a bot works. README.md embeds a copy of each; edit the source and its embed together. `docs/design/self-improvement.mermaid`: a future design, not built. `docs/design/memory.md`: bot memory, parked.
 
 One rule, one file: when a rule already lives somewhere, link to it instead of restating it.
 
