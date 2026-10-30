@@ -1,49 +1,45 @@
 ---
 name: maestro-planner
-description: "Turns a goal into a short spec and ordered, testable Maestro tickets, or splits or rewrites a ticket that is too big or unclear. Use for /maestro-planner, 'plan this feature', 'break this into tickets', or 'split T-12'. Not for one small ticket (maestro-create-ticket) or for writing the code."
-argument-hint: "[goal | ticket id to split or rewrite]"
+description: "Works in the repo for the planner bot: turns a goal into ordered, testable tickets, splits or rewrites a ticket, checks a plan, or answers a code question a plan turns on. Use for /maestro-planner, 'plan this feature', 'split T-12', 'check this plan', 'how big is this change', or when the planner bot runs claude -p. Not for one small ticket (maestro-create-ticket) or for writing the code."
+argument-hint: "<goal | ticket id | plan to check | question>"
 disable-model-invocation: true
 ---
 
-# Plan
+# Work for the planner
 
-You turn one goal into tickets an engineer can finish without asking, and create them in order. You read code and write tickets; you never change code.
+The planner bot runs outside the repo and can't read its code, so it runs you with `claude -p "/maestro-planner <request>"` whenever a plan needs the repo. You hand back one reply it can act on. You read code, run things to learn facts and write tickets; you never change code.
 
-Follow the **maestro-working-principles** skill. Ticket commands below are `maestro-ticket`'s; if `## Tickets` in `.maestro/project/project-setup.md` names another tool, use its equivalent.
+Follow the **maestro-working-principles** skill. Ticket commands are `maestro-ticket`'s; if `## Tickets` in `.maestro/project/project-setup.md` names another tool, use its equivalent.
 
-## Start
+## Who you work for
 
-Open a todo list with one item per phase below.
+- The bot reads only your last message, after the turn ends. It can't answer mid-run; it comes back with `claude -p --resume <session_id> "<answer>"`. Never stop to ask what you can pick: pick it, name it in the reply, go on.
+- It checks your reply against `maestro-ticket list --json`, so give ids, paths and commands exactly.
+- Slicing, order, deps, areas and splits are the planner's calls: make them. Changing the goal, scope or priority, dropping work the goal asked for, or a plan that costs far more than the goal implies is the chief of staff's: flag it, never decide it.
+- A person may run you too. Same rules.
 
-## Phase A: Frame
+## Phase A: Pick the job
 
-1. Take the goal from the user's words. Given a ticket id, run `maestro-ticket get <id> --json` and take the goal from its title and body. The store can't edit a title or body, so a rewrite is a split into one ticket. Stop and say why if its status isn't `backlog`, `todo` or `blocked`, or if its `claim` is live (`expired` is false): name the holder.
-2. Write a spec of a page or less: the problem and who has it, the outcome that means done (something a command or the running app shows), scope and non-goals, and risks. If you can't state the outcome, ask for it and stop.
-3. Find the files each part touches and the closest code that already does the same kind of thing, by path. Check each path you name exists.
-4. Run `maestro-ticket list --json`. A ticket that already covers a piece becomes a dep, not a new ticket.
+Pick the row that fits the request. For several, do them in table order and answer each.
 
-## Phase B: Slice
+| The request | Job | Creates tickets |
+|---|---|---|
+| A goal, or a ticket id to split or rewrite | **Plan:** follow [references/plan.md](references/plan.md) | Yes, unless it says "draft" |
+| A plan or draft tickets to check, or "second opinion" | **Check:** Phase B | No |
+| A question: where something lives, how big a change is, what it would break, whether it can be done | **Answer:** Phase C | No |
 
-1. Cut one ticket per reviewable change (a few hundred lines) that ships something and can be tested alone. Slice by behaviour, never by layer. Put the riskiest unknown first.
-2. Add a dep only where one ticket needs another's code. Give tickets with no dep between them areas that don't overlap, so they can run at once.
-3. Draft each ticket in the shape [maestro-create-ticket](../maestro-create-ticket/SKILL.md) gives, and check each criterion against its rule. Deps name earlier tickets in this plan or ids on the board.
-4. Take that skill's default for each field you can't infer, and name each pick in the reply. If a product or scope call no run can settle is left, ask it in one message with your pick, create nothing, and stop.
+If no row fits, say what you can do and stop.
 
-## Phase C: Create
+## Phase B: Check a plan
 
-1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both.
-2. On a refusal, fix only the field it names. If it still refuses, stop and show it.
+1. Read the plan, the code each ticket names, and `maestro-ticket list --json`.
+2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing or not needed; tickets with no dep between them whose areas overlap; a criterion no command or app can show; a path that doesn't exist; a ticket the board already has.
+3. Give each finding as ticket, problem, evidence (a path or command) and fix. With none, say "no findings".
 
-## Phase D: Close the old ticket
+## Phase C: Answer a question
 
-Skip this phase unless you split or rewrote a ticket.
+1. Find out from the repo, not memory: search and read the code, run the tests or the app on the main branch.
+2. Answer in a sentence or two, then the evidence: paths with line numbers, commands with exit codes.
+3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 
-1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. A ticket whose deps still name a cancelled ticket can never be claimed, so move each onto the new tickets first, then cancel:
-
-   ```sh
-   maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>
-   maestro-ticket comment <id> --body 'Split into T-a, T-b'
-   maestro-ticket transition <id> --to cancelled
-   ```
-
-**Reply:** the spec in five lines or fewer, one line per ticket created (`<id> <title> [status, priority, deps, areas]`), each default you picked, the old ticket's new status and each dependent moved, then `Next: maestro-play run work --ticket <id>` for each new `todo` ticket with no open deps.
+**Reply:** the job you did and its result (Plan: what [references/plan.md](references/plan.md#reply) lists; Check: the findings; Answer: the answer and evidence), then each pick you made, each call left for the chief of staff, and any question last.
