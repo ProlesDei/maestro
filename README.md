@@ -132,6 +132,8 @@ Runs time out: a session after 30m, a check after 15m, a git or gh call after 5m
 
 To use your own ticket method, add `--tickets <dir>`: a folder with `maestro-create-ticket/` and its `SKILL.md`. The installer copies it in place of Maestro's. Keep that name: the personas call it.
 
+Optional: a code graph. Install [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) and add it as an MCP server for your harness. Step sessions then use it to find symbols and callers before they grep, which costs fewer reads. The installer doesn't set it up yet.
+
 ## Use
 
 Build a ticket from the shell in the target repo. It's a playbook, so no Claude session wraps it:

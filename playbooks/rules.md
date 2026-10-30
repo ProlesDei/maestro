@@ -12,6 +12,11 @@ You are a session that `maestro-play` started to run one step of a playbook. `ma
 - Never edit `.maestro/project/`, the repo's `AGENTS.md`, `CLAUDE.md` or harness settings, or anything under `.claude/`, `.agents/` or `.grok/`.
 - Never discard work: no `git reset --hard`, `git clean`, force flags or branch deletion. Save half-done work as a commit, never a stash: every worktree shares one stash.
 
+## Code graph
+
+- If you have codebase-memory-mcp's tools, use them first to find code: `search_graph` for symbols, `trace_path` for callers and call chains, `get_code_snippet` for a symbol's source. If the worktree isn't indexed, run `index_repository` on it first.
+- Use grep for text, config and non-code files, or when those tools are missing.
+
 ## Tickets
 
 - Read tickets with `maestro-ticket get`, `list` and `events`.
