@@ -40,7 +40,7 @@ Before it opens the store, the CLI refuses (exit 2) a bare repo or a submodule w
 
 ## Roles and workflow
 
-Roles: `chief-of-staff`, `engineer`, `reviewer`. `create --role`, `claim --role`, `transition --role` and `--actor-role` refuse any other name (exit 2).
+Roles: `chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`. The QA lead records results as a comment starting `QA: pass` or `QA: fail`; there is no QA status. `create --role`, `claim --role`, `transition --role` and `--actor-role` refuse any other name (exit 2).
 
 Statuses and moves live in `ticket/ticket.go` (`workflows`), one table per ticket type (`create --type`, default `ship`):
 
@@ -59,7 +59,7 @@ maestro-ticket comment T-12 --actor reviewer --body "Kickback: <findings>"
 
 If someone holds a live claim on the ticket, both moves fail with exit 4 `claimed` until the holder releases it or the lease expires.
 
-Schema v5 upgrades older stores: tickets in a removed status, or blocked from one, go back to `in_review`, and the old role names map onto the three roles (the list is `schemaV5` in `sqlitestore/sqlitestore.go`). Each change is an event with actor `maestro-ticket`. `doctor` fails while any open ticket has an unknown role or status; fix one by moving it to another status with `transition <id> --to <status> --role <role>`, then back. A move to the same status is refused.
+Schema v5 upgrades older stores: tickets in a removed status, or blocked from one, go back to `in_review`, and the old role names map onto current ones; `planner` and `qa-lead` stay (the list is `schemaV5` in `sqlitestore/sqlitestore.go`). Each change is an event with actor `maestro-ticket`. `doctor` fails while any open ticket has an unknown role or status; fix one by moving it to another status with `transition <id> --to <status> --role <role>`, then back. A move to the same status is refused.
 
 **Dependencies and areas.** `create --deps T-1,T-2 --areas tools/maestro-ticket,skills`, or `update <id> --add-deps/--remove-deps/--areas` later. These gate work that writes code: tickets in `todo` or `in_progress`. `claim --next` only hands out such a ticket when its dependencies are all `done` and none of its areas overlaps (equal, or one inside the other) an area of another `todo` or `in_progress` ticket under a live claim. Claiming one by id fails with exit 4 `waiting_on_deps` or `area_busy`; renewing your own lease is exempt. Claims in other statuses (grooming `backlog`, answering `blocked`, review) neither wait nor hold areas. Their holder can't move the ticket into `todo` or `in_progress` without `--release` until the same checks pass, and the holder of a working claim can't `update --areas` onto another live claim's areas. Areas are repo-relative paths with no `.` or `..` segments, compared case-sensitively. Cycles are refused.
 

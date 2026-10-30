@@ -173,14 +173,18 @@ func ParseType(s string) (Type, error) {
 const SystemActor = "maestro-ticket"
 
 // Roles. Only the reviewer sets ship tickets done, after it merges the PR.
+// The QA lead records results as a comment starting "QA: pass" or
+// "QA: fail", not as a status.
 const (
 	RoleChiefOfStaff = "chief-of-staff"
+	RolePlanner      = "planner"
 	RoleEngineer     = "engineer"
+	RoleQALead       = "qa-lead"
 	RoleReviewer     = "reviewer"
 )
 
 // Roles lists every role a ticket or an actor may have.
-var Roles = []string{RoleChiefOfStaff, RoleEngineer, RoleReviewer}
+var Roles = []string{RoleChiefOfStaff, RolePlanner, RoleEngineer, RoleQALead, RoleReviewer}
 
 // Priority runs 0 (most urgent) to 3.
 const (
