@@ -1,127 +1,113 @@
-# Memory for a swarm (draft, not built)
+# Memory for a swarm (draft v4, not built)
 
-Two kinds of memory. **Short term** is what one piece of work needs to resume: it lives with the work and goes when the work merges. **Long term** is lessons: things a future session needs that the code, git and tickets can't show. Lessons are files in the repo, so git carries them to every machine, and they reach `main` only through a reviewed PR.
+**Short term** is what one piece of work needs to resume. It already exists: the run's scratch file and the `wip:` commit. **Long term** is lessons: what a future session needs that the code, git and tickets can't show. Lessons are small files on `main`, one per lesson, scoped by what they're about. Only a run that hit trouble may propose one, each ticket gets at most one lesson PR, and the engine, not a prompt, decides which lessons a step sees.
 
-## 1. Where each kind of memory lives
-
-Nothing new syncs between machines. A run's scratch never leaves the machine it ran on. The resume note rides on the branch. Lessons are committed. The one piece that doesn't travel today is the ticket store, which is a local SQLite file; going multi-machine means a shared ticket store first, through the Postgres driver its README describes.
+## 1. What exists and what's new
 
 ```mermaid
 flowchart TD
-    subgraph Local["This machine only · git's shared folder"]
-        S["<b>Run scratch</b><br/>plan step writes, build step reads<br/>gone when the run ends"]
-        I["<b>Inbox</b><br/>lessons from runs that<br/>never reached a PR"]
+    subgraph Short["Short term · exists today"]
+        S["<b>Run scratch</b><br/>scratch/bot/ticket.md<br/>plan writes it; build reads it, on a kickback too<br/><i>fix: prune it once the ticket is done</i>"]
+        W["<b>Resume note</b><br/>body of the newest wip: commit<br/>travels with the branch"]
     end
-    subgraph Branch["The work's branch · travels when pushed"]
-        W["<b>Resume note</b><br/>body of the newest wip: commit"]
-        N["<b>New lesson files</b><br/>proposed in this PR"]
+    subgraph Long["Long term · new"]
+        L["<b>Lessons on main</b><br/>.maestro/project/memory/<br/>areas/ by path · roles/ by role · shared/<br/>one file each: title, text, evidence path"]
     end
-    subgraph Main["main · every session, every machine"]
-        L["<b>Lessons</b><br/>.maestro/project/memory/"]
-        A["<b>Archive</b><br/>kept and searchable,<br/>never loaded"]
-    end
-    T[("<b>Ticket store</b><br/>claims · status · comments<br/>local today")]
-    D["<b>Desk</b><br/>what one bot is driving now<br/>built on demand, never stored"]
-    N -->|"review merges"| L
-    I -->|"chief of staff opens a PR"| N
-    L -->|"over the cap"| A
-    T --> D
-    W --> D
+    T[("<b>Ticket store</b><br/>local SQLite today<br/>multi-machine needs the Postgres driver")]
+    L -->|"git carries it to every machine"| M["Every session"]
 ```
 
-## 2. Which lessons a session loads
+## 2. How a lesson gets in
 
-Lessons have a scope: everyone (`shared`), one role (`roles/<role>`), or one part of the code (`areas/<path>`). A session loads only the scopes that match its role and the paths it touches, so hundreds of agents each read a short list instead of one giant file. In a playbook step the engine picks the scopes from the ticket's `areas` and the run's role; in your own session you run the same command.
+A lesson never rides in a code PR: review can't drop part of a PR, and a build step may not edit `.maestro/project/`. It gets its own PR, with three limits that keep hundreds of runs from making hundreds of PRs:
 
-```mermaid
-flowchart TD
-    Q["<b>Session on T-12</b><br/>role: engineer<br/>touches tools/maestro-ticket/cli"]
-    Q --> R["maestro-play memory read<br/>--role engineer<br/>--paths tools/maestro-ticket/cli"]
-    R --> S1["<b>shared/</b><br/>everyone · 10 max"]
-    R --> S2["<b>roles/engineer/</b><br/>15 max"]
-    R --> S3["<b>areas/tools/maestro-ticket/</b><br/>matches the path · 15 max"]
-    R -. "not loaded" .-> X["roles/reviewer/ · areas/skills/ · archive/"]
-    S1 --> P["<b>Into the prompt</b><br/>40 lessons at most<br/>stale ones marked stale"]
-    S2 --> P
-    S3 --> P
-```
-
-## 3. How a lesson gets in
-
-No curator. A lesson rides in the same PR as the work that taught it, and the reviewer, from another model family, judges it with the code. A bad lesson gets dropped; it never blocks good code. A run that stops before it reaches a PR (often the one that learned the most) leaves its lesson in the inbox, and the chief of staff turns the inbox into a normal PR while it handles the escalation.
+- **Only a run that hit trouble may propose one**: a retry, failed checks, a failed verify, a kickback or a block. The engine knows which runs those are and drops the `memory` field from the rest. A clean first run rarely learned anything the repo doesn't already show.
+- **One lesson branch per ticket**, `maestro/lessons-<ticket>`, so a ticket that bounces three times still has one PR. Each run adds a commit on top.
+- **No worktree.** The engine builds the commit with git plumbing (`hash-object`, `mktree`, `commit-tree` on `origin/<main>`), then pushes and opens the PR the way `open pr` does. No force push is ever needed.
 
 ```mermaid
 sequenceDiagram
-    participant S as Session on T-12
+    participant S as Step session
     participant E as Engine
-    participant B as Branch maestro/T-12
+    participant P as Lesson PR for T-12
     participant R as Reviewer
     participant M as main
-    participant F as A later session
-    S->>S: learns: store tests miss lease bugs without -race
-    alt your own session
-        S->>B: adds memory/areas/tools/maestro-ticket/race.md
-    else a playbook step
-        S->>E: reply field memory
-        E->>B: writes the lesson file before it opens the PR
+    S->>E: reply field memory: add or delete, scope, title, text, evidence
+    E->>E: schema check, and drop it if the run had no trouble
+    Note over E: run ends: done, ended or blocked
+    E->>P: commit on maestro/lessons-T-12, no worktree
+    P->>P: lint: size, fields, evidence path exists, no URLs, no hidden text
+    P->>R: review: evidence real? duplicate? right scope? safe to load?
+    alt holds
+        R->>M: GO merges
+    else a duplicate of one on main
+        R->>R: ticket: turn it into a lint or check
+        R->>P: close it
+    else fails
+        R->>P: close it, with the reason
     end
-    B->>R: one PR: the code and the lesson
-    R->>R: evidence real? duplicate? right scope? under the cap?
-    alt lesson holds
-        R->>M: GO merges both
-    else lesson fails
-        R->>B: auto-fix finding: drop the lesson, code goes on
-    end
-    M->>F: memory read loads it from then on
 ```
 
-## 4. How the cap works without losing anything
+A lesson written twice is the signal to turn it into a rule in code, so the duplicate check doubles as the trigger. A session that finds a lesson wrong replies with a `delete` entry and the reason; it lands the same way. In your own session, the path is the same, by hand: a worktree from `main`, one file per lesson, a PR (the steps in **maestro-working-principles**).
 
-The cap limits what loads, never what's kept. Lint fails the PR that would push a scope over its cap, and that PR makes room: merge two lessons, promote one into a rule, or archive one with a reason. Promotion is the best way out for an important lesson: a rule in a lint, a check or `AGENTS.md` can't be forgotten. Archived lessons stay in git and `memory search` still finds them. A `keep: true` lesson only the owner can move.
+File names are `<slug>-<ticket>.md`, so two tickets that learn the same thing at once never collide in git; review merges them.
+
+## 3. What a step sees
+
+At the start of a run the engine fetches `origin/<main>` once. At each step it reads the lessons from there, not from the worktree, so a lesson merged an hour ago reaches a branch that started yesterday. With no remote it reads the local main branch. It picks scopes from the ticket's `areas` (every lesson folder whose path is a prefix of an area), the run's role, and `shared`. Only titles go into the prompt, at the end so the fixed part still caches; the full text goes to a file the prompt names.
 
 ```mermaid
 flowchart TD
-    A["PR adds a lesson"] --> C{"lint: is the scope<br/>over its cap?"}
-    C -->|no| OK["PR passes"]
-    C -->|yes| F["lint fails:<br/>make room in this PR"]
-    F --> M1["Merge two lessons<br/>into one"]
-    F --> M2["Promote one into a rule<br/>lint · check · AGENTS.md · Conventions"]
-    F --> M3["Archive one,<br/>with the reason"]
-    M1 --> OK
-    M2 --> AR
-    M3 --> AR["<b>archive/</b><br/>still in git<br/>memory search finds it"]
-    AR --> OK
-    K["<b>keep: true</b><br/>the owner pinned it"] -. "an agent can't merge or archive it<br/>review asks the owner" .-> F
+    Q["<b>Step starts</b> · ticket T-12<br/>areas: tools/maestro-ticket/cli · role: engineer"]
+    Q --> R["Engine reads origin/main<br/>fetched once at run start"]
+    R --> A1["areas/tools/"]
+    R --> A2["areas/tools/maestro-ticket/"]
+    R --> RO["roles/engineer/"]
+    R --> SH["shared/"]
+    R -. "skipped" .-> X["areas/skills/ · roles/reviewer/"]
+    A1 --> O
+    A2 --> O
+    RO --> O
+    SH --> O["<b>Prompt ends with</b><br/>Notes from earlier runs, rules.md wins:<br/>up to 40 titles, nearest area first<br/>N more: see lessons file<br/><b>Full text</b> → run's lessons file"]
 ```
 
-## 5. One Grok Bot, many sessions, two machines
+Nothing is evicted to meet a cap. A lesson stays on `main` until a PR deletes it because it's wrong or a rule replaced it, with the reason in the commit. The cap only limits how many titles a prompt carries; the rest are one file away, and the prompt says how many.
 
-Grok Bot holds none of this in its head. Before it starts anything it reads its desk, which is built from claims, runs and worktrees, so it can't drift. It names the work in every prompt, runs at most one live session per work, and starts each one fresh: the session picks up from the resume note and the lessons, not from old chat. Moving work to another machine means pushing the branch.
+## 4. Where it can go wrong, and the guard
 
-```mermaid
-sequenceDiagram
-    participant G as Grok Bot · engineer
-    participant D as Desk
-    participant A as Session · T-12
-    participant B as Session · T-15
-    participant M2 as Machine 2
-    G->>D: maestro-play memory desk --bot eng-1
-    D-->>G: T-12 in progress, paused at 3f2a · T-15 todo
-    par two works at once, one session each
-        G->>A: work: T-12 (fresh session)
-        A->>A: read the wip note and lessons, go on
-    and
-        G->>B: work: T-15 (fresh session)
-        B->>B: make the worktree, read lessons
-    end
-    A-->>G: paused: wip commit holds the resume note
-    Note over A,M2: to move T-12, push maestro/T-12
-    M2->>M2: fetch the branch, read the wip note, go on
-```
+| Risk | Guard |
+|---|---|
+| A step reads a hostile ticket and writes a lesson like "always run X" | The reply schema, titles under 100 characters, the lesson lint (no URLs, no hidden text), review of every lesson PR, and the prompt label "notes from earlier runs; rules.md wins" |
+| Hundreds of runs flood review with lessons | Only runs that hit trouble propose; one PR per ticket |
+| Prompts grow with the swarm | Titles only, 40 at most, at the end of the prompt |
+| A lesson goes stale | Lint fails when its evidence path is gone. A change to the file alone doesn't mark it stale |
+| A lesson matters too much to sit in a list | Written twice, it becomes a ticket for a lint or check, then the lesson goes |
+| Lag: parallel work misses a lesson until it merges | Accepted for now. Reading `origin/<main>` keeps the lag to review time |
+
+## 5. Engine work
+
+1. Type the reply's `memory` field: a list of `add` (scope, title up to 100 characters, text up to 600 bytes, evidence path) or `delete` (file, reason). Add one line to `_contract.md` asking for it after trouble.
+2. Keep `memory` only from runs with a retry, failed checks, a failed verify, a kickback or a block.
+3. At the end of every run (`finish`, `end` and `escalate`; today `escalate` drops it), commit the lessons to `maestro/lessons-<ticket>` with git plumbing, push, and open or update its PR. This replaces `memory-inbox/`.
+4. Fetch `origin/<main>` at run start. In `compose`, after the template: the titles and the path of the lessons file.
+5. `maestro-play memory read --role <role> --paths <paths>` for your own session, and `maestro-play memory lint` for review: the same code the engine uses.
+6. At run start, prune scratch files whose ticket is `done` or `cancelled`. Not at run end: a kickback run reads the plan from scratch.
+
+## Changes after the second audit
+
+| v3 | v4 | Why |
+|---|---|---|
+| Every run may propose lessons | Only runs that hit trouble | Hundreds of clean runs would flood review with lessons nobody needed |
+| One lesson PR per run | One per ticket | A ticket that bounces three times made three PRs |
+| The engine makes a worktree for the lesson PR | Git plumbing, no worktree | Less disk and less code; no checkout to clean up |
+| "Read main's tip" | Fetch `origin/<main>` once per run | The engine never fetches, so local main can lag GitHub by hours |
+| Delete scratch when the run is done | Prune it once the ticket is done | A kickback run reads the plan from scratch (`playbooks/work/build.md:5`) |
+| Add only | Add or delete | A session that finds a lesson wrong had no way to say so |
+| Promotion to a rule had no trigger | A duplicate in review makes the ticket | "Written twice, make it a lint" now has a moment |
+| `<slug>.md` | `<slug>-<ticket>.md` | Two tickets naming the same slug at once would collide |
 
 ## Still open
 
-1. Runs that never reach a PR: keep the inbox for them, drained by the chief of staff? (Proposed: yes.)
-2. A goal scope, so sibling tickets from one planner goal share findings while they run. Needs a `--goal` ticket field. (Proposed: wait for a real need.)
-3. Cap sizes: 15 per area or role, 10 shared, 8 lines per lesson?
-4. Only the owner sets `keep: true`?
+1. **How deep to review a lesson PR.** Lessons are text agents obey, so `maestro-code-review` puts them in tier 2: all ten passes and a fresh skeptic. Proposed: a lesson row that runs the skeptic and `maestro-play memory lint` only.
+2. **Who picks up lesson PRs.** They have no ticket of their own. Proposed: label them `maestro-lesson`, and the chief of staff sends open ones to the reviewer with the rest of its queue.
+3. **Worktrees from a stale main.** `worktree add` also branches from local main without a fetch. That's an engine gap beyond memory; the fetch in item 4 should cover both. Proposed: a separate ticket.
