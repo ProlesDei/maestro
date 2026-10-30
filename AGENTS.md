@@ -7,9 +7,9 @@ Instructions for coding agents (Claude Code, Codex, Grok Build). This file is th
 Maestro: tooling that takes a ticket to a merged PR with coding agents. Nothing in it runs on its own. See README.md and `docs/decisions.md`. Stack: Markdown for skills, personas and prompts; YAML for the playbook; `tools/` is Go (1.26+, no cgo).
 
 Layout:
-- `bot-profiles/`: the three personas (`chief-of-staff`, `engineer`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
+- `bot-profiles/`: the five personas (`chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
 - `playbooks/`: `engineer/work.yaml`, its step templates in `playbooks/prompts/`, and `playbooks/rules.md`, the rules every session gets. Format in `playbooks/README.md`.
-- `skills/`: `maestro-work`, `maestro-create-ticket`, `maestro-review` and the user's own skills; `skills/use.yaml` names them. See `skills/README.md`.
+- `skills/`: Maestro's seven commands (`maestro-planner`, `maestro-create-ticket`, `maestro-work`, `maestro-software-engineer`, `maestro-qa-lead`, `maestro-review`, `maestro-chief-of-staff`) and the user's own skills; `skills/use.yaml` names them. See `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
 - `scripts/install.sh`: the installer. `scripts/install_test.sh` is its test.
 - `tools/maestro-play/`: the playbook engine. `tools/maestro-ticket/`: the ticket store and CLI.
