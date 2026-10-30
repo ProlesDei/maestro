@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"syscall"
 	"time"
 )
@@ -17,13 +16,11 @@ import (
 // Run statuses.
 const (
 	StatusRunning = "running"
-	StatusWaiting = "waiting" // an ask step waits for resume --choice
 	StatusDone    = "done"
 	StatusBlocked = "blocked"
 	StatusLost    = "lost"    // the lease was lost; nothing more was written
 	StatusStopped = "stopped" // the stop file exists; resume later
 	StatusFailed  = "failed"  // the engine couldn't go on (no harness, a bad playbook)
-	StatusIdle    = "idle"    // run --next found nothing to do
 )
 
 // Phases of a run.
@@ -74,16 +71,13 @@ type State struct {
 	NoPrompt bool `json:"no_prompt,omitempty"`
 
 	// Input is run --input's text; ClaimRole the ticket's role when the run
-	// took it (Return-role:); Cursor the playbook's stored cursor;
-	// BlockStep the step whose block: applies.
+	// took it (Return-role:); BlockStep the step whose block: applies.
 	Input     string `json:"input,omitempty"`
 	ClaimRole string `json:"claim_role,omitempty"`
-	Cursor0   any    `json:"cursor_value,omitempty"`
 	BlockStep string `json:"block_step,omitempty"`
 
 	Branch    string    `json:"branch,omitempty"`
 	Worktree  string    `json:"worktree,omitempty"`
-	Ask       *AskState `json:"ask,omitempty"`
 	Processes []Process `json:"processes,omitempty"`
 
 	Escalation map[string]any `json:"escalation,omitempty"`
@@ -93,17 +87,6 @@ type State struct {
 
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
-}
-
-// AskState is a pending or answered ask step.
-type AskState struct {
-	Step     string   `json:"step"`
-	Index    int      `json:"index"` // the item of an each: step, else -1
-	Question string   `json:"question"`
-	Choices  []string `json:"choices"`
-	Choice   string   `json:"choice,omitempty"`
-	Text     string   `json:"text,omitempty"`
-	Answered bool     `json:"answered,omitempty"`
 }
 
 // Process is one a prompt reply said it started.
@@ -206,28 +189,7 @@ func (e *Engine) LoadState(id string) (*State, error) {
 	normalize(st.TicketD)
 	normalize(st.Retry)
 	normalize(st.Escalation)
-	st.Cursor0 = normalizeValue(st.Cursor0)
 	return &st, nil
-}
-
-// unfinished lists this bot's runs that crashed or stopped, oldest first.
-func (e *Engine) unfinished(bot string) ([]*State, error) {
-	paths, err := filepath.Glob(filepath.Join(runsDir(e.cfg.Common), "*.json"))
-	if err != nil {
-		return nil, err
-	}
-	var out []*State
-	for _, p := range paths {
-		st, err := e.LoadState(filepath.Base(p[:len(p)-len(".json")]))
-		if err != nil {
-			continue
-		}
-		if st.Bot == bot && (st.Status == StatusRunning || st.Status == StatusStopped) {
-			out = append(out, st)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
-	return out, nil
 }
 
 // lockRun takes the run's lock, <runs>/<id>.d/lock, so one process drives

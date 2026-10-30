@@ -35,7 +35,7 @@ func TestLintFixturesClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Playbooks != 8 || len(res.Problems) != 0 {
+	if res.Playbooks != 7 || len(res.Problems) != 0 {
 		t.Fatalf("%d playbooks, problems: %v", res.Playbooks, res.Problems)
 	}
 }
@@ -63,13 +63,18 @@ func TestLintCatches(t *testing.T) {
 		{"ticket claim", head + "steps:\n  - id: a\n    ticket: claim {{.ticket.id}}\n", "the engine claims"},
 		{"engine flag", head + "steps:\n  - id: a\n    ticket: comment {{.ticket.id}} --body x --token 3\n", "--token is the engine's"},
 		{"engine flag, one dash", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done -actor-role=reviewer\n", "--actor-role is the engine's"},
-		{"gate not a bool", head + "steps:\n  - id: a\n    run: check all\n  - id: b\n    gate: '{{or .steps.a.results .steps.a.results}}'\n", `gate rendered "[]" on empty data`},
+		{"gate not a bool", head + "steps:\n  - id: a\n    run: check all\n  - id: b\n    gate: '{{or .steps.a.output 1}}'\n", `gate rendered "1" on empty data`},
 		{"flag a request doesn't take", head + "steps:\n  - id: a\n    run: check all --role reviewer\n", "run check takes no --role"},
 		{"bad subcommand", head + "steps:\n  - id: a\n    ticket: frob\n", "ticket \"frob\""},
 		{"on target", head + "steps:\n  - id: a\n    run: check all\n    on: {fail: nowhere}\n", "no step \"nowhere\""},
 		{"on outcome", head + "steps:\n  - id: a\n    run: check all\n    on: {done: next}\n", "\"done\" isn't an outcome of a run step"},
 		{"exit outcome ok", head + "steps:\n  - id: a\n    run: check all\n    on: {exit:3: next, exit:x: next}\n", "\"exit:x\" isn't an outcome"},
-		{"ask no choices", head + "steps:\n  - id: a\n    ask: {question: q, choices: []}\n", "want one or more"},
+		{"removed ask", head + "steps:\n  - id: a\n    ask: {question: q, choices: [y]}\n", "field ask not found"},
+		{"removed each", head + "steps:\n  - id: a\n    each: .steps\n    run: check all\n", "field each not found"},
+		{"removed run list", head + "steps:\n  - id: a\n    run: [head, check all]\n", "cannot unmarshal"},
+		{"removed cursor", head + "cursor: {name: x, save: '1'}\nsteps:\n  - id: a\n    run: check all\n", "field cursor not found"},
+		{"removed intake filter", head + "intake: {category: new-work, status: todo, kinds: [bug]}\nsteps:\n  - id: a\n    run: check all\n", "field kinds not found"},
+		{"removed scheduled", head + "intake: {category: scheduled}\nsteps:\n  - id: a\n    run: check all\n", `intake.category "scheduled"`},
 		{"missing prompt", head + "steps:\n  - id: a\n    prompt: nope\n", "prompt \"nope\": no"},
 		{"partial prompt", head + "steps:\n  - id: a\n    prompt: _contract\n", "partials are added by the engine"},
 		{"bad tier", head + "steps:\n  - id: a\n    prompt: plan\n    model: opus\n", "model \"opus\""},
@@ -93,7 +98,7 @@ func TestLintCatches(t *testing.T) {
 		{"done move", head + "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done\n", "moves the ticket to done; no playbook may"},
 		{"done wrap-up", head + "steps:\n  - id: a\n    run: check all\ndone: {to: '{{if .ticket.id}}done{{else}}in_review{{end}}'}\n", "moves the ticket to done; no playbook may"},
 		{"removed status", head + "intake: {category: new-work, status: in_qa}\nsteps:\n  - id: a\n    run: check all\n", `intake.status "in_qa"`},
-		{"removed role", "name: bad\nrole: planner\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", `unknown role "planner"`},
+		{"removed role", "name: bad\nrole: janitor\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", `unknown role "janitor"`},
 		{"name mismatch", "name: other\nrole: engineer\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", "must match the file name"},
 	}
 	for _, c := range cases {

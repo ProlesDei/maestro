@@ -3,24 +3,28 @@
 Runs a playbook (`playbooks/<role>/<job>.yaml`) step by step: it claims the ticket, runs each step as a `maestro-ticket` call, a built-in request or a harness prompt, saves every output in the run state, and writes the handoff or escalation note itself. Sessions it starts never write tickets. Go, no cgo; build with `go build -o bin/maestro-play ./cmd/maestro-play`. `go test -race ./...` here also lints and renders `../../playbooks`.
 
 ```sh
-maestro-play run engineer/work --ticket <id> --bot <bot-id>   # also: run <role> --next, run <role>/<job> with no ticket
-maestro-play resume <run-id> [--choice <c> [--text <t>]]      # after a crash, a stop or an ask step
+maestro-play run engineer/work --ticket <id> --bot <bot-id>   # a claim: false playbook takes no --ticket
+maestro-play resume <run-id>                                  # after a crash or a stop
 maestro-play render <role>/<job> --step <id|done|escalate> [--ticket <id> | --ticket-file <f>] [--env <f>]
 maestro-play lint [<playbooks-dir>]
 ```
 
-`run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused), and for `waiting` also `question`, `choices` and `evidence`. Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 5 idle, 6 waiting, 7 stopped (`<common>/STOP` exists). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
+`run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused). Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 7 stopped (`<common>/STOP` exists). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
 
-Flags: `--playbooks` (`$MAESTRO_PLAYBOOKS`, else `./playbooks`), `--skills` (`$MAESTRO_SKILLS`), `--common` (`$MAESTRO_COMMON`, else `<git common dir>/maestro`), `--ticket-bin` (`$MAESTRO_TICKET_BIN`), `--harness claude|codex` (`$MAESTRO_HARNESS`, default claude). `MAESTRO_GIT_BIN`, `MAESTRO_GH_BIN`, `MAESTRO_CLAUDE_BIN` and `MAESTRO_CODEX_BIN` pick the binaries; `MAESTRO_MODEL_MID` and `MAESTRO_MODEL_FRONTIER` the models (claude default: sonnet, opus); `MAESTRO_CLAUDE_ARGS` and `MAESTRO_CODEX_ARGS` add session flags, such as `--permission-mode acceptEdits`. Without them, your own harness settings decide what a session may do.
+Flags: `--playbooks` (`$MAESTRO_PLAYBOOKS`, else `./playbooks`), `--skills` (`$MAESTRO_SKILLS`), `--common` (`$MAESTRO_COMMON`, else `<git common dir>/maestro`), `--ticket-bin` (`$MAESTRO_TICKET_BIN`), `--harness claude|codex` (`$MAESTRO_HARNESS`, default claude). `MAESTRO_GIT_BIN`, `MAESTRO_GH_BIN`, `MAESTRO_CLAUDE_BIN` and `MAESTRO_CODEX_BIN` pick the binaries; `MAESTRO_MODEL_MID` and `MAESTRO_MODEL_FRONTIER` the models (claude default: sonnet, opus); `MAESTRO_CLAUDE_ARGS` and `MAESTRO_CODEX_ARGS` add session flags, split on spaces.
+
+Sessions run headless, with no one to answer a permission prompt, so by default they may do anything: claude gets `--permission-mode bypassPermissions`, codex `--dangerously-bypass-approvals-and-sandbox`. To set limits, put your own permission flag in the args; then the engine adds none. Claude's: `--permission-mode`, `--dangerously-skip-permissions`, `--allowedTools`, `--disallowedTools`, `--restricted`. Codex's: `-s`/`--sandbox`, `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `-c sandbox_mode=...`, `-c approval_policy=...`. For example `MAESTRO_CLAUDE_ARGS="--permission-mode acceptEdits"`. `codex exec resume` takes no `-s`, so limit codex with `-c`.
+
+Timeouts, as Go durations (`90s`, `1h`; `0` is no limit): `MAESTRO_SESSION_TIMEOUT` (default `30m`) for one session call, `MAESTRO_CHECK_TIMEOUT` (`15m`) for each check, `MAESTRO_GIT_TIMEOUT` (`5m`) for each git or gh call. Each command runs in its own process group; on timeout the engine kills the group, the call exits 124 with output ending `timed out after <d>`, and the step fails as any other would: `on:`, retries, then escalation. maestro-ticket calls have no limit.
 
 ## Built-in requests
 
-A `run:` step names one of these, or a list of them run in order until one fails. Every reply has `status` (`ok`, `failed` or `refused`), `exit_code` and `output`, plus:
+A `run:` step names one of these. Every reply has `status` (`ok`, `failed` or `refused`), `exit_code` and `output`, plus:
 
 | Request | Runs | Reply fields |
 |---|---|---|
 | `worktree add <ticket> --from <branch>` | `git worktree add -b maestro/<ticket> .maestro/worktrees/<ticket> <branch>`; reuses the branch, or the worktree, if it exists | `path`, `branch` |
-| `check all`, `check <name>` | each `` - <name>: `<command>` `` under `## Checks` in `.maestro/project/project-setup.md`, with `sh -c` in the worktree; all run, so every failure shows | `summary`, `checks` (name, command, exit_code, status), `output_path` |
+| `check all`, `check <name>` | each `` - <name>: `<command>` `` under `## Checks` in `.maestro/project/project-setup.md`, with `sh -c` in the worktree; all run, so every failure shows. `check all` with no checks listed (or no file) passes, with summary `no checks listed` | `summary`, `checks` (name, command, exit_code, status), `output_path` |
 | `head` | `git rev-parse HEAD` in the worktree | `sha` |
 | `open pr [--title <t>] [--body <b>]` | `git push -u origin <branch>`, then `gh pr create --base <main branch>`, or returns the PR already open from this repo (a fork's PR from a branch of the same name doesn't count); fails if the branch has no commits beyond the main branch | `url`, `number` |
 
@@ -32,6 +36,6 @@ Engine-only: `session start` runs `claude -p --output-format json --session-id <
 
 ## Template data and run state
 
-Templates see `.ticket` (the `get --json` ticket plus `kind`, `latest` and `trailers`), `.project` (`name`, `summary`, `main_branch`, `setup`, `checks`), `.env` (`harness`, `family`), `.limits` (`step_visits` 5, `retries` 1), `.run` (`id`, `branch`, `worktree`, `scratch`, `evidence_dir`, `skipped`, ...), `.steps.<id>` (`status`, `outcome`, `output`, the reply fields above, `reply` for a prompt step), `.step.with`, `.item`/`.index` in an `each:` step, `.input.text`, `.cursor` and `.retry`. Functions: `json`, `join`, `int`, `add`, `index`, `quote`, `latest`, `line`, `latestLine`, `hasPrefix`, `contains`, `trim`, `lower`, `default`.
+Templates see `.ticket` (the `get --json` ticket plus `kind`, `latest` and `trailers`), `.project` (`name`, `summary`, `main_branch`, `setup`, `checks`), `.env` (`harness`, `family`), `.limits` (`step_visits` 5, `retries` 1), `.run` (`id`, `branch`, `worktree`, `scratch`, `evidence_dir`, `skipped`, ...), `.steps.<id>` (`status`, `outcome`, `output`, the reply fields above, `reply` for a prompt step), `.step.with`, `.input.text` and `.retry`. Functions: `json`, `join`, `int`, `add`, `index`, `quote`, `latest`, `line`, `latestLine`, `hasPrefix`, `contains`, `trim`, `lower`, `default`.
 
-`<common>/runs/<run-id>.json` holds the lease, the cursor and every step's record; prompts, schemas and check output go in `<run-id>.d/`. `resume` gets the lease back and starts at the step that was running; writes reuse their idempotency keys, so a replay is safe. A done run deletes both and removes a clean worktree; the branch stays.
+`<common>/runs/<run-id>.json` holds the lease, the next step and every step's record; prompts, schemas and check output go in `<run-id>.d/`. `resume` gets the lease back and starts at the step that was running; writes reuse their idempotency keys, so a replay is safe. A done run deletes both and removes a clean worktree; the branch stays.

@@ -194,11 +194,11 @@ func (e *Engine) request(st *State, req *playbook.Request, words []string) (map[
 
 // git runs git in dir.
 func (e *Engine) git(st *State, dir string, args ...string) (execResult, error) {
-	return e.exec(dir, e.cfg.GitBin, e.runEnv(st), "", args...)
+	return e.exec(dir, e.cfg.GitBin, e.runEnv(st), "", e.cfg.GitTimeout, args...)
 }
 
 func (e *Engine) gh(st *State, dir string, args ...string) (execResult, error) {
-	return e.exec(dir, e.cfg.GhBin, e.runEnv(st), "", args...)
+	return e.exec(dir, e.cfg.GhBin, e.runEnv(st), "", e.cfg.GitTimeout, args...)
 }
 
 // workDir is where a run's commands run: its worktree, else the main
@@ -285,8 +285,9 @@ func (e *Engine) hideWorktrees(st *State) {
 }
 
 // check runs the project's checks, all of them or the one named, in order,
-// in the run's worktree. Every check runs, so the reply lists every
-// failure; the full output goes to output_path.
+// in the run's worktree, each for at most CheckTimeout. Every check runs,
+// so the reply lists every failure; the full output goes to output_path.
+// A project may have no checks: check all then passes with none run.
 func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	s := e.setup()
 	var run []projectCheck
@@ -296,11 +297,11 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 		}
 	}
 	if len(run) == 0 {
-		what := "no checks"
-		if name != "all" {
-			what = "no check " + name
+		if name == "all" {
+			return newReply("ok", 0, "no checks under ## Checks in "+s.Path, "summary", "no checks listed",
+				"checks", []any{}, "output_path", ""), nil
 		}
-		return newReply("failed", 1, fmt.Sprintf("%s under ## Checks in %s", what, s.Path)), nil
+		return newReply("failed", 1, fmt.Sprintf("no check %s under ## Checks in %s", name, s.Path)), nil
 	}
 	dir := runDir(e.cfg.Common, st.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -328,7 +329,7 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	var failed []string
 	exit := 0
 	for _, c := range run {
-		r, err := e.exec(e.workDir(st), "sh", e.runEnv(st), "", "-c", c.Command)
+		r, err := e.exec(e.workDir(st), "sh", e.runEnv(st), "", e.cfg.CheckTimeout, "-c", c.Command)
 		if err != nil {
 			return nil, err
 		}

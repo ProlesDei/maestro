@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/engine"
 )
@@ -20,9 +21,8 @@ const usage = `maestro-play runs Maestro playbooks.
 
 Usage:
   maestro-play run <role>/<job> --ticket <id> --bot <bot-id> [--input <text>]
-  maestro-play run <role>[/<job>] --next --bot <bot-id>
   maestro-play run <role>/<job> --bot <bot-id> [--input <text>]   (claim: false, no ticket)
-  maestro-play resume <run-id> [--choice <c> [--text <t>]]
+  maestro-play resume <run-id>
   maestro-play render <role>/<job> --step <id> [--ticket <id> | --ticket-file <f>] [--env <f>] [--input <t>]
   maestro-play lint [<playbooks-dir>]
 
@@ -36,15 +36,19 @@ Flags for every command:
 Environment: MAESTRO_GIT_BIN, MAESTRO_GH_BIN, MAESTRO_CLAUDE_BIN and
 MAESTRO_CODEX_BIN set the binaries; MAESTRO_MODEL_MID and
 MAESTRO_MODEL_FRONTIER the models per tier; MAESTRO_CLAUDE_ARGS and
-MAESTRO_CODEX_ARGS extra session flags, split on spaces (for example
-"--permission-mode acceptEdits").
+MAESTRO_CODEX_ARGS extra session flags, split on spaces. Sessions may do
+anything (claude --permission-mode bypassPermissions, codex
+--dangerously-bypass-approvals-and-sandbox) unless those flags set
+permissions, for example "--permission-mode acceptEdits".
+MAESTRO_SESSION_TIMEOUT (30m), MAESTRO_CHECK_TIMEOUT (15m) and
+MAESTRO_GIT_TIMEOUT (5m, each git or gh call) are Go durations; 0 is no
+limit.
 
 run and resume print one JSON object: id, state, playbook, ticket, step,
-reason, and for a waiting run question, choices and evidence.
+reason.
 
 Exit codes: 0 done (lint: clean), 1 failed (lint: problems), 2 usage,
-3 blocked, 4 lease lost, 5 idle (--next found nothing), 6 waiting on an
-ask step, 7 stopped (<common>/STOP exists).
+3 blocked, 4 lease lost, 7 stopped (<common>/STOP exists).
 `
 
 // Env is what the CLI reads from outside.
@@ -143,6 +147,22 @@ func (c *cmd) config() (engine.Config, error) {
 		ClaudeBin: get("MAESTRO_CLAUDE_BIN"), CodexBin: get("MAESTRO_CODEX_BIN"), Harness: c.harness,
 		Models: models, ClaudeArgs: strings.Fields(get("MAESTRO_CLAUDE_ARGS")), CodexArgs: strings.Fields(get("MAESTRO_CODEX_ARGS")),
 	}
+	for key, d := range map[string]*time.Duration{
+		"MAESTRO_SESSION_TIMEOUT": &cfg.SessionTimeout, "MAESTRO_CHECK_TIMEOUT": &cfg.CheckTimeout, "MAESTRO_GIT_TIMEOUT": &cfg.GitTimeout,
+	} {
+		v := get(key)
+		if v == "" {
+			continue
+		}
+		t, err := time.ParseDuration(v)
+		if err != nil || t < 0 {
+			return cfg, fmt.Errorf("%s=%q: want a duration such as 30m, or 0 for no limit", key, v)
+		}
+		if t == 0 {
+			t = -1 // the engine's no limit
+		}
+		*d = t
+	}
 	if cfg.Playbooks == "" {
 		cfg.Playbooks = filepath.Join(dir, "playbooks")
 	}
@@ -190,7 +210,6 @@ func (c *cmd) report(r engine.Result, err error) int {
 
 func (c *cmd) run() int {
 	ticketID := c.fs.String("ticket", "", "ticket id")
-	next := c.fs.Bool("next", false, "take the next ticket the role's intake matches")
 	bot := c.fs.String("bot", "", "bot id (required)")
 	input := c.fs.String("input", "", "text for a playbook with input: (.input.text)")
 	if err := c.parse(); err != nil {
@@ -202,33 +221,25 @@ func (c *cmd) run() int {
 	if *bot == "" {
 		return c.usageErr("--bot is required")
 	}
-	if *next && *ticketID != "" {
-		return c.usageErr("use --ticket or --next, not both")
-	}
 	e, code := c.engine()
 	if e == nil {
 		return code
 	}
-	return c.report(e.Run(engine.RunOpts{Ref: c.args[0], Ticket: *ticketID, Next: *next, Bot: *bot, Input: *input}))
+	return c.report(e.Run(engine.RunOpts{Ref: c.args[0], Ticket: *ticketID, Bot: *bot, Input: *input}))
 }
 
 func (c *cmd) resume() int {
-	choice := c.fs.String("choice", "", "the answer to the ask step")
-	text := c.fs.String("text", "", "free text with the answer")
 	if err := c.parse(); err != nil {
 		return 2
 	}
 	if len(c.args) != 1 {
 		return c.usageErr("want one <run-id>")
 	}
-	if *text != "" && *choice == "" {
-		return c.usageErr("--text goes with --choice")
-	}
 	e, code := c.engine()
 	if e == nil {
 		return code
 	}
-	return c.report(e.Resume(c.args[0], *choice, *text))
+	return c.report(e.Resume(c.args[0]))
 }
 
 func (c *cmd) render() int {

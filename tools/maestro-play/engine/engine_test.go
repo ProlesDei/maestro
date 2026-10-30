@@ -137,15 +137,10 @@ func TestNoRunStartsInsideARun(t *testing.T) {
 	}
 	w2 := newWorld(t, todoTicket())
 	w2.e.cfg.Environ = append(w2.e.cfg.Environ, RunEnv+"=r-outer")
-	for _, got := range []Result{
-		w2.run(RunOpts{Ref: "engineer/build-ticket", Ticket: "T-1"}),
-		w2.run(RunOpts{Ref: "engineer", Next: true}),
-	} {
-		if got.Status != StatusFailed || !strings.Contains(got.Reason, "belongs to run r-outer") {
-			t.Errorf("run inside a run: %+v", got)
-		}
+	if got := w2.run(RunOpts{Ref: "engineer/build-ticket", Ticket: "T-1"}); got.Status != StatusFailed || !strings.Contains(got.Reason, "belongs to run r-outer") {
+		t.Errorf("run inside a run: %+v", got)
 	}
-	if got, _ := w2.e.Resume("r-any", "", ""); got.Status != StatusFailed || !strings.Contains(got.Reason, "belongs to run r-outer") {
+	if got, _ := w2.e.Resume("r-any"); got.Status != StatusFailed || !strings.Contains(got.Reason, "belongs to run r-outer") {
 		t.Errorf("resume inside a run: %+v", got)
 	}
 	if n := len(w2.calls()); n != 0 {
@@ -184,8 +179,8 @@ func TestRunStepRefusesBadRequests(t *testing.T) {
 	}
 }
 
-// No playbook moves a ticket to done, even when lint never saw it: /review
-// does.
+// No playbook moves a ticket to done, even when lint never saw it:
+// /maestro-review does.
 func TestOnlyDoneEndersSetDone(t *testing.T) {
 	for name, yaml := range map[string]string{
 		"step":    "steps:\n  - id: a\n    ticket: transition {{.ticket.id}} --to done --from todo\n",
@@ -372,7 +367,7 @@ func TestStopFileThenResumeReplaysInflightWrite(t *testing.T) {
 	if r.Status != StatusStopped || r.ExitCode() != 7 || r.Step != "build" {
 		t.Fatalf("result %+v", r)
 	}
-	if r2, _ := w.e.Resume(r.RunID, "", ""); r2.Status != StatusStopped {
+	if r2, _ := w.e.Resume(r.RunID); r2.Status != StatusStopped {
 		t.Fatalf("resume with the stop file: %+v", r2)
 	}
 	os.Remove(filepath.Join(w.common, "STOP"))
@@ -389,7 +384,7 @@ func TestStopFileThenResumeReplaysInflightWrite(t *testing.T) {
 	w.saveFake("tickets.json", &s)
 	w.script(fakeConfig{Harness: buildReplies})
 
-	r3, err := w.e.Resume(r.RunID, "", "")
+	r3, err := w.e.Resume(r.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +421,7 @@ func TestResumeAfterTheTicketMovedOnIsLost(t *testing.T) {
 	s.Tickets["T-1"].Comments = append(s.Tickets["T-1"].Comments, fakeComment{ID: 9, Body: "Handoff: approved at \"abc1234\".\nsha: abc1234"})
 	w.saveFake("tickets.json", &s)
 	w.script(fakeConfig{Harness: buildReplies})
-	r2, err := w.e.Resume(r.RunID, "", "")
+	r2, err := w.e.Resume(r.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,45 +436,16 @@ func TestResumeAfterTheTicketMovedOnIsLost(t *testing.T) {
 	}
 }
 
-func TestNextPicksSentBackBeforeNewWork(t *testing.T) {
-	newer := todoTicket()
-	newer.ID, newer.Priority = "T-2", 0
-	escalated := todoTicket()
-	escalated.ID = "T-3"
-	escalated.Comments = []fakeComment{{ID: 1, Body: "Escalation: please take it"}}
-	sent := todoTicket()
-	sent.ID, sent.Status, sent.Priority = "T-4", "in_progress", 3
-	busy := todoTicket()
-	busy.ID, busy.Status, busy.Priority, busy.WaitingOnDeps = "T-5", "in_progress", 0, true
-	w := newWorld(t, todoTicket(), newer, escalated, sent, busy)
-	w.script(fakeConfig{Harness: []map[string]any{
-		reply("done", map[string]any{"plan": "p", "risks": "r"}),
-		reply("done", map[string]any{"commit": "c000001", "files": []any{}, "tests": []any{}}),
-		reply("done", map[string]any{"criteria": []any{}, "failures": []any{}}),
-	}})
-	r := w.run(RunOpts{Ref: "engineer", Next: true})
-	if r.Ticket != "T-4" || r.Playbook != "engineer/fix-sent-back" || r.Status != StatusDone {
-		t.Fatalf("result %+v (T-5 waits on deps, T-4 is the other sent-back ticket)", r)
-	}
-	w.script(fakeConfig{Harness: buildReplies})
-	r = w.run(RunOpts{Ref: "engineer", Next: true})
-	if r.Ticket != "T-2" {
-		t.Fatalf("second --next took %s, want T-2 (priority 0)", r.Ticket)
-	}
-	lists := w.find("ticket", "list")
-	if flagValue(lists[len(lists)-1].Args, "--not-latest-prefix") != "Escalation:" {
-		t.Errorf("list args %q", lists[len(lists)-1].Args)
-	}
-}
-
-func TestNextIdleAndUnknownRole(t *testing.T) {
-	w := newWorld(t)
-	r := w.run(RunOpts{Ref: "engineer", Next: true})
-	if r.Status != StatusIdle || r.ExitCode() != 5 {
-		t.Fatalf("result %+v", r)
-	}
-	if r := w.run(RunOpts{Ref: "nobody/x", Next: true}); r.Status != StatusFailed {
+func TestUnknownRoleOrNoJob(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	if r := w.run(RunOpts{Ref: "nobody/x", Ticket: "T-1"}); r.Status != StatusFailed || !strings.Contains(r.Reason, "unknown role") {
 		t.Errorf("unknown role: %+v", r)
+	}
+	if r := w.run(RunOpts{Ref: "engineer", Ticket: "T-1"}); r.Status != StatusFailed || !strings.Contains(r.Reason, "want <role>/<job>") {
+		t.Errorf("no job: %+v", r)
+	}
+	if len(w.calls()) != 0 {
+		t.Errorf("calls %+v", w.calls())
 	}
 }
 
@@ -562,67 +528,37 @@ var drafted = reply("done", map[string]any{"tickets": []any{
 	map[string]any{"title": "Docs", "role": "engineer", "body": "Type: docs"},
 }})
 
-func TestEachCreatesAndAsksPerItemThenDone(t *testing.T) {
+// with: renders before the prompt; a write to another ticket goes without
+// the lease; done.to, the note and the log line are templates.
+func TestSplitCreatesThenDone(t *testing.T) {
 	w := newWorld(t, planTicket())
 	w.script(fakeConfig{Harness: []map[string]any{drafted}})
 	r := w.run(RunOpts{Ref: "chief-of-staff/split", Ticket: "T-1", Bot: "pl-1"})
-	if r.Status != StatusWaiting || r.Question != "Created T-101. Tell the user?" {
-		t.Fatalf("first ask: %+v", r)
+	if r.Status != StatusDone {
+		t.Fatalf("result %+v", r)
 	}
 	creates := w.find("ticket", "create")
-	if len(creates) != 2 {
-		t.Fatalf("%d creates, want 2 (item 1 has no title)", len(creates))
+	if len(creates) != 1 || flagValue(creates[0].Args, "--title") != "Plan: export" ||
+		!strings.HasPrefix(flagValue(creates[0].Args, "--body"), `[{"body":"Type: feature`) ||
+		flagValue(creates[0].Args, "--idempotency-key") != r.RunID+":create" || hasFlag(creates[0].Args, "--token") {
+		t.Errorf("creates %+v", creates)
 	}
-	if flagValue(creates[0].Args, "--title") != "Add the flag" || flagValue(creates[0].Args, "--body") != "Type: feature\nCriteria: x" ||
-		flagValue(creates[1].Args, "--idempotency-key") != r.RunID+":create:2" || hasFlag(creates[0].Args, "--token") {
-		t.Errorf("create args %q / %q", creates[0].Args, creates[1].Args)
-	}
-	// with: is rendered before the prompt; the fresh session is a start.
+	// The fresh session is a start.
 	s := w.sessions()
 	if len(s) != 1 || resumed(s[0]) || !strings.Contains(s[0].Prompt, "goal Plan: export.") {
 		t.Fatalf("draft session %+v", s)
 	}
-	if bad, _ := w.e.Resume(r.RunID, "maybe", ""); bad.Status != StatusFailed {
-		t.Errorf("bad choice: %+v", bad)
-	}
-	r2, _ := w.e.Resume(r.RunID, "sent", "")
-	if r2.Status != StatusWaiting || r2.Question != "Created T-102. Tell the user?" {
-		t.Fatalf("second ask: %+v", r2)
-	}
-	// The resumed run kept its lease: no second claim, and a keepalive for
-	// this process, since the first one died with the run that asked.
-	if n := len(w.find("ticket", "claim")); n != 1 {
-		t.Errorf("%d claims", n)
-	}
-	ka := w.waitFor("ticket", "keepalive", "T-1")
-	if len(ka) == 0 || flagValue(ka[0].Args, "--pid") != fmt.Sprint(os.Getpid()) || flagValue(ka[0].Args, "--holder") == "" {
-		t.Errorf("keepalives %+v", ka)
-	}
-	r3, _ := w.e.Resume(r.RunID, "sent", "")
-	if r3.Status != StatusDone {
-		t.Fatalf("after the asks: %+v", r3)
-	}
 	tk := w.ticket("T-1")
-	note := tk.Comments[len(tk.Comments)-1].Body
-	for _, want := range []string{"Report: 3 drafted, sha def, check unit.", "Skipped: create[1] — no title", "Skipped: confirm[1] — not created", "cursor: 0"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("note lacks %q:\n%s", want, note)
-		}
+	if note := tk.Comments[len(tk.Comments)-1].Body; !strings.Contains(note, "Report: 3 drafted, sha def, check unit.") {
+		t.Errorf("note:\n%s", note)
 	}
 	if tk.Status != "in_review" || tk.Claim != nil {
 		t.Errorf("ticket %s %+v", tk.Status, tk.Claim)
-	}
-	if b, err := os.ReadFile(filepath.Join(w.common, "cursors", "pl-1", "split")); err != nil || string(b) != "1\n" {
-		t.Errorf("cursor %q %v", b, err)
 	}
 	logs, _ := filepath.Glob(filepath.Join(w.common, "logs", "*.jsonl"))
 	b, _ := os.ReadFile(logs[0])
 	if !strings.Contains(string(b), `"note":"split: 3 tickets"`) {
 		t.Errorf("log %s", b)
-	}
-	// The next run reads the saved cursor.
-	if got := w.e.loadCursor("pl-1", "split"); got != 1 {
-		t.Errorf("loadCursor = %v", got)
 	}
 }
 
@@ -637,9 +573,6 @@ func TestEndReleasesWithoutNoteOrMove(t *testing.T) {
 	if tk.Status != "todo" || tk.Claim != nil || len(tk.Comments) != 2 {
 		t.Errorf("end should only release: %+v", tk)
 	}
-	if _, err := os.Stat(filepath.Join(w.common, "cursors", "pl-1", "split")); err == nil {
-		t.Errorf("end saved the cursor")
-	}
 	if len(w.find("ticket", "release", "T-1")) != 1 {
 		t.Errorf("no release")
 	}
@@ -653,7 +586,8 @@ func TestDoneKeepReleasesWithNote(t *testing.T) {
 		t.Fatalf("result %+v", r)
 	}
 	tk := w.ticket("T-1")
-	if tk.Status != "todo" || tk.Claim != nil || !strings.HasPrefix(tk.Comments[2].Body, "Report: 0 drafted") {
+	if tk.Status != "todo" || tk.Claim != nil || !strings.HasPrefix(tk.Comments[2].Body, "Report: 0 drafted") ||
+		!strings.Contains(tk.Comments[2].Body, "Skipped: create — nothing drafted") {
 		t.Errorf("keep: %+v", tk)
 	}
 	if len(w.find("ticket", "transition")) != 0 {
@@ -678,16 +612,28 @@ func TestStepBlockGoesToChiefOfStaff(t *testing.T) {
 	}
 }
 
-func TestNextUsesEveryIntakeEntry(t *testing.T) {
-	notPlan := planTicket()
-	notPlan.Title = "Something else"
+// run --ticket takes a ticket whose status any intake entry names.
+func TestTicketFitsAnyIntakeEntry(t *testing.T) {
 	back := planTicket()
-	back.ID, back.Title, back.Status = "T-2", "x", "in_progress"
-	w := newWorld(t, notPlan, back)
+	back.Status = "in_progress"
+	w := newWorld(t, back)
 	w.script(fakeConfig{Harness: []map[string]any{reply("done", map[string]any{"tickets": []any{}})}})
-	r := w.run(RunOpts{Ref: "chief-of-staff", Next: true, Bot: "pl-1"})
-	if r.Ticket != "T-2" || r.Status != StatusDone {
-		t.Fatalf("result %+v (T-1's title isn't a Plan:)", r)
+	if r := w.run(RunOpts{Ref: "chief-of-staff/split", Ticket: "T-1", Bot: "pl-1"}); r.Status != StatusDone {
+		t.Fatalf("result %+v", r)
+	}
+}
+
+// A playbook with claim: false runs by name, with no ticket.
+func TestRunByNameTakesNoTicket(t *testing.T) {
+	w := newWorld(t)
+	if r := w.run(RunOpts{Ref: "chief-of-staff/digest", Bot: "cos-1"}); r.Status != StatusDone {
+		t.Fatalf("result %+v", r)
+	}
+	if n := len(w.find("git", "rev-parse", "HEAD")); n != 1 {
+		t.Errorf("digest ran head %d times", n)
+	}
+	if n := len(w.find("ticket")); n != 0 {
+		t.Errorf("%d ticket calls", n)
 	}
 }
 
@@ -783,24 +729,6 @@ func TestDropsLease(t *testing.T) {
 	}
 }
 
-// A request intake with no status is a user's request, run by name: --next
-// must not hand it some ticket of the role, in whatever status.
-func TestNextSkipsRequestIntakeWithoutStatus(t *testing.T) {
-	tk := todoTicket()
-	tk.Status, tk.Role = "done", "chief-of-staff"
-	w := newWorld(t, tk)
-	r := w.run(RunOpts{Ref: "chief-of-staff", Next: true, Bot: "cos-1"})
-	if r.Status != StatusIdle {
-		t.Fatalf("result %+v, want idle", r)
-	}
-	if n := len(w.find("git", "rev-parse", "HEAD")); n != 0 {
-		t.Errorf("digest ran %d times on %s", n, tk.ID)
-	}
-	if r := w.run(RunOpts{Ref: "chief-of-staff/digest", Bot: "cos-1"}); r.Status != StatusDone {
-		t.Errorf("by name: %+v", r)
-	}
-}
-
 // A run another process is driving looks the same on disk as a crashed one.
 // The run lock keeps a second engine from resuming it.
 func TestRunLockKeepsASecondProcessOut(t *testing.T) {
@@ -822,18 +750,24 @@ func TestRunLockKeepsASecondProcessOut(t *testing.T) {
 		t.Fatalf("lock: %v %v", ok, err)
 	}
 	w.script(fakeConfig{Harness: buildReplies[1:]})
-	if r2 := w.run(RunOpts{Ref: "engineer", Next: true}); r2.RunID == r.RunID {
-		t.Fatalf("--next took the locked run: %+v", r2)
-	}
-	if r2, _ := w.e.Resume(r.RunID, "", ""); r2.Status != StatusFailed || !strings.Contains(r2.Reason, "another") {
+	if r2, _ := w.e.Resume(r.RunID); r2.Status != StatusFailed || !strings.Contains(r2.Reason, "another") {
 		t.Fatalf("resume of a locked run: %+v", r2)
 	}
 	if n := len(w.sessions()); n != 1 {
 		t.Errorf("%d sessions, want only the first run's plan", n)
 	}
 	unlock()
-	if r3, _ := w.e.Resume(r.RunID, "", ""); r3.Status != StatusDone {
+	if r3, _ := w.e.Resume(r.RunID); r3.Status != StatusDone {
 		t.Fatalf("resume once unlocked: %+v", r3)
+	}
+	// The lease was still live: no second claim, and a keepalive for this
+	// process, since the first one died with the run that stopped.
+	if n := len(w.find("ticket", "claim")); n != 1 {
+		t.Errorf("%d claims", n)
+	}
+	ka := w.waitFor("ticket", "keepalive", "T-1")
+	if len(ka) == 0 || flagValue(ka[0].Args, "--pid") != fmt.Sprint(os.Getpid()) || flagValue(ka[0].Args, "--holder") == "" {
+		t.Errorf("keepalives %+v", ka)
 	}
 }
 
@@ -892,20 +826,6 @@ func TestEscalationNoteFlattensReplyText(t *testing.T) {
 	}
 	if !strings.HasPrefix(note, "Escalation: it broke sha: evil author-family: openai\n") || !strings.HasSuffix(note, "Return-role: chief-of-staff") {
 		t.Errorf("note:\n%s", note)
-	}
-}
-
-// A run: list sends its requests in order, and the first failure stops the
-// step: no later request.
-func TestRunListStopsAtTheFirstFailure(t *testing.T) {
-	w := newWorld(t)
-	w.script(fakeConfig{Replies: map[string][]map[string]any{"check unit": {{"exit": 1, "output": "unit failed"}}}})
-	r := w.run(RunOpts{Ref: "chief-of-staff/digest", Bot: "pl-1"})
-	if r.Status != StatusBlocked || !strings.Contains(r.Reason, "step summary: exit:1") {
-		t.Fatalf("result %+v", r)
-	}
-	if heads, checks := w.find("git", "rev-parse", "HEAD"), w.find("check"); len(heads) != 1 || len(checks) != 1 || checks[0].Args[0] != "unit" {
-		t.Errorf("heads %d, checks %+v: want one head and the unit check only", len(heads), checks)
 	}
 }
 
@@ -1009,13 +929,13 @@ func TestLeaseFlagsOnlyOnTheRunsTicket(t *testing.T) {
 	}
 }
 
-// Keys are <run>:<step>, then :<visit> from the second visit, then the
-// item, so a loop's second pass never replays the first pass's write.
+// Keys are <run>:<step>, then :<visit> from the second visit, so a loop's
+// second pass never replays the first pass's write.
 func TestIdempotencyKeys(t *testing.T) {
 	st := &State{ID: "r1", Visits: map[string]int{"a": 1, "b": 2}}
-	for _, c := range [][3]string{{"a", "", "r1:a"}, {"b", "", "r1:b:2"}, {"b", "3", "r1:b:2:3"}, {"a", "0", "r1:a:0"}} {
-		if got := key(st, c[0], c[1]); got != c[2] {
-			t.Errorf("key(%s, %q) = %s, want %s", c[0], c[1], got, c[2])
+	for _, c := range [][2]string{{"a", "r1:a"}, {"b", "r1:b:2"}} {
+		if got := key(st, c[0]); got != c[1] {
+			t.Errorf("key(%s) = %s, want %s", c[0], got, c[1])
 		}
 	}
 }
@@ -1044,30 +964,5 @@ func TestEscalatingABlockedTicketForwardsIt(t *testing.T) {
 	}
 	if !strings.Contains(r.Reason, "needs the user") || strings.Contains(r.Reason, "write failed") {
 		t.Errorf("reason %q", r.Reason)
-	}
-}
-
-// Each item of an each: step sees the results of the items before it, and
-// a step whose items were all skipped is ok.
-func TestEachResultsFillAndAllSkippedIsOK(t *testing.T) {
-	tk := planTicket()
-	tk.Title = "Chain: export"
-	w := newWorld(t, tk)
-	two := reply("done", map[string]any{"tickets": []any{map[string]any{"title": "A"}, map[string]any{"title": "B"}}})
-	w.script(fakeConfig{Harness: []map[string]any{two}})
-	if r := w.run(RunOpts{Ref: "chief-of-staff/chain", Ticket: "T-1", Bot: "pl-1"}); r.Status != StatusDone {
-		t.Fatalf("result %+v", r)
-	}
-	creates := w.find("ticket", "create")
-	if len(creates) != 2 || flagValue(creates[0].Args, "--body") != "after 0" || flagValue(creates[1].Args, "--body") != "after 1 T-101" {
-		t.Errorf("creates %+v", creates)
-	}
-	none := reply("done", map[string]any{"tickets": []any{map[string]any{"title": ""}, map[string]any{"title": ""}}})
-	w.script(fakeConfig{Harness: []map[string]any{none}})
-	if r := w.run(RunOpts{Ref: "chief-of-staff/chain", Ticket: "T-1", Bot: "pl-1"}); r.Status != StatusDone {
-		t.Fatalf("all skipped: %+v", r)
-	}
-	if n := len(w.find("ticket", "create")); n != 2 {
-		t.Errorf("%d creates, want no new ones", n)
 	}
 }

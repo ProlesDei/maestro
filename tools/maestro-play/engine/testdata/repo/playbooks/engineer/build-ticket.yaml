@@ -1,8 +1,7 @@
 name: build-ticket
 role: engineer
 description: Build a complex or risky ticket on its own maestro/ branch, with tests for each criterion, and submit it for review.
-intake: {category: new-work, status: todo, kinds: [feature, chore, docs],
-         unless_latest: "Escalation:", unless_body: "Playbook: "}
+intake: {category: new-work, status: todo}
 claim: true                       # engine claims, keeps the token, heartbeat starts
 session: ticket                   # one harness session for all prompt steps; fresh per ticket
 steps:

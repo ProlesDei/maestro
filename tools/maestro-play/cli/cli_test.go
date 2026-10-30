@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-play/engine"
 )
 
 const fixture = "../engine/testdata/repo"
@@ -23,7 +26,7 @@ func run(t *testing.T, env map[string]string, args ...string) (int, string, stri
 
 func TestLint(t *testing.T) {
 	code, out, _ := run(t, nil, "lint", fixture+"/playbooks", "--skills", fixture+"/skills")
-	if code != 0 || out != "8 playbooks, 0 problems\n" {
+	if code != 0 || out != "7 playbooks, 0 problems\n" {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	dir := t.TempDir()
@@ -39,9 +42,9 @@ func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"frob"},
 		{"run", "engineer/build-ticket"},
-		{"run", "--bot", "b", "--ticket", "T-1", "--next", "engineer"},
+		{"run", "--bot", "b", "--next", "engineer"}, // --next is gone
 		{"resume"},
-		{"resume", "r1", "--text", "x"},
+		{"resume", "r1", "--choice", "x"}, // so is --choice
 		{"render", "engineer/build-ticket"},
 		{"lint", "a", "b"},
 		{"run", "--nope"},
@@ -55,6 +58,25 @@ func TestUsageErrors(t *testing.T) {
 	}
 	if code, _, _ := run(t, nil, "--help"); code != 0 {
 		t.Errorf("--help: %d", code)
+	}
+	for _, v := range []string{"soon", "-5m", "30"} {
+		env := map[string]string{"MAESTRO_COMMON": t.TempDir(), "MAESTRO_CHECK_TIMEOUT": v}
+		if code, _, errs := run(t, env, "run", "engineer/build-ticket", "--ticket", "T-1", "--bot", "b"); code != 2 || !strings.Contains(errs, "MAESTRO_CHECK_TIMEOUT") {
+			t.Errorf("MAESTRO_CHECK_TIMEOUT=%s: exit %d: %s", v, code, errs)
+		}
+	}
+}
+
+// The timeout variables reach the engine; 0 is no limit, unset the default.
+func TestTimeoutEnv(t *testing.T) {
+	var got engine.Config
+	var out, errb bytes.Buffer
+	env := map[string]string{"MAESTRO_COMMON": t.TempDir(), "MAESTRO_SESSION_TIMEOUT": "90s", "MAESTRO_GIT_TIMEOUT": "0",
+		"MAESTRO_CLAUDE_BIN": "no-such-claude"}
+	Main(Env{Args: []string{"run", "engineer/build-ticket", "--ticket", "T-1", "--bot", "b"}, Stdout: &out, Stderr: &errb,
+		Dir: t.TempDir(), Getenv: func(k string) string { return env[k] }, Engine: func(c *engine.Config) { got = *c }})
+	if got.SessionTimeout != 90*time.Second || got.GitTimeout != -1 || got.CheckTimeout != 0 {
+		t.Errorf("timeouts %v %v %v", got.SessionTimeout, got.GitTimeout, got.CheckTimeout)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"text/template"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
@@ -48,7 +47,7 @@ func (e *Engine) steps(p *playbook.Playbook, st *State) error {
 		}
 		switch out.status {
 		case "":
-		case StatusLost, StatusStopped, StatusWaiting:
+		case StatusLost, StatusStopped:
 			st.Status = out.status
 			if out.status == StatusLost {
 				st.StoppedAt, st.StopReason = s.ID, out.reason
@@ -72,8 +71,8 @@ func (e *Engine) steps(p *playbook.Playbook, st *State) error {
 	return nil
 }
 
-// route picks the next step from on:, or the default: ok, done, skipped
-// and every ask choice go to the next step, anything else blocks.
+// route picks the next step from on:, or the default: ok, done and skipped
+// go to the next step, anything else blocks.
 func (e *Engine) route(p *playbook.Playbook, st *State, s *playbook.Step, outcome string) {
 	target, ok := s.On[outcome]
 	if !ok && strings.HasPrefix(outcome, "exit:") {
@@ -82,8 +81,6 @@ func (e *Engine) route(p *playbook.Playbook, st *State, s *playbook.Step, outcom
 	if !ok {
 		switch {
 		case outcome == "ok", outcome == "done", outcome == "skipped":
-			target = playbook.TargetNext
-		case s.Kind() == playbook.KindAsk && s.Each == "":
 			target = playbook.TargetNext
 		default:
 			target = playbook.TargetBlock
@@ -138,49 +135,30 @@ func blockOut(format string, args ...any) stepOut {
 	return stepOut{status: StatusBlocked, reason: fmt.Sprintf(format, args...)}
 }
 
-// call is one execution of a step: the whole step, or one item of an
-// each: step.
+// call is one execution of a step.
 type call struct {
 	rec     map[string]any // where the outcome goes
-	extra   map[string]any // .item and .index
-	suffix  string         // added to the idempotency key and file names
-	index   int            // the item, or -1
 	resumed bool           // the run crashed or paused inside this call
 }
 
-func (c call) label(s *playbook.Step) string {
-	if c.index >= 0 {
-		return fmt.Sprintf("%s[%d]", s.ID, c.index)
-	}
-	return s.ID
-}
-
+// step runs a step: when:, then its type.
 func (e *Engine) step(p *playbook.Playbook, st *State, s *playbook.Step, resumed bool) (stepOut, error) {
-	rec := st.Steps[s.ID]
-	rec["visits"] = st.Visits[s.ID]
-	if s.Each != "" {
-		return e.eachStep(p, st, s, resumed)
-	}
-	return e.one(p, st, s, call{rec: rec, index: -1, resumed: resumed})
-}
-
-// one runs a step once: when:, then its type.
-func (e *Engine) one(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {
-	answered := s.Kind() == playbook.KindAsk && st.Ask != nil && st.Ask.Step == s.ID && st.Ask.Index == c.index && st.Ask.Answered
-	if s.When != nil && !answered {
-		d := e.data(p, st, s, c.extra)
-		ok, err := renderBool(c.label(s)+".when", s.When.If, d)
+	c := call{rec: st.Steps[s.ID], resumed: resumed}
+	c.rec["visits"] = st.Visits[s.ID]
+	if s.When != nil {
+		d := e.data(p, st, s)
+		ok, err := renderBool(s.ID+".when", s.When.If, d)
 		if err != nil {
-			return blockOut("step %s: when: %v", c.label(s), err), nil
+			return blockOut("step %s: when: %v", s.ID, err), nil
 		}
 		if !ok {
 			reason := "when was false: " + strings.TrimSpace(s.When.If)
 			if tmpl := firstNonEmpty(s.When.Reason, s.Reason); tmpl != "" {
-				if r, err := renderTemplate(c.label(s)+".reason", tmpl, d); err == nil {
+				if r, err := renderTemplate(s.ID+".reason", tmpl, d); err == nil {
 					reason = strings.TrimSpace(r)
 				}
 			}
-			line := fmt.Sprintf("Skipped: %s — %s", c.label(s), reason)
+			line := fmt.Sprintf("Skipped: %s — %s", s.ID, reason)
 			if !playbook.Contains(st.Skipped, line) {
 				st.Skipped = append(st.Skipped, line)
 			}
@@ -196,17 +174,15 @@ func (e *Engine) one(p *playbook.Playbook, st *State, s *playbook.Step, c call) 
 	case playbook.KindPrompt:
 		return e.promptStep(p, st, s, c)
 	case playbook.KindGate:
-		ok, err := renderBool(c.label(s)+".gate", s.Gate, e.data(p, st, s, c.extra))
+		ok, err := renderBool(s.ID+".gate", s.Gate, e.data(p, st, s))
 		if err != nil {
-			return blockOut("step %s: gate: %v", c.label(s), err), nil
+			return blockOut("step %s: gate: %v", s.ID, err), nil
 		}
 		c.rec["value"], c.rec["status"] = ok, "ok"
 		if ok {
 			return stepOut{outcome: "ok"}, nil
 		}
 		return stepOut{outcome: "fail"}, nil
-	case playbook.KindAsk:
-		return e.askStep(p, st, s, c)
 	}
 	return blockOut("step %s: no step type", s.ID), nil
 }
@@ -220,109 +196,13 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
-// items evaluates an each: path. A path that names nothing is no items.
-func (e *Engine) items(p *playbook.Playbook, st *State, s *playbook.Step) ([]any, error) {
-	var got any
-	t, err := template.New(s.ID + ".each").Funcs(funcs).
-		Funcs(template.FuncMap{"capture": func(v any) string { got = v; return "" }}).
-		Option("missingkey=error").Parse("{{capture (" + s.Each + ")}}")
-	if err != nil {
-		return nil, err
-	}
-	var b strings.Builder
-	if err := t.Execute(&b, e.data(p, st, s, nil)); err != nil {
-		if zeroDataError(err) || strings.Contains(err.Error(), "map has no entry") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	switch l := got.(type) {
-	case []any:
-		return l, nil
-	case nil:
-		return nil, nil
-	case []map[string]any:
-		out := make([]any, len(l))
-		for i := range l {
-			out[i] = l[i]
-		}
-		return out, nil
-	}
-	return nil, fmt.Errorf("each: %s is a %T, not a list", s.Each, got)
-}
-
-// eachStep runs the step once per item. Items already done (before a
-// crash or an ask) aren't run again. The outcome is fail if any item
-// failed, after trying them all.
-func (e *Engine) eachStep(p *playbook.Playbook, st *State, s *playbook.Step, resumed bool) (stepOut, error) {
-	rec := st.Steps[s.ID]
-	items, err := e.items(p, st, s)
-	if err != nil {
-		return blockOut("step %s: %v", s.ID, err), nil
-	}
-	results, _ := rec["results"].([]any)
-	if !resumed || results == nil {
-		results = []any{}
-	}
-	rec["results"] = results
-	// A run: list is a sequence: its first failure leaves later items unrun.
-	seq := len(s.Run) > 1
-	for i := len(results); i < len(items) && !(seq && anyFailed(s, results)); i++ {
-		irec := zeroRecord(s)
-		c := call{rec: irec, extra: map[string]any{"item": items[i], "index": i}, suffix: fmt.Sprint(i), index: i,
-			resumed: resumed && i == len(results)}
-		if pending, ok := rec["pending"].(map[string]any); ok && c.resumed {
-			c.rec = pending
-		}
-		out, err := e.one(p, st, s, c)
-		if err != nil {
-			return out, err
-		}
-		if out.status != "" {
-			rec["pending"] = c.rec
-			rec["results"] = results
-			return out, nil
-		}
-		c.rec["outcome"] = out.outcome
-		results = append(results, c.rec)
-		rec["results"] = results
-		delete(rec, "pending")
-		if err := e.save(st); err != nil {
-			return stepOut{}, err
-		}
-	}
-	if anyFailed(s, results) {
-		rec["status"] = "failed"
-		return stepOut{outcome: "fail"}, nil
-	}
-	rec["status"] = "ok"
-	return stepOut{outcome: "ok"}, nil
-}
-
-// anyFailed reports whether an item of an each: step ended in anything but
-// ok, done, a skip or one of its ask choices.
-func anyFailed(s *playbook.Step, results []any) bool {
-	for _, r := range results {
-		m, _ := r.(map[string]any)
-		o := str(m["outcome"])
-		if o == "ok" || o == "done" || o == "skipped" || (s.Ask != nil && playbook.Contains(s.Ask.Choices, o)) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
 // key is the idempotency key for a write of a step: <run>:<step>, with the
 // visit number from the second visit on so a loop never replays an old
-// write, and the item's index for an each: step.
-func key(st *State, step, suffix string) string {
+// write.
+func key(st *State, step string) string {
 	k := st.ID + ":" + step
 	if n := st.Visits[step]; n > 1 {
 		k += fmt.Sprintf(":%d", n)
-	}
-	if suffix != "" {
-		k += ":" + suffix
 	}
 	return k
 }
@@ -381,21 +261,21 @@ func targetsRunTicket(st *State, args []string) bool {
 }
 
 func (e *Engine) ticketStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {
-	d := e.data(p, st, s, c.extra)
-	args, err := renderArgs(c.label(s), s.Ticket, d)
+	d := e.data(p, st, s)
+	args, err := renderArgs(s.ID, s.Ticket, d)
 	if err != nil {
-		return blockOut("step %s: %v", c.label(s), err), nil
+		return blockOut("step %s: %v", s.ID, err), nil
 	}
 	if len(args) == 0 {
-		return blockOut("step %s: ticket: nothing to run", c.label(s)), nil
+		return blockOut("step %s: ticket: nothing to run", s.ID), nil
 	}
 	if args[0] == "transition" && flagArg(args, "--to") == "done" && !playbook.Contains(DoneEnders, p.Role+"/"+p.Name) {
-		return blockOut("step %s: %s/%s may not move a ticket to done; /review does", c.label(s), p.Role, p.Name), nil
+		return blockOut("step %s: %s/%s may not move a ticket to done; /maestro-review does", s.ID, p.Role, p.Name), nil
 	}
 	if s.Body != "" {
-		body, err := renderTemplate(c.label(s)+".body", s.Body, d)
+		body, err := renderTemplate(s.ID+".body", s.Body, d)
 		if err != nil {
-			return blockOut("step %s: body: %v", c.label(s), err), nil
+			return blockOut("step %s: body: %v", s.ID, err), nil
 		}
 		if body = strings.TrimSpace(body); body != "" {
 			flag := "--body"
@@ -405,14 +285,14 @@ func (e *Engine) ticketStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 			args = append(args, flag, body)
 		}
 	}
-	return e.ticketCall(st, s, c, args, key(st, s.ID, c.suffix))
+	return e.ticketCall(st, s, c, args, key(st, s.ID))
 }
 
 // ticketCall runs one maestro-ticket call for a step and records it.
 func (e *Engine) ticketCall(st *State, s *playbook.Step, c call, args []string, idemKey string) (stepOut, error) {
 	full, err := e.ticketArgs(st, args, idemKey)
 	if err != nil {
-		return blockOut("step %s: %v", c.label(s), err), nil
+		return blockOut("step %s: %v", s.ID, err), nil
 	}
 	tc, err := e.ticket(full...)
 	if err != nil {
@@ -483,36 +363,18 @@ func exitOutcome(rec map[string]any, exit int) stepOut {
 	return stepOut{outcome: fmt.Sprintf("exit:%d", exit)}
 }
 
-// runStep sends a run: step's requests in order and stops at the first
-// that doesn't succeed. The record is the last request's.
+// runStep sends a run: step's built-in request.
 func (e *Engine) runStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {
-	var out stepOut
-	for i, line := range s.Run {
-		if i > 0 {
-			visits := c.rec["visits"]
-			clear(c.rec)
-			merge(c.rec, zeroRecord(s))
-			c.rec["visits"] = visits
-		}
-		var err error
-		if out, err = e.runLine(p, st, s, c, line); err != nil || out.status != "" || out.outcome != "ok" {
-			return out, err
-		}
-	}
-	return out, nil
-}
-
-func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c call, line string) (stepOut, error) {
-	args, err := renderArgs(c.label(s), line, e.data(p, st, s, c.extra))
+	args, err := renderArgs(s.ID, s.Run, e.data(p, st, s))
 	if err != nil {
-		return blockOut("step %s: %v", c.label(s), err), nil
+		return blockOut("step %s: %v", s.ID, err), nil
 	}
 	req := playbook.FindRequest(args)
 	switch {
 	case req == nil:
-		return blockOut("step %s: %q isn't a built-in request", c.label(s), strings.Join(args, " ")), nil
+		return blockOut("step %s: %q isn't a built-in request", s.ID, strings.Join(args, " ")), nil
 	case req.Engine:
-		return blockOut("step %s: the engine sends %s itself", c.label(s), req.Name), nil
+		return blockOut("step %s: the engine sends %s itself", s.ID, req.Name), nil
 	}
 	reply, err := e.request(st, req, args[len(strings.Fields(req.Name)):])
 	if err != nil {
@@ -521,7 +383,7 @@ func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c ca
 	merge(c.rec, reply)
 	c.rec["json"] = reply
 	if reply["status"] == "refused" {
-		return blockOut("step %s: %s refused: %v", c.label(s), req.Name, reply["output"]), nil
+		return blockOut("step %s: %s refused: %v", s.ID, req.Name, reply["output"]), nil
 	}
 	if req.Name == "worktree add" && reply["status"] == "ok" {
 		if v, ok := reply["path"].(string); ok && v != "" {
@@ -541,37 +403,6 @@ func (e *Engine) runLine(p *playbook.Playbook, st *State, s *playbook.Step, c ca
 	return exitOutcome(c.rec, exit), nil
 }
 
-func (e *Engine) askStep(p *playbook.Playbook, st *State, s *playbook.Step, c call) (stepOut, error) {
-	if st.Ask != nil && st.Ask.Step == s.ID && st.Ask.Index == c.index && st.Ask.Answered {
-		c.rec["choice"], c.rec["text"], c.rec["status"] = st.Ask.Choice, st.Ask.Text, "ok"
-		choice := st.Ask.Choice
-		st.Ask = nil
-		return stepOut{outcome: choice}, nil
-	}
-	q, err := renderTemplate(c.label(s)+".question", s.Ask.Question, e.data(p, st, s, c.extra))
-	if err != nil {
-		return blockOut("step %s: question: %v", c.label(s), err), nil
-	}
-	q = strings.TrimSpace(q)
-	c.rec["question"] = q
-	st.Ask = &AskState{Step: s.ID, Index: c.index, Question: q, Choices: s.Ask.Choices}
-	if st.Token > 0 {
-		// Nothing heartbeats while the run waits, so stretch the lease.
-		ttl, err := s.Ask.LeaseTTL()
-		if err != nil {
-			return blockOut("step %s: %v", s.ID, err), nil
-		}
-		hb, err := e.ticket("heartbeat", st.Ticket, "--holder", st.Holder, "--token", fmt.Sprint(st.Token), "--ttl", ttl.String(), "--json")
-		if err != nil {
-			return stepOut{}, err
-		}
-		if lostLease(st, hb) {
-			return stepOut{status: StatusLost, reason: "heartbeat: " + hb.code}, nil
-		}
-	}
-	return stepOut{status: StatusWaiting}, nil
-}
-
 func (e *Engine) limits(st *State) map[string]any {
 	l := defaultLimits()
 	if m, ok := st.Env["limits"].(map[string]any); ok {
@@ -580,9 +411,8 @@ func (e *Engine) limits(st *State) map[string]any {
 	return l
 }
 
-// data is the template data for step s (nil outside a step), with extra's
-// keys (.item, .index) on top.
-func (e *Engine) data(p *playbook.Playbook, st *State, s *playbook.Step, extra map[string]any) map[string]any {
+// data is the template data for step s (nil outside a step).
+func (e *Engine) data(p *playbook.Playbook, st *State, s *playbook.Step) map[string]any {
 	ticket := zeroTicket()
 	if st.TicketD != nil {
 		merge(ticket, st.TicketD)
@@ -622,19 +452,14 @@ func (e *Engine) data(p *playbook.Playbook, st *State, s *playbook.Step, extra m
 		}
 		steps[id] = rec
 	}
-	var cursor any = 0
-	if st.Cursor0 != nil {
-		cursor = st.Cursor0
-	}
 	d := map[string]any{
 		"ticket": ticket, "project": project, "env": env, "limits": e.limits(st),
 		"run": run, "steps": steps, "retry": nil, "mode": "", "step": zeroStep(nil),
-		"item": nil, "index": 0, "input": map[string]any{"text": st.Input}, "cursor": cursor,
+		"input": map[string]any{"text": st.Input},
 	}
 	if st.Retry != nil {
 		d["retry"] = st.Retry
 	}
-	merge(d, extra)
 	if s != nil {
 		d["mode"] = s.Mode
 		with := map[string]any{}
