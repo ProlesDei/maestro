@@ -1,6 +1,6 @@
 ---
 name: maestro-chief-of-staff
-description: "Settles a blocked Maestro ticket: checks the facts behind its Escalation: note, then answers it and puts the ticket back, or writes up the one decision the owner must make. Use for /maestro-chief-of-staff, 'unblock T-12', 'what's stuck', or when a work run stops blocked."
+description: "Settles a blocked Maestro ticket: checks the facts behind its Escalation: note, then answers it and puts the ticket back, or writes up the one decision the owner must make. Use for /maestro-chief-of-staff, 'unblock T-12', 'answer the escalation on T-12', or when a work run stops blocked."
 argument-hint: "[ticket id]"
 disable-model-invocation: true
 ---
@@ -13,15 +13,15 @@ Follow the **maestro-working-principles** skill.
 
 ## Unblock
 
-Whoever owns the call (chief of staff, engineer, or a person) answers on the ticket, moves it back, and runs it again:
+Whoever owns the call (chief of staff, engineer, or a person) answers on the ticket, moves it back, and runs it again. A blocked run is over, and `maestro-play resume` won't restart it; the new run starts at plan and reads the `Answer:` note, so post nothing after it.
 
 ```sh
 maestro-ticket comment <id> --body 'Answer: <the decision>'
-maestro-ticket transition <id> --from blocked --to <blocked_from>
-maestro-play run work --ticket <id>
+maestro-ticket transition <id> --from blocked --to <blocked_from> --role <return role>
+maestro-play run <playbook> --ticket <id>
 ```
 
-`--to` must be the status the ticket was blocked from: `blocked_from` in `get --json`, `in_progress` after a work run. A blocked run is over, and `maestro-play resume` won't restart it. The new run starts again at plan, with the `Answer:` note on the ticket.
+Fill in `<blocked_from>` from `maestro-ticket get <id> --json` (`in_progress` after a work run), `<return role>` from the note's last line, `Return-role: <role>` (the block gave the ticket to the chief of staff; `--role` gives it back), and `<playbook>` from its `Stopped at: <step> (<playbook>)` line.
 
 ## Start
 
@@ -30,8 +30,8 @@ Open a todo list with one item per phase below.
 ## Phase A: Find the facts
 
 1. Use the id given, else the first of `maestro-ticket list --status blocked --json`. If there is none, say so and stop.
-2. `maestro-ticket get <id> --json` must show `blocked`. Read its latest `Escalation:` note and its `blocked_from`.
-3. For each question in the note, ask whether running or reading something answers it: does the file exist, what does the API return, do the checks pass on the main branch. Then find out. A fact is never the owner's to answer; what's left is a call.
+2. `maestro-ticket get <id> --json` must show `blocked`. Read its latest note that starts `Escalation:` or `Escalation (chief-of-staff):`.
+3. For each question in the note, ask whether running or reading something answers it: does the file exist, what does the API return, do the checks pass on the main branch. Then find out; the note's `Where:` line names the run's branch and worktree. A fact is never the owner's to answer; what's left is a call.
 
 ## Phase B: Decide whose call it is
 
@@ -52,7 +52,7 @@ Open a todo list with one item per phase below.
 ```text
 <id>: <title>
 Facts: <one line each, with the command>
-Answered: <the Answer: text>. Now: <status>. Next: maestro-play run work --ticket <id>
+Answered: <the Answer: text>. Now: <status>, role <role>. Next: maestro-play run <playbook> --ticket <id>
 Owner's call: What (one or two sentences), Why now, Options (two or three, each with its trade-off), Default (with a one-line why), Question (one word if it can be)
 ```
 
