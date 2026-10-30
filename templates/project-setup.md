@@ -25,6 +25,12 @@ main
 
 <how to start the app locally, and the URL or command to check it works; `/maestro-qa-lead` and `maestro-prove-complete` read this>
 
+## Tickets
+
+maestro-ticket
+
+<or your own tool, and how to find, claim, comment on and close a ticket in it; `maestro-working-principles` reads this>
+
 ## Conventions
 
 <branch and commit style, where tests live, files never to touch>

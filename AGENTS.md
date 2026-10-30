@@ -23,6 +23,7 @@ What we hold to:
 - The engine, not a prompt, decides what runs next. Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never overwrites a file and hides its skill copies from git ([decisions](docs/decisions.md)).
+- It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`install.sh --tickets`), so a skill names `maestro-ticket` only as the default.
 - Small and plain: cut what only exists to look impressive. But never cut a skill, bot, role or diagram without the owner's yes. An audit or plan is advice, not a ruling.
 
 ## Layout
