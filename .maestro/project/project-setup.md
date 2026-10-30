@@ -46,9 +46,12 @@ PATH=$GOBIN:$PATH maestro-play render work --step plan --ticket T-1 --playbooks 
 
 maestro-ticket
 
+## Skills
+
+- Our own working skills drop the `maestro-` prefix and live once in `.maestro/skills/<name>/`. `.claude/skills/` and `.agents/skills/` hold only symlinks to them, so every harness reads one copy: from each harness folder, `ln -s ../../.maestro/skills/<name>`. Never put a real folder in a harness folder.
+- To rename or retire one, remove its folder and both symlinks.
+- `skills/` holds the skills Maestro ships; AGENTS.md says how to change them.
+
 ## Conventions
 
-Follow AGENTS.md. Two rules matter most for dogfooding:
-
-- `skills/` holds the skills Maestro ships, each named `maestro-*`. Our own working skills drop the prefix and live once in `.maestro/skills/<name>/`; `.claude/skills/` and `.agents/skills/` hold only symlinks to them (`ln -s ../../.maestro/skills/<name>`), so every harness reads one copy. Never put a real folder in a harness folder.
-- `shellcheck scripts/*.sh` isn't a check because shellcheck isn't installed on every machine; run it by hand after changing `scripts/`.
+Follow AGENTS.md. `shellcheck scripts/*.sh` isn't a check because shellcheck isn't installed on every machine; run it by hand after changing `scripts/`.

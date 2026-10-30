@@ -72,6 +72,13 @@ From `tools/maestro-play/` or `tools/maestro-ticket/`:
 
 Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`.
 
+## Changing shipped skills
+
+This repo is Maestro's source, so edit shipped skills in `skills/maestro-*`. The rule in the **create-edit-skill** skill against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. Use that skill for the work, then:
+- Update the count and group table in `skills/README.md`, and `skills/use.yaml` when a step loads the skill or only a person starts it.
+- Run `go test ./...` in `tools/maestro-play/` and `bash scripts/install_test.sh`.
+- `.maestro/skills/create-edit-skill/SKILL.md` and `skills/maestro-create-edit-skill/SKILL.md` match except for `name` and the `/command`. Edit ours, copy it over, fix those two, and `diff` the pair.
+
 ## Working rules
 
 - Read the code before changing it. Match the style of the code around it.
