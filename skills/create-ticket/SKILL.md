@@ -17,14 +17,14 @@ You make one `maestro-ticket create` call. The store checks deps and cycles; don
 
    | Field | Values | Default |
    |---|---|---|
-   | kind | `feature`, `bug`, `refactor`, `perf`. `/work` picks its mode from it | from the wording, else `feature` |
+   | kind | `feature`, `bug`, `refactor`, `perf`, written as the body's `Type:` line. `/work` picks its mode from it | from the wording, else `feature` |
    | deps | ticket ids that must be `done` first; check each with `maestro-ticket get` | none |
    | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
 
    Waiting on another ticket is a dep, never `blocked`.
-4. **Create.** The body's first line is `Type: <kind>`: `/work` reads it. Show the command, then run it:
+4. **Create.** The body's first line is `Type: <kind>`: `/work` reads it. It is not `maestro-ticket create --type`, which takes `ship` or `scout`; leave that flag out (the default is `ship`). Show the command, then run it:
 
    ```sh
    maestro-ticket create --json --title '<title>' --priority <n> --status <todo|backlog> \
