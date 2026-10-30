@@ -5,4 +5,4 @@
 #     build: [my-tdd]        # one step, by template name in playbooks/prompts/
 prompts:
   all: []
-commands: [work, create-ticket, review]   # you call these; no prompt names them
+commands: [maestro-work, maestro-create-ticket, maestro-review]   # you call these; no prompt names them

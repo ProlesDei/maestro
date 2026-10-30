@@ -1,6 +1,6 @@
 # Playbooks
 
-A playbook is a YAML list of typed steps that `maestro-play` runs in order. Maestro ships one, `engineer/work.yaml`; `/work` runs it as `maestro-play run engineer/work --ticket <id>`. Playbooks are never installed into the target repo. Engine detail (commands, built-in requests, template data and functions, exit codes) is in [tools/maestro-play/README.md](../tools/maestro-play/README.md).
+A playbook is a YAML list of typed steps that `maestro-play` runs in order. Maestro ships one, `engineer/work.yaml`; `/maestro-work` runs it as `maestro-play run engineer/work --ticket <id>`. Playbooks are never installed into the target repo. Engine detail (commands, built-in requests, template data and functions, exit codes) is in [tools/maestro-play/README.md](../tools/maestro-play/README.md).
 
 ## What work.yaml does
 

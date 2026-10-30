@@ -21,15 +21,15 @@ Run each command at the repo's root. `-p` runs one headless turn; `--output-form
 
 | To | Run | Skill |
 |---|---|---|
-| Turn a request into a ticket | `claude -p "/create-ticket <what the owner wants>" --output-format json` | [create-ticket](../../skills/create-ticket/SKILL.md) |
-| Build a ticket to an open PR | `claude -p "/work <id>" --output-format json` | [work](../../skills/work/SKILL.md) |
-| Review a PR, then merge it or send it back | `claude -p "/review <pr>" --output-format json` | [review](../../skills/review/SKILL.md) |
+| Turn a request into a ticket | `claude -p "/maestro-create-ticket <what the owner wants>" --output-format json` | [maestro-create-ticket](../../skills/maestro-create-ticket/SKILL.md) |
+| Build a ticket to an open PR | `claude -p "/maestro-work <id>" --output-format json` | [maestro-work](../../skills/maestro-work/SKILL.md) |
+| Review a PR, then merge it or send it back | `claude -p "/maestro-review <pr>" --output-format json` | [maestro-review](../../skills/maestro-review/SKILL.md) |
 
 1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
-3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run `/work <id>` again.
-4. **Unblock.** Classify the escalation first. When the call is yours and easy to undo, pick one of its options and follow [Unblock](../../skills/work/SKILL.md#unblock). Otherwise bring it to the owner as a card, then answer the same way.
-5. **Review on another model family when one is installed.** Codex if Claude built it: `codex exec '$review <pr>'` at the repo's root runs the [review](../../skills/review/SKILL.md) skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$review` alone.
+3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run `/maestro-work <id>` again.
+4. **Unblock.** Classify the escalation first. When the call is yours and easy to undo, pick one of its options and follow [Unblock](../../skills/maestro-work/SKILL.md#unblock). Otherwise bring it to the owner as a card, then answer the same way.
+5. **Review on another model family when one is installed.** Codex if Claude built it: `codex exec '$maestro-review <pr>'` at the repo's root runs the [maestro-review](../../skills/maestro-review/SKILL.md) skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$maestro-review` alone.
 
 ## How you talk to the owner
 

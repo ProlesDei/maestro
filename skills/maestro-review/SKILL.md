@@ -1,6 +1,6 @@
 ---
-name: review
-description: Use when asked to review, gate, approve, merge or kick back a pull request, a `maestro/<ticket>` branch or a ticket in `in_review`. Runs ten passes, the project's checks and a fresh-session skeptic, then gives one verdict for one head sha. GO merges the PR and sets the ticket done; NO-GO sends it back with a `Kickback:` comment.
+name: maestro-review
+description: Use when the user types /maestro-review, or asks to review, gate, approve, merge or kick back a pull request, a `maestro/<ticket>` branch or a ticket in `in_review`. Runs ten passes, the project's checks and a fresh-session skeptic, then gives one verdict for one head sha. GO merges the PR and sets the ticket done; NO-GO sends it back with a `Kickback:` comment.
 argument-hint: "<PR number | maestro/<ticket> branch | ticket id>"
 disable-model-invocation: true
 ---
@@ -90,7 +90,7 @@ maestro-ticket transition <id> --to done --from in_review --actor-role reviewer 
 ```
 Never squash, rebase, force-push or `--no-verify`. If the merge refuses because the head moved, the verdict is void.
 
-**NO-GO:** comment first, then move, so `/work` sees the kickback as the latest note:
+**NO-GO:** comment first, then move, so `/maestro-work` sees the kickback as the latest note:
 ```bash
 maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H <<'EOF'
 Kickback: ...
