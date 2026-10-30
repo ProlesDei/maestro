@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 17 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
+Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 18 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
 
 ## Install
 
@@ -44,7 +44,7 @@ The other jobs are skills, in Claude Code (or headless: `claude -p "/maestro-rev
 
 ## Your own skills
 
-Maestro ships 17 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and three that prompt steps load. [skills/README.md](skills/README.md) lists them. To add your own, put `skills/<name>/SKILL.md` here and name it in `skills/use.yaml` if prompt steps should load it.
+Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and three that prompt steps load. [skills/README.md](skills/README.md) lists them. To add your own, put `skills/<name>/SKILL.md` here and name it in `skills/use.yaml` if prompt steps should load it.
 
 ## Personas
 
@@ -148,7 +148,7 @@ flowchart TD
 
     subgraph Installed ["Their repo after install.sh"]
         direction LR
-        S1["<b>17 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]
