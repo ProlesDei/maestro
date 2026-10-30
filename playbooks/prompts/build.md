@@ -20,6 +20,6 @@ Reply: commit (one sha), files, tests (command, exit code, counts; perf adds bef
 `auto-fix` finding and what you changed, or empty).
 ## This step
 Ticket {{.ticket.id}}, mode {{.step.with.mode}}, branch {{.run.branch}}, worktree {{.run.worktree}}, scratch {{.run.scratch}}.
-{{- with index .steps "checks"}}{{if eq (print (index . "outcome")) "fail"}} Checks failed; start from {{index . "output_path"}}.{{end}}{{end}}
+{{- with index .steps "checks"}}{{if eq (print (index . "status")) "failed"}} Checks failed; start from {{index . "output_path"}}.{{end}}{{end}}
 {{- with index .steps "verify"}}{{with index . "reply"}}{{with index . "failures"}} Verify failed: {{json .}}.{{end}}{{end}}{{end}}
 {{- if .retry}} Your last reply was missing: {{.retry.reason}}.{{end}}
