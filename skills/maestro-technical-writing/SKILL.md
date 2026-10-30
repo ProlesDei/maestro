@@ -43,11 +43,11 @@ Each text does one job. If it does two, split it and link the parts.
 - **README:** what it is in one sentence, why to use it, a quickstart that works when pasted, and links to the rest.
 - **PR description:** what changed, why, how you checked it (commands and results), the risk, and what is out of scope. No boasting; a reviewer should get it in one read.
 - **Commit message:** a subject of 72 characters or fewer that says what changed, then a body that says why and what the diff can't show. No file list.
-- **Ticket body:** the goal, acceptance criteria someone can test, and pointers by path.
+- **Ticket body:** the goal, acceptance criteria someone can test, and pointers by path. `/maestro-planner` and `/maestro-create-ticket` hold the full ticket shape.
 - **Decision:** the context, the choice, the options turned down, and why.
 
 ## 5. Check before you hand it on
 
-Read it once as the reader. Can they act or decide without asking you? Did you run each command and copy it from that run? Does each term mean one thing? Is each sentence still needed? If a rule makes a sentence worse, fix the sentence another way. [references/example.md](references/example.md) shows one rewrite.
+Read it once as the reader. Can they act or decide without asking you? Did you run each command and copy it from that run? Does each term mean one thing? Is each sentence still needed? If a rule makes a sentence worse, fix the sentence another way. [references/example.md](references/example.md) shows one rewrite. Last, run `/maestro-unslop` on it.
 
 Reply: the finished text, then one line for each rule you broke on purpose and why, or "no exceptions".
