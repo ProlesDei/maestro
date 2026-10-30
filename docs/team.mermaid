@@ -1,0 +1,70 @@
+flowchart TD
+    User([User])
+
+    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts jobs with claude -p, or codex exec for review<br/>Never touches code"]
+    Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
+
+    Eng["<b>Engineer</b><br/>/maestro-work &lt;id&gt;"]
+
+    subgraph Work ["maestro-play run engineer/work: one ticket to one PR"]
+        Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
+        Build["<b>Build</b><br/>Frontier<br/>Test first (perf: measure first)<br/>mode: feature, bug, refactor, perf"]
+        Checks["<b>Project checks</b><br/>Checks list in project-setup.md<br/>No tokens · none listed passes"]
+        Verify["<b>Verify</b><br/>Mid-tier<br/>Evidence from the running code"]
+        PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
+    end
+
+    QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
+    Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
+    Done([Merged · ticket done])
+
+    %% User and Chief of Staff
+    User <-->|"goals, decisions, approvals"| CoS
+
+    %% The Chief of Staff starts each job
+    CoS -->|"plan a goal"| Planner
+    CoS -->|"work a ticket"| Eng
+    CoS -->|"test a PR"| QA
+    CoS -->|"review a PR"| Rev
+
+    %% Planning
+    Planner -->|"writes tickets"| Tickets
+    Tickets -->|"todo"| Eng
+
+    %% Build
+    Eng --> Plan --> Build --> Checks --> Verify --> PR
+    Checks -.->|"failed"| Build
+    Verify -.->|"failed"| Build
+    Work -.->|"blocked: Escalation note"| Eng
+    Eng -.->|"what the ticket can't settle"| CoS
+    CoS -.->|"Answer note, unblock"| Tickets
+
+    %% Test and review
+    PR -->|"ticket in_review"| QA
+    QA -.->|"QA: pass or fail comment"| Rev
+    Rev -->|"GO: gh pr merge, ticket done"| Done
+    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Eng
+
+    %% Legend
+    subgraph Legend ["Legend"]
+        direction LR
+        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Bot or session you start"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+    end
+
+    %% Styles by cost tier
+    classDef frontier fill:#f8c4b4,stroke:#b5472b,color:#1a1a1a
+    classDef mid fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
+    classDef free fill:#c8e6c9,stroke:#2e7d32,color:#1a1a1a
+    classDef storage fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
+    classDef person fill:#f5f5f5,stroke:#555,color:#1a1a1a
+    classDef bot fill:#fff3c4,stroke:#b38f00,color:#1a1a1a
+    classDef note fill:#ffffff,stroke:#999,color:#1a1a1a,stroke-dasharray:3 3
+
+    class Plan,Build,L1 frontier
+    class Verify,L2 mid
+    class Checks,PR,L3 free
+    class Tickets,L4 storage
+    class User,Done person
+    class CoS,Planner,Eng,QA,Rev,L6 bot
+    class L5 note
