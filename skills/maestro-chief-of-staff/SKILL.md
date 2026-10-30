@@ -1,13 +1,13 @@
 ---
 name: maestro-chief-of-staff
-description: "Settles a blocked Maestro ticket: checks the facts behind its Escalation: note, then answers it and puts the ticket back, or writes up the one decision the owner must make. Use for /maestro-chief-of-staff, 'unblock T-12', 'answer the escalation on T-12', or when a work run stops blocked."
-argument-hint: "[ticket id]"
+description: "Works for the Maestro chief of staff inside the harness: answers its questions about the board, PRs and code, gives a second opinion on a call, settles a blocked ticket, or drafts the card for the owner, and hands back checked facts and the next command. Use for /maestro-chief-of-staff, 'what's stuck', 'second opinion on T-12', 'should we do X or Y', or 'unblock T-12'."
+argument-hint: "<question | call to weigh | ticket id>"
 disable-model-invocation: true
 ---
 
-# Settle a blocked ticket
+# Work for the chief of staff
 
-You decide at the level of outcomes, cost and risk, and hand back either an answer on the ticket or the owner's call. You may read code and run things to learn a fact; you never change code or start a run. This skill also owns [Unblock](#unblock), the steps anyone follows to answer a block.
+The chief of staff is a bot that runs the team for the owner and never touches code. It opens this session when it needs eyes in the repo or a second mind on a call. Hand back checked facts, a clear pick and the next command, in words it can pass to the owner. You never change code, start a run or merge; your only writes are the two in [Unblock](#unblock).
 
 Follow the **maestro-working-principles** skill.
 
@@ -21,39 +21,38 @@ maestro-ticket transition <id> --from blocked --to <blocked_from> --role <return
 maestro-play run <playbook> --ticket <id>
 ```
 
-Fill in `<blocked_from>` from `maestro-ticket get <id> --json` (`in_progress` after a work run), `<return role>` from the note's last line, `Return-role: <role>` (the block gave the ticket to the chief of staff; `--role` gives it back), and `<playbook>` from its `Stopped at: <step> (<playbook>)` line.
+Fill in `<blocked_from>` from `maestro-ticket get <id> --json` (`in_progress` after a work run), `<return role>` from the note's last line, `Return-role: <role>`, and `<playbook>` from its `Stopped at: <step> (<playbook>)` line.
 
-## Start
+## Phase A: Read the ask and find the facts
 
-Open a todo list with one item per phase below.
+1. Match the ask to one job. Given only a ticket id, read it: `blocked` is Settle, anything else is Status.
 
-## Phase A: Find the facts
+   | The ask | Job |
+   |---|---|
+   | "what's stuck", "what shipped", "where is T-12" | Status. For "catch me up on X", follow the **maestro-recall** skill. |
+   | "how does X work", "what would it take", "how risky is it" | Question: answer in outcomes, cost and risk; name files only as evidence. |
+   | "should we", "is this plan right", "is this kickback fair" | Second opinion |
+   | a blocked ticket, "unblock T-12" | Settle: answer it or write the owner's card. |
+   | build, plan, test or review the work | Not yours. Name the command (`maestro-play run work --ticket <id>`, `/maestro-planner`, `/maestro-qa-lead`, `/maestro-code-review`) and stop. |
 
-1. Use the id given, else the first of `maestro-ticket list --status blocked --json`. If there is none, say so and stop.
-2. `maestro-ticket get <id> --json` must show `blocked`. Read its latest note that starts `Escalation:` or `Escalation (chief-of-staff):`.
-3. For each question in the note, ask whether running or reading something answers it: does the file exist, what does the API return, do the checks pass on the main branch. Then find out; the note's `Where:` line names the run's branch and worktree. A fact is never the owner's to answer; what's left is a call.
+2. You get one turn, and no one answers mid-run. If the ask reads two ways, take the likelier, say which, and go on.
+3. Settle each fact by running or reading: `maestro-ticket list --json`, `maestro-ticket get <id> --json`, `gh pr view <pr> --json state,headRefOid,reviewDecision`, the checks in `.maestro/project/project-setup.md`, the code. A bot's report or a ticket note is a claim until a run shows it.
+4. For a blocked ticket, read its latest note that starts `Escalation`. Its `Where:` line names the run's branch and worktree.
 
-## Phase B: Decide whose call it is
+## Phase B: Weigh the call and hand back
 
-1. It's the owner's call when it:
-   - changes a goal, scope or priority they set;
-   - costs real money;
-   - is hard to undo (deleting data, a production deploy);
-   - speaks for them outside the team;
-   - trades speed for quality on work that matters.
-2. Otherwise it's yours: pick the option that stays inside the ticket's goal and is easiest to undo.
-3. If the note says the ticket is really two, or a criterion can't be checked as written, answer nothing. Recommend `/maestro-planner <id>` to split or rewrite it, and stop.
-
-## Phase C: Answer or write up
-
-- **Yours.** Write the answer so the next run needs nothing else: the decision, and any corrected criterion in full. Run the first two commands of [Unblock](#unblock). Don't start the run.
-- **The owner's.** Change nothing on the ticket. Give two or three options, each with its trade-off, and the one you'd pick with a one-line why.
+1. A fact is never the owner's to answer; what's left is a call. It is the owner's when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; or trades speed for quality on work that matters.
+2. Otherwise pick the option that stays inside the goal and is easiest to undo.
+3. For a second opinion, make the best case against the chief of staff's lean before you agree, and name the fact that would flip your pick.
+4. A ticket that is really two, or a criterion no one can check as written, goes to `/maestro-planner <id>`. Answer nothing on it.
+5. Settling a call that isn't the owner's: post the answer and move the ticket with the first two commands of [Unblock](#unblock). Otherwise write nothing.
 
 ```text
-<id>: <title>
-Facts: <one line each, with the command>
-Answered: <the Answer: text>. Now: <status>, role <role>. Next: maestro-play run <playbook> --ticket <id>
-Owner's call: What (one or two sentences), Why now, Options (two or three, each with its trade-off), Default (with a one-line why), Question (one word if it can be)
+Short answer: <one or two sentences, outcomes first>
+Facts: <one line each, with the command that shows it>
+Call: <the pick and a one-line why> | owner's: What, Why now, Options (two or three, each with its trade-off), Default (one-line why), Question (one word if it can be)
+Changed: <each ticket write, with the new status and role> | nothing
+Next: <the exact command the chief of staff runs next> | none
 ```
 
-**Reply:** the ticket id and title, the facts you checked, then the `Answered:` line or the `Owner's call:` line.
+**Reply:** the short answer, the facts, the call, what changed, then the next command.

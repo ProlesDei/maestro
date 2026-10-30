@@ -26,7 +26,7 @@ Each command is one role's job. When the team has a bot for that role, the job i
 | engineer | Build a ticket to an open PR | `maestro-play run work --ticket <id> --bot chief-of-staff` (a playbook, no Claude wrapper; prints one JSON object) | [work playbook](../../playbooks/work/README.md) |
 | qa-lead | Test the PR in the running app | `claude -p "/maestro-qa-lead <pr>" --output-format json` | [maestro-qa-lead](../../skills/maestro-qa-lead/SKILL.md) |
 | reviewer | Review a PR, then merge it or send it back | `claude -p "/maestro-code-review <pr>" --output-format json` | [maestro-code-review](../../skills/maestro-code-review/SKILL.md) |
-| chief-of-staff | Settle a blocked ticket | `claude -p "/maestro-chief-of-staff <id>" --output-format json` | [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md) |
+| chief-of-staff | Check facts, ask about the code, get a second opinion, or settle a blocked ticket | `claude -p "/maestro-chief-of-staff <question or id>" --output-format json`; follow up with `--resume <session_id>` | [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md) |
 
 1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
