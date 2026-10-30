@@ -11,7 +11,7 @@ import (
 )
 
 // Backups taken while writers run are consistent snapshots: every ticket
-// in one has its created event and every event its outbox row.
+// in one has its created event.
 func TestBackupDuringWrites(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -51,10 +51,8 @@ func TestBackupDuringWrites(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var outbox int
-		b.r.QueryRow("SELECT COUNT(*) FROM outbox").Scan(&outbox)
-		if len(ex.Events) != len(ex.Tickets) || outbox != len(ex.Events) {
-			t.Errorf("%s: %d tickets, %d events, %d outbox rows", p, len(ex.Tickets), len(ex.Events), outbox)
+		if len(ex.Events) != len(ex.Tickets) {
+			t.Errorf("%s: %d tickets, %d events", p, len(ex.Tickets), len(ex.Events))
 		}
 		b.Close()
 	}

@@ -62,36 +62,32 @@ func ParseID(s string) (ID, error) {
 type Status string
 
 const (
-	StatusBacklog        Status = "backlog"
-	StatusTodo           Status = "todo"
-	StatusInProgress     Status = "in_progress"
-	StatusInReview       Status = "in_review"
-	StatusInQA           Status = "in_qa"
-	StatusReadyToRelease Status = "ready_to_release"
-	StatusDone           Status = "done"
-	StatusBlocked        Status = "blocked"
-	StatusCancelled      Status = "cancelled"
+	StatusBacklog    Status = "backlog"
+	StatusTodo       Status = "todo"
+	StatusInProgress Status = "in_progress"
+	StatusInReview   Status = "in_review"
+	StatusDone       Status = "done"
+	StatusBlocked    Status = "blocked"
+	StatusCancelled  Status = "cancelled"
 )
 
 // Statuses lists every status in workflow order.
 var Statuses = []Status{
-	StatusBacklog, StatusTodo, StatusInProgress, StatusInReview, StatusInQA,
-	StatusReadyToRelease, StatusBlocked, StatusDone, StatusCancelled,
+	StatusBacklog, StatusTodo, StatusInProgress, StatusInReview,
+	StatusBlocked, StatusDone, StatusCancelled,
 }
 
 // workflows lists the moves each ticket type allows. Ship tickets reach done
-// only through review, QA and release; scout tickets end at in_review, where
-// the owner reads the report. Blocked is not listed as a source: a blocked
+// only from in_review, where the reviewer sets them done; scout tickets end
+// at in_review, where the owner reads the report. Blocked is not listed as a source: a blocked
 // ticket returns only to the status it was blocked from, or is cancelled
 // (see Ticket.NextStatuses). Done and cancelled are terminal.
 var workflows = map[Type]map[Status][]Status{
 	TypeShip: {
-		StatusBacklog:        {StatusTodo, StatusBlocked, StatusCancelled},
-		StatusTodo:           {StatusInProgress, StatusBacklog, StatusBlocked, StatusCancelled},
-		StatusInProgress:     {StatusInReview, StatusTodo, StatusBlocked, StatusCancelled},
-		StatusInReview:       {StatusInQA, StatusInProgress, StatusBlocked, StatusCancelled},
-		StatusInQA:           {StatusReadyToRelease, StatusInProgress, StatusBlocked, StatusCancelled},
-		StatusReadyToRelease: {StatusDone, StatusInProgress, StatusBlocked, StatusCancelled},
+		StatusBacklog:    {StatusTodo, StatusBlocked, StatusCancelled},
+		StatusTodo:       {StatusInProgress, StatusBacklog, StatusBlocked, StatusCancelled},
+		StatusInProgress: {StatusInReview, StatusTodo, StatusBlocked, StatusCancelled},
+		StatusInReview:   {StatusDone, StatusInProgress, StatusBlocked, StatusCancelled},
 	},
 	TypeScout: {
 		StatusBacklog:    {StatusTodo, StatusBlocked, StatusCancelled},
@@ -115,14 +111,15 @@ func (s Status) Valid() bool {
 func (s Status) Terminal() bool { return s == StatusDone || s == StatusCancelled }
 
 // WritesCode reports whether work in status s changes code: only then does
-// a claim wait on dependencies and areas, and hold its areas (0245).
+// a claim wait on dependencies and areas, and hold its areas. Claims for
+// review or grooming don't.
 func (s Status) WritesCode() bool { return s == StatusTodo || s == StatusInProgress }
 
-// IsSendBack reports whether from -> to sends work back from review or QA,
-// which adds one to a ship ticket's tries. An owner sending a scout report
-// back is not a try (decision 0502).
+// IsSendBack reports whether from -> to sends work back from review, which
+// adds one to a ship ticket's tries. An owner sending a scout report back
+// is not a try: there is no code to fix.
 func IsSendBack(from, to Status) bool {
-	return to == StatusInProgress && (from == StatusInReview || from == StatusInQA)
+	return to == StatusInProgress && from == StatusInReview
 }
 
 // ParseStatus validates a status name.
@@ -151,7 +148,7 @@ func ParseStatuses(s string) ([]Status, error) {
 }
 
 // Type is a ticket's shape. Ship tickets deliver changes and go through
-// review, QA and release. Scout tickets end at an evidenced report.
+// review. Scout tickets end at an evidenced report.
 type Type string
 
 const (
@@ -175,9 +172,15 @@ func ParseType(s string) (Type, error) {
 // lease_expired.
 const SystemActor = "maestro-ticket"
 
-// RoleOperationsManager is the only role that sets ship tickets done, after
-// release.
-const RoleOperationsManager = "operations-manager"
+// Roles. Only the reviewer sets ship tickets done, after it merges the PR.
+const (
+	RoleChiefOfStaff = "chief-of-staff"
+	RoleEngineer     = "engineer"
+	RoleReviewer     = "reviewer"
+)
+
+// Roles lists every role a ticket or an actor may have.
+var Roles = []string{RoleChiefOfStaff, RoleEngineer, RoleReviewer}
 
 // Priority runs 0 (most urgent) to 3.
 const (
@@ -194,14 +197,23 @@ const (
 )
 
 var (
-	namePattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	holderPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:-]*$`)
 )
 
-// ValidateRole checks a role name (lowercase, hyphens), empty allowed.
+// ValidRole reports whether role is one of Roles.
+func ValidRole(role string) bool {
+	for _, r := range Roles {
+		if role == r {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateRole checks a role name against Roles, empty allowed.
 func ValidateRole(role string) error {
-	if role != "" && !namePattern.MatchString(role) {
-		return fmt.Errorf("%w: role %q must be lowercase letters, digits and hyphens", ErrInvalid, role)
+	if role != "" && !ValidRole(role) {
+		return fmt.Errorf("%w: unknown role %q (want %s)", ErrInvalid, role, strings.Join(Roles, ", "))
 	}
 	return nil
 }
@@ -257,7 +269,7 @@ type Ticket struct {
 	CreatedBy string `json:"created_by"`
 	// Owner asked for the work. On scout tickets the owner sets done.
 	Owner string `json:"owner"`
-	// Tries counts send-backs from review or QA.
+	// Tries counts send-backs from review.
 	Tries int `json:"tries"`
 	// LeaseExpiries counts the leases on this ticket that expired instead of
 	// being released: sessions that died or stalled while holding it.
@@ -299,17 +311,17 @@ func (t Ticket) CanMove(to Status) bool {
 }
 
 // CheckGate decides whether actor, acting as actorRole, may move t to
-// status to. Only the Operations Manager sets a ship ticket done; only its
-// owner sets a scout ticket done. Run it after CanMove.
+// status to. Only the reviewer sets a ship ticket done; only its owner sets
+// a scout ticket done. Run it after CanMove.
 func (t Ticket) CheckGate(to Status, actor, actorRole string) error {
 	if to != StatusDone {
 		return nil
 	}
 	switch t.Type {
 	case TypeShip:
-		if actorRole != RoleOperationsManager {
+		if actorRole != RoleReviewer {
 			return fmt.Errorf("%w: only %s sets ship tickets done (actor role %q; pass --actor-role)",
-				ErrForbidden, RoleOperationsManager, actorRole)
+				ErrForbidden, RoleReviewer, actorRole)
 		}
 	case TypeScout:
 		if t.Owner == "" || t.Owner == "unknown" || actor != t.Owner {
@@ -606,7 +618,7 @@ type ListFilter struct {
 
 // ClaimRequest leases the next matching ticket, or a specific one when ID is
 // set. For --next claims Statuses defaults to [todo]. Backlog tickets are
-// claimed only by id, when the Planner grooms them, never by --next.
+// claimed only by id, when the chief of staff grooms them, never by --next.
 type ClaimRequest struct {
 	ID             ID            `json:"id,omitempty"`
 	Statuses       []Status      `json:"statuses,omitempty"`

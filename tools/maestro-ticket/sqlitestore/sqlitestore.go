@@ -35,7 +35,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
 // fencing, and the status a blocked ticket came from. Live v1 claims get
 // lease number 1 so every claim has a non-zero token. v1 never recorded
 // where a ticket was blocked from, so those return to todo: the earliest
-// active status, which never skips review or QA.
+// active status, which never skips review.
 const schemaV2 = `
 ALTER TABLE tickets ADD COLUMN type TEXT NOT NULL DEFAULT 'ship' CHECK (type IN ('ship', 'scout'));
 ALTER TABLE tickets ADD COLUMN owner TEXT NOT NULL DEFAULT '';
@@ -107,10 +107,8 @@ ALTER TABLE tickets ADD COLUMN blocked_from TEXT;
 UPDATE tickets SET blocked_from = 'todo' WHERE status = 'blocked';
 `
 
-// schemaV3 counts expired leases per ticket and adds the outbox: one row per
-// event, written in the same transaction, for a delivery hook to work
-// through (attempts, next_attempt_at, delivered_at). Events from before v3
-// are backfilled as already delivered, so a new hook doesn't replay history.
+// schemaV3 counts expired leases per ticket and adds the outbox, a delivery
+// queue with one row per event. v5 drops it.
 const schemaV3 = `
 ALTER TABLE tickets ADD COLUMN lease_expiries INTEGER NOT NULL DEFAULT 0 CHECK (lease_expiries >= 0);
 CREATE INDEX IF NOT EXISTS tickets_lease_expiry ON tickets(lease_expires_at) WHERE lease_holder IS NOT NULL;
@@ -148,6 +146,51 @@ CREATE TABLE IF NOT EXISTS areas (
 	area      TEXT    NOT NULL,
 	PRIMARY KEY (ticket_id, area)
 ) WITHOUT ROWID;
+`
+
+// schemaV5 cuts the store to three roles and one review step, and drops
+// the outbox, which nothing reads any more.
+//
+// Tickets in the removed statuses in_qa and ready_to_release go back to
+// in_review, the last step they had passed, where the reviewer sets them
+// done; blocked tickets that came from one return there too. Old role
+// names map onto the three roles; any other role is left for doctor to
+// report. Each change is logged as an event by maestro-ticket, so the log
+// still explains every ticket's state. A status move bumps version, as a
+// transition does.
+const schemaV5 = `
+INSERT INTO events (ticket_id, type, actor, data, created_at)
+	SELECT id, 'transitioned', 'maestro-ticket',
+		json_object('from', status, 'to', 'in_review', 'note', 'schema v5: status ' || status || ' removed'),
+		CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	FROM tickets WHERE status IN ('in_qa', 'ready_to_release') ORDER BY id;
+UPDATE tickets SET status = 'in_review', version = version + 1, updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	WHERE status IN ('in_qa', 'ready_to_release');
+
+INSERT INTO events (ticket_id, type, actor, data, created_at)
+	SELECT id, 'updated', 'maestro-ticket',
+		json_object('blocked_from', 'in_review', 'note', 'schema v5: status ' || blocked_from || ' removed'),
+		CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	FROM tickets WHERE blocked_from IN ('in_qa', 'ready_to_release') ORDER BY id;
+UPDATE tickets SET blocked_from = 'in_review', updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	WHERE blocked_from IN ('in_qa', 'ready_to_release');
+
+CREATE TEMP TABLE v5_roles (old TEXT PRIMARY KEY, new TEXT NOT NULL);
+INSERT INTO v5_roles VALUES
+	('planner', 'chief-of-staff'),
+	('senior-software-engineer', 'engineer'), ('junior-software-engineer', 'engineer'),
+	('code-reviewer', 'reviewer'), ('qa-lead', 'reviewer'), ('operations-manager', 'reviewer');
+INSERT INTO events (ticket_id, type, actor, data, created_at)
+	SELECT t.id, 'updated', 'maestro-ticket',
+		json_object('role', r.new, 'note', 'schema v5: role ' || r.old || ' renamed'),
+		CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	FROM tickets t JOIN v5_roles r ON r.old = t.role ORDER BY t.id;
+UPDATE tickets SET role = (SELECT new FROM v5_roles WHERE old = tickets.role),
+	updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	WHERE role IN (SELECT old FROM v5_roles);
+DROP TABLE v5_roles;
+
+DROP TABLE IF EXISTS outbox;
 `
 
 // Options tune a Store. The zero value is fine for production.
@@ -390,33 +433,16 @@ func (s *Store) getTicket(ctx context.Context, q querier, id ticket.ID, nowMS in
 	return t, err
 }
 
-// appendEvent logs an event and queues it in the outbox, in the caller's
-// transaction, so an event is never delivered without being committed or
-// committed without being queued.
+// appendEvent logs an event in the caller's transaction, so the change and
+// its event commit together or not at all.
 func appendEvent(ctx context.Context, tx *sql.Tx, id ticket.ID, typ, actor string, data any, nowMS int64) error {
 	b, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		"INSERT INTO events (ticket_id, type, actor, data, created_at) VALUES (?, ?, ?, ?, ?)",
 		id, typ, actor, string(b), nowMS)
-	if err != nil {
-		return err
-	}
-	seq, err := res.LastInsertId()
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(ticket.Event{
-		Seq: seq, TicketID: id, Type: typ, Actor: actor, Data: b, CreatedAt: msTime(nowMS),
-	})
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx,
-		"INSERT INTO outbox (event_id, kind, payload, next_attempt_at) VALUES (?, ?, ?, ?)",
-		seq, typ, string(payload), nowMS)
 	return err
 }
 
@@ -461,7 +487,7 @@ func (s *Store) expireLease(ctx context.Context, tx *sql.Tx, t ticket.Ticket, no
 // waiting on readers or writers (PASSIVE), so the WAL stays short even when
 // SQLite's own checkpoint on commit keeps losing to busy readers. It
 // returns the WAL's size in frames and how many are now in the database.
-// SQLite only; the reap loop calls it.
+// SQLite only; reap calls it.
 func (s *Store) Checkpoint(ctx context.Context) (walFrames, checkpointed int, err error) {
 	var busy int
 	err = s.w.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &walFrames, &checkpointed)
@@ -663,7 +689,7 @@ func setAreas(ctx context.Context, tx *sql.Tx, id ticket.ID, areas []string) err
 
 // Update implements ticket.Store. It doesn't change version: the claim
 // rules read dependencies and areas live, and a holder's --expect-version
-// shouldn't fail because the Planner added a dependency.
+// shouldn't fail because someone added a dependency.
 func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ticket, error) {
 	if err := req.Validate(); err != nil {
 		return ticket.Ticket{}, err
@@ -856,7 +882,7 @@ func (s *Store) pickClaimable(ctx context.Context, tx *sql.Tx, req ticket.ClaimR
 		if c != nil && c.Holder != req.Holder {
 			return t, fmt.Errorf("%w: %s is held by %s until %s", ticket.ErrClaimed, t.ID, c.Holder, c.ExpiresAt.Format(time.RFC3339))
 		}
-		// Grooming, review, QA, release and answering an escalation change
+		// Grooming, review and answering an escalation change
 		// no code, and renewing a lease you hold starts nothing new.
 		if !t.Status.WritesCode() || c != nil {
 			return t, nil
@@ -1365,13 +1391,42 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	}
 	add("leases", true, "%d tickets; %d live claims, %d expired (claimable; reap frees them)", total, live, expired)
 
-	var unqueued int
-	err = conn.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM events e WHERE NOT EXISTS (SELECT 1 FROM outbox o WHERE o.event_id = e.seq)").Scan(&unqueued)
+	// Statuses and roles are checked in Go, not by the schema: list the
+	// open tickets whose values this build doesn't know.
+	var badStatus, badRole []string
+	vrows, err := conn.QueryContext(ctx, "SELECT id, status, role FROM tickets WHERE status NOT IN ('done', 'cancelled') ORDER BY id")
 	if err != nil {
 		return rep, err
 	}
-	add("outbox", unqueued == 0, "%d events without an outbox row", unqueued)
+	for vrows.Next() {
+		var id ticket.ID
+		var status, role string
+		if err := vrows.Scan(&id, &status, &role); err != nil {
+			vrows.Close()
+			return rep, err
+		}
+		if !ticket.Status(status).Valid() {
+			badStatus = append(badStatus, fmt.Sprintf("%s (%s)", id, status))
+		}
+		if role != "" && !ticket.ValidRole(role) {
+			badRole = append(badRole, fmt.Sprintf("%s (%s)", id, role))
+		}
+	}
+	vrows.Close()
+	if err := vrows.Err(); err != nil {
+		return rep, err
+	}
+	if len(badStatus) == 0 {
+		add("statuses", true, "every open ticket has a known status")
+	} else {
+		add("statuses", false, "unknown status on %s", strings.Join(badStatus, ", "))
+	}
+	if len(badRole) == 0 {
+		add("roles", true, "every open ticket has a known role or none")
+	} else {
+		add("roles", false, "unknown role on %s (want %s; fix with transition --role)",
+			strings.Join(badRole, ", "), strings.Join(ticket.Roles, ", "))
+	}
 
 	var lastSeq int64
 	var triggers int

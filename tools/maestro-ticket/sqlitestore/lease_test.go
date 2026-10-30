@@ -23,7 +23,7 @@ func eventTypes(t *testing.T, s *Store, since int64) []string {
 	return types
 }
 
-// F4/F12: a write by someone who holds no lease used to clear an expired
+// A write by someone who holds no lease used to clear an expired
 // lease silently (a terminal move logged it as "released"), or leave it
 // unreported. Every write now logs lease_expired first.
 func TestUnclaimedWritesLogExpiredLease(t *testing.T) {
@@ -36,9 +36,9 @@ func TestUnclaimedWritesLogExpiredLease(t *testing.T) {
 	clk.Advance(2 * time.Minute)
 
 	before, _ := s.LastSeq(ctx)
-	// The Planner read version N while the lease showed as expired; its
+	// The chief of staff read version N while the lease showed as expired; its
 	// --expect-version N still holds after the store logs the expiry.
-	got, err := s.Transition(ctx, ticket.TransitionRequest{ID: a.ID, To: ticket.StatusCancelled, ExpectVersion: ca.Version, Actor: "planner"})
+	got, err := s.Transition(ctx, ticket.TransitionRequest{ID: a.ID, To: ticket.StatusCancelled, ExpectVersion: ca.Version, Actor: "cos"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestUnclaimedWritesLogExpiredLease(t *testing.T) {
 	}
 
 	before, _ = s.LastSeq(ctx)
-	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: b.ID, Body: "status?", Actor: "planner"}); err != nil {
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: b.ID, Body: "status?", Actor: "cos"}); err != nil {
 		t.Fatal(err)
 	}
 	if types := eventTypes(t, s, before); fmt.Sprint(types) != "[lease_expired commented]" {
@@ -131,7 +131,7 @@ func TestReapBatches(t *testing.T) {
 	}
 }
 
-// F14 (M4): a lease is expired at its exact expiry millisecond, not after.
+// A lease is expired at its exact expiry millisecond, not after.
 func TestLeaseExpiresAtExactMillisecond(t *testing.T) {
 	s, clk := newStore(t)
 	ctx := context.Background()

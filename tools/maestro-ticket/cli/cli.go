@@ -67,14 +67,14 @@ Commands:
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
-  keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--every D]
+  keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
   release     <id> --holder H --token N
-  reap        [--every D]
+  reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
               [--actor-role R]
   comment     <id> (--body B | --body-file F|-) [--holder H --token N]
-  events      [--since SEQ] [--limit N] [--ticket ID] [--type T] [--wait D]
-  backup      [--dir D] [--keep N] [--every D]   (default dir: backups/ next to the store)
+  events      [--since SEQ] [--limit N] [--ticket ID] [--type T]
+  backup      [--dir D] [--keep N]   (default dir: backups/ next to the store)
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
@@ -95,21 +95,21 @@ too. All fail with exit 4 once the lease is lost.
 Heartbeats: claim --keepalive PID starts a background keepalive that
 heartbeats every ttl/3 while process PID (the harness session) lives, and
 stops when the lease is lost or released.
-Expired leases: reap frees them and logs lease_expired; so does any write to
-the ticket. Run "reap --every 30s" as a background process; it also
-checkpoints the WAL.
+Expired leases: reap frees them, logs lease_expired and checkpoints the
+WAL; any write to the ticket frees its expired lease too.
 
-Statuses: backlog todo in_progress in_review in_qa ready_to_release blocked done cancelled
-Ship:  backlog -> todo -> in_progress -> in_review -> in_qa -> ready_to_release -> done
+Roles: chief-of-staff engineer reviewer
+Statuses: backlog todo in_progress in_review blocked done cancelled
+Ship:  backlog -> todo -> in_progress -> in_review -> done (by the reviewer)
 Scout: backlog -> todo -> in_progress -> in_review -> done (by the owner)
-Only --actor-role operations-manager (default $MAESTRO_TICKET_ROLE) sets a ship
-ticket done; only its owner (--actor) sets a scout ticket done.
+Only --actor-role reviewer (default $MAESTRO_TICKET_ROLE) sets a ship ticket
+done; only its owner (--actor) sets a scout ticket done.
 In todo and in_progress, claim skips (--next) or refuses (by id) tickets
 whose dependencies aren't all done, and tickets whose areas overlap (equal,
 or one inside the other) an area of another todo or in_progress ticket under
 a live claim.
 Blocked returns only to the status it was blocked from. Send-backs from
-in_review or in_qa to in_progress add one to a ship ticket's tries.
+in_review to in_progress add one to a ship ticket's tries.
 Exit codes: 0 ok, 1 internal, 2 usage/invalid, 3 not found, 4 conflict, 5 no work
 `
 
@@ -625,7 +625,7 @@ func runKeepalive(ctx context.Context, c *call) error {
 	token := c.fs.Int64("token", 0, "lease token from your claim (required)")
 	pid := c.fs.Int("pid", 0, "keep the lease while this process lives (required)")
 	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length from each heartbeat")
-	every := c.fs.Duration("every", 0, "heartbeat interval (default ttl/3)")
+	every := c.fs.Duration("interval", 0, "heartbeat interval (default ttl/3)")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		id, err := c.idArg()
 		if err != nil {
@@ -642,7 +642,7 @@ func runKeepalive(ctx context.Context, c *call) error {
 			interval = *ttl / 3
 		}
 		if interval <= 0 || interval >= *ttl {
-			return usagef("keepalive: --every must be shorter than --ttl")
+			return usagef("keepalive: --interval must be shorter than --ttl")
 		}
 		// Check the process often, so a dead session stops heartbeating
 		// within a second, not a whole interval.
@@ -694,40 +694,24 @@ func runRelease(ctx context.Context, c *call) error {
 }
 
 func runReap(ctx context.Context, c *call) error {
-	every := c.fs.Duration("every", 0, "keep running, reaping at this interval (0 = once)")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
-		if *every < 0 || (*every > 0 && *every < time.Second) {
-			return usagef("reap: --every must be at least 1s")
+		res, err := s.Reap(ctx)
+		if err != nil {
+			return err
 		}
-		for {
-			res, err := s.Reap(ctx)
-			if err != nil {
-				return err
-			}
-			// The long-running reaper is the store's upkeep process: it also
-			// checkpoints the WAL on drivers that have one.
-			if cp, ok := s.(interface {
-				Checkpoint(context.Context) (int, int, error)
-			}); ok && *every > 0 {
-				if _, _, err := cp.Checkpoint(ctx); err != nil {
-					fmt.Fprintf(c.env.Stderr, "maestro-ticket reap: checkpoint: %v\n", err)
-				}
-			}
-			if err := c.out(res, func(w io.Writer) { printReap(w, res) }); err != nil {
-				return err
-			}
-			if *every == 0 {
-				return nil
-			}
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(*every):
+		// Reap is the store's upkeep: it also checkpoints the WAL on drivers
+		// that have one.
+		if cp, ok := s.(interface {
+			Checkpoint(context.Context) (int, int, error)
+		}); ok {
+			if _, _, err := cp.Checkpoint(ctx); err != nil {
+				fmt.Fprintf(c.env.Stderr, "maestro-ticket reap: checkpoint: %v\n", err)
 			}
 		}
+		return c.out(res, func(w io.Writer) { printReap(w, res) })
 	})
 }
 
@@ -791,7 +775,6 @@ func runEvents(ctx context.Context, c *call) error {
 	limit := c.fs.Int("limit", 0, "max events (0 = all)")
 	tid := c.fs.String("ticket", "", "only this ticket")
 	typ := c.fs.String("type", "", "only this event type")
-	wait := c.fs.Duration("wait", 0, "if nothing matches yet, wait up to this long for an event")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -807,10 +790,7 @@ func runEvents(ctx context.Context, c *call) error {
 			}
 			f.TicketID = id
 		}
-		if *wait < 0 {
-			return usagef("events: --wait must be >= 0")
-		}
-		evs, err := waitEvents(ctx, s, f, *wait)
+		evs, err := s.Events(ctx, f)
 		if err != nil {
 			return err
 		}
@@ -822,28 +802,6 @@ func runEvents(ctx context.Context, c *call) error {
 	})
 }
 
-// eventPoll is how often events --wait checks the store. Reads are cheap
-// and never block writers.
-const eventPoll = 200 * time.Millisecond
-
-// waitEvents returns the matching events, polling for up to wait while
-// there are none. A watcher sleeps here instead of spending tokens. It
-// returns an empty list on timeout or when ctx is cancelled.
-func waitEvents(ctx context.Context, s ticket.Store, f ticket.EventFilter, wait time.Duration) ([]ticket.Event, error) {
-	deadline := time.Now().Add(wait)
-	for {
-		evs, err := s.Events(ctx, f)
-		if err != nil || len(evs) > 0 || !time.Now().Before(deadline) {
-			return evs, err
-		}
-		select {
-		case <-ctx.Done():
-			return evs, nil
-		case <-time.After(min(eventPoll, time.Until(deadline))):
-		}
-	}
-}
-
 // backupPrefix and backupSuffix frame snapshot names, and backupName
 // matches them whole, so pruning only ever touches files backup wrote.
 const backupPrefix, backupSuffix = "tickets-", ".db"
@@ -853,16 +811,12 @@ var backupName = regexp.MustCompile(`^tickets-\d{8}T\d{6}\.\d{3}Z\.db$`)
 func runBackup(ctx context.Context, c *call) error {
 	dir := c.fs.String("dir", "", "snapshot directory (default backups/ next to the store)")
 	keep := c.fs.Int("keep", 24, "keep this many newest snapshots, delete older ones (0 = keep all)")
-	every := c.fs.Duration("every", 0, "keep running, taking a snapshot at this interval (0 = once)")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
 		if *keep < 0 {
 			return usagef("backup: --keep must be >= 0")
-		}
-		if *every < 0 || (*every > 0 && *every < time.Minute) {
-			return usagef("backup: --every must be at least 1m")
 		}
 		store, _, err := c.storePath()
 		if err != nil {
@@ -878,29 +832,17 @@ func runBackup(ctx context.Context, c *call) error {
 		if now == nil {
 			now = time.Now
 		}
-		for {
-			name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + backupSuffix
-			path := filepath.Join(d, name)
-			if err := s.Backup(ctx, path); err != nil {
-				return err
-			}
-			pruned, err := pruneBackups(d, *keep, store)
-			if err != nil {
-				return err
-			}
-			res := map[string]any{"path": path, "pruned": pruned}
-			if err := c.out(res, func(w io.Writer) { fmt.Fprintf(w, "wrote %s (pruned %d)\n", path, len(pruned)) }); err != nil {
-				return err
-			}
-			if *every == 0 {
-				return nil
-			}
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(*every):
-			}
+		name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + backupSuffix
+		path := filepath.Join(d, name)
+		if err := s.Backup(ctx, path); err != nil {
+			return err
 		}
+		pruned, err := pruneBackups(d, *keep, store)
+		if err != nil {
+			return err
+		}
+		res := map[string]any{"path": path, "pruned": pruned}
+		return c.out(res, func(w io.Writer) { fmt.Fprintf(w, "wrote %s (pruned %d)\n", path, len(pruned)) })
 	})
 }
 
