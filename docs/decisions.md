@@ -2,7 +2,7 @@
 
 The rules still in force, each with its reason. To change one, edit its line and give the reason in the commit. The old log (135 files under `docs/decisions/`) lives in git history: `git log -- docs/decisions/`.
 
-1. **Maestro is tooling only.** It ships the files the installer copies, the playbook, the ticket tool, the skills slot and the personas; bots and people run them. Nothing in Maestro runs on its own: no loop, watcher, scheduler, dispatcher that picks a ticket and starts a run, or webhook that wakes a bot. Why: whoever types the command is in charge, and nothing acts unasked. (1040, owner's ruling, Oct 29 2026.)
+1. **Maestro is tooling only.** It ships the files the installer copies, the playbook, the ticket tool, the skills slot and the personas; bots and people run them. Nothing in Maestro runs on its own: no loop, watcher, scheduler, dispatcher that picks a ticket and starts a run, or webhook that wakes a bot. `maestro-play run work` with no `--ticket` takes the next ticket once, for the person who typed it, and never waits for more. Why: whoever types the command is in charge, and nothing acts unasked. (1040, owner's ruling, Oct 29 2026.)
 2. **Tickets live in `maestro-ticket` only.** Not in chat, a Markdown file or a second tracker. Why: one store gives one answer, and it enforces the status, lease and fence rules.
 3. **Every ticket write under a claim carries its fencing token.** The token grows on every claim. Why: a session whose lease ran out can't overwrite the new holder's work. (0203.)
 4. **Sessions `maestro-play` starts never write tickets; the engine does, from their reply.** Why: every write gets the token, an idempotency key and a version check in one place. (0732.)

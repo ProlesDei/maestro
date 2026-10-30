@@ -1,6 +1,6 @@
-// Package playbook holds the playbook schema: the YAML files under
-// playbooks/<role>/<job>.yaml, the step types, and the names the engine and
-// the lint agree on. It has no I/O beyond reading the files.
+// Package playbook holds the playbook schema: playbooks/<name>/playbook.yaml,
+// the step types, and the names the engine and the lint agree on. It has no
+// I/O beyond reading the files.
 package playbook
 
 import (
@@ -16,6 +16,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// File is a playbook's file name inside its folder, playbooks/<name>/.
+const File = "playbook.yaml"
 
 // Roles are the bot-profile folder names a playbook can belong to.
 var Roles = []string{"chief-of-staff", "planner", "engineer", "qa-lead", "reviewer"}
@@ -63,7 +66,7 @@ const (
 // Targets are the reserved on: targets.
 var Targets = []string{TargetNext, TargetBlock, TargetDone, TargetEnd}
 
-// Playbook is one playbooks/<role>/<job>.yaml file.
+// Playbook is one playbooks/<name>/playbook.yaml file.
 type Playbook struct {
 	Name        string     `yaml:"name"`
 	Role        string     `yaml:"role"`
@@ -83,8 +86,11 @@ type Playbook struct {
 	Path string `yaml:"-"` // file it was read from
 }
 
-// Ref is the playbook's <role>/<job> name.
-func (p *Playbook) Ref() string { return p.Role + "/" + p.Name }
+// Ref is the name the playbook runs by: its folder.
+func (p *Playbook) Ref() string { return p.Name }
+
+// Dir is the playbook's folder, which holds its step templates.
+func (p *Playbook) Dir() string { return filepath.Dir(p.Path) }
 
 // Step returns the step with this id, or nil.
 func (p *Playbook) Step(id string) *Step {
@@ -150,7 +156,9 @@ func decodeStrict(n *yaml.Node, v any) error {
 }
 
 // Intake says which tickets the playbook takes. run --ticket checks only
-// the status; Latest, the comment the entry expects last, is for readers.
+// the status, so a bot can resume a ticket that waits on someone. run with
+// no --ticket takes the first unclaimed ticket with the status whose latest
+// comment starts with Latest, entry by entry.
 type Intake struct {
 	Category string     `yaml:"category"`
 	Status   StringList `yaml:"status"`
@@ -348,13 +356,12 @@ func Parse(path string, data []byte) (*Playbook, error) {
 	return &p, nil
 }
 
-// Load reads <dir>/<ref>.yaml, where ref is <role>/<job>.
-func Load(dir, ref string) (*Playbook, error) {
-	role, job, ok := strings.Cut(ref, "/")
-	if !ok || role == "" || job == "" || strings.Contains(job, "/") {
-		return nil, fmt.Errorf("playbook %q: want <role>/<job>", ref)
+// Load reads <dir>/<name>/playbook.yaml.
+func Load(dir, name string) (*Playbook, error) {
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+		return nil, fmt.Errorf("playbook %q: want a folder name such as work, for %s", name, filepath.Join(dir, "<name>", File))
 	}
-	path := filepath.Join(dir, role, job+".yaml")
+	path := filepath.Join(dir, name, File)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -362,9 +369,9 @@ func Load(dir, ref string) (*Playbook, error) {
 	return Parse(path, data)
 }
 
-// LoadRole reads every playbook of a role, sorted by file name.
-func LoadRole(dir, role string) ([]*Playbook, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, role, "*.yaml"))
+// LoadAll reads every <dir>/*/playbook.yaml, sorted by folder.
+func LoadAll(dir string) ([]*Playbook, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*", File))
 	if err != nil {
 		return nil, err
 	}
@@ -380,9 +387,6 @@ func LoadRole(dir, role string) ([]*Playbook, error) {
 			return nil, err
 		}
 		out = append(out, p)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no playbooks for role %q in %s", role, dir)
 	}
 	return out, nil
 }

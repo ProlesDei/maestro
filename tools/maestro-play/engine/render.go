@@ -11,7 +11,7 @@ import (
 
 // RenderOpts selects what render prints.
 type RenderOpts struct {
-	Ref    string // <role>/<job>
+	Ref    string // the playbook's folder name
 	Step   string // a step id, "done" for the note, or "escalate"
 	Ticket string // read with maestro-ticket get
 	// TicketFile is a get --json document to use instead of the store.
@@ -70,7 +70,7 @@ func (e *Engine) Render(o RenderOpts) (string, error) {
 	case "done":
 		return renderTemplate("done.note", p.Done.Note, e.data(p, st, nil))
 	case "escalate":
-		return e.compose("_escalate", e.data(p, st, nil), str(env["harness"]))
+		return e.compose(p, "_escalate", e.data(p, st, nil), str(env["harness"]))
 	}
 	s := p.Step(o.Step)
 	if s == nil {
@@ -79,7 +79,7 @@ func (e *Engine) Render(o RenderOpts) (string, error) {
 	d := e.data(p, st, s)
 	switch s.Kind() {
 	case playbook.KindPrompt:
-		return e.compose(s.Prompt, d, str(env["harness"]))
+		return e.compose(p, s.Prompt, d, str(env["harness"]))
 	case playbook.KindTicket:
 		args, err := renderArgs(s.ID, s.Ticket, d)
 		if err != nil {

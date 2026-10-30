@@ -13,10 +13,9 @@
 # if a later step fails it removes what it wrote.
 #
 # --tickets <dir>: a team's own ticket method. <dir> holds
-# maestro-create-ticket/ and, if the team wants, maestro-work/, each with a
-# SKILL.md. They are installed in place of Maestro's folders of the same
-# name, the names the personas call. Any other entry in <dir> is refused;
-# dot files are skipped.
+# maestro-create-ticket/ with a SKILL.md, installed in place of Maestro's
+# folder of the same name, the name the personas call. Any other entry in
+# <dir> is refused; dot files are skipped.
 #
 # Uninstall, from the target repo. The first line removes the skills; the
 # second removes your project files and the ticket store, with every ticket:
@@ -78,8 +77,8 @@ if [ -n "$tickets" ]; then
 	for entry in "$tickets"/*; do
 		name=$(basename "$entry")
 		case $name in
-		maestro-create-ticket | maestro-work) skill "$entry" "--tickets $entry" ;;
-		*) die "--tickets $tickets may hold only maestro-create-ticket/ and maestro-work/, not $name" ;;
+		maestro-create-ticket) skill "$entry" "--tickets $entry" ;;
+		*) die "--tickets $tickets may hold only maestro-create-ticket/, not $name" ;;
 		esac
 		for i in "${!names[@]}"; do
 			[ "${names[i]}" != "$name" ] || from[i]=$entry

@@ -19,6 +19,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"testing"
@@ -182,6 +184,30 @@ func fakeTicket(args []string) int {
 	if sub == "create" && len(pos) == 0 {
 		fmt.Println(s.Results[fl["--idempotency-key"]])
 		return 0
+	}
+	if sub == "list" {
+		// Like the store's list: by priority, then id.
+		list := []*fakeTicketT{}
+		for _, t := range s.Tickets {
+			latest := ""
+			if n := len(t.Comments); n > 0 {
+				latest = t.Comments[n-1].Body
+			}
+			switch {
+			case fl["--status"] != "" && !slices.Contains(strings.Split(fl["--status"], ","), t.Status):
+			case fl["--unclaimed"] == "true" && t.Claim != nil && !t.Claim.Expired:
+			case !strings.HasPrefix(latest, fl["--latest-prefix"]):
+			default:
+				list = append(list, t)
+			}
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].Priority != list[j].Priority {
+				return list[i].Priority < list[j].Priority
+			}
+			return list[i].ID < list[j].ID
+		})
+		return out(map[string]any{"tickets": list})
 	}
 	if len(pos) == 0 {
 		return fail("usage", 2)

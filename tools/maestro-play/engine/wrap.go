@@ -323,7 +323,7 @@ func oneLine(s string) string {
 // can't, the note falls back on the stop reason.
 func (e *Engine) escalatePrompt(p *playbook.Playbook, st *State) error {
 	data := e.data(p, st, nil)
-	prompt, err := e.compose("_escalate", data, str(st.Env["harness"]))
+	prompt, err := e.compose(p, "_escalate", data, str(st.Env["harness"]))
 	if err != nil {
 		st.Escalation = map[string]any{"error": "render _escalate.md: " + err.Error()}
 		return nil

@@ -1,15 +1,19 @@
 ---
 name: maestro-prune
-description: "Use when the user types /maestro-prune or says 'prune this repo', 'remove dead code', 'delete unused files', or 'clear out stale branches and worktrees'. Finds what nothing uses, proves it, lists it by class, then removes it so a revert brings it back. Asks before anything that can't be recovered."
+description: "Find what nothing uses, prove it, list it by class, and remove it so a revert brings it back, asking before anything that can't be recovered. Use for /maestro-prune, 'prune this repo', 'remove dead code', 'delete unused files', or 'clear out stale branches and worktrees'."
 argument-hint: "[path] [--dry-run]"
 disable-model-invocation: true
 ---
 
 # Prune
 
-Find what nothing uses, prove that nothing uses it, and remove it so a revert brings it back. Start at `[path]` if given, else the repo root.
+You remove what nothing uses, each item with its proof, so a revert brings it back. You never remove what can't be recovered without the user's yes. Start at `[path]` if given, else the repo root. Follow the **maestro-working-principles** skill.
 
-## 1. Inventory (read only)
+## Start
+
+Open a todo list with one item per phase below.
+
+## Phase A: Find candidates (read only)
 
 | Class | How to find it |
 |---|---|
@@ -22,20 +26,30 @@ Find what nothing uses, prove that nothing uses it, and remove it so a revert br
 | Maestro leftovers | `.maestro/worktrees/<ticket>`, and `evidence/<ticket>` (QA evidence is in its `qa/` folder) and `scratch/` files under `$(git rev-parse --git-common-dir)/maestro/`, for tickets `maestro-ticket get <id> --json` shows `done` or `cancelled`; ask the user how old they must be |
 | Empty folders, duplicates | `find -type d -empty`; identical files by `git hash-object` |
 
-## 2. Sort each candidate
+## Phase B: Sort each candidate
 
-- **Safe:** tracked and proven unused. A `git rm` in its own commit comes back on revert.
-- **Ask first:** anything that can't be recovered (untracked or ignored files, worktrees, branches, Maestro leftovers), anything large, and anything whose only proof is "no grep hits" in code that loads files by name at runtime.
-- **Never:** `.maestro/project/`, harness settings (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, secrets files, a worktree with changes, a branch with unpushed or unmerged commits, the ticket store (`tickets.db` and `backups/`), the `STOP` file, and anything another session holds.
+| Sort | What goes there |
+|---|---|
+| Safe | tracked and proven unused. A `git rm` in its own commit comes back on revert. |
+| Ask first | anything that can't be recovered (untracked or ignored files, worktrees, branches, Maestro leftovers), anything large, and anything whose only proof is "no grep hits" in code that loads files by name at runtime |
+| Never | `.maestro/project/`, harness settings (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, secrets files, a worktree with changes, a branch with unpushed or unmerged commits, the ticket store (`tickets.db` and `backups/`), the `STOP` file, and anything another session holds |
 
-## 3. Show the list
+## Phase C: Show the list
 
 Show every candidate by class, with its proof (the empty grep, the merge check) and its size. With `--dry-run`, stop here.
 
-## 4. Remove
+## Phase D: Remove
 
 1. Remove the safe class with `git rm <paths>`, one commit per class. Each message says what went and how you proved it unused.
 2. Remove ask-first items only after the user says yes, one item or class at a time, by explicit path. Use `git worktree remove <path>` (no `--force`) and `git branch -d`. Never `git clean`, `rm -rf` on a pattern, or `git branch -D`.
 3. Run every command under `## Checks` in `.maestro/project/project-setup.md`, or the repo's build and tests if that file is missing. If one fails, revert that class's commit and move its items to the kept list.
 
-Reply: the removed items by class with their commits; the kept items, each with its reason; files and bytes saved; the check results; then the ask-first items still waiting on the user.
+```
+Removed:  <class>: <paths> (<commit sha>)
+Kept:     <path>: <reason>
+Saved:    <n> files, <bytes>
+Checks:   <command>: exit <code>
+Waiting:  <ask-first items still waiting on the user>
+```
+
+**Reply:** the report above, filled in.

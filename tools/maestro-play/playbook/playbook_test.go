@@ -30,7 +30,7 @@ steps:
 	if p.Steps[0].When.If != "{{true}}" || p.Steps[1].When.Reason != "why" {
 		t.Errorf("when %+v %+v", p.Steps[0].When, p.Steps[1].When)
 	}
-	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindGate || p.Ref() != "chief-of-staff/x" || p.Index("b") != 1 {
+	if p.Steps[0].Kind() != KindRun || p.Steps[1].Kind() != KindGate || p.Ref() != "x" || p.Index("b") != 1 {
 		t.Errorf("kinds %q %q", p.Steps[0].Kind(), p.Steps[1].Kind())
 	}
 	for _, bad := range []string{

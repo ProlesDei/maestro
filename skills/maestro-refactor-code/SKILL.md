@@ -1,43 +1,50 @@
 ---
 name: maestro-refactor-code
-description: "Use when the user types /maestro-refactor-code or says 'refactor X', 'restructure this module', or 'clean this up without changing behaviour'. Pins current behaviour with tests proven able to fail, then makes small named refactorings with the tests green after each. Never mixes in a behaviour change."
+description: "Pin current behaviour with tests proven able to fail, then make small named refactorings with the tests green after each. Use for /maestro-refactor-code, 'refactor X', 'restructure this module', or 'clean this up without changing behaviour'."
 argument-hint: "<what to refactor and why> [ticket id]"
 disable-model-invocation: true
 ---
 
 # Refactor code
 
-Change the code's structure, never what it does. The tests stay green after every step, and no step changes behaviour.
+You change the code's structure, never what it does. The tests stay green after every step, and no step mixes in a behaviour change. Follow the **maestro-working-principles** skill.
 
-## 1. Name the problem and the target
+## Start
 
-With a ticket id, read the problem from `maestro-ticket get <id> --json`. Name it in concrete terms: duplication at `a:12` and `b:40`, a 600-line function, a module everything imports, names that lie. Sketch the shape you are aiming for in a few lines. "Cleaner" is not a reason. If you can't name a problem, stop.
+Open a todo list with one item per phase below.
 
-## 2. Pin the behaviour
+## Phase A: Name the problem
+
+1. With a ticket id, read the problem from `maestro-ticket get <id> --json`.
+2. Name the problem in concrete terms: duplication at `a:12` and `b:40`, a 600-line function, a module everything imports, names that lie. "Cleaner" is not a reason. If you can't name a problem, stop.
+3. Sketch the target shape in a few lines.
+
+## Phase B: Pin the behaviour
 
 1. Write characterisation tests at the public edges the refactor could touch: exported functions, CLI output, API responses, file formats, error messages callers parse. They must pass on the unchanged code.
 2. List what you can't test, and keep the refactor away from it.
 3. Prove the tests can fail: break the code on purpose (not a test), watch a test go red, and undo the break until `git status --porcelain` prints nothing.
 4. Commit the tests alone: `test: characterise <area>`.
 
-## 3. Move in small, named steps
+## Phase C: Move in small, named steps
 
-Each step is one known refactoring, in its own commit, with the tests green after it:
+1. Make one known refactoring per commit, with the tests green after it: extract or inline a function or variable, rename, move a function or module, introduce a parameter object, replace a conditional with polymorphism or a lookup table, split a module along a seam, replace a temp with a query, remove dead code the tests prove unused.
+2. Never change a characterisation test. If one must change, that step changes behaviour: stop, and give it a ticket of its own.
+3. Keep public interfaces. If one must move, leave a shim at the old name and mark it deprecated.
+4. Make no formatting churn, add no dependencies, fix nothing "while you're here". List those as follow-ups for the **maestro-create-ticket** skill.
 
-- extract or inline a function or variable
-- rename
-- move a function or module
-- introduce a parameter object
-- replace a conditional with polymorphism or a lookup table
-- split a module along a seam
-- replace a temp with a query
-- remove dead code the tests prove unused
+## Phase D: Prove it
 
-## 4. Hard rules
+1. Run every command under `## Checks` in `.maestro/project/project-setup.md`, or the repo's build and tests if that file is missing.
+2. On a hot path, run the same benchmark before and after, under the same conditions, and give both numbers.
 
-- The characterisation tests never change. If one must, that step changes behaviour: stop, and give it a ticket of its own.
-- Keep public interfaces. If one must move, leave a shim at the old name and mark it deprecated.
-- No formatting churn, no new dependencies, no "while I'm here" fixes. List those as follow-ups for `/maestro-create-ticket`.
-- On a hot path, run the same benchmark before and after, under the same conditions, and give both numbers.
+```
+Problem:    <the concrete problem>; target: <the shape>
+Pinned:     <test commit sha>; went red when <the break>
+Steps:      <sha> <refactoring>: <what moved>   (one line each)
+Checks:     <command>: exit <code>; benchmark <before> / <after>
+Not tested: <areas the refactor stayed away from>
+Follow-ups: <one line each>
+```
 
-Reply: the problem and target shape; the characterisation test commit and the break that turned it red; one line per refactoring commit; the check results; what you couldn't test; and the follow-ups.
+**Reply:** the report above, filled in.

@@ -1,15 +1,17 @@
 # maestro-play
 
-Runs a playbook (`playbooks/<role>/<job>.yaml`) step by step: it claims the ticket, runs each step as a `maestro-ticket` call, a built-in request or a harness prompt, saves every output in the run state, and writes the handoff or escalation note itself. Sessions it starts never write tickets. Go, no cgo; build with `go build -o bin/maestro-play ./cmd/maestro-play`. `go test -race ./...` here also lints and renders `../../playbooks`.
+Runs a playbook (`playbooks/<name>/playbook.yaml`, its step templates beside it) step by step: it claims the ticket, runs each step as a `maestro-ticket` call, a built-in request or a harness prompt, saves every output in the run state, and writes the handoff or escalation note itself. Sessions it starts never write tickets. Go, no cgo; build with `go build -o bin/maestro-play ./cmd/maestro-play`. `go test -race ./...` here also lints and renders `../../playbooks`.
 
 ```sh
-maestro-play run engineer/work --ticket <id> --bot <bot-id>   # a claim: false playbook takes no --ticket
-maestro-play resume <run-id>                                  # after a crash or a stop
-maestro-play render <role>/<job> --step <id|done|escalate> [--ticket <id> | --ticket-file <f>] [--env <f>]
+maestro-play run work [--ticket <id>] [--bot <bot-id>]   # no --ticket: the next ticket intake matches
+maestro-play resume <run-id>                             # after a crash or a stop
+maestro-play render work --step <id|done|escalate> [--ticket <id> | --ticket-file <f>] [--env <f>]
 maestro-play lint [<playbooks-dir>]
 ```
 
 `run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused). Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 7 stopped (`<common>/STOP` exists). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
+
+`--bot` defaults to `$MAESTRO_BOT`, else `user`. Without `--ticket`, a playbook that claims takes the first unclaimed ticket its `intake:` entries match, entry by entry, skipping one it can't claim; it runs once and never waits for work.
 
 Flags: `--playbooks` (`$MAESTRO_PLAYBOOKS`, else `./playbooks`), `--skills` (`$MAESTRO_SKILLS`), `--common` (`$MAESTRO_COMMON`, else `<git common dir>/maestro`), `--ticket-bin` (`$MAESTRO_TICKET_BIN`), `--harness claude|codex` (`$MAESTRO_HARNESS`, default claude). `MAESTRO_GIT_BIN`, `MAESTRO_GH_BIN`, `MAESTRO_CLAUDE_BIN` and `MAESTRO_CODEX_BIN` pick the binaries; `MAESTRO_MODEL_MID` and `MAESTRO_MODEL_FRONTIER` the models (claude default: sonnet, opus); `MAESTRO_CLAUDE_ARGS` and `MAESTRO_CODEX_ARGS` add session flags, split on spaces.
 

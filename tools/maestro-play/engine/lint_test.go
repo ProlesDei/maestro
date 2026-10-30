@@ -99,13 +99,14 @@ func TestLintCatches(t *testing.T) {
 		{"done wrap-up", head + "steps:\n  - id: a\n    run: check all\ndone: {to: '{{if .ticket.id}}done{{else}}in_review{{end}}'}\n", "moves the ticket to done; no playbook may"},
 		{"removed status", head + "intake: {category: new-work, status: in_qa}\nsteps:\n  - id: a\n    run: check all\n", `intake.status "in_qa"`},
 		{"removed role", "name: bad\nrole: janitor\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", `unknown role "janitor"`},
-		{"name mismatch", "name: other\nrole: engineer\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", "must match the file name"},
+		{"name mismatch", "name: other\nrole: engineer\ndescription: d\nsteps:\n  - id: a\n    run: check all\n", "must match the folder"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			dir := t.TempDir()
 			copyTree(t, "testdata/repo", dir)
-			if err := os.WriteFile(filepath.Join(dir, "playbooks", "engineer", "bad.yaml"), []byte(c.yaml), 0o644); err != nil {
+			os.MkdirAll(filepath.Join(dir, "playbooks", "bad"), 0o755)
+			if err := os.WriteFile(filepath.Join(dir, "playbooks", "bad", "playbook.yaml"), []byte(c.yaml), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			res, err := Lint(filepath.Join(dir, "playbooks"), filepath.Join(dir, "skills"))
@@ -181,7 +182,7 @@ func TestLintCommands(t *testing.T) {
 	write("loose/agents/openai.yaml", "policy:\n  allow_implicit_invocation: true\n")
 	write("tdd/SKILL.md", "# tdd\nWhen done, run /work.\n## In your own session\nRun `/work <id>`.\nIn your own session, $work works too.\n## Not in your own session\nRun /work.\n")
 	write("use.yaml", "prompts:\n  build: [tdd, work]\nbots:\n  all: [work]\ncommands: [work, auto, codex, loose, ghost]\n")
-	if err := os.WriteFile(filepath.Join(dir, "playbooks", "prompts", "plan.md"), []byte("# Plan\nThen run /work.\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "playbooks", "plan.md"), []byte("# Plan\nThen run /work.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	res, err := Lint(filepath.Join(dir, "playbooks"), skills)
@@ -201,7 +202,7 @@ func TestLintCommands(t *testing.T) {
 		`tdd/SKILL.md: line 2 calls the command /work`,
 		`tdd/SKILL.md: line 7 calls the command /work`, // "Not in your own session" is no exemption
 		`bots.all: "work" is a command`,
-		`prompts/plan.md: line 2 calls the command /work`,
+		`playbooks/plan.md: line 2 calls the command /work`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("want %q in:\n%s", want, joined)
@@ -217,7 +218,7 @@ func TestLintCommands(t *testing.T) {
 func TestLintNeedsPartials(t *testing.T) {
 	dir := t.TempDir()
 	copyTree(t, "testdata/repo", dir)
-	os.Remove(filepath.Join(dir, "playbooks", "prompts", "_escalate.md"))
+	os.Remove(filepath.Join(dir, "playbooks", "_escalate.md"))
 	res, _ := Lint(filepath.Join(dir, "playbooks"), filepath.Join(dir, "skills"))
 	if len(res.Problems) != 1 || !strings.Contains(res.Problems[0].Msg, "missing _escalate.md") {
 		t.Errorf("problems %v", res.Problems)

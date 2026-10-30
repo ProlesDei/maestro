@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Acceptance test for scripts/install.sh: a fresh repo installs hidden from
 # git, with project-setup.md written once; --tickets swaps in a team's
-# maestro-create-ticket and maestro-work; a team's own unprefixed skills
+# maestro-create-ticket; a team's own unprefixed skills
 # don't clash; a second run, a maestro- skill already there, a non-repo
 # (also through GIT_DIR), a subdirectory, a symlinked .claude, a bad
 # --tickets dir, a failed doctor and a failed copy all refuse and change
@@ -83,7 +83,7 @@ install "$tmp/setup" || { cat "$tmp/out"; fail "install with a project-setup.md 
 [ "$(cat "$tmp/setup/.maestro/project/project-setup.md")" = mine ] || fail "install overwrote project-setup.md"
 
 # --tickets: the team's maestro-create-ticket replaces Maestro's, and its
-# .git is skipped; maestro-work stays Maestro's until the team ships one too.
+# .git is skipped.
 team="$tmp/team one"
 mkdir -p "$team/maestro-create-ticket/agents" "$team/.git"
 printf '%s\n' '---' 'name: maestro-create-ticket' '---' 'Our tickets.' >"$team/maestro-create-ticket/SKILL.md"
@@ -92,15 +92,7 @@ git init -q "$tmp/team"
 install --tickets "$team" "$tmp/team" || { cat "$tmp/out"; fail "install --tickets exited non-zero"; }
 for harness in .claude .agents; do
 	same "$team/maestro-create-ticket" "$tmp/team/$harness/skills/maestro-create-ticket"
-	same "$skills/maestro-work" "$tmp/team/$harness/skills/maestro-work"
 	same "$skills/maestro-review" "$tmp/team/$harness/skills/maestro-review"
-done
-mkdir "$team/maestro-work"
-echo 'Our work.' >"$team/maestro-work/SKILL.md"
-git init -q "$tmp/team2"
-install --tickets "$team" "$tmp/team2" || { cat "$tmp/out"; fail "install --tickets with work exited non-zero"; }
-for harness in .claude .agents; do
-	same "$team/maestro-work" "$tmp/team2/$harness/skills/maestro-work"
 done
 
 # A bad --tickets dir refuses before doctor runs or anything is written.
@@ -112,16 +104,16 @@ refuses "has no maestro-create-ticket/" "$tmp/bad" --tickets "$tmp/t-nocreate" "
 mkdir -p "$tmp/t-noskill/maestro-create-ticket"
 refuses "isn't a skill" "$tmp/bad" --tickets "$tmp/t-noskill" "$tmp/bad"
 cp -R "$team" "$tmp/t-extra"
-mkdir "$tmp/t-extra/maestro-review"
-refuses "may hold only maestro-create-ticket/ and maestro-work/" "$tmp/bad" --tickets "$tmp/t-extra" "$tmp/bad"
+mkdir "$tmp/t-extra/maestro-work"
+refuses "may hold only maestro-create-ticket/" "$tmp/bad" --tickets "$tmp/t-extra" "$tmp/bad"
 mkdir -p "$tmp/t-old/create-ticket"
 echo x >"$tmp/t-old/create-ticket/SKILL.md"
 refuses "has no maestro-create-ticket/" "$tmp/bad" --tickets "$tmp/t-old" "$tmp/bad"
 refuses "usage:" "$tmp/bad" --tickets
 refuses "--tickets needs a directory" "$tmp/bad" --tickets "" "$tmp/bad"
-[ "$(wc -l <"$STUB_LOG")" -eq 4 ] || fail "doctor ran for a refused install: $(cat "$STUB_LOG")"
+[ "$(wc -l <"$STUB_LOG")" -eq 3 ] || fail "doctor ran for a refused install: $(cat "$STUB_LOG")"
 
-# A team's own work and review skills don't clash; a maestro-work does.
+# A team's own work and review skills don't clash; a maestro-review does.
 git init -q "$tmp/own"
 for name in work review create-ticket; do
 	mkdir -p "$tmp/own/.claude/skills/$name"
@@ -131,10 +123,10 @@ install "$tmp/own" || { cat "$tmp/out"; fail "install beside the team's own skil
 for name in work review create-ticket; do
 	[ "$(cat "$tmp/own/.claude/skills/$name/SKILL.md")" = mine ] || fail "install changed the team's $name skill"
 done
-same "$skills/maestro-work" "$tmp/own/.claude/skills/maestro-work"
+same "$skills/maestro-review" "$tmp/own/.claude/skills/maestro-review"
 git init -q "$tmp/clash"
-mkdir -p "$tmp/clash/.agents/skills/maestro-work"
-refuses ".agents/skills/maestro-work already exists" "$tmp/clash" "$tmp/clash"
+mkdir -p "$tmp/clash/.agents/skills/maestro-review"
+refuses ".agents/skills/maestro-review already exists" "$tmp/clash" "$tmp/clash"
 
 git init -q "$tmp/nostore"
 export STUB_FAIL=1

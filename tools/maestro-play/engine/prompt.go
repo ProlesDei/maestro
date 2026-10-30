@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,17 +13,21 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
 )
 
-// readPrompt reads playbooks/prompts/<name>.md.
-func (e *Engine) readPrompt(name string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(e.cfg.Playbooks, "prompts", name+".md"))
+// readPrompt reads <name>.md from the playbook's folder, else from the
+// playbooks folder, where the shared _contract.md and _escalate.md live.
+func (e *Engine) readPrompt(p *playbook.Playbook, name string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(p.Dir(), name+".md"))
+	if errors.Is(err, os.ErrNotExist) {
+		b, err = os.ReadFile(filepath.Join(e.cfg.Playbooks, name+".md"))
+	}
 	return string(b), err
 }
 
 // compose renders a prompt step: _contract.md, then the skills use.yaml
 // names for the template, then the template. The fixed text comes first so
 // the harness can cache it.
-func (e *Engine) compose(template string, data map[string]any, harness string) (string, error) {
-	contract, err := e.readPrompt("_contract")
+func (e *Engine) compose(p *playbook.Playbook, template string, data map[string]any, harness string) (string, error) {
+	contract, err := e.readPrompt(p, "_contract")
 	if err != nil {
 		return "", err
 	}
@@ -35,7 +40,7 @@ func (e *Engine) compose(template string, data map[string]any, harness string) (
 	if skills := e.uses.PromptSkills(template); len(skills) > 0 {
 		parts = append(parts, nameSkills(harness, skills))
 	}
-	text, err := e.readPrompt(template)
+	text, err := e.readPrompt(p, template)
 	if err != nil {
 		return "", err
 	}
@@ -246,7 +251,7 @@ func (e *Engine) promptStep(p *playbook.Playbook, st *State, s *playbook.Step, c
 	tier := s.Tier()
 	fresh := p.Session == "step" || s.Session == "fresh"
 	for try := 0; ; try++ {
-		prompt, err := e.compose(s.Prompt, e.data(p, st, s), str(st.Env["harness"]))
+		prompt, err := e.compose(p, s.Prompt, e.data(p, st, s), str(st.Env["harness"]))
 		if err != nil {
 			return blockOut("step %s: render %s: %v", s.ID, s.Prompt, err), nil
 		}

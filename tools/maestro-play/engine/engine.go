@@ -134,8 +134,8 @@ func failed(format string, args ...any) Result {
 
 // RunOpts selects what run does.
 type RunOpts struct {
-	Ref    string // <role>/<job>
-	Ticket string
+	Ref    string // the playbook's folder name
+	Ticket string // empty on a claim playbook: take the next one intake matches
 	Bot    string
 	Input  string // .input.text, for playbooks with input:
 }
@@ -149,10 +149,6 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 	if o.Bot == "" || strings.Contains(o.Bot, "/") {
 		return failed("--bot: want a bot id without /"), nil
 	}
-	role, job, _ := strings.Cut(o.Ref, "/")
-	if !playbook.Contains(playbook.Roles, role) {
-		return failed("unknown role %q", role), nil
-	}
 	if e.stopped() {
 		return Result{Status: StatusStopped, Reason: "the stop file exists"}, nil
 	}
@@ -160,15 +156,12 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 		return failed("%s", msg), nil
 	}
 	env := e.environment()
-	if job == "" {
-		return failed("run %s: want <role>/<job>", o.Ref), nil
-	}
 	p, err := playbook.Load(e.cfg.Playbooks, o.Ref)
 	if err != nil {
 		return failed("%v", err), nil
 	}
-	if o.Ticket == "" && p.Claim {
-		return failed("%s claims a ticket: pass --ticket", p.Ref()), nil
+	if !playbook.Contains(playbook.Roles, p.Role) {
+		return failed("%s: unknown role %q", p.Ref(), p.Role), nil
 	}
 	if p.Input == "required" && strings.TrimSpace(o.Input) == "" {
 		return failed("%s needs --input", p.Ref()), nil
@@ -176,32 +169,109 @@ func (e *Engine) Run(o RunOpts) (Result, error) {
 	if p.Input == "" && o.Input != "" {
 		return failed("%s takes no --input", p.Ref()), nil
 	}
+	if o.Ticket == "" && p.Claim {
+		return e.runNext(p, o, env)
+	}
 	st := e.newState(p, o.Bot, o.Ticket, env)
 	st.Input = flat(o.Input)
 	if o.Ticket != "" {
-		t, res := e.readTicket(st)
+		skip, res := e.take(p, st)
 		if res != nil {
 			return *res, nil
 		}
-		// The store reads "1" as T-1; from here on the run uses its id, so
-		// a step's write to .ticket.id is a write to the run's own ticket.
-		if id := str(t["id"]); id != "" {
-			st.Ticket = id
-		}
-		if msg := statusMismatch(p, t); msg != "" {
-			return failed("%s: %s", st.Ticket, msg), nil
-		}
-		if p.Claim {
-			code, res := e.claim(st)
-			if res != nil {
-				return *res, nil
-			}
-			if code != "" {
-				return Result{Status: StatusFailed, Ticket: st.Ticket, Playbook: p.Ref(), Reason: "claim: " + code}, nil
-			}
+		if skip != "" {
+			return Result{Status: StatusFailed, Ticket: st.Ticket, Playbook: p.Ref(), Reason: skip}, nil
 		}
 	}
 	return e.start(p, st)
+}
+
+// take reads the run's ticket, checks intake's statuses and, on a claim
+// playbook, claims it. skip says why the ticket can't run now: a status
+// intake doesn't take, or the store's claim code (claimed,
+// waiting_on_deps, area_busy).
+func (e *Engine) take(p *playbook.Playbook, st *State) (skip string, res *Result) {
+	t, res := e.readTicket(st)
+	if res != nil {
+		return "", res
+	}
+	// The store reads "1" as T-1; from here on the run uses its id, so a
+	// step's write to .ticket.id is a write to the run's own ticket.
+	if id := str(t["id"]); id != "" {
+		st.Ticket = id
+	}
+	if msg := statusMismatch(p, t); msg != "" {
+		return st.Ticket + ": " + msg, nil
+	}
+	if !p.Claim {
+		return "", nil
+	}
+	code, res := e.claim(st)
+	if code != "" {
+		return "claim: " + code, res
+	}
+	return "", res
+}
+
+// runNext runs the first ticket intake matches that the run can claim.
+// Intake entries go in file order; within one, the store's order (priority,
+// then id). Someone typed the command, so this picks one ticket once: it
+// never loops or waits.
+func (e *Engine) runNext(p *playbook.Playbook, o RunOpts, env map[string]any) (Result, error) {
+	ids, err := e.candidates(p)
+	if err != nil {
+		return failed("%v", err), nil
+	}
+	var skipped []string
+	for _, id := range ids {
+		st := e.newState(p, o.Bot, id, env)
+		st.Input = flat(o.Input)
+		skip, res := e.take(p, st)
+		if res != nil {
+			return *res, nil
+		}
+		if skip != "" {
+			skipped = append(skipped, id+" ("+strings.TrimPrefix(skip, id+": ")+")")
+			continue
+		}
+		return e.start(p, st)
+	}
+	reason := fmt.Sprintf("%s: no unclaimed ticket matches its intake", p.Ref())
+	if len(skipped) > 0 {
+		reason += "; skipped " + strings.Join(skipped, ", ")
+	}
+	return Result{Status: StatusFailed, Playbook: p.Ref(), Reason: reason}, nil
+}
+
+// candidates lists the unclaimed tickets each intake entry matches, in
+// intake order, each id once.
+func (e *Engine) candidates(p *playbook.Playbook) ([]string, error) {
+	var ids []string
+	for _, in := range p.Intake {
+		args := []string{"list", "--unclaimed", "--json"}
+		if len(in.Status) > 0 {
+			args = append(args, "--status", strings.Join(in.Status, ","))
+		}
+		if in.Latest != "" {
+			args = append(args, "--latest-prefix", in.Latest)
+		}
+		call, err := e.ticket(args...)
+		if err != nil {
+			return nil, err
+		}
+		m, _ := call.result.(map[string]any)
+		list, ok := m["tickets"].([]any)
+		if call.exit != 0 || !ok {
+			return nil, fmt.Errorf("list: exit %d: %s", call.exit, call.output)
+		}
+		for _, v := range list {
+			t, _ := v.(map[string]any)
+			if id := str(t["id"]); id != "" && !playbook.Contains(ids, id) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids, nil
 }
 
 func (e *Engine) newState(p *playbook.Playbook, bot, ticketID string, env map[string]any) *State {
@@ -251,6 +321,11 @@ func (e *Engine) resumeLocked(id string) (Result, error) {
 	st, err := e.LoadState(id)
 	if err != nil {
 		return failed("%v", err), nil
+	}
+	// Runs saved before playbooks became folders name <role>/<job>; the
+	// folder is now just <job>.
+	if _, job, ok := strings.Cut(st.Playbook, "/"); ok && !strings.Contains(job, "/") {
+		st.Playbook = job
 	}
 	p, err := playbook.Load(e.cfg.Playbooks, st.Playbook)
 	if err != nil {
