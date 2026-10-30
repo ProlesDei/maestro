@@ -4,14 +4,16 @@ Instructions for coding agents (Claude Code, Codex, Grok Build). This file is th
 
 ## Project
 
-Maestro: tooling that takes a ticket to a merged PR with coding agents. See README.md and `docs/decisions.md`. Stack: Markdown for skills, personas and prompts; YAML for the playbook; `tools/` is Go (1.26+, no cgo).
+Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hundreds of agents runs and works at once. The end goal: robust enough to give one person the power of a whole company. See README.md and `docs/decisions.md`. Stack: Markdown for skills, personas and prompts; YAML for the playbook; `tools/` is Go (1.26+, no cgo).
 
 ## What we're building
 
-A kit a team installs into its own repo so coding agents can take work from a goal to a merged PR, with a person or one bot in charge. It is tooling only: files, a ticket tool, a playbook engine, skills and personas. Nothing runs on its own: no loop, scheduler, dispatcher, watcher or webhook. A person, or a bot such as Grok Bot, starts every job (the owner's ruling, `docs/decisions.md`).
+The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, a playbook engine, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
 
-How work moves (drawn in `docs/team.mermaid`):
-1. The chief of staff (a bot such as Grok Bot) talks to the owner, one decision at a time, and starts each job with one command, listed in [its persona](bot-profiles/chief-of-staff/persona.md#how-you-drive-claude). It never touches code.
+That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the five roles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+
+How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
+1. The chief of staff talks to the owner, one decision at a time, and starts each job with one command, listed in [its persona](bot-profiles/chief-of-staff/persona.md#how-you-drive-claude). It never touches code.
 2. The planner turns a goal into tickets in `maestro-ticket`.
 3. The engineer runs the work playbook. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.

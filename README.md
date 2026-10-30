@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro takes a ticket to a merged pull request with coding agents. It is tooling only: files you install into a repo and commands you run. One playbook, a ticket tool, 18 skills and five bot personas. Nothing in it runs on its own; a person or a bot starts every job ([decisions](docs/decisions.md)).
+Maestro is infrastructure for a fully agentic workflow: a swarm of up to hundreds of agents working at once, robust enough to give one person the power of a whole company. Grok Bot runs outside your repo and takes the place of the person who prompts the harness: it plays one of five roles and works through that role's skills. Maestro gives it the parts, installed into your repo: one playbook, a ticket tool, 18 skills and five role personas. Nothing in Maestro runs on its own; a person or Grok Bot starts every job ([decisions](docs/decisions.md)).
 
 ## Install
 
@@ -48,9 +48,9 @@ Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of y
 
 ## Personas
 
-[bot-profiles/](bot-profiles/README.md) holds five personas for bot tools such as Grok Bot, plus the [team rules](bot-profiles/team-rules.md) every bot follows:
+[bot-profiles/](bot-profiles/README.md) holds the five roles Grok Bot plays, plus the [team rules](bot-profiles/team-rules.md) every role follows:
 
-- `chief-of-staff`: the one agent the owner talks to. Drives Claude with the commands above; settles blocked tickets with `/maestro-chief-of-staff`; never touches code.
+- `chief-of-staff`: the one role the owner talks to. Drives Claude with the commands above; settles blocked tickets with `/maestro-chief-of-staff`; never touches code.
 - `planner`: turns a goal into tickets with `/maestro-planner` and `/maestro-create-ticket`.
 - `engineer`: runs the work playbook and unblocks a run that stops.
 - `qa-lead`: tests a PR in the running app with `/maestro-qa-lead` before review.
@@ -65,11 +65,15 @@ Who does what, and how work moves between them:
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
-    Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
+    subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
+        CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
+        Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
+        Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
+        Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
+    end
 
-    Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
     subgraph Work ["playbooks/work: one ticket to one PR"]
         Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
@@ -79,8 +83,6 @@ flowchart TD
         PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
     end
 
-    QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
-    Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
     Done([Merged · ticket done])
 
     %% User and Chief of Staff
@@ -113,7 +115,7 @@ flowchart TD
     %% Legend
     subgraph Legend ["Legend"]
         direction LR
-        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Bot or session you start"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Role Grok Bot plays"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
     end
 
     %% Styles by cost tier
@@ -132,6 +134,7 @@ flowchart TD
     class User,Done person
     class CoS,Planner,Eng,QA,Rev,L6 bot
     class L5 note
+    style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
 ```
 
 How each bot works, and what one `maestro-play run work` does:
@@ -139,9 +142,9 @@ How each bot works, and what one `maestro-play run work` does:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Bot runtime</b> · outside their repo<br/>Any agent, e.g. Grok Bot<br/>Thinks and decides. Never edits their code<br/>Runs maestro-play run work to build a ticket,<br/>claude -p /maestro-&lt;skill&gt; for the other jobs,<br/>or codex exec for review<br/><i>How the bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Thinks and decides. Never edits their code<br/>Runs maestro-play run work to build a ticket,<br/>claude -p /maestro-&lt;skill&gt; for the other jobs,<br/>or codex exec for review<br/><i>How Grok Bot is started is out of scope</i>"]
 
-    subgraph Profile ["Bot profile: loaded by the bot runtime, never installed into their repo"]
+    subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR
         P1["<b>persona.md</b><br/>Who the bot is,<br/>what it runs"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"]
     end
@@ -172,17 +175,17 @@ flowchart TD
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>a dirty worktree fails check, head and open pr · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
 
-    subgraph Roles ["Same anatomy, different profiles: what each bot starts"]
+    subgraph Roles ["One Grok Bot, five profiles: what each role starts"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts the others"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts each job"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-review ·<br/>merge or Kickback"]
     end
 
-    Runtime -->|"loads the profile it's configured for"| Profile
+    Runtime -->|"loads the profile for the role it plays"| Profile
     Runtime ==>|"claude -p in their repo"| H
     Installed --> H
     Runtime ==>|"maestro-play run work in their repo"| Engine
-    Engine -.->|"one JSON object, read by the bot"| Runtime
-    H -.->|"result, read by the bot"| Runtime
+    Engine -.->|"one JSON object, read by Grok Bot"| Runtime
+    H -.->|"result, read by Grok Bot"| Runtime
     Engine --> B1 --> B2 --> B3
     Guard -.-> B3
     Prompt -.->|"shapes every prompt"| B3

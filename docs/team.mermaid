@@ -1,11 +1,15 @@
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
-    Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
+    subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
+        CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
+        Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
+        Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
+        Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
+    end
 
-    Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
     subgraph Work ["playbooks/work: one ticket to one PR"]
         Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
@@ -15,8 +19,6 @@ flowchart TD
         PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
     end
 
-    QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
-    Rev["<b>Reviewer</b><br/>/maestro-review &lt;pr&gt;<br/>Another model family from the author<br/>Ten passes, one verdict per head sha"]
     Done([Merged · ticket done])
 
     %% User and Chief of Staff
@@ -49,7 +51,7 @@ flowchart TD
     %% Legend
     subgraph Legend ["Legend"]
         direction LR
-        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Bot or session you start"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Role Grok Bot plays"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
     end
 
     %% Styles by cost tier
@@ -68,3 +70,4 @@ flowchart TD
     class User,Done person
     class CoS,Planner,Eng,QA,Rev,L6 bot
     class L5 note
+    style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
