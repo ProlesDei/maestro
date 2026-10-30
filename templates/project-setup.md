@@ -3,7 +3,7 @@
 `scripts/install.sh` copies this to `.maestro/project/project-setup.md` once; fill it in there. `maestro-play` parses two sections, so keep their shape:
 
 - `## Main branch`: one line, the branch PRs merge into.
-- `## Checks`: only bullets of a name, a colon and the command in backticks. `check all` runs them in order in the ticket's worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write, or the run stops at `head`.
+- `## Checks`: only bullets of a name, a colon and the command in backticks. `check all` runs them in order in the ticket's worktree; a non-zero exit, or a run past the check timeout (15m by default), fails the check. Checks must leave `git status` clean: gitignore what they write, or the run stops at `head`.
 
 Sessions read the rest as plain text.
 
