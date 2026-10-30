@@ -65,7 +65,7 @@ Who does what, and how work moves between them:
 flowchart TD
     User([User])
 
-    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Starts jobs with claude -p, or codex exec for review<br/>Never touches code"]
+    CoS["<b>Chief of Staff</b><br/>Grok Bot · the one bot the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
     Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 

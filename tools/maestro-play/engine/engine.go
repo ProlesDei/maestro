@@ -322,6 +322,11 @@ func (e *Engine) resumeLocked(id string) (Result, error) {
 	if err != nil {
 		return failed("%v", err), nil
 	}
+	// Runs saved before playbooks became folders name <role>/<job>; the
+	// folder is now just <job>.
+	if _, job, ok := strings.Cut(st.Playbook, "/"); ok && !strings.Contains(job, "/") {
+		st.Playbook = job
+	}
 	p, err := playbook.Load(e.cfg.Playbooks, st.Playbook)
 	if err != nil {
 		return failed("%v", err), nil

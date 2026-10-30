@@ -360,6 +360,28 @@ func TestReviewWithoutAuthorFamilyBlocksWithoutPrompting(t *testing.T) {
 	}
 }
 
+// A run saved before playbooks became folders names <role>/<job>; resume
+// still finds the folder.
+func TestResumeOldRoleJobName(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	plan := reply("done", map[string]any{"plan": "p", "risks": "r"})
+	plan["stop_file"] = true
+	w.script(fakeConfig{Harness: []map[string]any{plan, buildReplies[1], buildReplies[2]}})
+	r := w.run(RunOpts{Ref: "build-ticket", Ticket: "T-1"})
+	if r.Status != StatusStopped {
+		t.Fatalf("result %+v", r)
+	}
+	os.Remove(filepath.Join(w.common, "STOP"))
+	st, _ := w.e.LoadState(r.RunID)
+	st.Playbook = "engineer/build-ticket"
+	w.e.save(st)
+	w.script(fakeConfig{Harness: []map[string]any{buildReplies[1], buildReplies[2]}})
+	r2, err := w.e.Resume(r.RunID)
+	if err != nil || r2.Status != StatusDone || r2.Playbook != "build-ticket" {
+		t.Fatalf("resume %+v, %v", r2, err)
+	}
+}
+
 func TestStopFileThenResumeReplaysInflightWrite(t *testing.T) {
 	w := newWorld(t, todoTicket())
 	plan := reply("done", map[string]any{"plan": "p", "risks": "r"})
