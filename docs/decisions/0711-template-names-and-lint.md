@@ -1,6 +1,0 @@
-# 0711 Every template name exists up front, and prompt templates are linted per playbook
-
-- **Context:** 0700 A1 wants `missingkey=error` and a lint that fails a misspelled step id, while a template can name a step that hasn't run. Rendering against zero data doesn't reach names inside `{{if}}` branches that aren't taken.
-- **Choice:** Each step's record starts with its fields set to zero: the base ones, the request's reply fields for `run:` steps (from the runner table in `playbook/requests.go`), and `reply` with the base and `out:` fields for prompt steps. `.ticket`, `.project`, `.env`, `.limits` and `.run` have fixed documented names (the README). Lint walks each template's parse tree and checks every field chain on the root data and on `$`, then renders it with and without `.retry`. A prompt template is checked against each playbook that uses it, so a shared template that names `.steps.checks` needs a `checks` step in every one of them; `{{with index .steps "x"}}` is the way out for an optional step. Unknown YAML keys are errors.
-- **Alternatives:** Execute-only lint (misses branches); let unknown names render empty (a typo becomes an empty prompt line).
-- **Why:** A typo fails `go test` instead of a live run, and the playbooks and templates have to agree on step ids, which is the coupling 0700 means to make visible.

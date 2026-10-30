@@ -1,3 +1,0 @@
-{"type":"system","subtype":"init","session_id":"sess-stream","model":"claude-sonnet-5-5","tools":["Read","Bash"]}
-{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":5,"output_tokens":2}},"session_id":"sess-stream"}
-{"type":"result","subtype":"success","is_error":false,"duration_ms":900,"session_id":"sess-stream","total_cost_usd":0.003,"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":100,"output_tokens":2},"modelUsage":{"claude-sonnet-5-5":{"inputTokens":5,"outputTokens":2,"cacheReadInputTokens":100,"cacheCreationInputTokens":0,"costUSD":0.003}}}

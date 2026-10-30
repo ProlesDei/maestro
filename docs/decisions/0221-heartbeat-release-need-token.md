@@ -1,6 +1,0 @@
-# 0221 Heartbeat and release need the lease token
-
-- **Context:** 0203 left heartbeat unfenced (track B owned it) and made `release --token` optional. A leftover process of a session that re-claimed could keep the newer lease alive with a heartbeat, or drop it with a token-less release.
-- **Choice:** `heartbeat` and `release` both require `--token` (missing: exit 2 `invalid`). Heartbeat extends only the live lease with that holder and token (else exit 4 `lease_lost`); its UPDATE is guarded on holder and token too. Release with a stale token on a live lease is exit 4 `lease_lost`. Releasing a lease that is already gone (released, expired, or re-claimed and freed) is still a no-op, so cleanup can repeat. The `released` event now records the token. This replaces 0203's "`release --token` is optional".
-- **Alternatives:** Keep the token optional on release and check holder plus token only when given (still lets a token-less leftover drop a newer lease); fence heartbeat by version (a holder's own transitions would fence its heartbeats).
-- **Why:** Every write to a claimed ticket carries the token, as the brief says. Losing the token is now safe: the session stops, and the lease expires and is reaped. The skills already pass `--token` to `release`; heartbeat needs one edit (0239).

@@ -1,3 +1,0 @@
-[{"type":"system","subtype":"init","session_id":"sess-verbose","model":"claude-sonnet-5-5"},
- {"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"ok"}]},"session_id":"sess-verbose"},
- {"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"session_id":"sess-verbose","total_cost_usd":0.01,"usage":{"input_tokens":7,"cache_creation_input_tokens":300,"cache_read_input_tokens":0,"output_tokens":20},"modelUsage":{"claude-sonnet-5-5":{"inputTokens":7,"outputTokens":20,"cacheReadInputTokens":0,"cacheCreationInputTokens":300,"costUSD":0.01}}}]

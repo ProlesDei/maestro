@@ -1,6 +1,0 @@
-# 0715 `done` and `end` are two targets; step lines are rendered, then split
-
-- **Context:** 0740 reads `on: {x: end}` as "finish through `done:`"; 0750 has a `done` target for that and makes `end` a quiet stop (no note, no move). Slice 5's `evals {{join .tasks " "}}` needs a rendered list to become several arguments, and its `quote` shell-quotes a value, so its lines are rendered and then split. Both can't hold.
-- **Choice:** 0750's reading. `done` runs the wrap-up; `end` releases the lease, writes the memory and the log line and cleans up, but posts no note, moves nothing and saves no cursor. Running off the last step is `done`. At merge, slice 4's `on: {…: end}` targets become `done` (review-change, verify-ticket and any other playbook whose `done:` note handles that ending). A `ticket:` or `run:` line is rendered whole, then split like a shell (quotes, no expansion); `quote` wraps a value that may have spaces and `join` spreads a list. `index` is nil-safe, so an optional read of a step that hasn't run renders nothing.
-- **Alternatives:** 0740's reading (slice 5 would need a new name for a quiet stop, in more files); split before rendering (then `join` can't spread a list and `quote` would leave literal quotes).
-- **Why:** Two targets say more than one, and the rename is in fewer files. Render-then-split is what both slices wrote their lines for.
