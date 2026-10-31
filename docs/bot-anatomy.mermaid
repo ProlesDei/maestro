@@ -32,9 +32,9 @@ flowchart TD
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>a dirty worktree fails check, head and open pr · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
 
-    subgraph Roles ["One Grok Bot, five profiles: what each role starts"]
+    subgraph Roles ["One Grok Bot, six profiles: what each role starts"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts each job"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts each job"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Senior Engineer</b><br/>maestro-play run work ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>maestro-play run work ·<br/>routine ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>merge or Kickback"]
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
@@ -74,5 +74,5 @@ flowchart TD
     class B1,B2,B3,B4,B5,B6,B7 step
     class H,Step harness
     class Engine,S1,S2,S3 ours
-    class E1,E2,E3,E4,E5 role
+    class E1,E2,E3,E6,E4,E5 role
     class Guard note

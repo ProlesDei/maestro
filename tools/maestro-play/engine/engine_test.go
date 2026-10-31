@@ -442,6 +442,33 @@ func TestStopFileThenResumeReplaysInflightWrite(t *testing.T) {
 	}
 }
 
+// A session that sees the kill switch replies blocked, as the session rules
+// say. The run stops instead of escalating, and resume reruns the step.
+func TestStopFileBlockedReplyStopsWithoutEscalation(t *testing.T) {
+	w := newWorld(t, todoTicket())
+	plan := reply("blocked", map[string]any{"summary": "kill switch is on"})
+	plan["stop_file"] = true
+	w.script(fakeConfig{Harness: []map[string]any{plan}})
+	r := w.run(RunOpts{Ref: "build-ticket", Ticket: "T-1"})
+	if r.Status != StatusStopped || r.ExitCode() != 7 || r.Step != "plan" {
+		t.Fatalf("result %+v", r)
+	}
+	if tk := w.ticket("T-1"); tk.Status != "in_progress" || len(tk.Comments) != 0 {
+		t.Fatalf("the stop escalated: %+v", tk)
+	}
+	if st, _ := w.e.LoadState(r.RunID); st.Visits["plan"] != 0 {
+		t.Errorf("plan visits %d, want 0: the stop ended that visit", st.Visits["plan"])
+	}
+	os.Remove(filepath.Join(w.common, "STOP"))
+	w.script(fakeConfig{Harness: buildReplies})
+	if r2, err := w.e.Resume(r.RunID); err != nil || r2.Status != StatusDone {
+		t.Fatalf("resume %+v %v", r2, err)
+	}
+	if tk := w.ticket("T-1"); tk.Status != "in_review" {
+		t.Errorf("ticket %+v", tk)
+	}
+}
+
 // A run whose lease lapsed while the ticket moved on doesn't take it back:
 // it would drive a ticket in a state it never saw.
 func TestResumeAfterTheTicketMovedOnIsLost(t *testing.T) {
