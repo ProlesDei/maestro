@@ -9,7 +9,7 @@ maestro-play render work --step <id|done|escalate> [--ticket <id> | --ticket-fil
 maestro-play lint [<playbooks-dir>]
 ```
 
-`run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused). Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 7 stopped (`<common>/STOP` exists). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
+`run` and `resume` print one JSON object: `id`, `state`, `playbook`, `ticket`, `step`, `reason` (why it failed, blocked or was refused). Exit codes: 0 done, 1 failed, 2 usage, 3 blocked, 4 lease lost, 7 stopped (`<common>/STOP` exists; a step that would block while it does stops the run instead, and `resume` reruns that step). `render` prints what a step would send and writes nothing. `lint` checks the schema, step types, requests and their flags, ticket subcommands, `on:` targets, and every template against the data below.
 
 `--bot` defaults to `$MAESTRO_BOT`, else `user`. Without `--ticket`, a playbook that claims takes the first unclaimed ticket its `intake:` entries match, entry by entry, skipping one it can't claim; it runs once and never waits for work.
 
