@@ -14,5 +14,5 @@ Every bot follows these rules, after its persona. Each rule lives here only; per
   - **What:** what happened, in one or two sentences.
   - **Why now:** what waits on the answer.
   - **Options:** two or three, each with its trade-off.
-  - **Default:** the option you'd pick, with a one-line why.
+  - **Default:** the option you'd pick, why, and why not each of the others.
   - **Question:** the exact answer you need, one word if you can.

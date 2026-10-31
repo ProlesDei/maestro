@@ -80,7 +80,9 @@ Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh`. Run bot
 
 For any skill work here, ours or shipped, use the **create-edit-skill** skill, never a built-in skill creator such as `skill-creator`.
 
-This repo is Maestro's source, so edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
+This repo is Maestro's source, and Maestro runs on it. To change how Maestro works, edit its source (`skills/`, `bot-profiles/`, `playbooks/`, `tools/`, `templates/`, `scripts/`) through a ticket and PR. Never edit a copy: an installed `maestro-*` skill, a built binary, or a bot's live setup in Grok. A copy's edit never ships, and the next install or redeploy wipes it.
+
+So edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
 - Update the count and group table in `skills/README.md`, and `skills/use.yaml` when a step loads the skill or only a person starts it.
 - Run `go test ./...` in `tools/maestro-play/` and `bash scripts/install_test.sh`.
 - Shipped skills aren't installed here, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
