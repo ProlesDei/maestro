@@ -22,6 +22,7 @@ Run each at the repo's root.
 | Turn a goal into ordered tickets | `claude -p "/maestro-planner <goal>" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | Split or rewrite a ticket that is too big or unclear | `claude -p "/maestro-planner <id>" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | Check a plan, or get a second opinion on one | `claude -p "/maestro-planner check this plan: <plan>" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
+| Find what keeps tickets from running at once | `claude -p "/maestro-planner board" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | Learn a fact a plan turns on (where code lives, how big a change is) | `claude -p "/maestro-planner <question>" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | Add one ticket | `claude -p "/maestro-create-ticket <what needs doing>" --output-format json` | [maestro-create-ticket](../../skills/maestro-create-ticket/SKILL.md) |
 
