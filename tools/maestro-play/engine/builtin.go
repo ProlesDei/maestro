@@ -131,6 +131,33 @@ func (e *Engine) runEnv(st *State) []string {
 	return nil
 }
 
+// stepEnv is runEnv for sessions and checks, with TMPDIR set to the run's
+// temp folder, made on first use under the user's TMPDIR. cleanup removes
+// it, so no session has to: claude and grok refuse an rm whose path comes
+// from $(...), and codex any rm -f.
+func (e *Engine) stepEnv(st *State) []string {
+	env := e.runEnv(st)
+	if st == nil {
+		return env
+	}
+	if st.Tmp == "" {
+		base := ""
+		for _, kv := range e.cfg.Environ {
+			if v, ok := strings.CutPrefix(kv, "TMPDIR="); ok {
+				base = v
+			}
+		}
+		dir, err := os.MkdirTemp(base, "tmp.")
+		if err != nil {
+			return env
+		}
+		st.Tmp = dir
+	} else if err := os.MkdirAll(st.Tmp, 0o700); err != nil {
+		return env
+	}
+	return append(env, "TMPDIR="+st.Tmp)
+}
+
 func newReply(status string, exit int, output string, fields ...any) map[string]any {
 	r := map[string]any{"status": status, "exit_code": exit, "output": trimOutput(output)}
 	for i := 0; i+1 < len(fields); i += 2 {
@@ -367,7 +394,7 @@ func (e *Engine) check(st *State, name string) (map[string]any, error) {
 	var failed []string
 	exit := 0
 	for _, c := range run {
-		r, err := e.exec(e.workDir(st), "sh", e.runEnv(st), "", e.cfg.CheckTimeout, "-c", c.Command)
+		r, err := e.exec(e.workDir(st), "sh", e.stepEnv(st), "", e.cfg.CheckTimeout, "-c", c.Command)
 		if err != nil {
 			return nil, err
 		}

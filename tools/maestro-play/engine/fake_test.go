@@ -391,6 +391,14 @@ func noPrompt() string {
 	return os.Getenv("GIT_TERMINAL_PROMPT") + "|" + os.Getenv("GH_PROMPT_DISABLED") + "|" + os.Getenv("GIT_SSH_COMMAND")
 }
 
+// tmpDir is the call's TMPDIR, or "missing" when it isn't a folder.
+func tmpDir() string {
+	if fi, err := os.Stat(os.Getenv("TMPDIR")); err != nil || !fi.IsDir() {
+		return "missing"
+	}
+	return os.Getenv("TMPDIR")
+}
+
 // signalEngine is an engine whose command, a shell, writes its pid to
 // dir/ready, then waits; an interrupt makes it write dir/got and exit.
 // TestForwardSignals interrupts the engine. It returns only if the
@@ -452,7 +460,7 @@ func sideEffects(h map[string]any, rep map[string]any) {
 // one JSON result with the structured reply in structured_output.
 func fakeClaude(args []string) int {
 	prompt, _ := io.ReadAll(os.Stdin)
-	logCall("claude", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("claude", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv), "tmp": tmpDir()})
 	cfg := loadFake()
 	h := cfg.popHarness()
 	saveJSON("fake.json", cfg)
@@ -479,7 +487,7 @@ func fakeClaude(args []string) int {
 // refuses an --output-schema that isn't strict.
 func fakeCodex(args []string) int {
 	prompt, _ := io.ReadAll(os.Stdin)
-	logCall("codex", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("codex", args, map[string]any{"prompt": string(prompt), "cwd": cwd(), "run_env": os.Getenv(RunEnv), "tmp": tmpDir()})
 	_, fl := fakeFlags(args)
 	if f := fl["--output-schema"]; f != "" {
 		var schema any
@@ -621,7 +629,7 @@ func fakeGit(args []string) int {
 // fakeCheck is a project check: it passes unless fake.json scripts
 // "check <name>" or "check" with exit and output.
 func fakeCheck(args []string) int {
-	logCall("check", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv)})
+	logCall("check", args, map[string]any{"cwd": cwd(), "run_env": os.Getenv(RunEnv), "tmp": tmpDir()})
 	cfg := loadFake()
 	defer saveJSON("fake.json", cfg)
 	r := cfg.pop("check " + strings.Join(args, " "))

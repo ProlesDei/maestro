@@ -43,7 +43,7 @@ How you change files day to day: in a worktree, in small checked commits, throug
 ## Clean up
 
 - Stop every process you started. In a step, list each under `processes`.
-- Put throwaway files in a temp folder and remove them when done. Never leave them in the worktree.
+- Put throwaway files in a folder under `TMPDIR`, never in the worktree. In a step, leave them: the engine removes the run's `TMPDIR`. Elsewhere, remove them when done by full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one.
 - After the merge, remove the worktree, only if it is clean.
 
 ## Ask, prove, get unstuck
