@@ -15,7 +15,7 @@ Write to the bar, not toward a kickback. Before you code, read the ten passes in
 
 Plan before the first edit when the change touches more than one file (a file and its test count as one), crosses a module or layer edge, or carries 3 or more design calls. If a plan exists (the step's scratch file, the PR body), follow it instead. For a design question with no code yet, answer with the key calls, their trade-offs and one pick.
 
-1. **Frame.** The goal in one sentence, the numbered acceptance criteria (the ticket's, from `maestro-ticket get <id> --json`, else your own), the constraints, and what you won't do.
+1. **Frame.** The goal in one sentence, the numbered acceptance criteria (the ticket's, else your own), the constraints, and what you won't do.
 2. **Read.** The target, the closest code that already does the same kind of thing (path and lines), and every caller. Learn why that code has its shape before you copy or change it.
 3. **Decide.** Spend the thought on the 2-4 calls that drive the outcome; give the rest a pick and a one-line reason. Make hard trade-offs yourself. Ask only for a missing requirement or a product call.
 4. **Write it down.** In a step, where the step's prompt says. In your own session, in the PR body:
@@ -31,7 +31,7 @@ Tests:     <what fails without the change; what passes with it>
 ## Rules
 
 1. **Name each reading.** If the ask reads two ways, name both and ask; never pick one in silence. Never invent a requirement.
-2. **Know the blast radius.** Before you change a shared function, type, payload, schema or constant, `git grep` it (or query a code graph) and read every caller and every reader and writer of the state it touches.
+2. **Know the blast radius.** Before you change a shared function, type, payload, schema or constant, search for it and read every caller and every reader and writer of the state it touches.
 3. **Write the least code.** No feature, flag, option or layer nobody asked for. Every changed line traces to the ask. Pull out shared code on its second copy, not its first.
 4. **Match the codebase.** Use the pattern it already uses, even when you'd pick another. Replace one only on purpose, naming its cost and every place that must change with it.
 5. **Name the worst failure.** A race, a replay, a partial write, lost precision, unbounded growth, a dependency slow or down. Show the design survives it.
@@ -50,7 +50,7 @@ Tests:     <what fails without the change; what passes with it>
 
 ## Review your diff, then fix what comes back
 
-1. Read `git diff <main branch>...HEAD` top to bottom as a stranger, against the ten passes. Fix what you find and run the repo's build, lint and tests again.
+1. Read your whole diff against the main branch, top to bottom, as a stranger, against the ten passes. Fix what you find and run the repo's build, lint and tests again.
 2. In your own session, number each item in the latest `Kickback:` or `QA: fail` comment. Fix it, answer it with evidence, or disagree in one or two sentences. Fix exactly what it asks, then rerun the checks and the proof for each item you touched. In a step, the step's prompt says how.
 
 **Reply:** the plan, the branch and commits, one line per criterion with its test and result, each check with its exit code, what self-review found and fixed, each kickback or QA item and what you did, and what you left out of scope. In a step, put these in the step's reply fields.
