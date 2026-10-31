@@ -6,22 +6,22 @@ A team installs it into its own repo and gets:
 
 - `maestro-play`, a playbook engine that takes one ticket to an open PR.
 - `maestro-ticket`, a ticket store and CLI.
-- 18 `maestro-*` skills, and five role personas.
+- 18 `maestro-*` skills, and six bot profiles.
 
 Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook. A person or Grok Bot starts every job ([decisions](docs/decisions.md)).
 
 ## Who drives it
 
-Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the five roles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code or Codex with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the six profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code or Codex with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 ## How work moves
 
 1. The **chief of staff** talks to the owner, one decision at a time, and starts each job with one command. It never touches code.
 2. The **planner** turns a goal into tickets with `/maestro-planner`.
-3. The **engineer** runs `maestro-play run work`, which takes one ticket to an open PR: worktree, plan, build, your project's checks, verify, PR. Only prompt steps spend tokens.
+3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `maestro-play run work`, which takes one ticket to an open PR: worktree, plan, build, your project's checks, verify, PR. Only prompt steps spend tokens.
 4. The **QA lead** tests the PR in the running app with `/maestro-qa-lead` and comments `QA: pass` or `QA: fail`.
 5. The **reviewer**, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. The engineer or the chief of staff answers it and runs it again.
+6. A blocked run leaves an `Escalation:` note. An engineer or the chief of staff answers it and runs it again.
 
 Every role follows the [team rules](bot-profiles/team-rules.md).
 
@@ -33,7 +33,8 @@ flowchart TD
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
         Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-        Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+        Sr["<b>Senior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
+        Jr["<b>Junior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Another model family from the author<br/>Passes scaled to risk, one verdict per head sha"]
     end
@@ -55,27 +56,34 @@ flowchart TD
 
     %% The Chief of Staff starts each job
     CoS -->|"plan a goal"| Planner
-    CoS -->|"work a ticket"| Eng
+    CoS -->|"risky ticket"| Sr
+    CoS -->|"routine ticket"| Jr
     CoS -->|"test a PR"| QA
     CoS -->|"review a PR"| Rev
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
-    Tickets -->|"todo"| Eng
+    Tickets -->|"todo"| Sr
+    Tickets -->|"routine todo"| Jr
 
     %% Build
-    Eng --> Plan --> Build --> Checks --> Verify --> PR
+    Sr --> Plan
+    Jr --> Plan
+    Plan --> Build --> Checks --> Verify --> PR
     Checks -.->|"failed"| Build
     Verify -.->|"failed"| Build
-    Work -.->|"blocked: Escalation note"| Eng
-    Eng -.->|"what the ticket can't settle"| CoS
+    Work -.->|"blocked: Escalation note"| Sr
+    Work -.->|"blocked: Escalation note"| Jr
+    Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
+    Sr -.->|"what the ticket can't settle"| CoS
     CoS -.->|"Answer note, unblock"| Tickets
 
     %% Test and review
     PR -->|"ticket in_review"| QA
     QA -.->|"QA: pass or fail comment"| Rev
     Rev -->|"GO: gh pr merge, ticket done"| Done
-    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Eng
+    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
+    Rev -.->|"NO-GO"| Jr
 
     %% Legend
     subgraph Legend ["Legend"]
@@ -97,7 +105,7 @@ flowchart TD
     class Checks,PR,L3 free
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Eng,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
 ```
@@ -197,9 +205,9 @@ flowchart TD
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write ·<br/>a dirty worktree fails check, head and open pr · step_visits cap · timeouts ·<br/>ticket text is data · reviewer from another model family"]
 
-    subgraph Roles ["One Grok Bot, five profiles: what each role starts"]
+    subgraph Roles ["One Grok Bot, six profiles: what each role starts"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts each job"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Engineer</b><br/>maestro-play run work ·<br/>ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>starts each job"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets"] ~~~ E3["<b>Senior Engineer</b><br/>maestro-play run work ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>maestro-play run work ·<br/>routine ticket to PR"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>QA: comment"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>merge or Kickback"]
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
@@ -239,7 +247,7 @@ flowchart TD
     class B1,B2,B3,B4,B5,B6,B7 step
     class H,Step harness
     class Engine,S1,S2,S3 ours
-    class E1,E2,E3,E4,E5 role
+    class E1,E2,E3,E6,E4,E5 role
     class Guard note
 ```
 

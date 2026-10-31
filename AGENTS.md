@@ -10,15 +10,15 @@ Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hun
 
 The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, a playbook engine, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
 
-That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the five roles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the six profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
 1. The chief of staff talks to the owner, one decision at a time, and starts each job with one command, listed in [its persona](bot-profiles/chief-of-staff/persona.md#how-you-drive-claude). It never touches code.
 2. The planner turns a goal into tickets in `maestro-ticket`.
-3. The engineer runs the work playbook. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
+3. An engineer runs the work playbook: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
 5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. The engineer or the chief of staff answers it and runs it again.
+6. A blocked run leaves an `Escalation:` note. An engineer or the chief of staff answers it and runs it again.
 
 What we hold to:
 - Least friction for the team that installs it. The step sessions `maestro-play` starts run with all permissions; teams set limits as [tools/maestro-play](tools/maestro-play/README.md) shows.
@@ -56,7 +56,7 @@ Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`
 
 ## Layout
 
-- `bot-profiles/`: the five personas (`chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
+- `bot-profiles/`: the six personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
 - `playbooks/`: one folder per playbook (`work/playbook.yaml` with its step templates beside it), plus the shared `rules.md` (the rules every session gets), `_contract.md` and `_escalate.md`. Format in `playbooks/README.md`.
 - `skills/`: Maestro's 18 `maestro-*` skills and the user's own; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
