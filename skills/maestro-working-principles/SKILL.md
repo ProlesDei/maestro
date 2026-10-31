@@ -20,7 +20,7 @@ How you change files day to day: in a worktree, in small checked commits, throug
 - Every change to tracked files gets a worktree. Reading, answering and reviewing need none.
 - One per piece of work: `.maestro/worktrees/<name>` on branch `maestro/<name>`, where `<name>` is the ticket id, else a short slug such as `fix-login-typo`.
 - In a playbook step (your prompt starts "You are one step of a Maestro playbook"), the engine made yours. Work only there; your launch flags beat this file.
-- In your own session, from the main checkout: `git worktree add .maestro/worktrees/<name> -b maestro/<name> <main branch>`, with the branch from `## Main branch` in `.maestro/project/project-setup.md`. If the branch exists, drop `-b`.
+- In your own session, from the main checkout: `git worktree add .maestro/worktrees/<name> -b maestro/<name> <main branch>`, where the main branch is `git rev-parse --abbrev-ref origin/HEAD` without `origin/`, else the branch the main checkout is on. If the branch exists, drop `-b`.
 - If the worktree exists, go into it and read the trail before you change anything: `git log <main branch>..HEAD`, the newest `wip:` commit's body, and the ticket's comments. Go on from where it stopped.
 - Never work in another session's worktree. When main moves under you, `git merge <main branch>`; never rebase a pushed branch.
 
@@ -28,7 +28,7 @@ How you change files day to day: in a worktree, in small checked commits, throug
 
 - Work in small steps. Run the check that covers a step, then commit it: one reason per commit. Before you pause or reply, `git status --porcelain` prints nothing.
 - Stage by path: `git add <paths>`, never `git add -A` unread. Never commit generated files, secrets or another session's files.
-- Follow the commit style under `## Conventions` in `project-setup.md`. Else: a subject line under 72 characters that says what changed, then a body that says why. Claim only what you ran. Write it the way the **maestro-technical-writing** skill says.
+- Follow the repo's commit style, from its contributing docs or `git log`. Else: a subject line under 72 characters that says what changed, then a body that says why. Claim only what you ran. Write it the way the **maestro-technical-writing** skill says.
 - Making the same edit in many places? Write a script that makes it, and put the command in the body so review can rerun it.
 - Never amend or rebase a commit you pushed. Fix it with a new commit.
 - Stopping before you finish? Commit as `wip: <step>`, with a body that says what is done and checked, what is next, and the first command to run on resume.
@@ -36,7 +36,7 @@ How you change files day to day: in a worktree, in small checked commits, throug
 ## Pull requests
 
 - In a step, never push or open a PR: the engine does both.
-- In your own session, open one when the work is done: `## Checks` in `project-setup.md` pass and the **maestro-prove-complete** skill shows each thing asked for. Run `git push -u origin maestro/<name>`, then `gh pr create --base <main branch>`, unless `## Conventions` names another tool.
+- In your own session, open one when the work is done: the repo's build, lint and tests pass and the **maestro-prove-complete** skill shows each thing asked for. Run `git push -u origin maestro/<name>`, then `gh pr create --base <main branch>`, unless the repo's contributing docs name another tool.
 - One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks.
 - Never push the main branch, merge or deploy. Review merges. Answer review with new commits on the same branch.
 

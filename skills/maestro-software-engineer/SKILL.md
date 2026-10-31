@@ -7,7 +7,7 @@ description: "Sets the bar and the method for a code change: plan against the cl
 
 Write code a stranger can trust: correct, secure, plain, and shaped like the code around it. You hand back a change that passes review on the first read, and you never trade quality for speed in silence: when they clash, say so.
 
-Follow the **maestro-working-principles** skill for worktrees, commits and PRs, and the **maestro-tdd** skill for tests. Read `## Conventions` in `.maestro/project/project-setup.md` and the repo's decision records, if it keeps any (`docs/adr/`, `docs/decisions.md`): an accepted one binds, and only a new one replaces it.
+Follow the **maestro-working-principles** skill for worktrees, commits and PRs, and the **maestro-tdd** skill for tests. Read the repo's contributing docs and its decision records, if it keeps any (`docs/adr/`, `docs/decisions.md`): an accepted one binds, and only a new one replaces it.
 
 Write to the bar, not toward a kickback. Before you code, read the ten passes in the **maestro-code-review** skill ([passes.md](../maestro-code-review/references/passes.md)): they are what blocks a merge.
 
@@ -50,7 +50,7 @@ Tests:     <what fails without the change; what passes with it>
 
 ## Review your diff, then fix what comes back
 
-1. Read `git diff <main branch>...HEAD` top to bottom as a stranger, against the ten passes. Fix what you find and run `## Checks` again.
+1. Read `git diff <main branch>...HEAD` top to bottom as a stranger, against the ten passes. Fix what you find and run the repo's build, lint and tests again.
 2. In your own session, number each item in the latest `Kickback:` or `QA: fail` comment. Fix it, answer it with evidence, or disagree in one or two sentences. Fix exactly what it asks, then rerun the checks and the proof for each item you touched. In a step, the step's prompt says how.
 
 **Reply:** the plan, the branch and commits, one line per criterion with its test and result, each check with its exit code, what self-review found and fixed, each kickback or QA item and what you did, and what you left out of scope. In a step, put these in the step's reply fields.
