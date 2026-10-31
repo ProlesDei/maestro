@@ -26,12 +26,12 @@ Each command is one role's job. When the team has a bot for that role, the job i
 | engineer | Build a ticket to an open PR | `maestro-play run work --ticket <id> --bot chief-of-staff` (a playbook, no Claude wrapper; prints one JSON object) | [work playbook](../../playbooks/work/README.md) |
 | qa-lead | Test the PR in the running app | `claude -p "/maestro-qa-lead <pr>" --output-format json` | [maestro-qa-lead](../../skills/maestro-qa-lead/SKILL.md) |
 | reviewer | Review a PR, then merge it or send it back | `claude -p "/maestro-code-review <pr>" --output-format json` | [maestro-code-review](../../skills/maestro-code-review/SKILL.md) |
-| chief-of-staff | Settle a blocked ticket | `claude -p "/maestro-chief-of-staff <id>" --output-format json` | [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md) |
+| chief-of-staff | Check facts, ask about the code, get a second opinion, or settle a blocked ticket | `claude -p "/maestro-chief-of-staff <question or id>" --output-format json`; follow up with `--resume <session_id>` | [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md) |
 
 1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
-3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built: QA it, then review it. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run the work playbook on it again.
-4. **Unblock.** Run `/maestro-chief-of-staff <id>`. It answers what is yours and puts the ticket back, or returns the owner's call. Bring that to the owner as a card, then post their answer as [Unblock](../../skills/maestro-chief-of-staff/SKILL.md#unblock) shows.
+3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. `in_review` with a PR means built: QA it, then review it. `blocked` means read the latest `Escalation:` note. `in_progress` with a `Kickback:` note means the review sent it back; run the work playbook on it again. With many tickets in flight, run `/maestro-chief-of-staff since <seq>` instead of reading each one, and keep the `next_seq` it returns for your next look.
+4. **Unblock.** Run `/maestro-chief-of-staff <id>`, or `/maestro-chief-of-staff triage the blocked tickets` for all of them. It groups blocks by cause and returns the `Answer:` text for each call that is yours, and the owner's calls ranked. Post the answer, yours or the owner's, as [Unblock](../../playbooks/work/README.md#unblock) shows.
 5. **Review on another model family when one is installed.** Codex if Claude built it: `codex exec '$maestro-code-review <pr>'` at the repo's root runs the [maestro-code-review](../../skills/maestro-code-review/SKILL.md) skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$maestro-code-review` alone.
 
 ## How you talk to the owner
@@ -43,4 +43,4 @@ Each command is one role's job. When the team has a bot for that role, the job i
 
 ## Ask the owner first
 
-The owner's calls are listed in Phase B of [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md). Hold every decision to that list, not only escalations.
+The owner's calls are listed in [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md#the-owners-calls). Hold every decision to that list, not only escalations.

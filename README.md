@@ -142,7 +142,7 @@ Build a ticket from the shell in the target repo. It's a playbook, so no Claude 
 maestro-play run work --ticket T-12   # or no --ticket: the next one, sent back first, then todo
 ```
 
-It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [Unblock](skills/maestro-chief-of-staff/SKILL.md#unblock) shows. [playbooks/work](playbooks/work/README.md) has the steps and exit codes.
+It claims the ticket, makes a worktree on `maestro/<id>`, plans, builds, runs the checks, verifies each criterion, opens a PR and moves the ticket to `in_review`. The ticket's type picks the mode: feature, bug, refactor or perf. When a run blocks, the ticket moves to `blocked` with an `Escalation:` note; answer it and run again as [Unblock](playbooks/work/README.md#unblock) shows. [playbooks/work](playbooks/work/README.md) has the steps and exit codes.
 
 The other jobs are skills, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --output-format json`):
 
@@ -150,7 +150,7 @@ The other jobs are skills, in Claude Code (or headless: `claude -p "/maestro-cod
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-qa-lead <pr>` starts the app at the PR's head sha, walks each criterion and adds a `QA: pass` or `QA: fail` comment with evidence. It moves no ticket; `/maestro-code-review` reads the comment as evidence.
 - `/maestro-code-review <pr>` reviews the PR at its head sha, from another model family than the author when one is installed. GO merges the PR and moves the ticket to `done`. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the next `maestro-play run work` takes it first and starts again at build with that feedback. ESCALATE blocks the ticket with an `Escalation:` note when the change needs the owner's yes (a dependency, CI or hook change, or one a revert can't undo) or a third kickback would repeat the last two. The review's depth follows the PR's risk: a docs fix gets one pass, an auth or migration change all ten. Add `--report-only` for the report alone.
-- `/maestro-chief-of-staff <id>` settles a blocked ticket: answers what the facts settle and puts it back, or writes up the owner's call.
+- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs: it reads what changed on the board, groups blocked tickets by cause, gives a second opinion on a call, and drafts the `Answer:` texts and the owner's next card. It changes nothing.
 - `/maestro-software-engineer <id or change>` makes a change by hand in your own session: plan, test first, self-review. It writes no ticket. Any session that writes code loads it, and so do the plan and build steps.
 
 ## Your own skills

@@ -30,7 +30,19 @@ Any `blocked` reply, or a step that fails with no `on:` route, escalates: `_esca
 | `state` | Next |
 |---|---|
 | `done` | The ticket is `in_review` with a `Handoff:` note. Run `/maestro-qa-lead <id>`, then `/maestro-code-review <id>`. |
-| `blocked` | A blocked run is over; `resume` won't restart it. Answer the `Escalation:` note as [Unblock](../../skills/maestro-chief-of-staff/SKILL.md#unblock) shows, then run it again. |
+| `blocked` | A blocked run is over; `resume` won't restart it. Answer the `Escalation:` note as [Unblock](#unblock) shows, then run it again. |
 | `failed` with `no unclaimed ticket matches its intake` | The board has nothing to take. Add work with `/maestro-create-ticket` or `/maestro-planner`. |
 | `failed`, `lost`, `stopped`, or `refused` in `reason` | Read `reason`. Never work around a refused step or run one by hand. |
 | no JSON | `maestro-play resume <run id>` once, with the id the run printed. |
+
+## Unblock
+
+Whoever owns the call (the chief of staff, the engineer, or a person) answers on the ticket, moves it back, and runs it again. The new run starts at plan and reads the `Answer:` note, so post nothing after it.
+
+```sh
+maestro-ticket comment <id> --body 'Answer: <the decision>'
+maestro-ticket transition <id> --from blocked --to <blocked_from> --role <return role>
+maestro-play run <playbook> --ticket <id>
+```
+
+Take `<blocked_from>` from `maestro-ticket get <id> --json` (`in_progress` after a work run), `<return role>` from the note's last line, `Return-role: <role>` (a block to the chief of staff took the ticket's role; this gives it back), and `<playbook>` from its `Stopped at: <step> (<playbook>)` line.
