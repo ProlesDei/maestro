@@ -86,7 +86,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
      --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H
    ```
 4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick and the one question, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H`. With no ticket, post it with `gh pr comment <n> --body-file -`. A yes comes back as a rerun with `--approved <H>`.
-5. Revert any pass 6 mutation, then `git worktree remove $R` and `rm -rf $C`.
+5. Revert any pass 6 mutation, then `git worktree remove $R` and remove `$C` as **maestro-working-principles** says.
 
 ```
 # Code review: <id> <title>

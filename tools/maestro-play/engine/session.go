@@ -93,7 +93,7 @@ func (e *Engine) harness(st *State, c sessionCall) (map[string]any, error) {
 		args = append(args, "--session-id", st.HarnessSession)
 	}
 	args = append(args, permissionArgs("claude", e.cfg.ClaudeArgs)...)
-	r, err := e.exec(e.workDir(st), e.cfg.ClaudeBin, e.runEnv(st), c.prompt, e.cfg.SessionTimeout, args...)
+	r, err := e.exec(e.workDir(st), e.cfg.ClaudeBin, e.stepEnv(st), c.prompt, e.cfg.SessionTimeout, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (e *Engine) codex(st *State, c sessionCall, rules string, schema []byte) (m
 		args = append(args, "-m", m)
 	}
 	args = append(append(args, permissionArgs("codex", e.cfg.CodexArgs)...), "-")
-	r, err := e.exec(e.workDir(st), e.cfg.CodexBin, e.runEnv(st), prompt, e.cfg.SessionTimeout, args...)
+	r, err := e.exec(e.workDir(st), e.cfg.CodexBin, e.stepEnv(st), prompt, e.cfg.SessionTimeout, args...)
 	if err != nil {
 		return nil, err
 	}

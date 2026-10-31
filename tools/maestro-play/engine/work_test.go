@@ -699,6 +699,12 @@ func TestSessionTimesOutAndEscalates(t *testing.T) {
 	if !w.childGone() {
 		t.Errorf("the session's child outlived the timeout")
 	}
+	// A blocked run's next try starts a new session, so its temp folder goes.
+	if s := w.sessions(); len(s) == 0 || s[0].Tmp == "missing" {
+		t.Errorf("sessions %+v", s)
+	} else if _, err := os.Stat(s[0].Tmp); !os.IsNotExist(err) {
+		t.Errorf("tmp kept: %v", err)
+	}
 }
 
 // A push that hangs fails open pr with "timed out after", and no PR opens.

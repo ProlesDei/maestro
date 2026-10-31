@@ -18,7 +18,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 ## Share the machine
 
 - Change only what is yours: your worktree, branch, temp folder, ports and processes. Leave global config, installed tools and other sessions' branches, worktrees and locks alone.
-- Put throwaway files in a fresh temp folder the OS names, never a fixed path such as `/tmp/out.txt`. Remove it when done.
+- Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. In a step, leave it: the engine removes the run's `TMPDIR`. Elsewhere, remove it when done by its full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one.
 - Start each server on port 0 so the OS picks a free one, and read back the port it got. Stop each process, and the children it started, by its PID; stopping by name or port hits other sessions' too.
 - Install into the worktree or your temp folder, never globally.
 - On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make. Leave repo-wide cleanup, such as garbage collection or pruning worktrees, to the **maestro-prune** skill.

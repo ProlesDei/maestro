@@ -56,7 +56,7 @@ func newWorldAt(t *testing.T, fixture string, tickets ...*fakeTicketT) *world {
 	}
 	gitconfig := filepath.Join(dir, "gitconfig")
 	os.WriteFile(gitconfig, []byte("[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n"), 0o644)
-	environ := append(os.Environ(), "FAKE_DIR="+dir, "FAKE_COMMON="+filepath.Join(dir, "common"), "FAKE_GIT="+realGit,
+	environ := append(os.Environ(), "FAKE_DIR="+dir, "FAKE_COMMON="+filepath.Join(dir, "common"), "FAKE_GIT="+realGit, "TMPDIR="+dir,
 		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"GIT_CONFIG_GLOBAL="+gitconfig, "GIT_CONFIG_NOSYSTEM=1",
 		// atexit_sleep_ms: a race-built fake would sleep 1s at every exit.
@@ -146,6 +146,7 @@ type fakeCall struct {
 	Prompt string   `json:"prompt"`
 	Cwd    string   `json:"cwd"`
 	RunEnv string   `json:"run_env"`
+	Tmp    string   `json:"tmp"` // TMPDIR, for claude, codex and check
 	// NoPrompt is a git or gh call's prompt settings (noPrompt).
 	NoPrompt string `json:"no_prompt"`
 }

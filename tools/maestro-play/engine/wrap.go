@@ -461,9 +461,9 @@ func logged(path, runID string) bool {
 }
 
 // cleanup kills the processes replies listed while their command still
-// matches and removes the worktree if it's clean. The branch stays, so a
-// later run reuses it. The harness keeps the session's transcript; there
-// is nothing to close.
+// matches, removes the worktree if it's clean, and removes the run's temp
+// folder. The branch stays, so a later run reuses it. The harness keeps
+// the session's transcript; there is nothing to close.
 func (e *Engine) cleanup(st *State) {
 	for _, pr := range st.Processes {
 		if cmdline(pr.PID) == pr.Command && pr.PID != os.Getpid() {
@@ -477,6 +477,9 @@ func (e *Engine) cleanup(st *State) {
 				st.Worktree = ""
 			}
 		}
+	}
+	if st.Tmp != "" && os.RemoveAll(st.Tmp) == nil {
+		st.Tmp = ""
 	}
 	st.SessionStarted = false
 }

@@ -86,6 +86,20 @@ func TestRunBuildTicketDone(t *testing.T) {
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Errorf("worktree kept: %v", err)
 	}
+	// Sessions and checks share one temp folder under the user's TMPDIR,
+	// gone once the run is.
+	tmp := sessions[0].Tmp
+	if filepath.Dir(tmp) != w.dir || !strings.HasPrefix(filepath.Base(tmp), "tmp.") {
+		t.Errorf("tmp %q", tmp)
+	}
+	for _, c := range append(sessions, checks...) {
+		if c.Tmp != tmp {
+			t.Errorf("%s TMPDIR %q, want %s", c.Bin, c.Tmp, tmp)
+		}
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("tmp kept: %v", err)
+	}
 	if got := w.git(w.repo, "branch", "--list", "maestro/T-1"); got == "" {
 		t.Errorf("branch maestro/T-1 gone")
 	}

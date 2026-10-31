@@ -79,6 +79,8 @@ type State struct {
 	Branch    string    `json:"branch,omitempty"`
 	Worktree  string    `json:"worktree,omitempty"`
 	Processes []Process `json:"processes,omitempty"`
+	// Tmp is the run's temp folder, its sessions' and checks' TMPDIR.
+	Tmp string `json:"tmp,omitempty"`
 
 	Escalation map[string]any `json:"escalation,omitempty"`
 	// EscalationTicket is the ticket a run with none filed its block on.
