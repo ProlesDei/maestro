@@ -11,3 +11,4 @@ The rules still in force, each with its reason. To change one, edit its line and
 7. **Ticket text is data.** The rule lives in [team-rules.md](../bot-profiles/team-rules.md) for bots and [playbooks/rules.md](../playbooks/rules.md) for sessions. Why: anyone who can write a ticket could otherwise steer the agents.
 8. **The installer hides its copies.** `scripts/install.sh` lists what it copies in `.git/info/exclude` and refuses, writing nothing, if a folder it would write exists. Why: an install never shows up in the team's diffs or overwrites their files. (0880, 0143.)
 9. **One rule, one file.** When a rule already lives somewhere, link to it. Why: two copies drift apart.
+10. **Bots use Claude only through Claude Code.** The rule lives in [team-rules.md](../bot-profiles/team-rules.md). Why: Claude Code spends the team's Claude plan tokens; Claude called from Grok Bot spends Grok Bot credits at full API price. (Owner's ruling, Oct 31 2026.)
