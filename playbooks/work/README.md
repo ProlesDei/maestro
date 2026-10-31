@@ -37,7 +37,7 @@ Any `blocked` reply, or a step that fails with no `on:` route, escalates: `_esca
 
 ## Unblock
 
-Whoever owns the call (the chief of staff, the engineer, or a person) answers on the ticket, moves it back, and runs it again. The new run starts at plan and reads the `Answer:` note, so post nothing after it.
+Whoever owns the call (the chief of staff, the engineer, or a person) settles it. The planner, the engineer or a person answers on the ticket, moves it back, and runs it again. The new run starts at plan and reads the `Answer:` note, so post nothing after it.
 
 ```sh
 maestro-ticket comment <id> --body 'Answer: <the decision>'
