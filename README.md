@@ -17,11 +17,11 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 ## How work moves
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
-2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, starts each job with one command, keeps the parallel runs moving, and reports status and the blocks it can't settle to the chief of staff.
+2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, hands each ticket's build, QA and review to the right bot, and reports status and the blocks it can't settle to the chief of staff.
 3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `maestro-play run work`, which takes one ticket to an open PR: worktree, plan, build, your project's checks, verify, PR. Only prompt steps spend tokens.
 4. The **QA lead** tests the PR in the running app with `/maestro-qa-lead` and comments `QA: pass` or `QA: fail`.
 5. The **reviewer**, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. An engineer or the planner answers it and runs it again; the chief of staff settles what they can't.
+6. A blocked run leaves an `Escalation:` note. An engineer or the planner answers it and the ticket runs again; a call they can't make goes to the chief of staff.
 
 Every role follows the [team rules](bot-profiles/team-rules.md).
 
@@ -32,7 +32,7 @@ flowchart TD
 
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets<br/>Runs the board: starts builds, QA and review"]
+        Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, QA and review"]
         Sr["<b>Senior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
         Jr["<b>Junior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
@@ -58,7 +58,7 @@ flowchart TD
     CoS -->|"goals, answers"| Planner
     Planner -.->|"board status, blocks it can't settle"| CoS
 
-    %% The Planner starts each job
+    %% The Planner hands out each job
     Planner -->|"risky ticket"| Sr
     Planner -->|"routine ticket"| Jr
     Planner -->|"test a PR"| QA
