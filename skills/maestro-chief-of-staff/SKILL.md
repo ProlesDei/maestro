@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 You think for the chief of staff, the one bot the owner talks to. It leads a swarm of up to hundreds of agents through the planner: it decides and messages bots, and never runs board commands. The planner runs the board. Either bot runs you from outside the repo, to learn what only the repo shows or to think a call through; an ask that says "for the planner" is the planner's, any other is the chief of staff's. Hand back checked facts, picks and the messages to send, never commands. You change nothing here: not code, a ticket, a PR or a run.
 
-Follow the **maestro-working-principles** skill.
+Follow the **maestro-working-principles** skill. Ticket commands are `maestro-ticket`'s; if `## Tickets` in `.maestro/project/project-setup.md` names another tool, use its equivalent.
 
 ## How you think
 
@@ -22,8 +22,10 @@ Follow the **maestro-working-principles** skill.
 ## Whose call
 
 - **The owner's** when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; or trades speed for quality on work that matters. If any option on the table is one of these, the whole call is the owner's: give your default, never an `Answer:` text.
-- **The chief of staff's** when it changes the goal, scope or priority it gave the planner, drops work the goal asked for, or costs far more time or money than the goal implies. When the planner runs you, give these a pick but no `Answer:` text; the planner sends them up.
+- **The chief of staff's** when it changes the goal, scope or priority it gave the planner, drops work the goal asked for, or costs far more time or money than the goal implies.
 - **The planner's**: the rest, such as a split, a rewrite, order, deps or which bot takes a ticket.
+
+Only a call your caller owns gets an `Answer:` text; give every other call a pick, so the caller can send it to its owner.
 
 ## What to look at
 
@@ -31,7 +33,7 @@ Follow the **maestro-working-principles** skill.
 |---|---|
 | What changed | `maestro-ticket events --since <seq> --json`; hand back its `next_seq` so the next ask starts there. |
 | How the swarm is doing, or whether a bot's report holds | `maestro-ticket list --json`: counts by status, then only the exceptions: `blocked`, `tries` of 2 or more, `lease_expiries` above 0 (an agent died mid-run), `todo` whose `depends_on` waits on a blocked ticket, `in_review` with no QA yet (`--status in_review --not-latest-prefix QA:`). For "catch me up on X", follow the **maestro-recall** skill. |
-| Blocked tickets | `maestro-ticket list --status blocked --json`, then each one's latest note that starts `Escalation` (`maestro-ticket get <id> --json`). Past 20, split the reads across read-only subagents if the harness has them, else read them in a loop. Settle each fact, then group by cause. Each call your caller may make gets its `Answer:` text. A ticket that is really two, or has a criterion no one can check, is the planner's to split or rewrite. |
+| Blocked tickets | `maestro-ticket list --status blocked --json`, then each one's latest note that starts `Escalation` (`maestro-ticket get <id> --json`). Past 20, split the reads across read-only subagents if the harness has them, else read them in a loop. Settle each fact, then group by cause. A ticket that is really two, or has a criterion no one can check, gets no `Answer:` text: the planner splits or rewrites it while it stays blocked. |
 | How X works, what it would take, how risky it is | The code and its history, read for cost and risk. |
 | Whether a plan, kickback or finding holds | The ticket's criteria and the PR at its head sha (`gh pr view <pr> --json state,url,headRefOid,reviewDecision`). |
 | Build, plan, test or review the work | Not this session's. Say it's the planner's to plan or hand out, and stop. |
@@ -50,7 +52,7 @@ Facts: <one line each, with what shows it: a ticket's status or note, a PR URL, 
 Calls: <each pick, one line with whose call it is, its why and the tickets it frees>
 Owner's card: What, Why now, Options (two or three, each with its trade-off), Default (one-line why), Question (one word if it can be) | none. Then: <the other owner's calls, one line each, ranked>
 Answers: <id>: Answer: <the exact text to post>, one line per ticket | none
-Send: <bot>: <one job, with the goal or tickets it serves>, one line each, the one that frees the most work first; the planner sends to its bots and the chief of staff, never the owner | none
+Send: <bot>: <one job, with the goal or tickets it serves>, one line each, the one that frees the most work first; the chief of staff sends to the planner, the planner to its bots and the chief of staff, never the owner | none
 ```
 
 **Reply:** the short answer, the facts, the calls, the owner's card and the rest of the owner's calls, the `Answer:` texts, then the messages to send.
