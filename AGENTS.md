@@ -27,11 +27,9 @@ What we hold to:
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never overwrites a file and hides its skill copies from git ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`install.sh --tickets`), so a skill names `maestro-ticket` only as the default.
 - Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
-  - Shared state changes in one atomic step: a transaction, a lease, or write to a temp file and rename. Never read, decide, then write on the hope nothing moved in between. [maestro-ticket's guarantees](tools/maestro-ticket/README.md#guarantees) show the pattern.
-  - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no fixed scratch path, shared stash or global file a second session would overwrite.
-  - One crashed or stuck session frees its own work (an expiring lease) and never stalls the rest.
+  - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
   - What the owner and the chief of staff read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.
-  - Prove it under load. A Go change to shared state gets a test that runs it from many stores or goroutines under `-race`, as `tools/maestro-ticket/sqlitestore/race_test.go` does.
+  - Every token counts 300 times. Keep prompts, step output and checks lean, and add a concurrency test only when a change touches shared state.
 - Small and plain: cut what only exists to look impressive. But never cut a skill, bot, role or diagram without the owner's yes. An audit or plan is advice, not a ruling.
 
 ## Inspirations
