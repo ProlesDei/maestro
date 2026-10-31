@@ -14,7 +14,7 @@ That orchestrator is Grok Bot. It takes the place of the person who prompts the 
 
 How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
 1. The chief of staff talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
-2. The planner turns a goal into tickets in `maestro-ticket` and runs the board: it starts each job with one command, listed in [its persona](bot-profiles/planner/persona.md#how-you-run-the-board), and reports status and the blocks it can't settle to the chief of staff.
+2. The planner runs the team day to day, as product owner and project manager in one. It turns goals into tickets in `maestro-ticket`, starts each job with one command (listed in [its persona](bot-profiles/planner/persona.md#how-you-run-the-board)), keeps the parallel runs moving, and reports status and the blocks it can't settle to the chief of staff.
 3. An engineer runs the work playbook: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
 5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.

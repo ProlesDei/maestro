@@ -17,7 +17,7 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 ## How work moves
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
-2. The **planner** turns a goal into tickets with `/maestro-planner` and runs the board: it starts each job with one command and reports status and the blocks it can't settle to the chief of staff.
+2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, starts each job with one command, keeps the parallel runs moving, and reports status and the blocks it can't settle to the chief of staff.
 3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `maestro-play run work`, which takes one ticket to an open PR: worktree, plan, build, your project's checks, verify, PR. Only prompt steps spend tokens.
 4. The **QA lead** tests the PR in the running app with `/maestro-qa-lead` and comments `QA: pass` or `QA: fail`.
 5. The **reviewer**, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
