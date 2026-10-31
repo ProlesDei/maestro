@@ -4,7 +4,8 @@ flowchart TD
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Builds with maestro-play run work,<br/>other jobs with claude -p, review with codex exec<br/>Never touches code"]
         Planner["<b>Planner</b><br/>/maestro-planner<br/>Turns a goal into tickets"]
-        Eng["<b>Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;"]
+        Sr["<b>Senior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
+        Jr["<b>Junior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Another model family from the author<br/>Passes scaled to risk, one verdict per head sha"]
     end
@@ -26,27 +27,34 @@ flowchart TD
 
     %% The Chief of Staff starts each job
     CoS -->|"plan a goal"| Planner
-    CoS -->|"work a ticket"| Eng
+    CoS -->|"risky ticket"| Sr
+    CoS -->|"routine ticket"| Jr
     CoS -->|"test a PR"| QA
     CoS -->|"review a PR"| Rev
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
-    Tickets -->|"todo"| Eng
+    Tickets -->|"todo"| Sr
+    Tickets -->|"routine todo"| Jr
 
     %% Build
-    Eng --> Plan --> Build --> Checks --> Verify --> PR
+    Sr --> Plan
+    Jr --> Plan
+    Plan --> Build --> Checks --> Verify --> PR
     Checks -.->|"failed"| Build
     Verify -.->|"failed"| Build
-    Work -.->|"blocked: Escalation note"| Eng
-    Eng -.->|"what the ticket can't settle"| CoS
+    Work -.->|"blocked: Escalation note"| Sr
+    Work -.->|"blocked: Escalation note"| Jr
+    Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
+    Sr -.->|"what the ticket can't settle"| CoS
     CoS -.->|"Answer note, unblock"| Tickets
 
     %% Test and review
     PR -->|"ticket in_review"| QA
     QA -.->|"QA: pass or fail comment"| Rev
     Rev -->|"GO: gh pr merge, ticket done"| Done
-    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Eng
+    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
+    Rev -.->|"NO-GO"| Jr
 
     %% Legend
     subgraph Legend ["Legend"]
@@ -68,6 +76,6 @@ flowchart TD
     class Checks,PR,L3 free
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Eng,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4

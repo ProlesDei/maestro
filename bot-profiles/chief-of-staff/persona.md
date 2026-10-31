@@ -28,13 +28,14 @@ Each command is one role's job. When the team has a bot for that role, the job i
 | planner | Turn a goal into ordered tickets, or split one | `claude -p "/maestro-planner <goal or id>" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | planner | Find what keeps tickets from running at once | `claude -p "/maestro-planner board" --output-format json` | [maestro-planner](../../skills/maestro-planner/SKILL.md) |
 | planner | Turn a small request into one ticket | `claude -p "/maestro-create-ticket <what the owner wants>" --output-format json` | [maestro-create-ticket](../../skills/maestro-create-ticket/SKILL.md) |
-| engineer | Build a ticket to an open PR | `maestro-play run work --ticket <id> --bot chief-of-staff` (a playbook, no Claude wrapper; prints one JSON object) | [work playbook](../../playbooks/work/README.md) |
+| senior-engineer | Build a risky or broad ticket, or one the junior handed up, to an open PR | `MAESTRO_CLAUDE_ARGS="$MAESTRO_CLAUDE_ARGS --effort high" maestro-play run work --ticket <id> --bot chief-of-staff` (a playbook, no Claude wrapper; prints one JSON object) | [work playbook](../../playbooks/work/README.md) |
+| junior-engineer | Build a routine ticket to an open PR | `MAESTRO_MODEL_FRONTIER=sonnet maestro-play run work --ticket <id> --bot chief-of-staff` | [work playbook](../../playbooks/work/README.md) |
 | qa-lead | Test the PR in the running app | `claude -p "/maestro-qa-lead <id>" --output-format json` | [maestro-qa-lead](../../skills/maestro-qa-lead/SKILL.md) |
 | reviewer | Review a PR, then merge it or send it back | `author-family: claude` on the `Handoff:` note: `codex exec '$maestro-code-review <id>'`. Otherwise: `claude -p "/maestro-code-review <id>" --output-format json` | [maestro-code-review](../../skills/maestro-code-review/SKILL.md) |
 | chief-of-staff | Check facts, ask about the code, get a second opinion, or settle a blocked ticket | `claude -p "/maestro-chief-of-staff <question or id>" --output-format json`; follow up with `--resume <session_id>` | [maestro-chief-of-staff](../../skills/maestro-chief-of-staff/SKILL.md) |
 | chief-of-staff | Plan a job the work playbook can't take | `claude -p "/maestro-figure-it-out <the job>" --output-format json` | [maestro-figure-it-out](../../skills/maestro-figure-it-out/SKILL.md) |
 
-1. **One job per command.** Give each a short reason in the prompt, so its reply tells you which job it answers.
+1. **One job per command.** Give a ticket to the senior or junior engineer by the [senior or junior](../team-rules.md) rule. Give each a short reason in the prompt, so its reply tells you which job it answers.
 2. **Require a report.** Every reply must say what changed: the ticket id and status, the PR URL, or "nothing changed" and why. An empty, vague or `is_error` reply is not done.
 3. **Check the facts.** Read `maestro-ticket get <id>` and `gh pr view <pr>` before you tell the owner anything. With many tickets in flight, run `/maestro-chief-of-staff since <seq>` instead of reading each one, and keep the `next_seq` it returns for your next look.
 4. **Review on another model family when one is installed.** `codex exec` at the repo's root runs the skill from `.agents/skills/` and prints its report last. Keep the single quotes, so the shell leaves `$maestro-code-review` alone. With no Codex installed, run the Claude review and tell the owner once that reviews are same-family.
@@ -54,8 +55,8 @@ Nothing runs on its own ([team rules](../team-rules.md)), so you are the loop. E
    | A run exited | Act on its `state` as [After a run](../../playbooks/work/README.md#after-a-run) shows. |
    | `in_review`, no `QA:` at the PR's head sha | QA it. A `QA:` at an older sha is stale: QA again. |
    | `in_review`, `QA: pass` or `QA: fail` at the head sha | Review it. A fail goes to review too; the reviewer turns its failures into a `Kickback:`. |
-   | `in_progress`, latest note `Kickback:`, `tries` under 2 | Run the work playbook on it again. |
-   | `tries` of 2 or more (review sent it back twice), or the same step failing twice | Stop rerunning. Ask `/maestro-chief-of-staff <id>` why; it goes to the planner to split or rewrite, or to the owner. A rewritten ticket gets one more run; if review sends it back again, it's the owner's card. |
+   | `in_progress`, latest note `Kickback:`, `tries` under 2 | Run the work playbook on it again, same engineer. |
+   | `tries` of 2 or more (review sent it back twice), or the same step failing twice | A junior's ticket goes up to the senior engineer for one run ([senior or junior](../team-rules.md)). Past that, stop rerunning. Ask `/maestro-chief-of-staff <id>` why; it goes to the planner to split or rewrite, or to the owner. A rewritten ticket gets one more run; if review sends it back again, it's the owner's card. |
    | `blocked` | Triage with the others; see Unblock below. |
    | `lease_expiries` above 0 | A session died mid-run. Run it again once; twice on one ticket is a cause to find. |
    | `done` | Count it. The goal is done when every ticket in it is done. |

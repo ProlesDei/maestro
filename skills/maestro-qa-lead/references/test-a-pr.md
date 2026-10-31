@@ -1,0 +1,62 @@
+# Test a PR
+
+You are the last check before production. Review read the diff; you run what ships, the way people use it, and catch what reading can't: the production build, data made before the change, whole journeys, what the screen shows, a second user, and what breaks over time. Post one `QA:` comment that `/maestro-code-review` reads.
+
+## Phase A: Resolve
+
+1. Find the ticket, branch and PR from the input. Ticket `T-12` is branch `maestro/T-12`. From the PR, read its URL, state, head sha (`H`), changed files and whether it comes from a fork.
+2. Refuse, with the reason, if the PR isn't open, comes from a fork (never run a fork's code), or `maestro-ticket get <id> --json` shows a status other than `in_review` or a live claim (name the holder). A PR with no ticket: `<id>` is `pr-<n>`, its body is the spec, and you invent no criteria.
+3. If the ticket's latest `QA:` comment is already at `H`, give it and stop, unless the ask says to test again.
+4. Name this run `qa-<id>-<6 random letters>`; call it `<run>`. No other session shares it. Fetch, add a detached worktree at `H` in `.maestro/worktrees/<run>`, and check its HEAD is `H`. Evidence goes in `maestro/evidence/<id>/<run>/` in the repo's shared git folder, never in the worktree.
+5. Read `## QA` and `## Run` in `.maestro/project/project-setup.md`, else the README and build files, for how production builds and starts the app and which user flows must never break. If nothing says how it runs, stop and say so, posting nothing.
+
+## Phase B: Plan by risk
+
+1. Pick the tier from the changed files with the table in Phase C of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)). When unsure, go up.
+2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it.
+
+| Tier | Angles |
+|---|---|
+| 0 | The production build starts; each criterion; one pass through each critical flow |
+| 1 | Break each criterion as Phase C of the **maestro-prove-complete** skill ([SKILL.md](../../maestro-prove-complete/SKILL.md)) says; every changed screen as [browser.md](browser.md) says; the features next to the change |
+| 2 | **Upgrade:** data made on the main branch still works at `H`. **Rollback:** the main branch still runs on data `H` wrote. **Second user:** they can't see or change the first's data. **Dependencies:** each one the change calls, slow and then down. **Time:** a restart, then 10 minutes of steady use with errors and memory watched. **Together:** two users or tabs on the same record at once |
+
+## Phase C: Set up what ships
+
+1. Build and start it the way production does: production mode, real config shape, migrations run, real services in place of mocks where the project can run them. Note each way your setup still differs from production.
+2. Keep state private: a new data dir or database, a free port, a browser profile of your own, and test accounts you create. Use a shared test account read-only. Never touch a shared or production service.
+3. At tier 2, start the main branch first on that state, make the data the change touches, stop it, then start `H` on the same data.
+4. If it won't build or start, that is a fail: keep the command and the error line.
+
+## Phase D: Test
+
+1. Prove each criterion on the running app with the proof table in Phase B of **maestro-prove-complete**. Check anything a user sees in a browser, as [browser.md](browser.md) says.
+2. Run each angle in the plan. Then explore: use the change as a new user, a careless one and a hostile one, until two rounds in a row find nothing new.
+3. When something looks wrong, run the same steps on the main branch. Wrong there too means it was already there: a new ticket, unless `H` makes it worse.
+4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
+5. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
+6. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, with the question that would fix it.
+7. Missing a tool or account the plan needs, such as a browser: test the rest, post nothing, and reply `test: blocked: <what's missing>` for the chief of staff.
+
+## Phase E: Judge and post
+
+1. `fail` if a criterion fails or is `not checked`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; or the upgrade or rollback breaks. Else `pass`. List every other problem as a possible new ticket, worst first.
+2. Stop every process you started and close each browser.
+3. If the PR's head has moved past `H`, post at `H` anyway and say so in the reply.
+4. Post this comment on the ticket with `maestro-ticket comment`, keyed by `--idempotency-key <run>` so a retry replays instead of posting twice. With no ticket, comment on the PR.
+
+   ```text
+   QA: <pass|fail> at <H> (PR <url>), tier <n>
+   Setup: <build, data and services used; each way it differs from production>
+   - 1 pass: <proof>: <excerpt or screenshot path>
+   - 2 fail: steps <exact, from a fresh start>; expected <...>; actual <quoted>; on main: <same | works>; rate <n/3>; evidence <path>
+   - 3 not checked: <why> | not checkable: <question>
+   Flows: <each critical flow: pass | fail>
+   Angles: <each one tried: what you did, what happened>
+   Rerun: <evidence folder>
+   New tickets: <problems outside the verdict, worst first | none>
+   ```
+
+5. Remove the worktree. If it isn't clean, leave it and name the path.
+
+In the reply, put the verdict and tier in the first line, then one line per criterion, the steps for each failure, the comment id and any worktree left behind. `Next:` is `/maestro-code-review <n>`.

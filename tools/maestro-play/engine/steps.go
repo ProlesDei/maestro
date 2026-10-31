@@ -45,6 +45,16 @@ func (e *Engine) steps(p *playbook.Playbook, st *State) error {
 		if err != nil {
 			return err
 		}
+		// A step that would block while the stop file exists, such as a
+		// session that saw the kill switch and replied blocked, stops the
+		// run instead: a stop across hundreds of runs must not post an
+		// Escalation from each. Resume reruns the step as a fresh visit.
+		if e.stopped() && (out.status == StatusBlocked || out.status == "" && next(s, out.outcome) == playbook.TargetBlock) {
+			st.Visits[s.ID]--
+			st.Inflight = ""
+			st.Status = StatusStopped
+			return nil
+		}
 		switch out.status {
 		case "":
 		case StatusLost, StatusStopped:
@@ -71,22 +81,26 @@ func (e *Engine) steps(p *playbook.Playbook, st *State) error {
 	return nil
 }
 
-// route picks the next step from on:, or the default: ok, done and skipped
-// go to the next step, anything else blocks.
-func (e *Engine) route(p *playbook.Playbook, st *State, s *playbook.Step, outcome string) {
+// next is where outcome sends the run from s: on:, or the default: ok,
+// done and skipped go to the next step, anything else blocks.
+func next(s *playbook.Step, outcome string) string {
 	target, ok := s.On[outcome]
 	if !ok && strings.HasPrefix(outcome, "exit:") {
 		target, ok = s.On["fail"]
 	}
-	if !ok {
-		switch {
-		case outcome == "ok", outcome == "done", outcome == "skipped":
-			target = playbook.TargetNext
-		default:
-			target = playbook.TargetBlock
-		}
+	if ok {
+		return target
 	}
-	switch target {
+	switch outcome {
+	case "ok", "done", "skipped":
+		return playbook.TargetNext
+	}
+	return playbook.TargetBlock
+}
+
+// route moves the run to where outcome sends it from s.
+func (e *Engine) route(p *playbook.Playbook, st *State, s *playbook.Step, outcome string) {
+	switch target := next(s, outcome); target {
 	case playbook.TargetNext:
 		if i := p.Index(s.ID) + 1; i < len(p.Steps) {
 			st.Cursor = p.Steps[i].ID
