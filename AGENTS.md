@@ -26,6 +26,10 @@ What we hold to:
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never overwrites a file and hides its skill copies from git ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`install.sh --tickets`), so a skill names `maestro-ticket` only as the default.
+- Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
+  - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
+  - What the owner and the chief of staff read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.
+  - Cost multiplies. Every prompt, step output and check runs in each session, so 100 extra tokens become 30,000. Keep them lean, and write a concurrency test only for a change to shared state.
 - Small and plain: cut what only exists to look impressive. But never cut a skill, bot, role or diagram without the owner's yes. An audit or plan is advice, not a ruling.
 
 ## Inspirations
