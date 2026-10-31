@@ -20,7 +20,7 @@ Run each at the repo's root. The [skill](../../skills/maestro-qa-lead/SKILL.md) 
 | Check a ticket can be tested, before it's built | `claude -p "/maestro-qa-lead can <id> be tested as written?" --output-format json` |
 | Plan tests, or learn how the app behaves | `claude -p "/maestro-qa-lead <ask>" --output-format json` |
 
-The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, answer with `claude -p --resume <session_id> "<answer>" --output-format json`. Before you report a test, check its verdict against the `QA:` comment on the ticket.
+The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, answer with `claude -p --resume <session_id> "<answer>" --output-format json`. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account; get it through the chief of staff, then run the test again.
 
 - **Send a criterion you can't test to the planner** to rewrite ([escalate up](../team-rules.md) if there is no planner).
 
