@@ -44,7 +44,7 @@ Tests:     <what fails without the change; what passes with it>
 3. **Survive the worst failure:** a race, a replay, a partial write, lost precision, unbounded growth, a dependency slow or down. Guard data two processes can write at once: compare-and-swap, a lock, a transaction or an idempotency key. Retries, workers and scheduled jobs get a bound, a backoff and a way to stop.
 4. **Fail closed.** A check that denies (auth, permissions, signatures) denies on a timeout, bad input or a tool that can't answer. Allowlist when the good inputs can be listed. Every refusal says how to recover.
 5. **Read the API; don't recall it.** Check the installed version and signature (lockfile, vendored source, type stubs) before you call it.
-6. **Let the code explain itself.** Name things in the codebase's own words. Comment only what the code can't say; never narrate history.
+6. **Let the code explain itself.** Name things in the codebase's own words. Never write comments.
 7. **Never** swallow an error (no empty catch, no catch-and-log to make a path "work"); add, bump or unpin a dependency the task doesn't name (ask, then pin the exact version); or leave debug prints, commented-out code, TODO stubs, or paths and values that only work on this machine.
 
 ## Phase D: Review your diff
