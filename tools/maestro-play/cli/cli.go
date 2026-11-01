@@ -140,10 +140,10 @@ func (c *cmd) config() (engine.Config, error) {
 			dir = top
 		}
 	}
-	// Commands run in the main checkout, the git common dir's parent: it
-	// holds .maestro/src, install.yaml, project-setup.md and the ticket
-	// worktrees, so a run started in a linked worktree finds them there and
-	// doesn't nest its worktrees in it.
+	// The main checkout, the git common dir's parent, holds .maestro/src,
+	// install.yaml, project-setup.md and the ticket worktrees, so a run
+	// started in a linked worktree finds them there and doesn't nest its
+	// worktrees in it. A run with no worktree step still works in dir.
 	var common string
 	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
 		common = strings.TrimSpace(string(out))
@@ -163,7 +163,7 @@ func (c *cmd) config() (engine.Config, error) {
 		}
 	}
 	cfg := engine.Config{
-		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: main,
+		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: main, Here: dir,
 		TicketBin: c.ticketBin, GitBin: get("MAESTRO_GIT_BIN"), GhBin: get("MAESTRO_GH_BIN"),
 		ClaudeBin: get("MAESTRO_CLAUDE_BIN"), CodexBin: get("MAESTRO_CODEX_BIN"), Harness: c.harness,
 		Models: models, ClaudeArgs: strings.Fields(get("MAESTRO_CLAUDE_ARGS")), CodexArgs: strings.Fields(get("MAESTRO_CODEX_ARGS")),

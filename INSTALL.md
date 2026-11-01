@@ -13,7 +13,7 @@ Ground rules:
 
 First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
 
-Install in the main checkout, not a linked worktree: `install.sh` refuses one, and `maestro-play` always runs in the main checkout.
+Install in the main checkout, not a linked worktree: `install.sh` refuses one, and `maestro-play` reads its setup and puts ticket worktrees in the main checkout.
 
 ## 1. Check the machine
 

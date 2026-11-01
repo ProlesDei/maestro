@@ -144,6 +144,11 @@ rm "$r/.agents/skills/maestro-tdd/SKILL.md" && mkdir "$r/.agents/skills/maestro-
 refuses "clash: .agents/skills/maestro-tdd/SKILL.md/x isn't Maestro's" "$r" apply "$r"
 rm -r "$r/.agents/skills/maestro-tdd/SKILL.md"
 ok apply "$r"
+# A file where a skill folder goes clashes, until --replace.
+rm -r "$r/.agents/skills/maestro-tdd" && echo mine >"$r/.agents/skills/maestro-tdd"
+refuses "clash: .agents/skills/maestro-tdd isn't Maestro's" "$r" apply "$r"
+ok apply --replace maestro-tdd "$r"
+installed "$r" .agents
 
 # bot-bundle: one block per bot named, with the team's own memories.
 mkdir -p "$r/.maestro/project/bots"
@@ -156,6 +161,11 @@ grep -qxF -- "- Runs at once: up to 3." "$b" && grep -qxF "  Wrapped." "$b" || f
 grep -qF "$(sed -n 2p "$m/bot-profiles/team-rules.md")" "$b" || fail "planner block lacks the team rules"
 ! grep -q '^name: planner' "$b" || fail "planner block holds front matter"
 grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
+# A CRLF checkout of install.yaml names the same bots.
+cp "$r/.maestro/project/install.yaml" "$tmp/choices"
+sed -i 's/$/\r/' "$r/.maestro/project/install.yaml"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle failed on a CRLF install.yaml"; }
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
 before_exclude=$(cat "$r/.git/info/exclude")
@@ -289,6 +299,7 @@ colour: blue|install.yaml:4: unknown key colour
 nonsense|install.yaml:4: want key: value
 skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-nope|no skill maestro-nope
+skip: maestro-tdd|skip: maestro-tdd is loaded by a playbook step
 bots: designer|no bot profile designer
 EOF
 for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home wants committed or hidden"; do
@@ -298,6 +309,10 @@ done
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
 sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r4/.maestro/project/install.yaml"
 refuses "but install.yaml pins 0000000" "$r4" apply "$r4"
+cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
+echo dirty >>"$m/skills/maestro-tdd/SKILL.md"
+refuses "uncommitted changes in skills/" "$r4" apply "$r4"
+git -C "$m" checkout -q -- skills
 rm "$r4/.maestro/project/install.yaml"
 refuses "no $r4/.maestro/project/install.yaml" "$r4" apply "$r4"
 r5=$tmp/link

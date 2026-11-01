@@ -126,7 +126,7 @@ flowchart TD
 
 Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your ticket tool, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
 
-It needs git 2.31+, Go 1.26+, bash 4+, `gh` with access to this repo, and Claude Code or Codex.
+It needs git 2.31+, Go 1.26+, bash 4.4+, `gh` with access to this repo, and Claude Code or Codex.
 
 What you get:
 

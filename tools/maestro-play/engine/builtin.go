@@ -271,7 +271,7 @@ func (e *Engine) workDir(st *State) string {
 	if st.Worktree != "" {
 		return st.Worktree
 	}
-	return e.cfg.Dir
+	return e.cfg.Here
 }
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
@@ -419,23 +419,18 @@ func (e *Engine) copySkills(st *State, worktree string) string {
 		}
 		copied = append(copied, rl)
 	}
-	still, err := e.ignored(st, worktree, append(append([]string{}, keep...), copied...))
+	// A failed check keeps the old copies and drops the new ones.
+	all := append(keep, copied...)
+	still, err := e.ignored(st, worktree, all)
 	var lines []string
-	for _, rl := range keep {
-		if err == nil && !still[rl] {
+	for i, rl := range all {
+		n := filepath.Base(rl)
+		if !still[rl] && (err == nil || i >= len(keep)) {
 			os.RemoveAll(filepath.Join(worktree, rl))
-			missed = append(missed, filepath.Base(rl))
+			missed = append(missed, n)
 			continue
 		}
-		lines = append(lines, filepath.Base(rl)+"\t"+fps[filepath.Base(rl)]+"\n")
-	}
-	for _, rl := range copied {
-		if err != nil || !still[rl] {
-			os.RemoveAll(filepath.Join(worktree, rl))
-			missed = append(missed, filepath.Base(rl))
-			continue
-		}
-		lines = append(lines, filepath.Base(rl)+"\t"+fps[filepath.Base(rl)]+"\n")
+		lines = append(lines, n+"\t"+fps[n]+"\n")
 	}
 	sort.Strings(lines)
 	if werr := os.WriteFile(list, []byte(strings.Join(lines, "")), 0o644); werr != nil && err == nil {
@@ -453,8 +448,12 @@ func (e *Engine) copySkills(st *State, worktree string) string {
 }
 
 // fingerprint sums each file's path, size and modification time under
-// dir: it changes when an install rewrites the folder.
+// dir: it changes when an install rewrites the folder. A linked dir is
+// walked at its target; WalkDir won't follow the link.
 func fingerprint(dir string) string {
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = r
+	}
 	h := sha256.New()
 	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

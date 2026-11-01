@@ -97,6 +97,9 @@ done <"$choices"
 [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
 head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
 [[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
+# The copies must be the pinned commit's.
+[ "$cmd" != apply ] || [ -z "$(git -C "$root" status --porcelain -- skills templates)" ] ||
+	die "Maestro at $root has uncommitted changes in skills/ or templates/; commit them and pin that commit"
 [[ $home == committed || $home == hidden ]] || die "install.yaml: skills-home wants committed or hidden"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
@@ -129,7 +132,12 @@ done
 for s in ${skip[@]+"${skip[@]}"} ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
 done
-for s in ${skip[@]+"${skip[@]}"}; do unset "from[$s]"; done
+# The skills prompt steps load: never skipped, and in every harness folder.
+steps=$(sed -n '/^prompts:/,/^[a-z]/p' "$root/skills/use.yaml" | grep -o '\[[^]]*\]' | tr -d '[],' | tr ' ' '\n' | sort -u || true)
+for s in ${skip[@]+"${skip[@]}"}; do
+	! grep -qxF -- "$s" <<<"$steps" || die "install.yaml: skip: $s is loaded by a playbook step"
+	unset "from[$s]"
+done
 if [ "$tickets" != maestro-ticket ]; then
 	[[ $tickets == /* ]] || tickets=$target/$tickets
 	[ -d "$tickets" ] || die "install.yaml: tickets $tickets is not a directory"
@@ -256,8 +264,6 @@ if [ "$cmd" = check ]; then
 			[ "${hs[i]}" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
 		done
 	fi
-	# The skills prompt steps load must be in every harness folder.
-	steps=$(sed -n '/^prompts:/,/^[a-z]/p' "$root/skills/use.yaml" | grep -o '\[[^]]*\]' | tr -d '[],' | tr ' ' '\n' | sort -u || true)
 	for n in $steps; do
 		for d in "${dirs[@]}"; do
 			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: playbook steps load it"
@@ -417,6 +423,8 @@ for dir in "${!folders[@]}"; do
 		while IFS= read -r -d '' f; do
 			seen["${f#"$target/"}"]=1
 		done < <(find "$target/$dir" \( -type f -o -type l \) -print0)
+	elif [ -e "$target/$dir" ]; then
+		seen[$dir]=1 # a file where a skill folder goes
 	fi
 done
 # A folder at a recorded path isn't seen: the files in it are.

@@ -27,6 +27,7 @@ choices=$target/.maestro/project/install.yaml
 
 bots=() sha=
 while IFS= read -r line || [ -n "$line" ]; do
+	line=${line%$'\r'} # a CRLF checkout
 	case $line in
 	bots:*) read -ra bots <<<"${line#bots:}" ;;
 	maestro-sha:*) sha=${line#maestro-sha:} sha=${sha//[[:space:]]/} ;;

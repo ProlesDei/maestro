@@ -337,6 +337,23 @@ func TestWorktreeAddCopiesHiddenSkills(t *testing.T) {
 
 // A check that isn't listed fails the step; check all with no checks
 // listed, or no setup, passes with none run.
+// A linked skill folder's fingerprint follows its target, so a reused
+// worktree gets the new copy when the target changes.
+func TestFingerprintFollowsLink(t *testing.T) {
+	dir := t.TempDir()
+	real, link := filepath.Join(dir, "real"), filepath.Join(dir, "link")
+	os.MkdirAll(real, 0o755)
+	os.WriteFile(filepath.Join(real, "SKILL.md"), []byte("one\n"), 0o644)
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(link)
+	os.WriteFile(filepath.Join(real, "SKILL.md"), []byte("one two\n"), 0o644)
+	if fingerprint(link) == before {
+		t.Error("fingerprint of a linked folder didn't change with its target")
+	}
+}
+
 func TestCheckNeedsChecks(t *testing.T) {
 	w := newWorld(t)
 	st := &State{ID: "r1"}

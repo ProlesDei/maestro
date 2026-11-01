@@ -21,7 +21,10 @@ type Config struct {
 	Playbooks string // the playbooks folder
 	Skills    string // the skills folder (use.yaml)
 	Common    string // <git common dir>/maestro
-	Dir       string // the main checkout, where commands run
+	Dir       string // the main checkout: setup, worktrees, tickets
+	// Here is the checkout the run started in, where a step runs when the
+	// run has no worktree; Dir when empty.
+	Here      string
 	TicketBin string // maestro-ticket
 	GitBin    string // git
 	GhBin     string // gh
@@ -73,6 +76,9 @@ func New(cfg Config) (*Engine, error) {
 		if *b.p == "" {
 			*b.p = b.def
 		}
+	}
+	if cfg.Here == "" {
+		cfg.Here = cfg.Dir
 	}
 	if cfg.PID == 0 {
 		cfg.PID = os.Getpid()
