@@ -23,10 +23,15 @@
 # .maestro/project/installed.list when committed, else
 # <git-common-dir>/maestro/installed.list. It never writes over a file it
 # didn't place or one changed since; it lists each such clash and writes
-# nothing. --replace <skill> lets it replace that skill's folder. Run it
+# nothing. --replace <skill> lets it replace that skill's folder; skip:
+# keeps it. A file Maestro once shipped at that path counts as placed,
+# so it takes over an install by the install.sh before the record. Run it
 # again after an update, or after a run that failed partway: it replaces
-# what it placed and removes what it no longer installs. A switch to hidden
-# untracks the copies git tracks (git rm --cached) for the team to commit.
+# what it placed and removes what it no longer installs, unless the team
+# changed it: that folder stays, theirs. A switch to hidden untracks the
+# copies git tracks (git rm --cached) for the team to commit. It works in
+# the main checkout only: a linked worktree shares its exclude file, ticket
+# store and hidden record, and maestro-play runs in the main checkout.
 #
 # check reports what's wrong with an install; uninstall removes the files
 # the record lists, except those changed since.
@@ -40,7 +45,8 @@ unset $(git rev-parse --local-env-vars)
 
 die() { echo "install.sh: $*" >&2; exit 1; }
 usage() { echo "usage: scripts/install.sh apply [--replace <skill>]... <repo> | check <repo> | uninstall <repo>" >&2; exit 2; }
-[ "${BASH_VERSINFO[0]}" -ge 4 ] || die "needs bash 4 or later (macOS: brew install bash)"
+# 4.4: mapfile -d, and "${a[@]}" of an empty array under set -u.
+((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die "needs bash 4.4 or later (macOS: brew install bash)"
 
 cmd=${1-}
 [ $# -gt 0 ] && shift
@@ -60,6 +66,8 @@ top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) || die "$1 is not 
 [ "$top" = "$target" ] || die "$1 is inside the repo at $top; install at the top of the repo"
 common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
 [[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.31 or later"
+[ "$(git -C "$target" rev-parse --path-format=absolute --git-dir)" = "$common" ] ||
+	die "$1 is a linked worktree; run install.sh in the main checkout, ${common%/.git}"
 exclude=$common/info/exclude
 choices=$target/.maestro/project/install.yaml
 
@@ -160,8 +168,9 @@ reads=("$record")
 [ "$cmd" != apply ] || reads+=("$other")
 for r in "${reads[@]}"; do
 	[ -f "$r" ] || continue
+	# A CRLF checkout of the committed record ends each path in \r.
 	while IFS=$'\t' read -r h p; do
-		[[ $h == '#'* || -z $h ]] || old[$p]=$h
+		[[ $h == '#'* || -z $h ]] || old[${p%$'\r'}]=$h
 	done <"$r"
 done
 
@@ -183,8 +192,10 @@ prune() {
 	for d in .claude .agents; do rmdir -- "$target/$d/skills" "$target/$d" 2>/dev/null || true; done
 }
 
-# The exclude lines between these markers are this script's.
+# The exclude lines between these markers are this script's. apply also
+# drops the legacy ones, below.
 begin="# maestro install: begin" end="# maestro install: end"
+legacy=
 # exclude_lines <skill>...: the lines that hide Maestro's folders and, when
 # hidden, these skills.
 exclude_lines() {
@@ -205,7 +216,8 @@ write_exclude() {
 	touch "$exclude"
 	local tmp=$scratch/exclude
 	cp -p -- "$exclude" "$tmp"
-	awk -v b="$begin" -v e="$end" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$exclude" >"$tmp"
+	awk -v b="$begin" -v e="$end" -v l="$legacy" 'BEGIN{n=split(l, a, "\n"); for (i=1; i<=n; i++) old[a[i]]=1}
+		$0==b{skip=1;next} $0==e{skip=0;next} !skip && !($0 in old)' "$exclude" >"$tmp"
 	if [ -n "$1" ]; then
 		[ ! -s "$tmp" ] || [ -z "$(tail -c1 "$tmp")" ] || echo >>"$tmp"
 		printf '%s\n%s\n%s\n' "$begin" "$1" "$end" >>"$tmp"
@@ -287,14 +299,21 @@ if [ "$cmd" = check ]; then
 	if [ ! -f "$setup" ]; then
 		problem "no .maestro/project/project-setup.md"
 	else
-		main=$(awk '/^## /{s=$0; next} s=="## Main branch" && NF {print; exit}' "$setup")
+		# Each line trimmed, \r included, after its heading in lower case and
+		# as written, a tab apart: how maestro-play reads the file.
+		sections=$(awk '{sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")}
+			/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); s=tolower(h); next}
+			$0 != "" && !/^#/ {print s "\t" h "\t" $0}' "$setup")
+		# line: the setup line after the two tabs; it may hold tabs too.
+		line='function line() { t=$0; sub(/^[^\t]*\t[^\t]*\t/, "", t); return t }'
+		main=$(awk -F'\t' "$line"' $1=="main branch" {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print t; exit}' <<<"$sections")
 		[ -n "$main" ] || problem "project-setup.md: no branch under ## Main branch"
 		[ -z "$main" ] || git -C "$target" rev-parse --verify --quiet "refs/heads/$main" >/dev/null ||
 			git -C "$target" rev-parse --verify --quiet "refs/remotes/origin/$main" >/dev/null ||
 			problem "project-setup.md: main branch $main doesn't exist"
-		awk '/^## /{s=$0; next} s=="## Checks" && /^- /{f=1} END{exit !f}' "$setup" ||
+		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the work playbook runs none"
-		awk '/^## /{s=substr($0, 4); next} /^<.*>$/ {print s}' "$setup" | sort -u | while read -r s; do
+		awk -F'\t' "$line"' line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
 			warn "project-setup.md: ## $s still holds the template's <...> text"
 		done
 	fi
@@ -361,30 +380,78 @@ for i in "${!hs[@]}"; do new[${plan[i]}]=${hs[i]}; done
 
 # Every file now in a folder this install writes to, or listed in the
 # record, is in the plan, the record, or neither (the team's).
-declare -A seen=()
-for n in "${!from[@]}"; do
-	for d in "${dirs[@]}"; do
-		dir=$target/$d/skills/$n
-		if [ -L "$dir" ]; then
-			seen["$d/skills/$n"]=link
-		elif [ -d "$dir" ]; then
-			while IFS= read -r -d '' f; do
-				seen["${f#"$target/"}"]=1
-			done < <(find "$dir" \( -type f -o -type l \) -print0)
-		fi
-	done
+# read_shipped: read once, when needed, each skill file Maestro ever shipped,
+# into shipped["<blob> <skill>/<path>"], and each skill name into names.
+declare -A shipped=() names=()
+shipped_read=
+read_shipped() {
+	[ -z "$shipped_read" ] || return 0
+	shipped_read=1
+	local out a b c h st path
+	out=$(git -C "$root" log --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
+	while read -r a b c h st path; do
+		[ -n "$path" ] || continue
+		path=${path#skills/}
+		shipped["$h $path"]=1
+		names[${path%%/*}]=1
+	done <<<"$out"
+}
+# The install.sh before the record hid each skill it placed with a line
+# like .claude/skills/<name>/ outside the marked block. With no record,
+# such a line for a skill Maestro has shipped is its: apply drops it.
+if [ ${#old[@]} -eq 0 ]; then
+	lines=$(awk -v b="$begin" -v e="$end" '$0==b{s=1;next} $0==e{s=0;next} !s && /^\.(claude|agents)\/skills\/maestro-[a-z0-9]+(-[a-z0-9]+)*\/$/' "$exclude" 2>/dev/null || true)
+	[ -z "$lines" ] || read_shipped
+	for l in $lines; do [ -z "${names[$(skill_of "$l")]-}" ] || legacy+=$l$'\n'; done
+fi
+# The folders to scan: each this install writes to, and each one the
+# record or a legacy line names, since the team may have changed it.
+declare -A writing=() folders=() seen=()
+for n in "${!from[@]}"; do for d in "${dirs[@]}"; do writing[$d/skills/$n]=1 folders[$d/skills/$n]=1; done; done
+for p in "${!old[@]}"; do folders[${p%/"${p#*/skills/*/}"}]=1; done
+for l in $legacy; do folders[${l%/}]=1; done
+for dir in "${!folders[@]}"; do
+	if [ -L "$target/$dir" ]; then
+		seen[$dir]=link
+	elif [ -d "$target/$dir" ]; then
+		while IFS= read -r -d '' f; do
+			seen["${f#"$target/"}"]=1
+		done < <(find "$target/$dir" \( -type f -o -type l \) -print0)
+	fi
 done
-for p in "${!old[@]}"; do [ ! -e "$(full "$p")" ] && [ ! -L "$(full "$p")" ] || seen[$p]=1; done
+# A folder at a recorded path isn't seen: the files in it are.
+for p in "${!old[@]}"; do [ ! -f "$(full "$p")" ] && [ ! -L "$(full "$p")" ] || seen[$p]=1; done
 cur_paths=()
 for p in "${!seen[@]}"; do [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ] || cur_paths+=("$p"); done
 declare -A cur=()
 hashes hash_repo ${cur_paths[@]+"${cur_paths[@]}"}
 for i in "${!hs[@]}"; do cur[${cur_paths[i]}]=${hs[i]}; done
 
+# A file the record doesn't list, but that Maestro once shipped at that
+# path with that content, is an unchanged copy: one from the install.sh
+# before the record, or from a run that stopped before it wrote the record.
+for p in "${!cur[@]}"; do
+	[ -n "${old[$p]-}" ] || read_shipped
+	[ -n "${old[$p]-}" ] || [ -z "${shipped["${cur[$p]} ${p#*/skills/}"]-}" ] || old[$p]=${cur[$p]}
+done
+
+# A skill folder this install no longer writes to (the skill skipped,
+# dropped by Maestro, or its harness gone) that the team changed is
+# theirs now: it stays as it is and leaves the record. One they didn't
+# change goes.
+declare -A theirs=()
+for p in "${!seen[@]}"; do
+	f=${p%/"${p#*/skills/*/}"}
+	[ -z "${writing[$f]-}" ] || continue
+	{ [ "${seen[$p]}" != link ] && [ ! -L "$(full "$p")" ] && [ "${cur[$p]}" = "${old[$p]-}" ]; } || theirs[$f]=1
+done
+
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }
 clashes=() writes=() deletes=()
 for p in "${!seen[@]}"; do
-	if [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ]; then
+	if [ -n "${theirs[${p%/"${p#*/skills/*/}"}]-}" ]; then
+		continue
+	elif [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ]; then
 		if replacing "$p"; then deletes+=("$p"); else clashes+=("$p is a symlink"); fi
 	elif [ -n "${new[$p]-}" ]; then
 		if [ "${cur[$p]}" = "${new[$p]}" ]; then :
@@ -413,12 +480,17 @@ fi
 # then a rename), so a rerun finds it either as it was or as planned.
 olds=()
 for p in "${!old[@]}"; do olds+=("$(skill_of "$p")"); done
+for l in $legacy; do olds+=("$(skill_of "$l")"); done
 write_exclude "$(exclude_lines "${!from[@]}" ${olds[@]+"${olds[@]}"})"
 for p in ${deletes[@]+"${deletes[@]}"}; do rm -rf -- "$(full "$p")"; done
 i=0
 for p in ${writes[@]+"${writes[@]}"}; do
 	f=$(full "$p")
 	[ ! -L "$(dirname "$f")" ] || rm -f -- "$(dirname "$f")"
+	# A folder where a file goes holds only folders now: any file in it
+	# clashed or was deleted above.
+	[ ! -d "$f" ] || [ -L "$f" ] || find "$f" -depth -type d -empty -delete
+	[ ! -d "$f" ] || [ -L "$f" ] || die "$p is a folder that isn't empty; run apply again"
 	mkdir -p "$(dirname "$f")"
 	i=$((i + 1)) tmp=$scratch/$i
 	cp -p -- "${src[$p]}" "$tmp" || { rm -f -- "$tmp"; die "couldn't copy ${src[$p]} to $f; run apply again"; }
@@ -441,7 +513,8 @@ mv "$tmp" "$record"
 # untracks Maestro's copies and the committed record; the team commits it.
 untracked=0
 if [ "$home" = hidden ]; then
-	mine=("${plan[@]}" "${!old[@]}" "${other#"$target/"}")
+	mine=("${plan[@]}" "${other#"$target/"}")
+	for p in "${!old[@]}"; do [ -n "${theirs[${p%/"${p#*/skills/*/}"}]-}" ] || mine+=("$p"); done
 	mapfile -d '' -t tracked < <(git -C "$target" --literal-pathspecs ls-files -z -- "${mine[@]}")
 	if [ ${#tracked[@]} -gt 0 ]; then
 		git -C "$target" --literal-pathspecs rm -q --cached -- "${tracked[@]}"
@@ -453,4 +526,5 @@ rm -f -- "$other"
 [ "$tickets" = maestro-ticket ] && echo "ticket store ready" || echo "ticket method from $tickets"
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
+for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record: $f"; done
 [ $untracked -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"

@@ -11,11 +11,13 @@ Ground rules:
 - When a script exits non-zero, show the person its output and settle it with them. Never route around it.
 - Don't commit or push unless the person asks.
 
-First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing.
+First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
+
+Install in the main checkout, not a linked worktree: `install.sh` refuses one, and `maestro-play` always runs in the main checkout.
 
 ## 1. Check the machine
 
-Maestro needs git 2.31 or later, Go 1.26 or later, bash 4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code or Codex: `maestro-play` runs each playbook step through one of them. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code or Codex: `maestro-play` runs each playbook step through one of them. Check each. If one is missing, tell the person what it is and how to get it, and wait.
 
 ## 2. Get Maestro
 
@@ -44,7 +46,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 
 Run `.maestro/src/scripts/install.sh apply <repo>`. It copies the skills, writes `.maestro/project/project-setup.md` once, creates the ticket store, hides `.maestro/src/`, `.maestro/worktrees/` and `.maestro/bots/` from git, and lists what it placed in its record.
 
-If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`), or replace it (run again with `--replace <skill>`). Never pass `--replace` without their yes.
+If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). Never pass `--replace` without their yes.
 
 ## 6. Fill in project-setup.md
 
@@ -89,7 +91,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 1. Ask which commit to move to. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each.
+4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person.
 5. Rebuild the bot blocks and tell the person which ones changed: they paste those again.
 6. Run `check`.
 

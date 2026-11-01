@@ -3,10 +3,13 @@
 # against a copy of Maestro in its own git repo so an update can change it.
 # apply installs hidden or committed, and a second run changes nothing; an
 # update replaces and removes only what it placed; a team's file or one
-# changed since install clashes and changes nothing, until skip: or
-# --replace; a switch of skills-home takes over the copies, and a switch to
-# hidden untracks them; a CRLF checkout still matches the record, from any
-# directory; check finds what's wrong, also through a symlinked path;
+# changed since install clashes and changes nothing, until skip: (which
+# keeps it as the team's) or --replace; a folder where a file goes; an
+# install by the install.sh before the record is taken over; a switch of
+# skills-home takes over the copies, and a switch to hidden untracks them;
+# a CRLF checkout, the record's too, still matches the record, from any
+# directory; check finds what's wrong, also through a symlinked path, and
+# reads project-setup.md as maestro-play does; a linked worktree refuses;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; bad choices and bad repos refuse and change
@@ -26,6 +29,7 @@ m=$tmp/maestro
 mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
 mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
+touch "$m/templates/empty" # an empty blob in Maestro's history
 git -C "$m" init -q && git -C "$m" add -A && git -C "$m" commit -q -m one
 sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
@@ -108,6 +112,39 @@ ok apply --replace maestro-tdd "$r"
 installed "$r" .claude .agents
 ok check "$r"
 
+# skip: keeps a copy the team changed as theirs, out of the record, and
+# removes one they didn't.
+echo mine >>"$r/.claude/skills/maestro-recall/SKILL.md"
+refuses "clash: .claude/skills/maestro-recall/SKILL.md changed since install" "$r" apply "$r"
+echo "skip: maestro-recall" >>"$r/.maestro/project/install.yaml"
+ok apply "$r"
+says "kept as the team's, out of the record: .claude/skills/maestro-recall"
+[ "$(tail -1 "$r/.claude/skills/maestro-recall/SKILL.md")" = mine ] || fail "skip: changed the team's copy"
+[ ! -e "$r/.agents/skills/maestro-recall" ] || fail "skip: kept a copy the team didn't change"
+! grep -q maestro-recall "$r/.git/maestro/installed.list" "$r/.git/info/exclude" || fail "the team's skill is still in the record or hidden"
+ok check "$r"
+sed -i '/^skip:/d' "$r/.maestro/project/install.yaml"
+rm -r "$r/.claude/skills/maestro-recall"
+ok apply "$r"
+installed "$r" .claude .agents
+
+# A file Maestro ships, but at another path, or an empty one, is the team's.
+cp "$m/skills/maestro-swarm/SKILL.md" "$r/.claude/skills/maestro-tdd/swarm.md"
+touch "$r/.claude/skills/maestro-tdd/empty.md"
+refuses "clash: .claude/skills/maestro-tdd/empty.md isn't Maestro's" "$r" apply "$r"
+says "clash: .claude/skills/maestro-tdd/swarm.md isn't Maestro's"
+rm "$r/.claude/skills/maestro-tdd/swarm.md" "$r/.claude/skills/maestro-tdd/empty.md"
+
+# A folder where Maestro places a file: an empty one goes, one with a
+# file in it clashes.
+rm "$r/.agents/skills/maestro-tdd/SKILL.md" && mkdir -p "$r/.agents/skills/maestro-tdd/SKILL.md/sub"
+ok apply "$r"
+installed "$r" .agents
+rm "$r/.agents/skills/maestro-tdd/SKILL.md" && mkdir "$r/.agents/skills/maestro-tdd/SKILL.md" && touch "$r/.agents/skills/maestro-tdd/SKILL.md/x"
+refuses "clash: .agents/skills/maestro-tdd/SKILL.md/x isn't Maestro's" "$r" apply "$r"
+rm -r "$r/.agents/skills/maestro-tdd/SKILL.md"
+ok apply "$r"
+
 # bot-bundle: one block per bot named, with the team's own memories.
 mkdir -p "$r/.maestro/project/bots"
 printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
@@ -135,7 +172,27 @@ installed "$r" .claude .agents
 [ ! -e "$r/.claude/skills/maestro-prune" ] && [ ! -e "$r/.agents/skills/maestro-prune" ] || fail "update kept a skill Maestro dropped"
 ! grep -q maestro-prune "$r/.git/info/exclude" || fail "update kept the dropped skill's exclude line"
 [ "$(echo "$before_exclude" | grep -v maestro-prune)" = "$(cat "$r/.git/info/exclude")" ] || fail "update changed other exclude lines"
-sha=$sha2
+sha1=$sha sha=$sha2
+
+# --- the install.sh before the record: its copies, from the first commit,
+# and its exclude lines. A copy the team changed clashes; then apply takes
+# the rest over, drops the old lines and removes the skill Maestro dropped.
+r10=$tmp/legacy
+repo "$r10" "harnesses: claude codex" "skills-home: committed"
+for d in .claude .agents; do
+	mkdir "$r10/$d" && git -C "$m" archive "$sha1" skills | tar -x -C "$r10/$d"
+	find "$r10/$d/skills" -maxdepth 1 -type f -delete
+	for n in $(cd "$r10/$d/skills" && ls); do echo "$d/skills/$n/"; done >>"$r10/.git/info/exclude"
+done
+echo mine >>"$r10/.agents/skills/maestro-swarm/SKILL.md"
+refuses "clash: .agents/skills/maestro-swarm/SKILL.md isn't Maestro's" "$r10" apply "$r10"
+git -C "$m" show "$sha1:skills/maestro-swarm/SKILL.md" >"$r10/.agents/skills/maestro-swarm/SKILL.md"
+ok apply "$r10"
+installed "$r10" .claude .agents
+[ ! -e "$r10/.claude/skills/maestro-prune" ] && [ ! -e "$r10/.agents/skills/maestro-prune" ] || fail "the old install's dropped skill stayed"
+! grep -q '^\.[a-z]*/skills/' "$r10/.git/info/exclude" || fail "the old exclude lines stayed"
+git -C "$r10" status --porcelain --untracked-files=all | grep -q '^?? .claude/skills/maestro-tdd/SKILL.md$' || fail "committed skills are still hidden"
+ok check "$r10"
 
 # A team's skill folder by a Maestro name clashes until skip:.
 r2=$tmp/own
@@ -161,10 +218,12 @@ git -C "$r" status --porcelain --untracked-files=all | grep -q '^?? .claude/skil
 # A CRLF checkout of the committed copies still matches the record, from
 # inside another repo with other attributes.
 git -C "$r" add -A && git -C "$r" commit -qm install
-echo '*.md text eol=crlf' >"$r/.gitattributes"
+printf '*.md text eol=crlf\ninstalled.list text eol=crlf\n' >"$r/.gitattributes"
 git -C "$r" add .gitattributes && git -C "$r" commit -qm crlf
-rm "$r/.claude/skills/maestro-tdd/SKILL.md" && git -C "$r" checkout -- .claude/skills/maestro-tdd/SKILL.md
+rm "$r/.claude/skills/maestro-tdd/SKILL.md" "$r/.maestro/project/installed.list"
+git -C "$r" checkout -- .claude/skills/maestro-tdd/SKILL.md .maestro/project/installed.list
 grep -q $'\r$' "$r/.claude/skills/maestro-tdd/SKILL.md" || fail "the checkout should be CRLF"
+grep -q $'\r$' "$r/.maestro/project/installed.list" || fail "the record's checkout should be CRLF"
 (cd "$r2" && run check "$r") || { cat "$tmp/out"; fail "check of a CRLF checkout from another repo failed"; }
 (cd "$r2" && run apply "$r") || { cat "$tmp/out"; fail "apply over a CRLF checkout clashed"; }
 
@@ -262,7 +321,22 @@ seen=$(git -C "$r7" status --porcelain --untracked-files=all)
 ok apply "$r7"
 installed "$r7" .claude .agents
 left=$(find "$r7" -name 'maestro-install.*'); [ -z "$left" ] || fail "a failed copy left its temp folder: $left"
+# check reads project-setup.md as maestro-play does: any heading case, a
+# bullet or backticks round the branch, CRLF.
+sed -i 's/^## Main branch$/## Main Branch/; s/^main$/- `main`/; s/^\(- [a-z]*:\) `/\1\t`/; s/$/\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
+! grep -q "lists no checks" "$tmp/out" || fail "check missed a check with a tab in it"
+printf '## Run\n\n<how to start it>\n' >>"$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md: ## Run still holds"
+# A linked worktree refuses, hidden or committed: it shares the main
+# checkout's exclude file and record.
+git -C "$r7" add .maestro/project && git -C "$r7" commit -qm setup
+git -C "$r7" worktree add -q "$tmp/wt7"
+for c in apply check uninstall; do refuses "is a linked worktree; run install.sh in the main checkout, $r7" "$r7" $c "$tmp/wt7"; done
+sed -i 's/^skills-home: .*/skills-home: committed/' "$tmp/wt7/.maestro/project/install.yaml"
+refuses "is a linked worktree" "$r7" apply "$tmp/wt7"
+git -C "$r7" worktree remove --force "$tmp/wt7"
 # A file git can't hash stops check and uninstall; uninstall keeps the record.
 if [ "$(id -u)" -ne 0 ]; then
 	chmod 000 "$r7/.claude/skills/maestro-tdd/SKILL.md"
