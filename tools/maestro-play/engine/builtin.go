@@ -336,9 +336,13 @@ func (e *Engine) linkSkills(st *State, worktree string) string {
 			want = append(want, rel)
 		}
 	}
-	hidden := e.ignored(st, e.cfg.Dir, want)
+	// With git failing, no skill is linked and every one is named.
+	hidden, err := e.ignored(st, e.cfg.Dir, want)
 	var linked, missed []string
 	for _, rel := range want {
+		if err != nil {
+			missed = append(missed, filepath.Base(rel))
+		}
 		if !hidden[rel] {
 			continue
 		}
@@ -349,35 +353,46 @@ func (e *Engine) linkSkills(st *State, worktree string) string {
 		}
 		linked = append(linked, rel)
 	}
-	still := e.ignored(st, worktree, linked)
+	still, err2 := e.ignored(st, worktree, linked)
+	if err == nil {
+		err = err2
+	}
 	for _, rel := range linked {
-		if !still[rel] {
+		if err2 != nil || !still[rel] {
 			os.Remove(filepath.Join(worktree, rel))
 			missed = append(missed, filepath.Base(rel))
 		}
 	}
-	if len(missed) == 0 {
+	if len(missed) == 0 && err == nil {
 		return ""
 	}
-	return "\nskills not linked into the worktree: " + strings.Join(missed, " ")
+	out := "\nskills not linked into the worktree: " + strings.Join(missed, " ")
+	if err != nil {
+		out += " (" + err.Error() + ")"
+	}
+	return out
 }
 
 // ignored is the set of paths, relative to dir, that git ignores there.
-func (e *Engine) ignored(st *State, dir string, paths []string) map[string]bool {
+// NUL-separated, so git doesn't quote an unusual name.
+func (e *Engine) ignored(st *State, dir string, paths []string) (map[string]bool, error) {
 	set := map[string]bool{}
 	if len(paths) == 0 {
-		return set
+		return set, nil
 	}
-	r, err := e.exec(dir, e.cfg.GitBin, e.noPromptEnv(st), strings.Join(paths, "\n")+"\n", e.cfg.GitTimeout, "check-ignore", "--stdin")
+	r, err := e.exec(dir, e.cfg.GitBin, e.noPromptEnv(st), strings.Join(paths, "\x00")+"\x00", e.cfg.GitTimeout, "check-ignore", "-z", "--stdin")
 	if err != nil {
-		return set
+		return nil, fmt.Errorf("git check-ignore: %v", err)
 	}
-	for _, line := range strings.Split(r.stdout, "\n") {
-		if line != "" {
-			set[line] = true
+	if r.exit > 1 { // 1: none ignored
+		return nil, fmt.Errorf("git check-ignore: exit %d: %s", r.exit, strings.TrimSpace(r.stderr))
+	}
+	for _, p := range strings.Split(r.stdout, "\x00") {
+		if p != "" {
+			set[p] = true
 		}
 	}
-	return set
+	return set, nil
 }
 
 // hideWorktrees adds .maestro/worktrees/ to the repo's info/exclude, so

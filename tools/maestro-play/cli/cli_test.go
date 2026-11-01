@@ -131,6 +131,32 @@ func TestPlaybooksFromInstall(t *testing.T) {
 	}
 }
 
+// From a linked worktree, which has no .maestro/src, the main checkout's
+// install still supplies the playbooks.
+func TestPlaybooksFromWorktree(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	git("init", "-q")
+	git("commit", "-q", "--allow-empty", "-m", "one")
+	wt := filepath.Join(dir, ".maestro", "worktrees", "T-1")
+	git("worktree", "add", "-q", wt)
+	src := filepath.Join(dir, ".maestro", "src")
+	if err := os.CopyFS(src, os.DirFS(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code := Main(Env{Args: []string{"lint"}, Stdout: &out, Stderr: &out, Dir: wt, Getenv: func(string) string { return "" }})
+	if code != 0 || out.String() != "7 playbooks, 0 problems\n" {
+		t.Fatalf("exit %d: %s", code, out.String())
+	}
+}
+
 // A binary built from a commit older than the repo's pinned one warns;
 // the pinned commit itself, or one the clone doesn't know, doesn't.
 func TestWarnStale(t *testing.T) {

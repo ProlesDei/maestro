@@ -106,6 +106,7 @@ type cmd struct {
 	fs                                            *flag.FlagSet
 	playbooks, skills, common, ticketBin, harness string
 	args                                          []string
+	main                                          string // the main checkout, where an install puts .maestro/src
 }
 
 // parse allows flags before and after the positional arguments.
@@ -140,6 +141,19 @@ func (c *cmd) config() (engine.Config, error) {
 			dir = top
 		}
 	}
+	// A linked worktree has no .maestro/src or install.yaml: they're hidden
+	// or untracked in the main checkout, the git common dir's parent.
+	var common string
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
+		common = strings.TrimSpace(string(out))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(dir, common)
+		}
+	}
+	c.main = dir
+	if filepath.Base(common) == ".git" {
+		c.main = filepath.Dir(common)
+	}
 	get := c.env.Getenv
 	models := map[string]string{}
 	for tier, key := range map[string]string{"mid": "MAESTRO_MODEL_MID", "frontier": "MAESTRO_MODEL_FRONTIER"} {
@@ -171,7 +185,7 @@ func (c *cmd) config() (engine.Config, error) {
 	}
 	if cfg.Playbooks == "" {
 		// The install guide clones Maestro into .maestro/src.
-		cfg.Playbooks = filepath.Join(dir, ".maestro", "src", "playbooks")
+		cfg.Playbooks = filepath.Join(c.main, ".maestro", "src", "playbooks")
 		if fi, err := os.Stat(cfg.Playbooks); err != nil || !fi.IsDir() {
 			cfg.Playbooks = filepath.Join(dir, "playbooks")
 		}
@@ -180,13 +194,8 @@ func (c *cmd) config() (engine.Config, error) {
 		cfg.Skills = filepath.Join(filepath.Dir(filepath.Clean(cfg.Playbooks)), "skills")
 	}
 	if cfg.Common == "" {
-		out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output()
-		if err != nil {
+		if common == "" {
 			return cfg, errors.New("not in a git repo: pass --common or set MAESTRO_COMMON")
-		}
-		common := strings.TrimSpace(string(out))
-		if !filepath.IsAbs(common) {
-			common = filepath.Join(dir, common)
 		}
 		cfg.Common = filepath.Join(common, "maestro")
 	}
@@ -206,7 +215,7 @@ func (c *cmd) engine() (*engine.Engine, int) {
 		fmt.Fprintf(c.env.Stderr, "maestro-play: %v\n", err)
 		return nil, 1
 	}
-	c.warnStale(cfg.Dir)
+	c.warnStale(c.main)
 	return e, 0
 }
 

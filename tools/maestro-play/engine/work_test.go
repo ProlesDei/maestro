@@ -239,17 +239,18 @@ func TestWorktreeAddReuses(t *testing.T) {
 // Codex finds them; a tracked skill comes with the checkout and an
 // untracked one that git doesn't ignore stays out. One hidden only as a
 // folder (a trailing /) would show as a link, so it isn't linked and is
-// named. The links leave git status clean, and the worktree still removes.
+// named. A name git would quote links too. The links leave git status
+// clean, and the worktree still removes.
 func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
 	w := newWorld(t)
-	for _, n := range []string{"maestro-tdd", "ours", "stray", "maestro-dir"} {
+	for _, n := range []string{"maestro-tdd", "ours", "stray", "maestro-dir", "café"} {
 		os.MkdirAll(filepath.Join(w.repo, ".agents", "skills", n), 0o755)
 		os.WriteFile(filepath.Join(w.repo, ".agents", "skills", n, "SKILL.md"), []byte(n+"\n"), 0o644)
 	}
 	w.git(w.repo, "add", ".agents/skills/ours")
 	w.git(w.repo, "commit", "-q", "-m", "our skill")
 	exclude := filepath.Join(w.repo, ".git", "info", "exclude")
-	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n/.agents/skills/maestro-dir/\n"), 0o644)
+	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n/.agents/skills/maestro-dir/\n/.agents/skills/café\n"), 0o644)
 	r, err := w.e.worktreeAdd(&State{ID: "r1"}, "T-1", "main")
 	if err != nil || r["status"] != "ok" {
 		t.Fatalf("worktree add: %v %v", r, err)
@@ -257,6 +258,9 @@ func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
 	wt := str(r["path"])
 	if b, err := os.ReadFile(filepath.Join(wt, ".agents", "skills", "maestro-tdd", "SKILL.md")); err != nil || string(b) != "maestro-tdd\n" {
 		t.Errorf("hidden skill not linked: %q %v", b, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "café")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("hidden skill with a quoted name not linked: %v", err)
 	}
 	if fi, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "ours")); err != nil || fi.Mode()&os.ModeSymlink != 0 {
 		t.Errorf("tracked skill should be the checkout's own folder: %v", err)
