@@ -40,4 +40,4 @@ Skip this phase unless you split or rewrote a ticket.
 
 ## Reply
 
-The spec in five lines or fewer, then one line per ticket (`<id> <title> [status, priority, deps, areas]`, or the full draft if you created nothing), the old ticket's new status and each dependent moved, how many new tickets can start now and the longest dep chain, then `Next: maestro-play run work --ticket <id>` for each that can start now.
+The spec in five lines or fewer, then one line per ticket (`<id> <title> [status, priority, deps, areas]`, or the full draft if you created nothing), the old ticket's new status and each dependent moved, how many new tickets can start now and the longest dep chain, then `Start now: <ids> | none`, the one most tickets wait on first, for the planner to hand to its engineers.

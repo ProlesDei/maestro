@@ -13,12 +13,12 @@ The infrastructure under that workflow, which a team installs into its own repo:
 That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the six profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
-1. The chief of staff talks to the owner, one decision at a time, and starts each job with one command, listed in [its persona](bot-profiles/chief-of-staff/persona.md#how-you-drive-claude). It never touches code.
-2. The planner turns a goal into tickets in `maestro-ticket`.
+1. The chief of staff talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
+2. The planner runs the team day to day, as product owner and project manager in one. It turns goals into tickets in `maestro-ticket`, hands each ticket's build, QA and review to the right bot ([its persona](bot-profiles/planner/persona.md)), and reports status and the blocks it can't settle to the chief of staff.
 3. An engineer runs the work playbook: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
 5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. An engineer or the chief of staff answers it and runs it again.
+6. A blocked run leaves an `Escalation:` note. An engineer or the planner answers it and the ticket runs again; a call they can't make goes to the chief of staff.
 
 What we hold to:
 - Least friction for the team that installs it. The step sessions `maestro-play` starts run with all permissions; teams set limits as [tools/maestro-play](tools/maestro-play/README.md) shows.
@@ -28,7 +28,7 @@ What we hold to:
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`install.sh --tickets`), so a skill names `maestro-ticket` only as the default.
 - Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
   - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
-  - What the owner and the chief of staff read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.
+  - What the owner, the chief of staff and the planner read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.
   - Cost multiplies. Every prompt, step output and check runs in each session, so 100 extra tokens become 30,000. Keep them lean, and write a concurrency test only for a change to shared state.
 - Small and plain: cut what only exists to look impressive. But never cut a skill, bot, role or diagram without the owner's yes. An audit or plan is advice, not a ruling.
 
@@ -80,7 +80,9 @@ Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh`. Run bot
 
 For any skill work here, ours or shipped, use the **create-edit-skill** skill, never a built-in skill creator such as `skill-creator`.
 
-This repo is Maestro's source, so edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
+This repo is Maestro's source, and Maestro runs on it. To change how Maestro works, edit its source (`skills/`, `bot-profiles/`, `playbooks/`, `tools/`, `templates/`, `scripts/`) through a ticket and PR. Never edit a copy: an installed `maestro-*` skill, a built binary, or a bot's live setup in Grok. A copy's edit never ships, and the next install or redeploy wipes it.
+
+So edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
 - Update the count and group table in `skills/README.md`, and `skills/use.yaml` when a step loads the skill or only a person starts it.
 - Run `go test ./...` in `tools/maestro-play/` and `bash scripts/install_test.sh`.
 - Shipped skills aren't installed here, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
