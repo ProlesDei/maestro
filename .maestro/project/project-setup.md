@@ -1,6 +1,6 @@
 # Project setup
 
-`scripts/install.sh` copies this to `.maestro/project/project-setup.md` once; fill it in there. `maestro-play` parses two sections, so keep their shape:
+`scripts/install.sh apply` copies this to `.maestro/project/project-setup.md` once; [INSTALL.md](https://github.com/ProlesDei/maestro/blob/main/INSTALL.md) has your agent fill it in with you. `maestro-play` parses two sections, so keep their shape:
 
 - `## Main branch`: one line, the branch PRs merge into.
 - `## Checks`: only bullets of a name, a colon and the command in backticks. `check all` runs them in order in the ticket's worktree; a non-zero exit, or a run past the check timeout (15m by default), fails the check. Checks must leave `git status` clean: gitignore what they write, or the run stops at `head`.
@@ -35,12 +35,14 @@ s=$(mktemp -d) && GOBIN=$s/bin
 (cd tools/maestro-ticket && GOBIN=$GOBIN go install ./cmd/maestro-ticket)
 (cd tools/maestro-play && GOBIN=$GOBIN go install ./cmd/maestro-play)
 git init -q $s/repo && git -C $s/repo commit -q --allow-empty -m init
-PATH=$GOBIN:$PATH bash scripts/install.sh $s/repo
+mkdir -p $s/repo/.maestro/project
+printf 'maestro-sha: %s\nharnesses: claude codex\nskills-home: hidden\n' $(git rev-parse HEAD) >$s/repo/.maestro/project/install.yaml
+PATH=$GOBIN:$PATH bash scripts/install.sh apply $s/repo
 cd $s/repo && PATH=$GOBIN:$PATH maestro-ticket create --title "try it" --status todo
 PATH=$GOBIN:$PATH maestro-play render work --step plan --ticket T-1 --playbooks <worktree>/playbooks
 ```
 
-`maestro-play lint <worktree>/playbooks` checks the playbooks alone. Never test against this repo's own ticket store; it holds the real backlog.
+`install.sh apply` refuses uncommitted Maestro: commit first, since it pins `HEAD`. To try INSTALL.md itself, give a fresh agent session in the scratch repo only "follow INSTALL.md in <worktree>". `maestro-play lint <worktree>/playbooks` checks the playbooks alone. Never test against this repo's own ticket store; it holds the real backlog.
 
 ## Tickets
 

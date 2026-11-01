@@ -4,12 +4,12 @@ Maestro ships 18 skills. Each has the `maestro-` prefix, so none clashes with a 
 
 | Group | Skills |
 |---|---|
-| Ticket to merge | `maestro-create-ticket` (one ticket; a team can swap in its own with `scripts/install.sh --tickets <dir>`), `maestro-code-review` (merge and close, or kick back). The build itself is a playbook, not a skill: [playbooks/work](../playbooks/work/README.md). |
+| Ticket to merge | `maestro-create-ticket` (one ticket; a team can swap in its own under `tickets:` in its `install.yaml`), `maestro-code-review` (merge and close, or kick back). The build itself is a playbook, not a skill: [playbooks/work](../playbooks/work/README.md). |
 | Roles | `maestro-planner`, `maestro-qa-lead`, `maestro-chief-of-staff` |
 | Working tools | `maestro-figure-it-out`, `maestro-swarm`, `maestro-sharpen`, `maestro-recall`, `maestro-unslop`, `maestro-prune`, `maestro-refactor-code`, `maestro-technical-writing`, `maestro-create-edit-skill` |
 | Named in prompt steps | `maestro-working-principles` (every step), `maestro-software-engineer` (plan, build), `maestro-tdd` (build), `maestro-prove-complete` (verify) |
 
-To add your own, drop a `skills/<name>/SKILL.md` folder here. `scripts/install.sh` copies every folder into the target repo's `.claude/skills/` and `.agents/skills/`.
+To add your own, drop a `skills/<name>/SKILL.md` folder here. `scripts/install.sh` copies every folder into the target repo's `.claude/skills/` and `.agents/skills/`, or under `~`, as [INSTALL.md](../INSTALL.md) has the team choose.
 
 `use.yaml` says which skills `maestro-play` names at the top of each prompt step: `prompts.all` for every step, `prompts.<template>` for one. `commands` marks the skills a person calls and a prompt step must never load. Each needs `disable-model-invocation: true` in its frontmatter and `agents/openai.yaml` with `policy.allow_implicit_invocation: false`; `maestro-play lint` checks both.
 

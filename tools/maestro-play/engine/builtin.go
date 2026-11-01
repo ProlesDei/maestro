@@ -293,7 +293,7 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 		if got := strings.TrimSpace(r.stdout); r.exit != 0 || got != branch {
 			return newReply("failed", 1, fmt.Sprintf("%s exists on %q, not %s: %s", path, got, branch, r.stderr)), nil
 		}
-		return ok("reused " + path), nil
+		return ok("reused " + path + e.linkSkills(st, path)), nil
 	}
 	e.hideWorktrees(st)
 	if _, err := e.git(st, e.cfg.Dir, "worktree", "prune"); err != nil {
@@ -312,7 +312,48 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 	if r.exit != 0 {
 		return newReply("failed", r.exit, r.stdout+r.stderr), nil
 	}
-	return ok(r.stdout + r.stderr), nil
+	return ok(r.stdout + r.stderr + e.linkSkills(st, path)), nil
+}
+
+// linkSkills links each skill folder git ignores in the main checkout's
+// .agents/skills into the worktree, and says what it couldn't link. Codex
+// looks for skills only up to the worktree's root, so it would miss the
+// hidden copies an install makes; Claude Code finds the main checkout's
+// .claude/skills itself. A link git wouldn't ignore in the worktree is
+// removed: it would leave git status dirty.
+func (e *Engine) linkSkills(st *State, worktree string) string {
+	src := filepath.Join(e.cfg.Dir, ".agents", "skills")
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return ""
+	}
+	var missed []string
+	for _, d := range entries {
+		rel := filepath.Join(".agents", "skills", d.Name())
+		dest := filepath.Join(worktree, rel)
+		if _, err := os.Lstat(dest); err == nil {
+			continue
+		}
+		if r, err := e.git(st, e.cfg.Dir, "check-ignore", "-q", "--", rel); err != nil || r.exit != 0 {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			missed = append(missed, d.Name())
+			continue
+		}
+		if err := os.Symlink(filepath.Join(src, d.Name()), dest); err != nil {
+			missed = append(missed, d.Name())
+			continue
+		}
+		if r, err := e.git(st, worktree, "check-ignore", "-q", "--", rel); err != nil || r.exit != 0 {
+			os.Remove(dest)
+			missed = append(missed, d.Name())
+		}
+	}
+	if len(missed) == 0 {
+		return ""
+	}
+	return "\nskills not linked into the worktree: " + strings.Join(missed, " ")
 }
 
 // hideWorktrees adds .maestro/worktrees/ to the repo's info/exclude, so

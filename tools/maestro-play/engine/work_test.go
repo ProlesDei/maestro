@@ -235,6 +235,40 @@ func TestWorktreeAddReuses(t *testing.T) {
 	}
 }
 
+// A new worktree links the skills an install hid in .agents/skills, so
+// Codex finds them; a tracked skill comes with the checkout and an
+// untracked one that git doesn't ignore stays out. The links leave git
+// status clean, and the worktree still removes.
+func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
+	w := newWorld(t)
+	for _, n := range []string{"maestro-tdd", "ours", "stray"} {
+		os.MkdirAll(filepath.Join(w.repo, ".agents", "skills", n), 0o755)
+		os.WriteFile(filepath.Join(w.repo, ".agents", "skills", n, "SKILL.md"), []byte(n+"\n"), 0o644)
+	}
+	w.git(w.repo, "add", ".agents/skills/ours")
+	w.git(w.repo, "commit", "-q", "-m", "our skill")
+	exclude := filepath.Join(w.repo, ".git", "info", "exclude")
+	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n"), 0o644)
+	r, err := w.e.worktreeAdd(&State{ID: "r1"}, "T-1", "main")
+	if err != nil || r["status"] != "ok" {
+		t.Fatalf("worktree add: %v %v", r, err)
+	}
+	wt := str(r["path"])
+	if b, err := os.ReadFile(filepath.Join(wt, ".agents", "skills", "maestro-tdd", "SKILL.md")); err != nil || string(b) != "maestro-tdd\n" {
+		t.Errorf("hidden skill not linked: %q %v", b, err)
+	}
+	if fi, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "ours")); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("tracked skill should be the checkout's own folder: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "stray")); err == nil {
+		t.Error("an untracked skill git doesn't ignore was linked")
+	}
+	if out := w.git(wt, "status", "--porcelain", "--untracked-files=all"); out != "" {
+		t.Errorf("worktree not clean: %s", out)
+	}
+	w.git(w.repo, "worktree", "remove", wt)
+}
+
 // A check that isn't listed fails the step; check all with no checks
 // listed, or no setup, passes with none run.
 func TestCheckNeedsChecks(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ no --ticket takes the first unclaimed ticket its intake matches. --bot
 defaults to $MAESTRO_BOT, else user.
 
 Flags for every command:
-  --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else ./playbooks)
+  --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else .maestro/src/playbooks
+                    when Maestro was installed there, else ./playbooks)
   --skills DIR      skills folder with use.yaml ($MAESTRO_SKILLS, else <playbooks>/../skills)
   --common DIR      Maestro's state folder ($MAESTRO_COMMON, else $(git rev-parse --git-common-dir)/maestro)
   --ticket-bin P    maestro-ticket ($MAESTRO_TICKET_BIN, else maestro-ticket)
@@ -168,7 +170,11 @@ func (c *cmd) config() (engine.Config, error) {
 		*d = t
 	}
 	if cfg.Playbooks == "" {
-		cfg.Playbooks = filepath.Join(dir, "playbooks")
+		// The install guide clones Maestro into .maestro/src.
+		cfg.Playbooks = filepath.Join(dir, ".maestro", "src", "playbooks")
+		if fi, err := os.Stat(cfg.Playbooks); err != nil || !fi.IsDir() {
+			cfg.Playbooks = filepath.Join(dir, "playbooks")
+		}
 	}
 	if cfg.Skills == "" {
 		cfg.Skills = filepath.Join(filepath.Dir(filepath.Clean(cfg.Playbooks)), "skills")
@@ -200,7 +206,50 @@ func (c *cmd) engine() (*engine.Engine, int) {
 		fmt.Fprintf(c.env.Stderr, "maestro-play: %v\n", err)
 		return nil, 1
 	}
+	c.warnStale(cfg.Dir)
 	return e, 0
+}
+
+// buildRevision is the commit this binary was built from, "" if unknown.
+var buildRevision = func() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
+		}
+	}
+	return ""
+}
+
+// warnStale warns when this binary was built from a commit older than the
+// one the repo pins in .maestro/project/install.yaml: its engine may not
+// match the playbooks in .maestro/src. One maestro-play serves every repo
+// on the machine, so a newer build is fine.
+func (c *cmd) warnStale(dir string) {
+	rev, pin := buildRevision(), pinnedSHA(filepath.Join(dir, ".maestro", "project", "install.yaml"))
+	if rev == "" || pin == "" || strings.HasPrefix(rev, pin) {
+		return
+	}
+	src := filepath.Join(dir, ".maestro", "src")
+	if exec.Command("git", "-C", src, "merge-base", "--is-ancestor", rev, pin).Run() != nil {
+		return
+	}
+	fmt.Fprintf(c.env.Stderr, "maestro-play: warning: built from %.12s, older than the pinned %s; rebuild it from .maestro/src/tools/maestro-play\n", rev, pin)
+}
+
+// pinnedSHA is the maestro-sha: line of an install.yaml, "" if none.
+func pinnedSHA(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "maestro-sha:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func (c *cmd) report(r engine.Result, err error) int {
