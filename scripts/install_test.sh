@@ -4,11 +4,13 @@
 # apply installs hidden or committed, and a second run changes nothing; an
 # update replaces and removes only what it placed; a team's file or one
 # changed since install clashes and changes nothing, until skip: or
-# --replace; a switch of skills-home takes over the copies; a CRLF checkout
-# still matches the record, from any directory; check finds what's wrong,
-# also through a symlinked path; uninstall removes only unchanged files and
-# keeps .maestro/src/ hidden; a failed copy stays hidden and a rerun
-# finishes it; bad choices and bad repos refuse and change nothing.
+# --replace; a switch of skills-home takes over the copies, and a switch to
+# hidden untracks them; a CRLF checkout still matches the record, from any
+# directory; check finds what's wrong, also through a symlinked path;
+# uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
+# failed copy stays hidden and a rerun finishes it; a file git can't hash
+# stops check and uninstall; bad choices and bad repos refuse and change
+# nothing.
 # Run from anywhere: bash scripts/install_test.sh
 set -euo pipefail
 
@@ -166,6 +168,17 @@ grep -q $'\r$' "$r/.claude/skills/maestro-tdd/SKILL.md" || fail "the checkout sh
 (cd "$r2" && run check "$r") || { cat "$tmp/out"; fail "check of a CRLF checkout from another repo failed"; }
 (cd "$r2" && run apply "$r") || { cat "$tmp/out"; fail "apply over a CRLF checkout clashed"; }
 
+# --- switch committed to hidden: the tracked copies are untracked ---
+sed -i 's/^skills-home: .*/skills-home: hidden/' "$r/.maestro/project/install.yaml"
+n=$(($(git -C "$r" ls-files .claude .agents | wc -l) + 1))
+ok apply "$r"
+says "untracked $n files git tracked: commit that"
+git -C "$r" commit -qam hide
+seen=$(git -C "$r" status --porcelain --untracked-files=all)
+[ -z "$seen" ] || fail "after the switch to hidden, git still sees: $seen"
+[ -z "$(git -C "$r" ls-files .claude .agents .maestro/project/installed.list)" ] || fail "the switch to hidden left files tracked"
+ok check "$r"
+
 # --- uninstall: removes unchanged files, keeps a changed one ---
 echo mine >>"$r/.agents/skills/maestro-tdd/SKILL.md"
 if run uninstall "$r"; then fail "uninstall with a changed file exited 0"; fi
@@ -241,15 +254,33 @@ refuses "usage:" "$r6" frob "$r6"
 r7=$tmp/half
 repo "$r7" "harnesses: claude codex" "skills-home: hidden"
 mkdir "$tmp/cpbin"
-printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *.agents/skills/maestro-tdd/*) exit 1 ;; esac' 'exec /bin/cp "$@"' >"$tmp/cpbin/cp"
+printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in */skills/maestro-tdd/*) exit 1 ;; esac' 'exec /bin/cp "$@"' >"$tmp/cpbin/cp"
 chmod +x "$tmp/cpbin/cp"
 if PATH="$tmp/cpbin:$PATH" run apply "$r7"; then fail "apply with a failing cp exited 0"; fi
 seen=$(git -C "$r7" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml" ] || fail "a failed apply should leave its copies hidden: $seen"
 ok apply "$r7"
 installed "$r7" .claude .agents
-left=$(find "$r7/.claude" "$r7/.agents" -type f -name '*.*.??????'); [ -z "$left" ] || fail "a failed copy left a temp file: $left"
+left=$(find "$r7" -name 'maestro-install.*'); [ -z "$left" ] || fail "a failed copy left its temp folder: $left"
 ok check "$r7"
+# A file git can't hash stops check and uninstall; uninstall keeps the record.
+if [ "$(id -u)" -ne 0 ]; then
+	chmod 000 "$r7/.claude/skills/maestro-tdd/SKILL.md"
+	if run check "$r7"; then fail "check passed with an unreadable file"; fi
+	says "git hash-object failed"
+	if run uninstall "$r7"; then fail "uninstall passed with an unreadable file"; fi
+	says "nothing was changed"
+	[ -f "$r7/.git/maestro/installed.list" ] && [ -f "$r7/.claude/skills/maestro-swarm/SKILL.md" ] || fail "a failed uninstall removed files or the record"
+	chmod 644 "$r7/.claude/skills/maestro-tdd/SKILL.md"
+fi
+
+# Committed skills git would ignore don't pass check.
+r9=$tmp/ignored
+repo "$r9" "harnesses: claude" "skills-home: committed"
+echo /.claude/ >"$r9/.gitignore"
+ok apply "$r9"
+if run check "$r9"; then fail "check passed with committed skills git ignores"; fi
+says ".claude/skills/maestro-tdd is hidden from git, but skills-home is committed"
 
 # check, through a symlinked path, still checks Maestro's clone in
 # .maestro/src/ for files the harnesses would load.

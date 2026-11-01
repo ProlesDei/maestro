@@ -29,7 +29,7 @@ bots=() sha=
 while IFS= read -r line || [ -n "$line" ]; do
 	case $line in
 	bots:*) read -ra bots <<<"${line#bots:}" ;;
-	maestro-sha:*) sha=$(echo ${line#maestro-sha:}) ;;
+	maestro-sha:*) sha=${line#maestro-sha:} sha=${sha//[[:space:]]/} ;;
 	esac
 done <"$choices"
 if [ ${#bots[@]} -eq 0 ]; then

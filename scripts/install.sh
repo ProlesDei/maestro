@@ -25,7 +25,8 @@
 # didn't place or one changed since; it lists each such clash and writes
 # nothing. --replace <skill> lets it replace that skill's folder. Run it
 # again after an update, or after a run that failed partway: it replaces
-# what it placed and removes what it no longer installs.
+# what it placed and removes what it no longer installs. A switch to hidden
+# untracks the copies git tracks (git rm --cached) for the team to commit.
 #
 # check reports what's wrong with an install; uninstall removes the files
 # the record lists, except those changed since.
@@ -140,6 +141,17 @@ hash_src() { git hash-object --no-filters --stdin-paths; }
 # hash_repo: the same for each record path on stdin, through the repo's own
 # .gitattributes and core.autocrlf, so a CRLF checkout of an LF file matches.
 hash_repo() { git -C "$target" hash-object --stdin-paths; }
+# hashes <hash_src|hash_repo> <path>...: set hs to each path's hash, in
+# order, or die, before anything is written, unless every path got one.
+hashes() {
+	local how=$1 out
+	shift
+	hs=()
+	[ $# -gt 0 ] || return 0
+	out=$(printf '%s\n' "$@" | "$how") || die "git hash-object failed; nothing was changed"
+	mapfile -t hs <<<"$out"
+	[ ${#hs[@]} -eq $# ] || die "git hash-object gave ${#hs[@]} hashes for $# files; nothing was changed"
+}
 
 # old: the record. apply also reads the one an install in the other
 # skills-home left, so a switch takes over its copies.
@@ -161,8 +173,11 @@ skill_of() { local p=${1#*/skills/}; echo "${p%%/*}"; }
 # if they're empty.
 prune() {
 	local p d
+	local -A pruned=()
 	for p in "$@"; do
 		d=${p%/"${p#*/skills/*/}"}
+		[ -z "${pruned[$d]-}" ] || continue
+		pruned[$d]=1
 		[ ! -d "$(full "$d")" ] || find "$(full "$d")" -depth -type d -empty -delete
 	done
 	for d in .claude .agents; do rmdir -- "$target/$d/skills" "$target/$d" 2>/dev/null || true; done
@@ -182,12 +197,14 @@ exclude_lines() {
 		for d in "${dirs[@]}"; do echo "/$d/skills/$n"; done
 	done
 }
-# write_exclude <lines>: replace the marked block; no lines drops it.
+# write_exclude <lines>: replace the marked block; no lines drops it. The
+# temp copy keeps the file's mode. Only maestro-play writes it at the same
+# moment, and its one line is in the block too.
 write_exclude() {
 	mkdir -p "$(dirname "$exclude")"
 	touch "$exclude"
-	local tmp
-	tmp=$(mktemp "$exclude.XXXXXX")
+	local tmp=$scratch/exclude
+	cp -p -- "$exclude" "$tmp"
 	awk -v b="$begin" -v e="$end" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$exclude" >"$tmp"
 	if [ -n "$1" ]; then
 		[ ! -s "$tmp" ] || [ -z "$(tail -c1 "$tmp")" ] || echo >>"$tmp"
@@ -195,6 +212,15 @@ write_exclude() {
 	fi
 	mv "$tmp" "$exclude"
 }
+
+# Temp files go in one folder in the git dir, out of the work tree, and
+# it goes when the script ends, however it ends.
+if [ "$cmd" != check ]; then
+	scratch=$(mktemp -d "$common/maestro-install.XXXXXX")
+	trap 'rm -rf -- "$scratch"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+fi
 
 # --- check ---
 if [ "$cmd" = check ]; then
@@ -213,13 +239,10 @@ if [ "$cmd" = check ]; then
 		for p in "${!old[@]}"; do
 			if [ -f "$(full "$p")" ]; then paths+=("$p") want+=("${old[$p]}"); else problem "missing: $p"; fi
 		done
-		if [ ${#paths[@]} -gt 0 ]; then
-			i=0
-			while read -r h; do
-				[ "$h" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
-				i=$((i + 1))
-			done < <(printf '%s\n' "${paths[@]}" | hash_repo)
-		fi
+		hashes hash_repo ${paths[@]+"${paths[@]}"}
+		for i in "${!hs[@]}"; do
+			[ "${hs[i]}" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
+		done
 	fi
 	# The skills prompt steps load must be in every harness folder.
 	steps=$(sed -n '/^prompts:/,/^[a-z]/p' "$root/skills/use.yaml" | grep -o '\[[^]]*\]' | tr -d '[],' | tr ' ' '\n' | sort -u || true)
@@ -228,13 +251,21 @@ if [ "$cmd" = check ]; then
 			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: playbook steps load it"
 		done
 	done
-	if [ "$home" = hidden ]; then
-		for n in "${!from[@]}"; do
-			for d in "${dirs[@]}"; do
-				git -C "$target" check-ignore -q "$d/skills/$n" || problem "$d/skills/$n isn't hidden from git"
-			done
+	# Hidden skills must be ignored, committed ones not. A tracked folder
+	# isn't ignored. One git call for every skill.
+	declare -A ign=()
+	out=$(for n in "${!from[@]}"; do for d in "${dirs[@]}"; do echo "$d/skills/$n"; done; done |
+		git -C "$target" check-ignore --stdin) || [ $? -eq 1 ] || die "git check-ignore failed"
+	while IFS= read -r p; do [ -z "$p" ] || ign[$p]=1; done <<<"$out"
+	for n in "${!from[@]}"; do
+		for d in "${dirs[@]}"; do
+			if [ "$home" = hidden ]; then
+				[ -n "${ign[$d/skills/$n]-}" ] || problem "$d/skills/$n isn't hidden from git"
+			else
+				[ -z "${ign[$d/skills/$n]-}" ] || problem "$d/skills/$n is hidden from git, but skills-home is committed"
+			fi
 		done
-	fi
+	done
 	tools=(maestro-play)
 	[ "$tickets" != maestro-ticket ] || tools+=(maestro-ticket)
 	for b in "${tools[@]}"; do
@@ -282,16 +313,15 @@ if [ "$cmd" = uninstall ]; then
 	for p in "${!old[@]}"; do
 		[ -f "$(full "$p")" ] && paths+=("$p") want+=("${old[$p]}")
 	done
-	i=0
-	while read -r h; do
-		if [ "$h" = "${want[i]}" ]; then
+	hashes hash_repo ${paths[@]+"${paths[@]}"}
+	for i in "${!hs[@]}"; do
+		if [ "${hs[i]}" = "${want[i]}" ]; then
 			rm -f -- "$(full "${paths[i]}")"
 			removed=$((removed + 1))
 		else
 			kept+=("${paths[i]}")
 		fi
-		i=$((i + 1))
-	done < <([ ${#paths[@]} -eq 0 ] || printf '%s\n' "${paths[@]}" | hash_repo)
+	done
 	[ ${#old[@]} -eq 0 ] || prune "${!old[@]}"
 	# .maestro/src/ and .maestro/bots/ stay, so they stay hidden.
 	write_exclude "$(home=committed exclude_lines)"
@@ -324,11 +354,10 @@ for n in "${!from[@]}"; do
 		done
 	done < <(find "${from[$n]}" -type f ! -path '*/.git/*' -print0)
 done
-i=0
-while read -r h; do
-	new[${plan[i]}]=$h
-	i=$((i + 1))
-done < <(for p in "${plan[@]}"; do echo "${src[$p]}"; done | hash_src)
+srcs=()
+for p in "${plan[@]}"; do srcs+=("${src[$p]}"); done
+hashes hash_src "${srcs[@]}"
+for i in "${!hs[@]}"; do new[${plan[i]}]=${hs[i]}; done
 
 # Every file now in a folder this install writes to, or listed in the
 # record, is in the plan, the record, or neither (the team's).
@@ -349,11 +378,8 @@ for p in "${!old[@]}"; do [ ! -e "$(full "$p")" ] && [ ! -L "$(full "$p")" ] || 
 cur_paths=()
 for p in "${!seen[@]}"; do [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ] || cur_paths+=("$p"); done
 declare -A cur=()
-i=0
-while read -r h; do
-	cur[${cur_paths[i]}]=$h
-	i=$((i + 1))
-done < <([ ${#cur_paths[@]} -eq 0 ] || printf '%s\n' "${cur_paths[@]}" | hash_repo)
+hashes hash_repo ${cur_paths[@]+"${cur_paths[@]}"}
+for i in "${!hs[@]}"; do cur[${cur_paths[i]}]=${hs[i]}; done
 
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }
 clashes=() writes=() deletes=()
@@ -389,11 +415,12 @@ olds=()
 for p in "${!old[@]}"; do olds+=("$(skill_of "$p")"); done
 write_exclude "$(exclude_lines "${!from[@]}" ${olds[@]+"${olds[@]}"})"
 for p in ${deletes[@]+"${deletes[@]}"}; do rm -rf -- "$(full "$p")"; done
+i=0
 for p in ${writes[@]+"${writes[@]}"}; do
 	f=$(full "$p")
 	[ ! -L "$(dirname "$f")" ] || rm -f -- "$(dirname "$f")"
 	mkdir -p "$(dirname "$f")"
-	tmp=$(mktemp "$f.XXXXXX")
+	i=$((i + 1)) tmp=$scratch/$i
 	cp -p -- "${src[$p]}" "$tmp" || { rm -f -- "$tmp"; die "couldn't copy ${src[$p]} to $f; run apply again"; }
 	chmod u+w "$tmp" # a read-only source stays removable
 	mv -f -- "$tmp" "$f"
@@ -404,14 +431,26 @@ conf=$target/.maestro/project/project-setup.md
 [ -e "$conf" ] || [ -L "$conf" ] || cp "$root/templates/project-setup.md" "$conf"
 write_exclude "$(exclude_lines "${!from[@]}")"
 mkdir -p "$(dirname "$record")"
-tmp=$(mktemp "$record.XXXXXX")
+tmp=$scratch/record
 {
 	echo "# Files scripts/install.sh placed at Maestro $sha: git blob hash, tab, path."
 	for p in "${plan[@]}"; do printf '%s\t%s\n' "${new[$p]}" "$p"; done | sort -k2
 } >"$tmp"
 mv "$tmp" "$record"
+# Exclude lines don't hide a file git tracks, so a switch to hidden
+# untracks Maestro's copies and the committed record; the team commits it.
+untracked=0
+if [ "$home" = hidden ]; then
+	mine=("${plan[@]}" "${!old[@]}" "${other#"$target/"}")
+	mapfile -d '' -t tracked < <(git -C "$target" --literal-pathspecs ls-files -z -- "${mine[@]}")
+	if [ ${#tracked[@]} -gt 0 ]; then
+		git -C "$target" --literal-pathspecs rm -q --cached -- "${tracked[@]}"
+		untracked=${#tracked[@]}
+	fi
+fi
 rm -f -- "$other"
 
 [ "$tickets" = maestro-ticket ] && echo "ticket store ready" || echo "ticket method from $tickets"
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
+[ $untracked -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"
