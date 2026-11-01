@@ -152,19 +152,16 @@ records=("$target/.maestro/project/installed.list" "$common/maestro/installed.li
 if [ "$home" = committed ]; then record=${records[0]} other=${records[1]}; else record=${records[1]} other=${records[0]}; fi
 # A record path is from the repo's top.
 full() { echo "$target/$1"; }
-# hash_src: the git blob hash of each file path on stdin, as it is.
-hash_src() { git hash-object --no-filters --stdin-paths; }
-# hash_repo: the same for each record path on stdin, through the repo's own
-# .gitattributes and core.autocrlf, so a CRLF checkout of an LF file matches.
-hash_repo() { git -C "$target" hash-object --stdin-paths; }
-# hashes <hash_src|hash_repo> <path>...: set hs to each path's hash, in
-# order, or die, before anything is written, unless every path got one.
+# hashes <path>...: set hs to the git blob hash of each path, a source's
+# full path or a record path, in order, or die, before anything is
+# written, unless every path got one. Each goes through the repo's
+# core.autocrlf and .gitattributes, so a CRLF source or a CRLF checkout
+# hashes as its LF blob, from any directory.
 hashes() {
-	local how=$1 out
-	shift
+	local out
 	hs=()
 	[ $# -gt 0 ] || return 0
-	out=$(printf '%s\n' "$@" | "$how") || die "git hash-object failed; nothing was changed"
+	out=$(printf '%s\n' "$@" | git -C "$target" hash-object --stdin-paths) || die "git hash-object failed; nothing was changed"
 	mapfile -t hs <<<"$out"
 	[ ${#hs[@]} -eq $# ] || die "git hash-object gave ${#hs[@]} hashes for $# files; nothing was changed"
 }
@@ -224,7 +221,8 @@ write_exclude() {
 	touch "$exclude"
 	local tmp=$scratch/exclude
 	cp -p -- "$exclude" "$tmp"
-	awk -v b="$begin" -v e="$end" -v l="$legacy" 'BEGIN{n=split(l, a, "\n"); for (i=1; i<=n; i++) old[a[i]]=1}
+	# legacy holds newlines, which macOS awk refuses in a -v value.
+	legacy=$legacy awk -v b="$begin" -v e="$end" 'BEGIN{n=split(ENVIRON["legacy"], a, "\n"); for (i=1; i<=n; i++) if (a[i] != "") old[a[i]]=1}
 		$0==b{skip=1;next} $0==e{skip=0;next} !skip && !($0 in old)' "$exclude" >"$tmp"
 	if [ -n "$1" ]; then
 		[ ! -s "$tmp" ] || [ -z "$(tail -c1 "$tmp")" ] || echo >>"$tmp"
@@ -259,7 +257,7 @@ if [ "$cmd" = check ]; then
 		for p in "${!old[@]}"; do
 			if [ -f "$(full "$p")" ]; then paths+=("$p") want+=("${old[$p]}"); else problem "missing: $p"; fi
 		done
-		hashes hash_repo ${paths[@]+"${paths[@]}"}
+		hashes ${paths[@]+"${paths[@]}"}
 		for i in "${!hs[@]}"; do
 			[ "${hs[i]}" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
 		done
@@ -338,7 +336,7 @@ if [ "$cmd" = uninstall ]; then
 	for p in "${!old[@]}"; do
 		[ -f "$(full "$p")" ] && paths+=("$p") want+=("${old[$p]}")
 	done
-	hashes hash_repo ${paths[@]+"${paths[@]}"}
+	hashes ${paths[@]+"${paths[@]}"}
 	for i in "${!hs[@]}"; do
 		if [ "${hs[i]}" = "${want[i]}" ]; then
 			rm -f -- "$(full "${paths[i]}")"
@@ -381,7 +379,7 @@ for n in "${!from[@]}"; do
 done
 srcs=()
 for p in "${plan[@]}"; do srcs+=("${src[$p]}"); done
-hashes hash_src "${srcs[@]}"
+hashes "${srcs[@]}"
 for i in "${!hs[@]}"; do new[${plan[i]}]=${hs[i]}; done
 
 # Every file now in a folder this install writes to, or listed in the
@@ -432,7 +430,7 @@ for p in "${!old[@]}"; do [ ! -f "$(full "$p")" ] && [ ! -L "$(full "$p")" ] || 
 cur_paths=()
 for p in "${!seen[@]}"; do [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ] || cur_paths+=("$p"); done
 declare -A cur=()
-hashes hash_repo ${cur_paths[@]+"${cur_paths[@]}"}
+hashes ${cur_paths[@]+"${cur_paths[@]}"}
 for i in "${!hs[@]}"; do cur[${cur_paths[i]}]=${hs[i]}; done
 
 # A file the record doesn't list, but that Maestro once shipped at that

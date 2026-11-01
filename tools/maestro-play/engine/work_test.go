@@ -242,8 +242,7 @@ func TestWorktreeAddReuses(t *testing.T) {
 // it was. A reused worktree gets the current install: a copy the install
 // no longer hides goes, one it changed is replaced, one whose source is
 // unchanged stays as it is, one the branch now tracks stays. The copies
-// leave git
-// status clean, and the worktree still removes.
+// leave git status clean, and the worktree still removes.
 func TestWorktreeAddCopiesHiddenSkills(t *testing.T) {
 	w := newWorld(t)
 	for _, n := range []string{"maestro-tdd", "ours", "stray", "maestro-dir", "café"} {
@@ -335,8 +334,6 @@ func TestWorktreeAddCopiesHiddenSkills(t *testing.T) {
 	w.git(w.repo, "worktree", "remove", wt)
 }
 
-// A check that isn't listed fails the step; check all with no checks
-// listed, or no setup, passes with none run.
 // A linked skill folder's fingerprint follows its target, so a reused
 // worktree gets the new copy when the target changes.
 func TestFingerprintFollowsLink(t *testing.T) {
@@ -354,6 +351,8 @@ func TestFingerprintFollowsLink(t *testing.T) {
 	}
 }
 
+// A check that isn't listed fails the step; check all with no checks
+// listed, or no setup, passes with none run.
 func TestCheckNeedsChecks(t *testing.T) {
 	w := newWorld(t)
 	st := &State{ID: "r1"}

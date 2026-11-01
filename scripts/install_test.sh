@@ -7,7 +7,7 @@
 # keeps it as the team's) or --replace; a folder where a file goes; an
 # install by the install.sh before the record is taken over; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
-# a CRLF checkout, the record's too, still matches the record, from any
+# a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
 # reads project-setup.md as maestro-play does; a linked worktree refuses;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
@@ -276,6 +276,15 @@ diff -r "$t/maestro-create-ticket" "$r3/.claude/skills/maestro-create-ticket" >/
 # With the team's own tickets, check needs no maestro-ticket.
 mkdir "$tmp/playonly" && cp "$tmp/bin/maestro-play" "$tmp/playonly/"
 PATH="$tmp/playonly:/usr/bin:/bin" run check "$r3" || { cat "$tmp/out"; fail "check wanted maestro-ticket with the team's own tickets"; }
+# A CRLF source, as core.autocrlf checks one out, matches its copy.
+git -C "$r3" config core.autocrlf true
+printf 'name: maestro-create-ticket\r\nOurs.\r\n' >>"$t/maestro-create-ticket/SKILL.md"
+ok apply "$r3"
+ok check "$r3"
+before=$(snap "$r3")
+ok apply "$r3"
+[ "$before" = "$(snap "$r3")" ] || fail "a second apply over a CRLF source changed the repo"
+git -C "$r3" config --unset core.autocrlf
 mkdir "$t/maestro-work"
 refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
 
