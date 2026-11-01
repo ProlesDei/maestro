@@ -21,7 +21,7 @@ Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logge
 
 ## 2. Get Maestro
 
-Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these paths: `.gitattributes`, `INSTALL.md`, `bot-profiles/`, `playbooks/`, `scripts/`, `skills/`, `templates/`, `tools/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
+Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these patterns: `/.gitattributes`, `/INSTALL.md`, `/bot-profiles/`, `/playbooks/`, `/scripts/`, `/skills/`, `/templates/`, `/tools/`. Keep the leading `/`: without it, `skills/` also matches Maestro's own `.claude/skills/`, `.agents/skills/` and `.maestro/skills/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
 
 Ask which commit to pin; the default is the newest on `main`. Check it out and note its sha.
 

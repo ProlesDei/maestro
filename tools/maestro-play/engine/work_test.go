@@ -364,6 +364,27 @@ func TestFingerprintFollowsLink(t *testing.T) {
 	}
 }
 
+// A repo whose .agents links to .claude, so both harnesses share one
+// folder, still gets its worktree: git refuses paths beyond the link, so
+// there's nothing to copy, and the step doesn't fail on it.
+func TestWorktreeAddLinkedAgents(t *testing.T) {
+	w := newWorld(t)
+	os.MkdirAll(filepath.Join(w.repo, ".claude", "skills", "ours"), 0o755)
+	os.WriteFile(filepath.Join(w.repo, ".claude", "skills", "ours", "SKILL.md"), []byte("ours\n"), 0o644)
+	if err := os.Symlink(".claude", filepath.Join(w.repo, ".agents")); err != nil {
+		t.Fatal(err)
+	}
+	w.git(w.repo, "add", ".claude", ".agents")
+	w.git(w.repo, "commit", "-q", "-m", "shared skills")
+	r, err := w.e.worktreeAdd(&State{ID: "r1"}, "T-1", "main")
+	if err != nil || r["status"] != "ok" || strings.Contains(str(r["output"]), "not copied") {
+		t.Fatalf("worktree add: %v %v", r, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(str(r["path"]), ".agents", "skills", "ours", "SKILL.md")); err != nil || string(b) != "ours\n" {
+		t.Errorf("the checkout's linked skills: %q %v", b, err)
+	}
+}
+
 // A check that isn't listed fails the step; check all with no checks
 // listed, or no setup, passes with none run.
 func TestCheckNeedsChecks(t *testing.T) {

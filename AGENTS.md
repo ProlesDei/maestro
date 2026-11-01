@@ -58,7 +58,7 @@ Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`
 
 - `bot-profiles/`: the six personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
 - `playbooks/`: one folder per playbook (`work/playbook.yaml` with its step templates beside it), plus the shared `rules.md` (the rules every session gets), `_contract.md` and `_escalate.md`. Format in `playbooks/README.md`.
-- `skills/`: Maestro's 18 `maestro-*` skills and the user's own; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
+- `skills/`: Maestro's 18 `maestro-*` skills; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
 - `INSTALL.md`: the install guide an agent follows in a team's repo. `scripts/install.sh` applies the choices it writes down; `scripts/bot-bundle.sh` builds each Grok bot's paste block; `scripts/install_test.sh` tests both.
 - `tools/maestro-play/`: the playbook engine. `tools/maestro-ticket/`: the ticket store and CLI.

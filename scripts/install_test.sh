@@ -107,9 +107,13 @@ if run check "$r"; then fail "check passed with a changed and a missing file"; f
 says "changed since install: .claude/skills/maestro-tdd/SKILL.md"
 says "missing: .agents/skills/maestro-swarm/SKILL.md"
 
-# A file changed since install clashes until --replace.
+# A file changed since install clashes until --replace, which leaves a
+# team's file beside it that no clash named.
+echo notes >"$r/.claude/skills/maestro-tdd/NOTES.md"
 refuses "clash: .claude/skills/maestro-tdd/SKILL.md changed since install" "$r" apply "$r"
 ok apply --replace maestro-tdd "$r"
+[ -f "$r/.claude/skills/maestro-tdd/NOTES.md" ] || fail "--replace removed a file no clash named"
+rm "$r/.claude/skills/maestro-tdd/NOTES.md"
 installed "$r" .claude .agents
 ok check "$r"
 
@@ -150,6 +154,11 @@ installed "$r" .agents
 rm "$r/.agents/skills/maestro-tdd/SKILL.md" && mkdir "$r/.agents/skills/maestro-tdd/SKILL.md" && touch "$r/.agents/skills/maestro-tdd/SKILL.md/x"
 refuses "clash: .agents/skills/maestro-tdd/SKILL.md/x isn't Maestro's" "$r" apply "$r"
 rm -r "$r/.agents/skills/maestro-tdd/SKILL.md"
+ok apply "$r"
+# A file where Maestro places a folder clashes too, before anything is written.
+rm -r "$r/.agents/skills/maestro-code-review/references" && echo mine >"$r/.agents/skills/maestro-code-review/references"
+refuses "clash: .agents/skills/maestro-code-review/references isn't Maestro's" "$r" apply "$r"
+rm "$r/.agents/skills/maestro-code-review/references"
 ok apply "$r"
 # A file where a skill folder goes clashes, until --replace.
 rm -r "$r/.agents/skills/maestro-tdd" && echo mine >"$r/.agents/skills/maestro-tdd"
@@ -217,6 +226,8 @@ git -C "$m" add -A && git -C "$m" commit -q -m two
 refuses "but install.yaml pins $sha" "$r" apply "$r"
 sha2=$(git -C "$m" rev-parse --short HEAD)
 sed -i "s/^maestro-sha: .*/maestro-sha: $sha2/" "$r/.maestro/project/install.yaml"
+if run check "$r"; then fail "check passed with copies from the old pin"; fi
+says "the record is from Maestro $sha, not the pinned $sha2: run apply"
 ok apply "$r"
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 installed "$r" .claude .agents

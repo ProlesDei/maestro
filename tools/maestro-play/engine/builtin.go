@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -265,8 +266,8 @@ func (e *Engine) noPromptEnv(st *State) []string {
 	return env
 }
 
-// workDir is where a run's commands run: its worktree, else the main
-// checkout.
+// workDir is where a run's commands run: its worktree, else the checkout
+// the run started in.
 func (e *Engine) workDir(st *State) string {
 	if st.Worktree != "" {
 		return st.Worktree
@@ -345,6 +346,12 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 // git wouldn't ignore isn't broken.
 func (e *Engine) copySkills(st *State, worktree string) (note string, broken bool) {
 	fail := func(err error) (string, bool) { return "\nskills not copied into the worktree: " + err.Error(), true }
+	// git refuses a path beyond a symlink, and a copy would land at the
+	// link's target. An install refuses a linked .agents, so there's no
+	// hidden copy to bring.
+	if linkedSkills(e.cfg.Dir) || linkedSkills(worktree) {
+		return "", false
+	}
 	r, err := e.git(st, worktree, "rev-parse", "--path-format=absolute", "--git-path", "maestro-skills")
 	if err == nil && r.exit != 0 {
 		err = fmt.Errorf("git rev-parse: exit %d: %s", r.exit, strings.TrimSpace(r.stderr))
@@ -364,7 +371,12 @@ func (e *Engine) copySkills(st *State, worktree string) (note string, broken boo
 			}
 		}
 	}
-	entries, _ := os.ReadDir(src)
+	// No folder means no hidden skills; one it can't read would look like
+	// an install that hides none, and lose every copy.
+	entries, err := os.ReadDir(src)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fail(err)
+	}
 	var rels []string
 	for _, d := range entries {
 		if fi, err := os.Stat(filepath.Join(src, d.Name())); err != nil || !fi.IsDir() {
@@ -478,6 +490,16 @@ func fingerprint(dir string) string {
 		return nil
 	})
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// linkedSkills says .agents or .agents/skills under root is a symlink.
+func linkedSkills(root string) bool {
+	for _, p := range []string{".agents", filepath.Join(".agents", "skills")} {
+		if fi, err := os.Lstat(filepath.Join(root, p)); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ignored is the set of paths, relative to dir, that git ignores there.

@@ -23,9 +23,10 @@
 # .maestro/project/installed.list when committed, else
 # <git-common-dir>/maestro/installed.list. It never writes over a file it
 # didn't place or one changed since; it lists each such clash and writes
-# nothing. --replace <skill> lets it replace that skill's folder; skip:
-# keeps it. A file Maestro once shipped at that path counts as placed,
-# so it takes over an install by the install.sh before the record. Run it
+# nothing. --replace <skill> lets it replace what clashed in that skill's
+# folder, though a team's file beside Maestro's stays; skip: keeps it. A
+# file Maestro once shipped at that path counts as placed, so it takes
+# over an install by the install.sh before the record. Run it
 # again after an update, or after a run that failed partway: it replaces
 # what it placed and removes what it no longer installs, unless the team
 # changed it: that folder stays, theirs. A switch to hidden untracks the
@@ -295,6 +296,9 @@ if [ "$cmd" = check ]; then
 		for i in "${!hs[@]}"; do
 			[ "${hs[i]}" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
 		done
+		# The copies match the record, so they're from the commit it names.
+		was=$(sed -n '1s/^# Files scripts\/install\.sh placed at Maestro \([0-9a-f]*\):.*/\1/p' "$record")
+		[ -z "$was" ] || [[ $head == "$was"* ]] || problem "the record is from Maestro $was, not the pinned $sha: run apply"
 	fi
 	for n in $steps; do
 		for d in "${dirs[@]}"; do
@@ -434,6 +438,15 @@ srcs=()
 for p in "${plan[@]}"; do srcs+=("${src[$p]}"); done
 hashes "${srcs[@]}"
 for i in "${!hs[@]}"; do new[${plan[i]}]=${hs[i]}; done
+# pdirs: each folder inside a skill folder that a planned file goes in.
+declare -A pdirs=()
+for p in "${plan[@]}"; do
+	q=${p%/*}
+	while [[ $q == */skills/*/* ]] && [ -z "${pdirs[$q]-}" ]; do
+		pdirs[$q]=1
+		q=${q%/*}
+	done
+done
 
 # Every file now in a folder this install writes to, or listed in the
 # record, is in the plan, the record, or neither (the team's).
@@ -480,16 +493,9 @@ for dir in "${!folders[@]}"; do
 		seen[$dir]=1 # a file where a skill folder goes
 	fi
 done
-# A folder at a recorded path isn't seen: the files in it are. Nor is a
-# file behind a linked folder: the link is, and when it goes, the plan
-# writes the file again.
-for p in "${!old[@]}"; do
-	if [ -L "$(full "$p")" ]; then
-		seen[$p]=1
-	elif [ -f "$(full "$p")" ] && ! linked "$p"; then
-		seen[$p]=1
-	fi
-done
+# find lists files and links, so a folder at a recorded path isn't seen:
+# the files in it are. Nor is a file behind a linked folder: the link is,
+# and when it goes, the plan writes the file again.
 cur_paths=()
 for p in "${!seen[@]}"; do [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ] || cur_paths+=("$p"); done
 declare -A cur=()
@@ -522,11 +528,11 @@ for p in "${!seen[@]}"; do
 done
 
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }
-# in_way <path>: true if a file the plan places is the path's folder, or
-# the path is a whole skill folder, so it blocks a copy.
+# in_way <path>: true if the path is a skill folder or a folder a planned
+# file goes in, or a planned file is on the way to it, so it blocks a copy.
 in_way() {
 	local q=$1
-	[ -z "${writing[$q]-}" ] || return 0
+	[ -z "${writing[$q]-}" ] && [ -z "${pdirs[$q]-}" ] || return 0
 	while [[ $q == */* ]]; do
 		q=${q%/*}
 		[ -z "${new[$q]-}" ] || return 0
@@ -544,10 +550,14 @@ for p in "${!seen[@]}"; do
 		elif [ "${cur[$p]}" = "${old[$p]-}" ] || replacing "$p"; then writes+=("$p")
 		elif [ -n "${old[$p]-}" ]; then clashes+=("$p changed since install")
 		else clashes+=("$p isn't Maestro's"); fi
-	elif [ "${cur[$p]}" = "${old[$p]-}" ] || replacing "$p"; then deletes+=("$p")
+	elif [ "${cur[$p]}" = "${old[$p]-}" ]; then deletes+=("$p")
+	# The team's file beside Maestro's, such as a .DS_Store, stays, even
+	# with --replace: no clash named it.
+	elif [ -z "${old[$p]-}" ] && ! in_way "$p"; then :
+	elif replacing "$p"; then deletes+=("$p")
 	elif [ -n "${old[$p]-}" ]; then clashes+=("$p changed since install, and Maestro no longer installs it")
-	elif in_way "$p"; then clashes+=("$p isn't Maestro's")
-	fi # else the team's file beside Maestro's, such as a .DS_Store: it stays
+	else clashes+=("$p isn't Maestro's")
+	fi
 done
 for p in "${plan[@]}"; do [ -n "${seen[$p]-}" ] || writes+=("$p"); done
 if [ ${#clashes[@]} -gt 0 ]; then
