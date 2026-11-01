@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Acceptance test for scripts/install.sh and scripts/bot-bundle.sh, run
 # against a copy of Maestro in its own git repo so an update can change it.
-# apply installs each skills-home, hidden or not as asked, and a second
-# run changes nothing; an update replaces and removes only what it placed;
-# a team's file or one changed since install clashes and changes nothing,
-# until skip: or --replace; a switch of skills-home moves the copies;
-# check finds what's wrong; uninstall removes only unchanged files; bad
-# choices and bad repos refuse and change nothing.
+# apply installs hidden or committed, and a second run changes nothing; an
+# update replaces and removes only what it placed; a team's file or one
+# changed since install clashes and changes nothing, until skip: or
+# --replace; a switch of skills-home takes over the copies; a CRLF checkout
+# still matches the record, from any directory; check finds what's wrong,
+# also through a symlinked path; uninstall removes only unchanged files and
+# keeps .maestro/src/ hidden; a failed copy stays hidden and a rerun
+# finishes it; bad choices and bad repos refuse and change nothing.
 # Run from anywhere: bash scripts/install_test.sh
 set -euo pipefail
 
@@ -14,9 +16,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fail() { cat "$tmp/out" 2>/dev/null; echo "FAIL: $*" >&2; exit 1; }
-export GIT_CONFIG_GLOBAL=$tmp/gitconfig GIT_CONFIG_NOSYSTEM=1 HOME=$tmp/home
+export GIT_CONFIG_GLOBAL=$tmp/gitconfig GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = t\n\temail = t@t\n[init]\n\tdefaultBranch = main\n' >"$GIT_CONFIG_GLOBAL"
-mkdir "$HOME"
 
 # A Maestro to install from: the parts INSTALL.md checks out.
 m=$tmp/maestro
@@ -42,14 +43,14 @@ says() { grep -qF -- "$1" "$tmp/out" || { cat "$tmp/out"; fail "output lacks: $1
 # A tree snapshot: every path and file checksum, .git included.
 snap() { (cd "$1" && find . -type f -print0 | sort -z | xargs -0 cksum && find . | sort); }
 # refuses <message> <repo> <args...>: install.sh <args> exits non-zero,
-# prints <message> and leaves <repo> and ~ as they were.
+# prints <message> and leaves <repo> as it was.
 refuses() {
 	local msg=$1 repo=$2 before
 	shift 2
-	before=$(snap "$repo"; snap "$HOME")
+	before=$(snap "$repo")
 	if run "$@"; then fail "install.sh $* exited 0"; fi
 	says "$msg"
-	[ "$before" = "$(snap "$repo"; snap "$HOME")" ] || fail "install.sh $* changed $repo or ~"
+	[ "$before" = "$(snap "$repo")" ] || fail "install.sh $* changed $repo"
 }
 # repo <path> <choices...>: a new repo with one commit and these choices.
 repo() {
@@ -60,13 +61,13 @@ repo() {
 	mkdir -p "$r/.maestro/project"
 	printf '%s\n' "maestro-sha: $sha" "$@" >"$r/.maestro/project/install.yaml"
 }
-# installed <base> <harness dir>...: every skill is there, as Maestro has it.
+# installed <repo> <harness dir>...: every skill is there, as Maestro has it.
 installed() {
-	local base=$1 d n
+	local r=$1 d n
 	shift
 	for d in "$@"; do
 		for n in $skills; do
-			diff -r "$m/skills/$n" "$base/$d/skills/$n" >/dev/null || fail "$base/$d/skills/$n differs from skills/$n"
+			diff -r "$m/skills/$n" "$r/$d/skills/$n" >/dev/null || fail "$r/$d/skills/$n differs from skills/$n"
 		done
 	done
 }
@@ -147,22 +148,23 @@ ok apply "$r2"
 [ "$(cat "$r2/.agents/skills/review/SKILL.md")" = mine ] || fail "apply changed the team's own review skill"
 [ ! -e "$r2/.claude" ] || fail "codex alone wrote .claude/"
 
-# --- switch hidden to user: the copies move to ~ ---
-sed -i 's/^skills-home: .*/skills-home: user/' "$r/.maestro/project/install.yaml"
-ok apply "$r"
-installed "$HOME" .claude .agents
-[ ! -e "$r/.claude/skills" ] && [ ! -e "$r/.agents/skills" ] || fail "the switch left copies in the repo"
-[ ! -e "$r/.git/maestro/installed.list" ] || [ "$(head -c2 <(cut -f2 "$r/.git/maestro/installed.list" | sed -n 2p))" = "~/" ] ||
-	fail "user record paths should start with ~/"
-ok check "$r"
-
-# --- switch user to committed: the copies show up in git ---
+# --- switch hidden to committed: the copies show up in git ---
 sed -i 's/^skills-home: .*/skills-home: committed/' "$r/.maestro/project/install.yaml"
 ok apply "$r"
+says "0 files written, 0 removed"
 installed "$r" .claude .agents
-[ ! -e "$HOME/.claude/skills/maestro-tdd" ] || fail "the switch left copies in ~"
 [ -f "$r/.maestro/project/installed.list" ] && [ ! -e "$r/.git/maestro/installed.list" ] || fail "committed record should be in .maestro/project only"
 git -C "$r" status --porcelain --untracked-files=all | grep -q '^?? .claude/skills/maestro-tdd/SKILL.md$' || fail "committed skills are hidden from git"
+
+# A CRLF checkout of the committed copies still matches the record, from
+# inside another repo with other attributes.
+git -C "$r" add -A && git -C "$r" commit -qm install
+echo '*.md text eol=crlf' >"$r/.gitattributes"
+git -C "$r" add .gitattributes && git -C "$r" commit -qm crlf
+rm "$r/.claude/skills/maestro-tdd/SKILL.md" && git -C "$r" checkout -- .claude/skills/maestro-tdd/SKILL.md
+grep -q $'\r$' "$r/.claude/skills/maestro-tdd/SKILL.md" || fail "the checkout should be CRLF"
+(cd "$r2" && run check "$r") || { cat "$tmp/out"; fail "check of a CRLF checkout from another repo failed"; }
+(cd "$r2" && run apply "$r") || { cat "$tmp/out"; fail "apply over a CRLF checkout clashed"; }
 
 # --- uninstall: removes unchanged files, keeps a changed one ---
 echo mine >>"$r/.agents/skills/maestro-tdd/SKILL.md"
@@ -171,7 +173,9 @@ says "kept, changed since install: .agents/skills/maestro-tdd/SKILL.md"
 left=$(cd "$r" && { find .claude .agents -type f 2>/dev/null || true; } | sort | tr '\n' ' ')
 [ "$left" = ".agents/skills/maestro-tdd/SKILL.md " ] || fail "uninstall left: $left"
 [ ! -e "$r/.claude" ] || fail "uninstall left an empty .claude/"
-! grep -q 'maestro install' "$r/.git/info/exclude" || fail "uninstall left the exclude block"
+! grep -q '/skills/' "$r/.git/info/exclude" || fail "uninstall left skill exclude lines"
+grep -qxF /.maestro/src/ "$r/.git/info/exclude" && grep -qxF /.maestro/bots/ "$r/.git/info/exclude" ||
+	fail "uninstall should keep .maestro/src/ and .maestro/bots/ hidden: they stay"
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "uninstall changed the user's exclude line"
 [ -f "$r/.maestro/project/install.yaml" ] && [ -f "$r/.maestro/project/project-setup.md" ] || fail "uninstall removed the team's choices or setup"
 
@@ -187,6 +191,9 @@ ok apply "$r3"
 says "ticket method from"
 diff -r "$t/maestro-create-ticket" "$r3/.claude/skills/maestro-create-ticket" >/dev/null || fail "the team's ticket skill wasn't installed"
 [ "$(wc -l <"$STUB_LOG")" -eq "$lines" ] || fail "doctor ran with the team's own tickets"
+# With the team's own tickets, check needs no maestro-ticket.
+mkdir "$tmp/playonly" && cp "$tmp/bin/maestro-play" "$tmp/playonly/"
+PATH="$tmp/playonly:/usr/bin:/bin" run check "$r3" || { cat "$tmp/out"; fail "check wanted maestro-ticket with the team's own tickets"; }
 mkdir "$t/maestro-work"
 refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
 
@@ -212,7 +219,7 @@ skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-nope|no skill maestro-nope
 bots: designer|no bot profile designer
 EOF
-for bad in "harnesses: vim|unknown harness vim" "skills-home: attic|skills-home wants committed, hidden or user"; do
+for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home wants committed or hidden"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
@@ -237,8 +244,22 @@ mkdir "$tmp/cpbin"
 printf '%s\n' '#!/usr/bin/env bash' 'case "$*" in *.agents/skills/maestro-tdd/*) exit 1 ;; esac' 'exec /bin/cp "$@"' >"$tmp/cpbin/cp"
 chmod +x "$tmp/cpbin/cp"
 if PATH="$tmp/cpbin:$PATH" run apply "$r7"; then fail "apply with a failing cp exited 0"; fi
+seen=$(git -C "$r7" status --porcelain --untracked-files=all)
+[ "$seen" = "?? .maestro/project/install.yaml" ] || fail "a failed apply should leave its copies hidden: $seen"
 ok apply "$r7"
 installed "$r7" .claude .agents
+left=$(find "$r7/.claude" "$r7/.agents" -type f -name '*.*.??????'); [ -z "$left" ] || fail "a failed copy left a temp file: $left"
 ok check "$r7"
 
-echo "ok: install.sh applies each skills-home, updates and switches cleanly, refuses clashes and bad choices, and uninstalls only what it placed; bot-bundle builds each bot's block"
+# check, through a symlinked path, still checks Maestro's clone in
+# .maestro/src/ for files the harnesses would load.
+r8=$tmp/cloned
+repo "$r8" "harnesses: claude" "skills-home: hidden"
+git clone -q "$m" "$r8/.maestro/src"
+bash "$r8/.maestro/src/scripts/install.sh" apply "$r8" >"$tmp/out" 2>&1 || { cat "$tmp/out"; fail "apply from .maestro/src failed"; }
+touch "$r8/.maestro/src/AGENTS.md"
+ln -s "$tmp" "$tmp/via"
+if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned" >"$tmp/out" 2>&1; then fail "check passed with AGENTS.md in .maestro/src"; fi
+says "problem: .maestro/src/AGENTS.md exists"
+
+echo "ok: install.sh applies hidden and committed installs, updates and switches cleanly, refuses clashes and bad choices, survives a failed copy and a CRLF checkout, and uninstalls only what it placed; bot-bundle builds each bot's block"

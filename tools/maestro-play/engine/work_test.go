@@ -237,18 +237,19 @@ func TestWorktreeAddReuses(t *testing.T) {
 
 // A new worktree links the skills an install hid in .agents/skills, so
 // Codex finds them; a tracked skill comes with the checkout and an
-// untracked one that git doesn't ignore stays out. The links leave git
-// status clean, and the worktree still removes.
+// untracked one that git doesn't ignore stays out. One hidden only as a
+// folder (a trailing /) would show as a link, so it isn't linked and is
+// named. The links leave git status clean, and the worktree still removes.
 func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
 	w := newWorld(t)
-	for _, n := range []string{"maestro-tdd", "ours", "stray"} {
+	for _, n := range []string{"maestro-tdd", "ours", "stray", "maestro-dir"} {
 		os.MkdirAll(filepath.Join(w.repo, ".agents", "skills", n), 0o755)
 		os.WriteFile(filepath.Join(w.repo, ".agents", "skills", n, "SKILL.md"), []byte(n+"\n"), 0o644)
 	}
 	w.git(w.repo, "add", ".agents/skills/ours")
 	w.git(w.repo, "commit", "-q", "-m", "our skill")
 	exclude := filepath.Join(w.repo, ".git", "info", "exclude")
-	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n"), 0o644)
+	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n/.agents/skills/maestro-dir/\n"), 0o644)
 	r, err := w.e.worktreeAdd(&State{ID: "r1"}, "T-1", "main")
 	if err != nil || r["status"] != "ok" {
 		t.Fatalf("worktree add: %v %v", r, err)
@@ -262,6 +263,9 @@ func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "stray")); err == nil {
 		t.Error("an untracked skill git doesn't ignore was linked")
+	}
+	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "maestro-dir")); err == nil || !strings.HasSuffix(str(r["output"]), "skills not linked into the worktree: maestro-dir") {
+		t.Errorf("a link git wouldn't hide should be removed and named: %v %q", err, r["output"])
 	}
 	if out := w.git(wt, "status", "--porcelain", "--untracked-files=all"); out != "" {
 		t.Errorf("worktree not clean: %s", out)

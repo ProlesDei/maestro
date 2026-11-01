@@ -8,15 +8,14 @@
 #
 # The choices live in <repo>/.maestro/project/install.yaml, one
 # "key: value" per line; a line starting with # is a comment:
-#   maestro-sha: <sha>                  the commit this Maestro is on (required)
-#   harnesses: claude codex grok        claude reads .claude/skills, codex and
-#                                       grok .agents/skills (required)
-#   skills-home: committed|hidden|user  in the repo and tracked, in the repo and
-#                                       hidden from git, or under ~ (required)
-#   skip: <skill> ...                   skills not to install
-#   tickets: maestro-ticket|<dir>       <dir>, from the repo's top, holds the
-#                                       team's maestro-create-ticket/
-#   bots: <profile> ...                 the bots scripts/bot-bundle.sh builds
+#   maestro-sha: <sha>              the commit this Maestro is on (required)
+#   harnesses: claude codex grok    claude reads .claude/skills, codex and
+#                                   grok .agents/skills (required)
+#   skills-home: committed|hidden   tracked in git, or hidden from it (required)
+#   skip: <skill> ...               skills not to install
+#   tickets: maestro-ticket|<dir>   <dir>, from the repo's top, holds the
+#                                   team's maestro-create-ticket/
+#   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
 #
 # apply copies each skill in skills/ beside this script into every harness
 # folder, writes project-setup.md once, creates the ticket store and lists
@@ -25,8 +24,8 @@
 # <git-common-dir>/maestro/installed.list. It never writes over a file it
 # didn't place or one changed since; it lists each such clash and writes
 # nothing. --replace <skill> lets it replace that skill's folder. Run it
-# again after an update: it replaces what it placed and removes what it no
-# longer installs.
+# again after an update, or after a run that failed partway: it replaces
+# what it placed and removes what it no longer installs.
 #
 # check reports what's wrong with an install; uninstall removes the files
 # the record lists, except those changed since.
@@ -53,7 +52,7 @@ done
 case $cmd in apply | check | uninstall) ;; *) usage ;; esac
 [ $# -eq 1 ] || usage
 
-root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 [ -d "$1" ] || die "$1 is not a directory"
 target=$(cd -- "$1" && pwd -P)
 top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) || die "$1 is not in a git work tree"
@@ -89,11 +88,7 @@ done <"$choices"
 [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
 head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
 [[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
-case $home in
-committed | hidden) base=$target ;;
-user) base=$HOME ;;
-*) die "install.yaml: skills-home wants committed, hidden or user" ;;
-esac
+[[ $home == committed || $home == hidden ]] || die "install.yaml: skills-home wants committed or hidden"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
 for h in "${harnesses[@]}"; do
@@ -138,15 +133,16 @@ fi
 
 records=("$target/.maestro/project/installed.list" "$common/maestro/installed.list")
 if [ "$home" = committed ]; then record=${records[0]} other=${records[1]}; else record=${records[1]} other=${records[0]}; fi
-# A record path is from the repo's top, or from ~ (~/...) for user installs.
-full() { if [[ $1 == '~/'* ]]; then echo "$HOME/${1#'~/'}"; else echo "$target/$1"; fi; }
-prefix=
-[ "$home" != user ] || prefix='~/'
-# hashes: git blob hash of each path on stdin, one per line.
-hashes() { git hash-object --stdin-paths; }
+# A record path is from the repo's top.
+full() { echo "$target/$1"; }
+# hash_src: the git blob hash of each file path on stdin, as it is.
+hash_src() { git hash-object --no-filters --stdin-paths; }
+# hash_repo: the same for each record path on stdin, through the repo's own
+# .gitattributes and core.autocrlf, so a CRLF checkout of an LF file matches.
+hash_repo() { git -C "$target" hash-object --stdin-paths; }
 
-# old: the record. apply also reads the one an install in another
-# skills-home left, so a switch removes the old copies.
+# old: the record. apply also reads the one an install in the other
+# skills-home left, so a switch takes over its copies.
 declare -A old=()
 reads=("$record")
 [ "$cmd" != apply ] || reads+=("$other")
@@ -157,9 +153,12 @@ for r in "${reads[@]}"; do
 	done <"$r"
 done
 
+# skill_of <path>: the skill folder name in a record path.
+skill_of() { local p=${1#*/skills/}; echo "${p%%/*}"; }
+
 # prune <record path>...: remove the empty folders left in each skill
-# folder the paths are in, that folder included, then the repo's harness
-# folders if they're empty.
+# folder the paths are in, that folder included, then the harness folders
+# if they're empty.
 prune() {
 	local p d
 	for p in "$@"; do
@@ -171,13 +170,15 @@ prune() {
 
 # The exclude lines between these markers are this script's.
 begin="# maestro install: begin" end="# maestro install: end"
+# exclude_lines <skill>...: the lines that hide Maestro's folders and, when
+# hidden, these skills.
 exclude_lines() {
 	echo /.maestro/src/
 	echo /.maestro/worktrees/
 	echo /.maestro/bots/
 	[ "$home" = hidden ] || return 0
 	local n d
-	for n in $(printf '%s\n' "${!from[@]}" | sort); do
+	for n in $(printf '%s\n' "$@" | sort -u); do
 		for d in "${dirs[@]}"; do echo "/$d/skills/$n"; done
 	done
 }
@@ -217,14 +218,14 @@ if [ "$cmd" = check ]; then
 			while read -r h; do
 				[ "$h" = "${want[i]}" ] || problem "changed since install: ${paths[i]}"
 				i=$((i + 1))
-			done < <(for p in "${paths[@]}"; do full "$p"; done | hashes)
+			done < <(printf '%s\n' "${paths[@]}" | hash_repo)
 		fi
 	fi
 	# The skills prompt steps load must be in every harness folder.
 	steps=$(sed -n '/^prompts:/,/^[a-z]/p' "$root/skills/use.yaml" | grep -o '\[[^]]*\]' | tr -d '[],' | tr ' ' '\n' | sort -u || true)
 	for n in $steps; do
 		for d in "${dirs[@]}"; do
-			[ -f "$base/$d/skills/$n/SKILL.md" ] || problem "$prefix$d/skills/$n is missing: playbook steps load it"
+			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: playbook steps load it"
 		done
 	done
 	if [ "$home" = hidden ]; then
@@ -234,7 +235,9 @@ if [ "$cmd" = check ]; then
 			done
 		done
 	fi
-	for b in maestro-ticket maestro-play; do
+	tools=(maestro-play)
+	[ "$tickets" != maestro-ticket ] || tools+=(maestro-ticket)
+	for b in "${tools[@]}"; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
 		command -v go >/dev/null || continue
 		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
@@ -281,20 +284,20 @@ if [ "$cmd" = uninstall ]; then
 	done
 	i=0
 	while read -r h; do
-		f=$(full "${paths[i]}")
 		if [ "$h" = "${want[i]}" ]; then
-			rm -f -- "$f"
+			rm -f -- "$(full "${paths[i]}")"
 			removed=$((removed + 1))
 		else
 			kept+=("${paths[i]}")
 		fi
 		i=$((i + 1))
-	done < <(for p in ${paths[@]+"${paths[@]}"}; do full "$p"; done | hashes)
+	done < <([ ${#paths[@]} -eq 0 ] || printf '%s\n' "${paths[@]}" | hash_repo)
 	[ ${#old[@]} -eq 0 ] || prune "${!old[@]}"
-	write_exclude ""
+	# .maestro/src/ and .maestro/bots/ stay, so they stay hidden.
+	write_exclude "$(home=committed exclude_lines)"
 	rm -f -- "$record"
 	echo "removed $removed files"
-	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/ and the ticket store at $common/maestro/"
+	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/, .maestro/bots/ and the ticket store at $common/maestro/"
 	if [ ${#kept[@]} -gt 0 ]; then
 		printf 'kept, changed since install: %s\n' "${kept[@]}"
 		exit 1
@@ -305,7 +308,6 @@ fi
 # --- apply ---
 for p in .claude .claude/skills .agents .agents/skills .maestro .maestro/project; do
 	# A copy behind a symlink would land outside the repo, where exclude can't hide it.
-	[ "$home" = user ] && [[ $p == .claude* || $p == .agents* ]] && continue
 	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install writes only inside the repo"
 done
 
@@ -316,7 +318,7 @@ for n in "${!from[@]}"; do
 	while IFS= read -r -d '' f; do
 		rel=${f#"${from[$n]}/"}
 		for d in "${dirs[@]}"; do
-			p=$prefix$d/skills/$n/$rel
+			p=$d/skills/$n/$rel
 			src[$p]=$f
 			plan+=("$p")
 		done
@@ -326,19 +328,19 @@ i=0
 while read -r h; do
 	new[${plan[i]}]=$h
 	i=$((i + 1))
-done < <(for p in "${plan[@]}"; do echo "${src[$p]}"; done | hashes)
+done < <(for p in "${plan[@]}"; do echo "${src[$p]}"; done | hash_src)
 
 # Every file now in a folder this install writes to, or listed in the
 # record, is in the plan, the record, or neither (the team's).
 declare -A seen=()
 for n in "${!from[@]}"; do
 	for d in "${dirs[@]}"; do
-		dir=$base/$d/skills/$n
+		dir=$target/$d/skills/$n
 		if [ -L "$dir" ]; then
-			seen["$prefix$d/skills/$n"]=link
+			seen["$d/skills/$n"]=link
 		elif [ -d "$dir" ]; then
 			while IFS= read -r -d '' f; do
-				seen["$prefix${f#"$base/"}"]=1
+				seen["${f#"$target/"}"]=1
 			done < <(find "$dir" \( -type f -o -type l \) -print0)
 		fi
 	done
@@ -351,10 +353,8 @@ i=0
 while read -r h; do
 	cur[${cur_paths[i]}]=$h
 	i=$((i + 1))
-done < <(for p in ${cur_paths[@]+"${cur_paths[@]}"}; do full "$p"; done | hashes)
+done < <([ ${#cur_paths[@]} -eq 0 ] || printf '%s\n' "${cur_paths[@]}" | hash_repo)
 
-# skill_of <path>: the skill folder name in a record path.
-skill_of() { local p=${1#'~/'}; p=${p#*/skills/}; echo "${p%%/*}"; }
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }
 clashes=() writes=() deletes=()
 for p in "${!seen[@]}"; do
@@ -382,20 +382,27 @@ if [ "$tickets" = maestro-ticket ]; then
 	(cd "$target" && maestro-ticket doctor >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
 fi
 
+# Hide the old and new skills before the first copy, so a run that stops
+# partway shows nothing in git status. Each file lands whole (a temp file,
+# then a rename), so a rerun finds it either as it was or as planned.
+olds=()
+for p in "${!old[@]}"; do olds+=("$(skill_of "$p")"); done
+write_exclude "$(exclude_lines "${!from[@]}" ${olds[@]+"${olds[@]}"})"
 for p in ${deletes[@]+"${deletes[@]}"}; do rm -rf -- "$(full "$p")"; done
 for p in ${writes[@]+"${writes[@]}"}; do
 	f=$(full "$p")
 	[ ! -L "$(dirname "$f")" ] || rm -f -- "$(dirname "$f")"
 	mkdir -p "$(dirname "$f")"
-	rm -f -- "$f"
-	cp -- "${src[$p]}" "$f"
-	chmod u+w "$f" # a read-only source stays removable
+	tmp=$(mktemp "$f.XXXXXX")
+	cp -p -- "${src[$p]}" "$tmp" || { rm -f -- "$tmp"; die "couldn't copy ${src[$p]} to $f; run apply again"; }
+	chmod u+w "$tmp" # a read-only source stays removable
+	mv -f -- "$tmp" "$f"
 done
 prune ${deletes[@]+"${deletes[@]}"}
 mkdir -p "$target/.maestro/project"
 conf=$target/.maestro/project/project-setup.md
 [ -e "$conf" ] || [ -L "$conf" ] || cp "$root/templates/project-setup.md" "$conf"
-write_exclude "$(exclude_lines)"
+write_exclude "$(exclude_lines "${!from[@]}")"
 mkdir -p "$(dirname "$record")"
 tmp=$(mktemp "$record.XXXXXX")
 {

@@ -132,7 +132,7 @@ What you get:
 
 - Maestro pinned to one commit in `.maestro/src/`, hidden from git. `maestro-play` reads its playbooks from there.
 - `maestro-ticket` and `maestro-play` on your `PATH`, one copy for every repo on the machine.
-- The skills in `.claude/skills/` and `.agents/skills/`: committed, hidden from git, or once per machine under `~`.
+- The skills in `.claude/skills/` and `.agents/skills/`: committed, or hidden from git.
 - `.maestro/project/project-setup.md`: your main branch, checks, how to run the app, your ticket flow.
 - One paste-ready block per Grok bot in `.maestro/bots/`.
 
@@ -183,7 +183,7 @@ flowchart TD
 
     subgraph Installed ["Their repo after INSTALL.md"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed, hidden from git or under ~: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]

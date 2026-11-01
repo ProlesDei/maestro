@@ -35,7 +35,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 |---|---|---|
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated. | The ones on this machine |
-| `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. `user`: once per machine under `~/.claude/skills/` and `~/.agents/skills/`; every repo on the machine shares one Maestro version, and an uninstall from one repo removes them for all. | `committed` for a team, `hidden` for a trial |
+| `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `skip` | Skills the team doesn't want. Never skip one that a playbook step loads, listed under `prompts:` in `.maestro/src/skills/use.yaml`. | none |
 | `tickets` | `maestro-ticket`, or the team's own tracker. For their own, the value is a folder in their repo, from its top, that holds only `maestro-create-ticket/` with its `SKILL.md`: how to write a ticket in their tool. Keep that name; the bots call it. Write it with them if they have none. | `maestro-ticket` |
 | `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
@@ -68,7 +68,7 @@ Ask about each:
 
 ## 8. Set up the bots
 
-For each bot in `bots:`, read its starting memories in `.maestro/src/bot-profiles/<bot>/memory.md` and ask the person about each default. Write any changes to `.maestro/project/bots/<bot>.memory.md`, the bullets only.
+For each bot in `bots:`, read its starting memories in `.maestro/src/bot-profiles/<bot>/memory.md` and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
 
 Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
 
@@ -82,7 +82,6 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 - `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
-- `user`: commit `.maestro/project/`.
 - Paste each bot block into Grok.
 
 ## Update
@@ -100,7 +99,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 ## Uninstall
 
-Ask first. With `skills-home: user`, warn that it removes the skills for every repo on the machine.
+Ask first.
 
 Run `.maestro/src/scripts/install.sh uninstall <repo>`. It removes the files its record lists and keeps any changed since, listing each: ask the person about those. It leaves the rest; ask about each:
 

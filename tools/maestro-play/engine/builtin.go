@@ -318,42 +318,66 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 // linkSkills links each skill folder git ignores in the main checkout's
 // .agents/skills into the worktree, and says what it couldn't link. Codex
 // looks for skills only up to the worktree's root, so it would miss the
-// hidden copies an install makes; Claude Code finds the main checkout's
-// .claude/skills itself. A link git wouldn't ignore in the worktree is
-// removed: it would leave git status dirty.
+// hidden copies an install makes; Claude Code also reads .claude/skills in
+// the folders above, so it finds the main checkout's (tried with Claude
+// Code and Codex, Oct 31 2026). A link git wouldn't ignore in the worktree
+// is removed: it would leave git status dirty. One git call per side,
+// however many skills: hundreds of runs may add worktrees at once.
 func (e *Engine) linkSkills(st *State, worktree string) string {
 	src := filepath.Join(e.cfg.Dir, ".agents", "skills")
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return ""
 	}
-	var missed []string
+	var want []string
 	for _, d := range entries {
 		rel := filepath.Join(".agents", "skills", d.Name())
+		if _, err := os.Lstat(filepath.Join(worktree, rel)); err != nil {
+			want = append(want, rel)
+		}
+	}
+	hidden := e.ignored(st, e.cfg.Dir, want)
+	var linked, missed []string
+	for _, rel := range want {
+		if !hidden[rel] {
+			continue
+		}
 		dest := filepath.Join(worktree, rel)
-		if _, err := os.Lstat(dest); err == nil {
+		if os.MkdirAll(filepath.Dir(dest), 0o755) != nil || os.Symlink(filepath.Join(e.cfg.Dir, rel), dest) != nil {
+			missed = append(missed, filepath.Base(rel))
 			continue
 		}
-		if r, err := e.git(st, e.cfg.Dir, "check-ignore", "-q", "--", rel); err != nil || r.exit != 0 {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			missed = append(missed, d.Name())
-			continue
-		}
-		if err := os.Symlink(filepath.Join(src, d.Name()), dest); err != nil {
-			missed = append(missed, d.Name())
-			continue
-		}
-		if r, err := e.git(st, worktree, "check-ignore", "-q", "--", rel); err != nil || r.exit != 0 {
-			os.Remove(dest)
-			missed = append(missed, d.Name())
+		linked = append(linked, rel)
+	}
+	still := e.ignored(st, worktree, linked)
+	for _, rel := range linked {
+		if !still[rel] {
+			os.Remove(filepath.Join(worktree, rel))
+			missed = append(missed, filepath.Base(rel))
 		}
 	}
 	if len(missed) == 0 {
 		return ""
 	}
 	return "\nskills not linked into the worktree: " + strings.Join(missed, " ")
+}
+
+// ignored is the set of paths, relative to dir, that git ignores there.
+func (e *Engine) ignored(st *State, dir string, paths []string) map[string]bool {
+	set := map[string]bool{}
+	if len(paths) == 0 {
+		return set
+	}
+	r, err := e.exec(dir, e.cfg.GitBin, e.noPromptEnv(st), strings.Join(paths, "\n")+"\n", e.cfg.GitTimeout, "check-ignore", "--stdin")
+	if err != nil {
+		return set
+	}
+	for _, line := range strings.Split(r.stdout, "\n") {
+		if line != "" {
+			set[line] = true
+		}
+	}
+	return set
 }
 
 // hideWorktrees adds .maestro/worktrees/ to the repo's info/exclude, so
