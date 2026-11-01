@@ -235,13 +235,16 @@ func TestWorktreeAddReuses(t *testing.T) {
 	}
 }
 
-// A new worktree links the skills an install hid in .agents/skills, so
+// A new worktree copies the skills an install hid in .agents/skills, so
 // Codex finds them; a tracked skill comes with the checkout and an
-// untracked one that git doesn't ignore stays out. One hidden only as a
-// folder (a trailing /) would show as a link, so it isn't linked and is
-// named. A name git would quote links too. The links leave git status
-// clean, and the worktree still removes.
-func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
+// untracked one that git doesn't ignore stays out. A name git would quote
+// copies too. An edit in the worktree leaves the main checkout's copy as
+// it was. A reused worktree gets the current install: a copy the install
+// no longer hides goes, one it changed is replaced, one whose source is
+// unchanged stays as it is, one the branch now tracks stays. The copies
+// leave git
+// status clean, and the worktree still removes.
+func TestWorktreeAddCopiesHiddenSkills(t *testing.T) {
 	w := newWorld(t)
 	for _, n := range []string{"maestro-tdd", "ours", "stray", "maestro-dir", "café"} {
 		os.MkdirAll(filepath.Join(w.repo, ".agents", "skills", n), 0o755)
@@ -252,27 +255,82 @@ func TestWorktreeAddLinksHiddenSkills(t *testing.T) {
 	exclude := filepath.Join(w.repo, ".git", "info", "exclude")
 	os.WriteFile(exclude, []byte("/.agents/skills/maestro-tdd\n/.agents/skills/maestro-dir/\n/.agents/skills/café\n"), 0o644)
 	r, err := w.e.worktreeAdd(&State{ID: "r1"}, "T-1", "main")
-	if err != nil || r["status"] != "ok" {
+	if err != nil || r["status"] != "ok" || strings.Contains(str(r["output"]), "not copied") {
 		t.Fatalf("worktree add: %v %v", r, err)
 	}
 	wt := str(r["path"])
-	if b, err := os.ReadFile(filepath.Join(wt, ".agents", "skills", "maestro-tdd", "SKILL.md")); err != nil || string(b) != "maestro-tdd\n" {
-		t.Errorf("hidden skill not linked: %q %v", b, err)
-	}
-	if fi, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "café")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("hidden skill with a quoted name not linked: %v", err)
+	skill := func(root, n string) string { return filepath.Join(root, ".agents", "skills", n, "SKILL.md") }
+	for _, n := range []string{"maestro-tdd", "maestro-dir", "café"} {
+		if b, err := os.ReadFile(skill(wt, n)); err != nil || string(b) != n+"\n" {
+			t.Errorf("hidden skill %s not copied: %q %v", n, b, err)
+		}
+		if fi, err := os.Lstat(filepath.Dir(skill(wt, n))); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("hidden skill %s should be a copy, not a link: %v", n, err)
+		}
 	}
 	if fi, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "ours")); err != nil || fi.Mode()&os.ModeSymlink != 0 {
 		t.Errorf("tracked skill should be the checkout's own folder: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "stray")); err == nil {
-		t.Error("an untracked skill git doesn't ignore was linked")
+		t.Error("an untracked skill git doesn't ignore was copied")
 	}
-	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "maestro-dir")); err == nil || !strings.HasSuffix(str(r["output"]), "skills not linked into the worktree: maestro-dir") {
-		t.Errorf("a link git wouldn't hide should be removed and named: %v %q", err, r["output"])
+	os.WriteFile(skill(wt, "maestro-tdd"), []byte("edited\n"), 0o644)
+	if b, _ := os.ReadFile(skill(w.repo, "maestro-tdd")); string(b) != "maestro-tdd\n" {
+		t.Errorf("an edit in the worktree changed the main checkout's copy: %q", b)
 	}
 	if out := w.git(wt, "status", "--porcelain", "--untracked-files=all"); out != "" {
 		t.Errorf("worktree not clean: %s", out)
+	}
+
+	// The branch now tracks one copy: it's the checkout's own and stays.
+	w.git(wt, "add", "-f", ".agents/skills/maestro-dir")
+	w.git(wt, "commit", "-q", "-m", "track")
+	os.WriteFile(exclude, []byte("/.agents/skills/maestro-dir/\n/.agents/skills/café\n"), 0o644)
+	os.WriteFile(skill(w.repo, "café"), []byte("new\n"), 0o644)
+	r, err = w.e.worktreeAdd(&State{ID: "r2"}, "T-1", "main")
+	if err != nil || r["status"] != "ok" || strings.Contains(str(r["output"]), "not copied") {
+		t.Fatalf("reuse: %v %v", r, err)
+	}
+	if _, err := os.Lstat(filepath.Join(wt, ".agents", "skills", "maestro-tdd")); err == nil {
+		t.Error("reuse kept a copy the install no longer hides")
+	}
+	if b, _ := os.ReadFile(skill(wt, "café")); string(b) != "new\n" {
+		t.Errorf("reuse kept an old copy: %q", b)
+	}
+	for _, n := range []string{"ours", "maestro-dir"} {
+		if b, _ := os.ReadFile(skill(wt, n)); string(b) != n+"\n" {
+			t.Errorf("reuse changed the tracked skill %s: %q", n, b)
+		}
+	}
+	if out := w.git(wt, "status", "--porcelain", "--untracked-files=all"); out != "" {
+		t.Errorf("reused worktree not clean: %s", out)
+	}
+
+	// A copy whose source is unchanged stays as the session left it; a
+	// link an older maestro-play made becomes a copy; with git check-ignore
+	// failing, nothing is removed.
+	os.WriteFile(skill(wt, "café"), []byte("edited\n"), 0o644)
+	os.WriteFile(exclude, []byte("/.agents/skills/maestro-dir/\n/.agents/skills/café\n/.agents/skills/maestro-tdd\n"), 0o644)
+	os.Symlink(filepath.Join(w.repo, ".agents", "skills", "maestro-tdd"), filepath.Join(wt, ".agents", "skills", "maestro-tdd"))
+	if r, err := w.e.worktreeAdd(&State{ID: "r3"}, "T-1", "main"); err != nil || r["status"] != "ok" || strings.Contains(str(r["output"]), "not copied") {
+		t.Fatalf("reuse: %v %v", r, err)
+	}
+	if b, _ := os.ReadFile(skill(wt, "café")); string(b) != "edited\n" {
+		t.Errorf("reuse replaced a copy whose source is unchanged: %q", b)
+	}
+	if fi, err := os.Lstat(filepath.Dir(skill(wt, "maestro-tdd"))); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("an old link should become a copy: %v", err)
+	}
+	git := w.e.cfg.GitBin
+	w.e.cfg.GitBin = filepath.Join(w.dir, "git-no-check-ignore")
+	os.WriteFile(w.e.cfg.GitBin, []byte("#!/bin/sh\ncase \"$*\" in *check-ignore*) exit 128 ;; esac\nexec "+w.gitBin+" \"$@\"\n"), 0o755)
+	os.WriteFile(skill(w.repo, "café"), []byte("newer\n"), 0o644)
+	if out := w.e.copySkills(&State{ID: "r4"}, wt); !strings.Contains(out, "not copied") {
+		t.Errorf("a git failure should be named: %q", out)
+	}
+	w.e.cfg.GitBin = git
+	if b, _ := os.ReadFile(skill(wt, "café")); string(b) != "edited\n" {
+		t.Errorf("a git failure removed a copy: %q", b)
 	}
 	w.git(w.repo, "worktree", "remove", wt)
 }

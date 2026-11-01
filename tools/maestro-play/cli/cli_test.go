@@ -132,7 +132,8 @@ func TestPlaybooksFromInstall(t *testing.T) {
 }
 
 // From a linked worktree, which has no .maestro/src, the main checkout's
-// install still supplies the playbooks.
+// install still supplies the playbooks, and commands run in the main
+// checkout.
 func TestPlaybooksFromWorktree(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) {
@@ -151,9 +152,14 @@ func TestPlaybooksFromWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	code := Main(Env{Args: []string{"lint"}, Stdout: &out, Stderr: &out, Dir: wt, Getenv: func(string) string { return "" }})
+	var got string
+	code := Main(Env{Args: []string{"lint"}, Stdout: &out, Stderr: &out, Dir: wt, Getenv: func(string) string { return "" },
+		Engine: func(cfg *engine.Config) { got = cfg.Dir }})
 	if code != 0 || out.String() != "7 playbooks, 0 problems\n" {
 		t.Fatalf("exit %d: %s", code, out.String())
+	}
+	if want, _ := filepath.EvalSymlinks(dir); got != want && got != dir {
+		t.Errorf("commands run in %q, want the main checkout %q", got, dir)
 	}
 }
 

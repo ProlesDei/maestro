@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/ProlesDei/maestro/tools/maestro-play/playbook"
@@ -293,7 +297,7 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 		if got := strings.TrimSpace(r.stdout); r.exit != 0 || got != branch {
 			return newReply("failed", 1, fmt.Sprintf("%s exists on %q, not %s: %s", path, got, branch, r.stderr)), nil
 		}
-		return ok("reused " + path + e.linkSkills(st, path)), nil
+		return ok("reused " + path + e.copySkills(st, path)), nil
 	}
 	e.hideWorktrees(st)
 	if _, err := e.git(st, e.cfg.Dir, "worktree", "prune"); err != nil {
@@ -312,65 +316,156 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 	if r.exit != 0 {
 		return newReply("failed", r.exit, r.stdout+r.stderr), nil
 	}
-	return ok(r.stdout + r.stderr + e.linkSkills(st, path)), nil
+	return ok(r.stdout + r.stderr + e.copySkills(st, path)), nil
 }
 
-// linkSkills links each skill folder git ignores in the main checkout's
-// .agents/skills into the worktree, and says what it couldn't link. Codex
+// copySkills copies each skill folder git ignores in the main checkout's
+// .agents/skills into the worktree, and says what it couldn't copy. Codex
 // looks for skills only up to the worktree's root, so it would miss the
 // hidden copies an install makes; Claude Code also reads .claude/skills in
 // the folders above, so it finds the main checkout's (tried with Claude
-// Code and Codex, Oct 31 2026). A link git wouldn't ignore in the worktree
-// is removed: it would leave git status dirty. One git call per side,
-// however many skills: hundreds of runs may add worktrees at once.
-func (e *Engine) linkSkills(st *State, worktree string) string {
-	src := filepath.Join(e.cfg.Dir, ".agents", "skills")
-	entries, err := os.ReadDir(src)
+// Code and Codex, Oct 31 2026). A copy, not a link, so an edit a session
+// makes stays in its own worktree. The worktree's git dir lists each
+// folder copied, with a fingerprint of its source; a reused worktree keeps
+// a copy whose source is unchanged, replaces one whose source changed,
+// and loses one the install no longer hides. A copy git wouldn't ignore in
+// the worktree is removed: it would leave git status dirty. Until git has
+// answered, nothing is removed. At most four git calls, however many
+// skills: hundreds of runs may add worktrees at once.
+func (e *Engine) copySkills(st *State, worktree string) string {
+	fail := func(err error) string { return "\nskills not copied into the worktree: " + err.Error() }
+	r, err := e.git(st, worktree, "rev-parse", "--path-format=absolute", "--git-path", "maestro-skills")
+	if err == nil && r.exit != 0 {
+		err = fmt.Errorf("git rev-parse: exit %d: %s", r.exit, strings.TrimSpace(r.stderr))
+	}
 	if err != nil {
-		return ""
+		return fail(err)
 	}
-	var want []string
+	list := strings.TrimSpace(r.stdout)
+	src := filepath.Join(e.cfg.Dir, ".agents", "skills")
+	rel := func(n string) string { return filepath.Join(".agents", "skills", n) }
+	// prev: each folder copied before, with its source's fingerprint.
+	prev := map[string]string{}
+	if b, err := os.ReadFile(list); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if n, fp, ok := strings.Cut(l, "\t"); ok && n != "" && n != "." && n != ".." && !strings.ContainsRune(n, '/') {
+				prev[n] = fp
+			}
+		}
+	}
+	entries, _ := os.ReadDir(src)
+	var rels []string
 	for _, d := range entries {
-		rel := filepath.Join(".agents", "skills", d.Name())
-		if _, err := os.Lstat(filepath.Join(worktree, rel)); err != nil {
-			want = append(want, rel)
+		if fi, err := os.Stat(filepath.Join(src, d.Name())); err != nil || !fi.IsDir() {
+			continue
+		}
+		rels = append(rels, rel(d.Name()))
+		// A link an older maestro-play made is a copy to replace.
+		if l, err := os.Readlink(filepath.Join(worktree, rel(d.Name()))); err == nil && l == filepath.Join(src, d.Name()) {
+			prev[d.Name()] = ""
 		}
 	}
-	// With git failing, no skill is linked and every one is named.
-	hidden, err := e.ignored(st, e.cfg.Dir, want)
-	var linked, missed []string
-	for _, rel := range want {
+	hidden, err := e.ignored(st, e.cfg.Dir, rels)
+	if err != nil {
+		return fail(err)
+	}
+	// A folder the branch now tracks is the checkout's own, not a copy.
+	tracked := map[string]bool{}
+	if len(prev) > 0 {
+		r, err := e.git(st, worktree, "ls-files", "-z", "--", filepath.Join(".agents", "skills"))
+		if err == nil && r.exit != 0 {
+			err = fmt.Errorf("git ls-files: exit %d: %s", r.exit, strings.TrimSpace(r.stderr))
+		}
 		if err != nil {
-			missed = append(missed, filepath.Base(rel))
+			return fail(err)
 		}
-		if !hidden[rel] {
+		for _, p := range strings.Split(r.stdout, "\x00") {
+			if rest, ok := strings.CutPrefix(p, ".agents/skills/"); ok {
+				tracked[strings.SplitN(rest, "/", 2)[0]] = true
+			}
+		}
+	}
+	fps := map[string]string{}
+	var keep []string
+	for n, fp := range prev {
+		if tracked[n] {
 			continue
 		}
-		dest := filepath.Join(worktree, rel)
-		if os.MkdirAll(filepath.Dir(dest), 0o755) != nil || os.Symlink(filepath.Join(e.cfg.Dir, rel), dest) != nil {
-			missed = append(missed, filepath.Base(rel))
+		dest := filepath.Join(worktree, rel(n))
+		if hidden[rel(n)] && fp != "" {
+			if fps[n] = fingerprint(filepath.Join(src, n)); fps[n] == fp {
+				if _, err := os.Lstat(dest); err == nil {
+					keep = append(keep, rel(n))
+					continue
+				}
+			}
+		}
+		os.RemoveAll(dest)
+	}
+	var copied, missed []string
+	for _, rl := range rels {
+		dest := filepath.Join(worktree, rl)
+		if _, err := os.Lstat(dest); !hidden[rl] || err == nil {
 			continue
 		}
-		linked = append(linked, rel)
-	}
-	still, err2 := e.ignored(st, worktree, linked)
-	if err == nil {
-		err = err2
-	}
-	for _, rel := range linked {
-		if err2 != nil || !still[rel] {
-			os.Remove(filepath.Join(worktree, rel))
-			missed = append(missed, filepath.Base(rel))
+		n := filepath.Base(rl)
+		if _, ok := fps[n]; !ok {
+			fps[n] = fingerprint(filepath.Join(src, n))
 		}
+		if os.MkdirAll(filepath.Dir(dest), 0o755) != nil || os.CopyFS(dest, os.DirFS(filepath.Join(src, n))) != nil {
+			os.RemoveAll(dest)
+			missed = append(missed, n)
+			continue
+		}
+		copied = append(copied, rl)
+	}
+	still, err := e.ignored(st, worktree, append(append([]string{}, keep...), copied...))
+	var lines []string
+	for _, rl := range keep {
+		if err == nil && !still[rl] {
+			os.RemoveAll(filepath.Join(worktree, rl))
+			missed = append(missed, filepath.Base(rl))
+			continue
+		}
+		lines = append(lines, filepath.Base(rl)+"\t"+fps[filepath.Base(rl)]+"\n")
+	}
+	for _, rl := range copied {
+		if err != nil || !still[rl] {
+			os.RemoveAll(filepath.Join(worktree, rl))
+			missed = append(missed, filepath.Base(rl))
+			continue
+		}
+		lines = append(lines, filepath.Base(rl)+"\t"+fps[filepath.Base(rl)]+"\n")
+	}
+	sort.Strings(lines)
+	if werr := os.WriteFile(list, []byte(strings.Join(lines, "")), 0o644); werr != nil && err == nil {
+		err = werr
 	}
 	if len(missed) == 0 && err == nil {
 		return ""
 	}
-	out := "\nskills not linked into the worktree: " + strings.Join(missed, " ")
+	sort.Strings(missed)
+	out := "\nskills not copied into the worktree: " + strings.Join(missed, " ")
 	if err != nil {
 		out += " (" + err.Error() + ")"
 	}
 	return out
+}
+
+// fingerprint sums each file's path, size and modification time under
+// dir: it changes when an install rewrites the folder.
+func fingerprint(dir string) string {
+	h := sha256.New()
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil && !d.IsDir() {
+			fmt.Fprintf(h, "%s\x00%d\x00%d\x00", strings.TrimPrefix(p, dir), fi.Size(), fi.ModTime().UnixNano())
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // ignored is the set of paths, relative to dir, that git ignores there.

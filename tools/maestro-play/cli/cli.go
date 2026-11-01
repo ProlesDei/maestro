@@ -106,7 +106,6 @@ type cmd struct {
 	fs                                            *flag.FlagSet
 	playbooks, skills, common, ticketBin, harness string
 	args                                          []string
-	main                                          string // the main checkout, where an install puts .maestro/src
 }
 
 // parse allows flags before and after the positional arguments.
@@ -141,8 +140,10 @@ func (c *cmd) config() (engine.Config, error) {
 			dir = top
 		}
 	}
-	// A linked worktree has no .maestro/src or install.yaml: they're hidden
-	// or untracked in the main checkout, the git common dir's parent.
+	// Commands run in the main checkout, the git common dir's parent: it
+	// holds .maestro/src, install.yaml, project-setup.md and the ticket
+	// worktrees, so a run started in a linked worktree finds them there and
+	// doesn't nest its worktrees in it.
 	var common string
 	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
 		common = strings.TrimSpace(string(out))
@@ -150,9 +151,9 @@ func (c *cmd) config() (engine.Config, error) {
 			common = filepath.Join(dir, common)
 		}
 	}
-	c.main = dir
+	main := dir
 	if filepath.Base(common) == ".git" {
-		c.main = filepath.Dir(common)
+		main = filepath.Dir(common)
 	}
 	get := c.env.Getenv
 	models := map[string]string{}
@@ -162,7 +163,7 @@ func (c *cmd) config() (engine.Config, error) {
 		}
 	}
 	cfg := engine.Config{
-		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: dir,
+		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: main,
 		TicketBin: c.ticketBin, GitBin: get("MAESTRO_GIT_BIN"), GhBin: get("MAESTRO_GH_BIN"),
 		ClaudeBin: get("MAESTRO_CLAUDE_BIN"), CodexBin: get("MAESTRO_CODEX_BIN"), Harness: c.harness,
 		Models: models, ClaudeArgs: strings.Fields(get("MAESTRO_CLAUDE_ARGS")), CodexArgs: strings.Fields(get("MAESTRO_CODEX_ARGS")),
@@ -185,7 +186,7 @@ func (c *cmd) config() (engine.Config, error) {
 	}
 	if cfg.Playbooks == "" {
 		// The install guide clones Maestro into .maestro/src.
-		cfg.Playbooks = filepath.Join(c.main, ".maestro", "src", "playbooks")
+		cfg.Playbooks = filepath.Join(main, ".maestro", "src", "playbooks")
 		if fi, err := os.Stat(cfg.Playbooks); err != nil || !fi.IsDir() {
 			cfg.Playbooks = filepath.Join(dir, "playbooks")
 		}
@@ -215,7 +216,7 @@ func (c *cmd) engine() (*engine.Engine, int) {
 		fmt.Fprintf(c.env.Stderr, "maestro-play: %v\n", err)
 		return nil, 1
 	}
-	c.warnStale(c.main)
+	c.warnStale(cfg.Dir)
 	return e, 0
 }
 
