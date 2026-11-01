@@ -18,7 +18,7 @@ How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot p
 3. An engineer runs the work playbook: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones. `maestro-play` takes one ticket to an open PR: worktree, plan, build, the project's own checks, verify, PR. Only prompt steps spend tokens.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
 5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. An engineer or the planner answers it and the ticket runs again; a call they can't make goes to the chief of staff.
+6. A blocked run leaves an `Escalation:` note. It climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it; the planner posts the answer and the ticket runs again.
 
 What we hold to:
 - Least friction for the team that installs it. The step sessions `maestro-play` starts run with all permissions; teams set limits as [tools/maestro-play](tools/maestro-play/README.md) shows.

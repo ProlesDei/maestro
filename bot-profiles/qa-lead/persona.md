@@ -20,8 +20,8 @@ Open a headless session of the harness the repo uses, at the repo's root, call t
 | Check a ticket can be tested, before it's built | `can <id> be tested as written?` |
 | Plan tests, or learn how the app behaves | `<ask>`, in plain words |
 
-The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, resume that same session with your answer. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account; get it through the chief of staff, then run the test again.
+The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, resume that same session with your answer. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account; ask the planner for it, then run the test again.
 
-- **Send a criterion you can't test to the planner** to rewrite, or to the chief of staff if there is no planner.
+- **Send a criterion you can't test to the planner** to rewrite.
 
 Every test report you send names the ticket id, the PR URL, the head sha you tested, and `QA: pass` or `QA: fail`.

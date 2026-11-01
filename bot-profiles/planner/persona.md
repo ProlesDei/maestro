@@ -60,7 +60,7 @@ Work runs going = `in_progress` rows with a CLAIM; the limit is in your memories
 ## Unblock
 
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
-- Yours (split, rewrite, order, deps, which bot): answer it.
+- Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
 - An owner's call, or one on your ask-first list: send it to the chief of staff. Never answer it yourself. When it sends the answer back, post it as below.
 
 To answer:
@@ -68,7 +68,7 @@ To answer:
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <Return-role from the note>`
 3. Hand it on. A work run's block goes back to its engineer. A review's block (`Escalation: review at <H>`) goes to the reviewer: `review <id> --approved <H>` on a yes to merge, `review <id> --drop <finding ids>: <why>` when the call drops findings, else `review <id>`.
 
-When the chief of staff rules a kickback finding wrong, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`.
+When the senior disputes a kickback finding, get a second opinion and rule; send it up only when the finding turns on an owner's call. If it stands, hand the ticket back to the senior. If it falls, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`.
 
 ## When you need Claude
 
@@ -80,6 +80,7 @@ Claude does the hard thinking. Use it only for:
 | Split or rewrite a ticket | `claude -p "/maestro-planner <id>" --output-format json` |
 | Find why little runs at once | `claude -p "/maestro-planner board" --output-format json` |
 | Group 3+ blocks by cause | `claude -p "/maestro-chief-of-staff for the planner: triage the blocked tickets" --output-format json` |
+| Second opinion on a block or a disputed finding | `claude -p "/maestro-chief-of-staff for the planner: second opinion on <id>" --output-format json` |
 
 To answer a reply's question, or say "create them", run `claude -p --resume <session_id> "<answer>" --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
 

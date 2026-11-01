@@ -21,7 +21,7 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `maestro-play run work`, which takes one ticket to an open PR: worktree, plan, build, your project's checks, verify, PR. Only prompt steps spend tokens.
 4. The **QA lead** tests the PR in the running app with `/maestro-qa-lead` and comments `QA: pass` or `QA: fail`.
 5. The **reviewer**, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
-6. A blocked run leaves an `Escalation:` note. An engineer or the planner answers it and the ticket runs again; a call they can't make goes to the chief of staff.
+6. A blocked run leaves an `Escalation:` note. It climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it; the planner posts the answer and the ticket runs again.
 
 Every role follows the [team rules](bot-profiles/team-rules.md).
 
@@ -78,7 +78,7 @@ flowchart TD
     Work -.->|"blocked: Escalation note"| Sr
     Work -.->|"blocked: Escalation note"| Jr
     Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle"| CoS
+    Sr -.->|"what the ticket can't settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets
 
     %% Test and review

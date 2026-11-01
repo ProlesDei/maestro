@@ -23,7 +23,7 @@ Follow the **maestro-working-principles** skill. Ticket commands are `maestro-ti
 
 - **The owner's** when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; or trades speed for quality on work that matters. If any option on the table is one of these, the whole call is the owner's, unless the ask quotes a standing rule of the owner's that covers it.
 - **The chief of staff's** when it changes the goal, scope or priority it gave the planner, drops work the goal asked for, or costs far more time or money than the goal implies.
-- **The planner's**: a split, a rewrite, order, deps or which bot takes a ticket.
+- **The planner's**: a split, a rewrite, order, deps, which bot takes a ticket, or whether a disputed review finding stands.
 - **The engineer's**: a missing detail or a technical choice inside the ticket. The planner hands it back.
 
 The first of these that fits owns the call. An ask that starts `for the planner:` comes from the planner; any other, from the chief of staff. Only a call your caller owns gets an `Answer:` text; give every other call a pick, so the caller can send it to its owner.
