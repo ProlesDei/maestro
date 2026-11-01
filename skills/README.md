@@ -9,7 +9,7 @@ Maestro ships 18 skills. Each has the `maestro-` prefix, so none clashes with a 
 | Working tools | `maestro-figure-it-out`, `maestro-swarm`, `maestro-sharpen`, `maestro-recall`, `maestro-unslop`, `maestro-prune`, `maestro-refactor-code`, `maestro-technical-writing`, `maestro-create-edit-skill` |
 | Named in prompt steps | `maestro-working-principles` (every step), `maestro-software-engineer` (plan, build), `maestro-tdd` (build), `maestro-prove-complete` (verify) |
 
-To add your own, drop a `skills/<name>/SKILL.md` folder here. `scripts/install.sh` copies every folder into the target repo's `.claude/skills/` and `.agents/skills/`, committed or hidden from git as [INSTALL.md](../INSTALL.md) has the team choose.
+`scripts/install.sh` copies every folder here into the target repo's `.claude/skills/` and `.agents/skills/`, committed or hidden from git as [INSTALL.md](../INSTALL.md) has the team choose. A team's own skills go straight in its repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`, not here: `install.sh` refuses a Maestro checkout with changes, and never touches a folder it didn't place.
 
 `use.yaml` says which skills `maestro-play` names at the top of each prompt step: `prompts.all` for every step, `prompts.<template>` for one. `commands` marks the skills a person calls and a prompt step must never load. Each needs `disable-model-invocation: true` in its frontmatter and `agents/openai.yaml` with `policy.allow_implicit_invocation: false`; `maestro-play lint` checks both.
 

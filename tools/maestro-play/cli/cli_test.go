@@ -166,6 +166,39 @@ func TestPlaybooksFromWorktree(t *testing.T) {
 	}
 }
 
+// With a bare main repo, the root is the linked worktree that holds
+// .maestro/src, from any of its worktrees.
+func TestRootBesideBareRepo(t *testing.T) {
+	dir := t.TempDir()
+	git := func(d string, args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	src := filepath.Join(dir, "src")
+	git(dir, "init", "-q", src)
+	git(src, "commit", "-q", "--allow-empty", "-m", "one")
+	bare := filepath.Join(dir, "proj", ".git")
+	git(dir, "clone", "-q", "--bare", src, bare)
+	home, feat := filepath.Join(dir, "proj", "home"), filepath.Join(dir, "proj", "feat")
+	git(bare, "worktree", "add", "-q", "-b", "home", home)
+	git(bare, "worktree", "add", "-q", "-b", "feat", feat)
+	if got := projectRoot(feat); got != feat {
+		t.Errorf("no install: root %q, want the worktree itself %q", got, feat)
+	}
+	if err := os.CopyFS(filepath.Join(home, ".maestro", "src"), os.DirFS(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(home)
+	for _, from := range []string{home, feat} {
+		if got, _ := filepath.EvalSymlinks(projectRoot(from)); got != want {
+			t.Errorf("from %s: root %q, want %q", from, got, want)
+		}
+	}
+}
+
 // A binary built from a commit older than the repo's pinned one warns;
 // the pinned commit itself, or one the clone doesn't know, doesn't.
 func TestWarnStale(t *testing.T) {

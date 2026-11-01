@@ -45,7 +45,8 @@ bullets() { awk '/^- /{b=1; print; next} b && /^  /{print; next} {b=0}' "$1"; }
 mkdir -p "$target/.maestro/bots"
 for b in "${bots[@]}"; do
 	persona=$profiles/$b/persona.md
-	[ -f "$persona" ] || die "no bot profile $b in $profiles"
+	# The name goes into paths, so no / or ..
+	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$persona" ]; } || die "no bot profile $b in $profiles"
 	memory=$target/.maestro/project/bots/$b.memory.md
 	[ -f "$memory" ] || memory=$profiles/$b/memory.md
 	out=$target/.maestro/bots/$b.md

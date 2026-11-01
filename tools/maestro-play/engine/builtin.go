@@ -288,7 +288,15 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 	}
 	branch := "maestro/" + ticket
 	path := filepath.Join(e.cfg.Dir, ".maestro", "worktrees", ticket)
-	ok := func(out string) map[string]any { return newReply("ok", 0, out, "path", path, "branch", branch) }
+	// done copies the hidden skills in: without them, Codex steps would run
+	// without the skills they load, so a failure fails the step.
+	done := func(out string) map[string]any {
+		note, broken := e.copySkills(st, path)
+		if broken && e.cfg.Harness == "codex" {
+			return newReply("failed", 1, out+note)
+		}
+		return newReply("ok", 0, out+note, "path", path, "branch", branch)
+	}
 	if _, err := os.Stat(path); err == nil {
 		r, err := e.git(st, path, "rev-parse", "--abbrev-ref", "HEAD")
 		if err != nil {
@@ -297,7 +305,7 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 		if got := strings.TrimSpace(r.stdout); r.exit != 0 || got != branch {
 			return newReply("failed", 1, fmt.Sprintf("%s exists on %q, not %s: %s", path, got, branch, r.stderr)), nil
 		}
-		return ok("reused " + path + e.copySkills(st, path)), nil
+		return done("reused " + path), nil
 	}
 	e.hideWorktrees(st)
 	if _, err := e.git(st, e.cfg.Dir, "worktree", "prune"); err != nil {
@@ -316,7 +324,7 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 	if r.exit != 0 {
 		return newReply("failed", r.exit, r.stdout+r.stderr), nil
 	}
-	return ok(r.stdout + r.stderr + e.copySkills(st, path)), nil
+	return done(r.stdout + r.stderr), nil
 }
 
 // copySkills copies each skill folder git ignores in the main checkout's
@@ -331,9 +339,11 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 // and loses one the install no longer hides. A copy git wouldn't ignore in
 // the worktree is removed: it would leave git status dirty. Until git has
 // answered, nothing is removed. At most four git calls, however many
-// skills: hundreds of runs may add worktrees at once.
-func (e *Engine) copySkills(st *State, worktree string) string {
-	fail := func(err error) string { return "\nskills not copied into the worktree: " + err.Error() }
+// skills: hundreds of runs may add worktrees at once. broken says a git
+// call or a copy failed, so a Codex run would miss skills it loads; a copy
+// git wouldn't ignore isn't broken.
+func (e *Engine) copySkills(st *State, worktree string) (note string, broken bool) {
+	fail := func(err error) (string, bool) { return "\nskills not copied into the worktree: " + err.Error(), true }
 	r, err := e.git(st, worktree, "rev-parse", "--path-format=absolute", "--git-path", "maestro-skills")
 	if err == nil && r.exit != 0 {
 		err = fmt.Errorf("git rev-parse: exit %d: %s", r.exit, strings.TrimSpace(r.stderr))
@@ -415,17 +425,19 @@ func (e *Engine) copySkills(st *State, worktree string) string {
 		if os.MkdirAll(filepath.Dir(dest), 0o755) != nil || os.CopyFS(dest, os.DirFS(filepath.Join(src, n))) != nil {
 			os.RemoveAll(dest)
 			missed = append(missed, n)
+			broken = true
 			continue
 		}
 		copied = append(copied, rl)
 	}
-	// A failed check keeps the old copies and drops the new ones.
+	// A failed check keeps the copies of skills listed before, which git
+	// ignored then, and drops the new ones.
 	all := append(keep, copied...)
 	still, err := e.ignored(st, worktree, all)
 	var lines []string
-	for i, rl := range all {
+	for _, rl := range all {
 		n := filepath.Base(rl)
-		if !still[rl] && (err == nil || i >= len(keep)) {
+		if _, listed := prev[n]; !still[rl] && (err == nil || !listed) {
 			os.RemoveAll(filepath.Join(worktree, rl))
 			missed = append(missed, n)
 			continue
@@ -437,14 +449,14 @@ func (e *Engine) copySkills(st *State, worktree string) string {
 		err = werr
 	}
 	if len(missed) == 0 && err == nil {
-		return ""
+		return "", broken
 	}
 	sort.Strings(missed)
 	out := "\nskills not copied into the worktree: " + strings.Join(missed, " ")
 	if err != nil {
 		out += " (" + err.Error() + ")"
 	}
-	return out
+	return out, broken || err != nil
 }
 
 // fingerprint sums each file's path, size and modification time under

@@ -31,7 +31,8 @@
 # changed it: that folder stays, theirs. A switch to hidden untracks the
 # copies git tracks (git rm --cached) for the team to commit. It works in
 # the main checkout only: a linked worktree shares its exclude file, ticket
-# store and hidden record, and maestro-play runs in the main checkout.
+# store and hidden record. Where the main checkout is a bare repo, it
+# works in one linked worktree instead.
 #
 # check reports what's wrong with an install; uninstall removes the files
 # the record lists, except those changed since.
@@ -66,8 +67,18 @@ top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) || die "$1 is not 
 [ "$top" = "$target" ] || die "$1 is inside the repo at $top; install at the top of the repo"
 common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
 [[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.31 or later"
-[ "$(git -C "$target" rev-parse --path-format=absolute --git-dir)" = "$common" ] ||
-	die "$1 is a linked worktree; run install.sh in the main checkout, ${common%/.git}"
+# One install per repo: its worktrees share the exclude file, ticket store
+# and hidden record. It goes in the main checkout, or in a linked worktree
+# when the main one is bare; maestro-play takes the checkout that holds
+# .maestro/src as the project's root.
+wts=$(git -C "$target" worktree list --porcelain | sed -n 's/^worktree //p')
+if [ "$(git -C "$target" rev-parse --path-format=absolute --git-dir)" != "$common" ] &&
+	[ "$(git -C "$common" config --bool core.bare 2>/dev/null)" != true ]; then
+	die "$1 is a linked worktree; run install.sh in the main checkout, $(head -n1 <<<"$wts")"
+fi
+while IFS= read -r w; do
+	[ -z "$w" ] || [ "$w" = "$target" ] || [ ! -d "$w/.maestro/src" ] || die "Maestro is installed in $w, a worktree of this repo; run install.sh there"
+done <<<"$wts"
 exclude=$common/info/exclude
 choices=$target/.maestro/project/install.yaml
 
@@ -112,8 +123,9 @@ for h in "${harnesses[@]}"; do
 	[[ " ${dirs[*]-} " == *" $d "* ]] || dirs+=("$d")
 done
 for b in ${bots[@]+"${bots[@]}"}; do
-	[ -f "$root/bot-profiles/$b/persona.md" ] || die "install.yaml: no bot profile $b"
+	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$root/bot-profiles/$b/persona.md" ]; } || die "install.yaml: no bot profile $b"
 done
+[ -n "$tickets" ] || die "install.yaml: tickets wants maestro-ticket or a folder"
 
 # skill <dir> <label>: die unless <dir> is a skill folder. The name goes
 # into paths and exclude lines, so no glob or space characters.
@@ -145,7 +157,8 @@ if [ "$tickets" != maestro-ticket ]; then
 		[ "$(basename "$entry")" = maestro-create-ticket ] || die "tickets: $tickets may hold only maestro-create-ticket/, not $(basename "$entry")"
 	done
 	skill "$tickets/maestro-create-ticket" "tickets: $tickets/maestro-create-ticket"
-	[ -z "${from[maestro-create-ticket]-}" ] || from[maestro-create-ticket]=$tickets/maestro-create-ticket
+	[ -n "${from[maestro-create-ticket]-}" ] || die "install.yaml: tickets names the team's maestro-create-ticket, so don't skip it"
+	from[maestro-create-ticket]=$tickets/maestro-create-ticket
 fi
 
 records=("$target/.maestro/project/installed.list" "$common/maestro/installed.list")
@@ -171,16 +184,35 @@ hashes() {
 declare -A old=()
 reads=("$record")
 [ "$cmd" != apply ] || reads+=("$other")
+# A record path names a file in a harness skill folder, with no . or ..
+# part: a committed record is anyone's to edit, and apply and uninstall
+# delete what it lists.
+recpath='^\.(claude|agents)/skills/[a-z0-9]+(-[a-z0-9]+)*/[^/]'
 for r in "${reads[@]}"; do
 	[ -f "$r" ] || continue
-	# A CRLF checkout of the committed record ends each path in \r.
-	while IFS=$'\t' read -r h p; do
-		[[ $h == '#'* || -z $h ]] || old[${p%$'\r'}]=$h
+	n=0
+	while IFS=$'\t' read -r h p || [ -n "$h" ]; do
+		n=$((n + 1))
+		[[ $h == '#'* || -z $h ]] && continue
+		p=${p%$'\r'} # a CRLF checkout of the committed record
+		[[ $h =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && $p =~ $recpath && /$p/ != */../* && /$p/ != */./* && $p != *//* && $p != */ ]] ||
+			die "$r:$n: want a blob hash, a tab and a file under .claude/skills/<skill>/ or .agents/skills/<skill>/; nothing was changed"
+		old[$p]=$h
 	done <"$r"
 done
 
 # skill_of <path>: the skill folder name in a record path.
 skill_of() { local p=${1#*/skills/}; echo "${p%%/*}"; }
+# linked <record path>: true if the path, or a folder on the way to it, is
+# a symlink, so a write or delete there would land outside the repo.
+linked() {
+	local p=$1
+	while :; do
+		[ ! -L "$target/$p" ] || return 0
+		[[ $p == */* ]] || return 1
+		p=${p%/*}
+	done
+}
 
 # prune <record path>...: remove the empty folders left in each skill
 # folder the paths are in, that folder included, then the harness folders
@@ -192,7 +224,7 @@ prune() {
 		d=${p%/"${p#*/skills/*/}"}
 		[ -z "${pruned[$d]-}" ] || continue
 		pruned[$d]=1
-		[ ! -d "$(full "$d")" ] || find "$(full "$d")" -depth -type d -empty -delete
+		[ ! -d "$(full "$d")" ] || linked "$d" || find "$(full "$d")" -depth -type d -empty -delete
 	done
 	for d in .claude .agents; do rmdir -- "$target/$d/skills" "$target/$d" 2>/dev/null || true; done
 }
@@ -282,6 +314,8 @@ if [ "$cmd" = check ]; then
 			fi
 		done
 	done
+	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
+		warn "Maestro at $root is a shallow clone: check can't tell if the tools are older than the pin; fetch its full history"
 	tools=(maestro-play)
 	[ "$tickets" != maestro-ticket ] || tools+=(maestro-ticket)
 	for b in "${tools[@]}"; do
@@ -317,6 +351,10 @@ if [ "$cmd" = check ]; then
 			problem "project-setup.md: main branch $main doesn't exist"
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the work playbook runs none"
+		# Any other bullet there fails every check step.
+		while IFS= read -r l; do
+			problem "project-setup.md: under ## Checks, want - <name>: \`<command>\`, not: $l"
+		done < <(awk -F'\t' "$line"' $1=="checks" && line() ~ /^([-*+]|[0-9]+[.)])[ \t]/ && line() !~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {print line()}' <<<"$sections")
 		awk -F'\t' "$line"' line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
 			warn "project-setup.md: ## $s still holds the template's <...> text"
 		done
@@ -332,9 +370,13 @@ fi
 # --- uninstall ---
 if [ "$cmd" = uninstall ]; then
 	[ -f "$record" ] || die "no record at $record: nothing to remove"
-	kept=() removed=0 paths=() want=()
+	kept=() behind=() removed=0 paths=() want=()
 	for p in "${!old[@]}"; do
-		[ -f "$(full "$p")" ] && paths+=("$p") want+=("${old[$p]}")
+		if linked "$p"; then
+			behind+=("$p")
+		elif [ -f "$(full "$p")" ]; then
+			paths+=("$p") want+=("${old[$p]}")
+		fi
 	done
 	hashes ${paths[@]+"${paths[@]}"}
 	for i in "${!hs[@]}"; do
@@ -351,10 +393,9 @@ if [ "$cmd" = uninstall ]; then
 	rm -f -- "$record"
 	echo "removed $removed files"
 	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/, .maestro/bots/ and the ticket store at $common/maestro/"
-	if [ ${#kept[@]} -gt 0 ]; then
-		printf 'kept, changed since install: %s\n' "${kept[@]}"
-		exit 1
-	fi
+	[ ${#kept[@]} -eq 0 ] || printf 'kept, changed since install: %s\n' "${kept[@]}"
+	[ ${#behind[@]} -eq 0 ] || printf 'kept, behind a symlink: %s\n' "${behind[@]}"
+	[ ${#kept[@]} -eq 0 ] && [ ${#behind[@]} -eq 0 ] || exit 1
 	exit 0
 fi
 
@@ -364,6 +405,16 @@ for p in .claude .claude/skills .agents .agents/skills .maestro .maestro/project
 	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install writes only inside the repo"
 done
 
+# srcfiles <skill>: its files, NUL-separated: for Maestro's, the ones git
+# tracks, so a file git ignores (.DS_Store, a swap file) isn't the pinned
+# commit's; for the team's ticket skill, all but a .git.
+srcfiles() {
+	if [ "${from[$1]}" = "$root/skills/$1" ]; then
+		git -C "$root" ls-files -z -- "skills/$1" | while IFS= read -r -d '' f; do printf '%s\0' "$root/$f"; done
+	else
+		find "${from[$1]}" -name .git -prune -o -type f -print0
+	fi
+}
 # The plan: every file to place, keyed by its record path.
 declare -A src=() new=()
 plan=()
@@ -375,7 +426,7 @@ for n in "${!from[@]}"; do
 			src[$p]=$f
 			plan+=("$p")
 		done
-	done < <(find "${from[$n]}" -type f ! -path '*/.git/*' -print0)
+	done < <(srcfiles "$n")
 done
 srcs=()
 for p in "${plan[@]}"; do srcs+=("${src[$p]}"); done
@@ -392,6 +443,8 @@ read_shipped() {
 	[ -z "$shipped_read" ] || return 0
 	shipped_read=1
 	local out a b c h st path
+	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
+		die "Maestro at $root is a shallow clone, so apply can't tell an older install's copies from the team's files; fetch its full history (git fetch --unshallow); nothing was changed"
 	out=$(git -C "$root" log --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
 	while read -r a b c h st path; do
 		[ -n "$path" ] || continue
@@ -425,8 +478,16 @@ for dir in "${!folders[@]}"; do
 		seen[$dir]=1 # a file where a skill folder goes
 	fi
 done
-# A folder at a recorded path isn't seen: the files in it are.
-for p in "${!old[@]}"; do [ ! -f "$(full "$p")" ] && [ ! -L "$(full "$p")" ] || seen[$p]=1; done
+# A folder at a recorded path isn't seen: the files in it are. Nor is a
+# file behind a linked folder: the link is, and when it goes, the plan
+# writes the file again.
+for p in "${!old[@]}"; do
+	if [ -L "$(full "$p")" ]; then
+		seen[$p]=1
+	elif [ -f "$(full "$p")" ] && ! linked "$p"; then
+		seen[$p]=1
+	fi
+done
 cur_paths=()
 for p in "${!seen[@]}"; do [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ] || cur_paths+=("$p"); done
 declare -A cur=()
@@ -453,6 +514,17 @@ for p in "${!seen[@]}"; do
 done
 
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }
+# in_way <path>: true if a file the plan places is the path's folder, or
+# the path is a whole skill folder, so it blocks a copy.
+in_way() {
+	local q=$1
+	[ -z "${writing[$q]-}" ] || return 0
+	while [[ $q == */* ]]; do
+		q=${q%/*}
+		[ -z "${new[$q]-}" ] || return 0
+	done
+	return 1
+}
 clashes=() writes=() deletes=()
 for p in "${!seen[@]}"; do
 	if [ -n "${theirs[${p%/"${p#*/skills/*/}"}]-}" ]; then
@@ -466,12 +538,13 @@ for p in "${!seen[@]}"; do
 		else clashes+=("$p isn't Maestro's"); fi
 	elif [ "${cur[$p]}" = "${old[$p]-}" ] || replacing "$p"; then deletes+=("$p")
 	elif [ -n "${old[$p]-}" ]; then clashes+=("$p changed since install, and Maestro no longer installs it")
-	else clashes+=("$p isn't Maestro's"); fi
+	elif in_way "$p"; then clashes+=("$p isn't Maestro's")
+	fi # else the team's file beside Maestro's, such as a .DS_Store: it stays
 done
 for p in "${plan[@]}"; do [ -n "${seen[$p]-}" ] || writes+=("$p"); done
 if [ ${#clashes[@]} -gt 0 ]; then
 	printf 'clash: %s\n' "${clashes[@]}" | sort >&2
-	die "nothing was written; keep the team's files with skip: <skill> in install.yaml, or replace them with --replace <skill>"
+	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill a playbook step loads), or replace them with --replace <skill>"
 fi
 
 # The store lives in the git common dir, outside the work tree; doctor
@@ -523,7 +596,8 @@ if [ "$home" = hidden ]; then
 	for p in "${!old[@]}"; do [ -n "${theirs[${p%/"${p#*/skills/*/}"}]-}" ] || mine+=("$p"); done
 	mapfile -d '' -t tracked < <(git -C "$target" --literal-pathspecs ls-files -z -- "${mine[@]}")
 	if [ ${#tracked[@]} -gt 0 ]; then
-		git -C "$target" --literal-pathspecs rm -q --cached -- "${tracked[@]}"
+		# -f: a staged edit to a copy would make git refuse; the file stays.
+		git -C "$target" --literal-pathspecs rm -q --cached -f -- "${tracked[@]}"
 		untracked=${#tracked[@]}
 	fi
 fi
@@ -532,5 +606,8 @@ rm -f -- "$other"
 [ "$tickets" = maestro-ticket ] && echo "ticket store ready" || echo "ticket method from $tickets"
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
-for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record: $f"; done
+# It's the team's own skill now, so git sees it like the rest of theirs.
+visible=
+[ "$home" != hidden ] || visible=" and no longer hidden from git"
+for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record$visible: $f"; done
 [ $untracked -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"

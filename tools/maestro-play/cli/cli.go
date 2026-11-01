@@ -140,10 +140,6 @@ func (c *cmd) config() (engine.Config, error) {
 			dir = top
 		}
 	}
-	// The main checkout, the git common dir's parent, holds .maestro/src,
-	// install.yaml, project-setup.md and the ticket worktrees, so a run
-	// started in a linked worktree finds them there and doesn't nest its
-	// worktrees in it. A run with no worktree step still works in dir.
 	var common string
 	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
 		common = strings.TrimSpace(string(out))
@@ -151,10 +147,11 @@ func (c *cmd) config() (engine.Config, error) {
 			common = filepath.Join(dir, common)
 		}
 	}
-	main := dir
-	if filepath.Base(common) == ".git" {
-		main = filepath.Dir(common)
-	}
+	// The project's root holds install.yaml, project-setup.md and the
+	// ticket worktrees, so a run started in a linked worktree finds them
+	// there and doesn't nest its worktrees in it. A run with no worktree
+	// step still works in dir.
+	main := projectRoot(dir)
 	get := c.env.Getenv
 	models := map[string]string{}
 	for tier, key := range map[string]string{"mid": "MAESTRO_MODEL_MID", "frontier": "MAESTRO_MODEL_FRONTIER"} {
@@ -204,6 +201,46 @@ func (c *cmd) config() (engine.Config, error) {
 		c.env.Engine(&cfg)
 	}
 	return cfg, nil
+}
+
+// projectRoot is the checkout install.sh put Maestro in, the one holding
+// .maestro/src: dir, or another worktree of its repo. With no install, it
+// is the main checkout, or dir when the main one is a bare repo.
+func projectRoot(dir string) string {
+	installed := func(p string) bool {
+		fi, err := os.Stat(filepath.Join(p, ".maestro", "src"))
+		return err == nil && fi.IsDir()
+	}
+	if installed(dir) {
+		return dir
+	}
+	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return dir
+	}
+	main := ""
+	for i, stanza := range strings.Split(string(out), "\n\n") {
+		path, bare := "", false
+		for _, l := range strings.Split(stanza, "\n") {
+			if p, ok := strings.CutPrefix(l, "worktree "); ok {
+				path = p
+			}
+			bare = bare || l == "bare"
+		}
+		if path == "" || bare {
+			continue
+		}
+		if installed(path) {
+			return path
+		}
+		if i == 0 {
+			main = path
+		}
+	}
+	if main == "" {
+		return dir
+	}
+	return main
 }
 
 func (c *cmd) engine() (*engine.Engine, int) {

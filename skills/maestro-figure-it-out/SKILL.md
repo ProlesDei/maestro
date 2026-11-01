@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 You design a playbook in Maestro's YAML format, not an improvised session, and hand back its folder, its step graph and the lint and render results. You never run it unless the user says so.
 
-`<pb>` is `$MAESTRO_PLAYBOOKS`, else `playbooks/` in the Maestro repo. `<dir>` is where you draft: in the Maestro repo, `playbooks/` in a worktree and branch of your own; elsewhere, a copy of `<pb>` in a new temp folder of your own. `<skills>` is `<pb>/../skills`. Point `maestro-play` at `<dir>` and `<skills>` on every call.
+`<pb>` is `$MAESTRO_PLAYBOOKS`, else `.maestro/src/playbooks` where INSTALL.md put Maestro, else `playbooks/` in the Maestro repo. `<dir>` is where you draft: in the Maestro repo, `playbooks/` in a worktree and branch of your own; elsewhere, a copy of `<pb>` in a new temp folder of your own. `<skills>` is `<pb>/../skills`. Point `maestro-play` at `<dir>` and `<skills>` on every call.
 
 ## Start
 

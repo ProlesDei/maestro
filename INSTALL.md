@@ -13,7 +13,7 @@ Ground rules:
 
 First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
 
-Install in the main checkout, not a linked worktree: `install.sh` refuses one, and `maestro-play` reads its setup and puts ticket worktrees in the main checkout.
+Install in the main checkout, not a linked worktree: `install.sh` refuses one. Where the main checkout is a bare repo, install in one linked worktree. `maestro-play` takes the checkout that holds `.maestro/src/` as the project's root: it reads the setup there and puts ticket worktrees there.
 
 ## 1. Check the machine
 
@@ -21,13 +21,13 @@ Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logge
 
 ## 2. Get Maestro
 
-Clone `github.com/ProlesDei/maestro` into `.maestro/src/` as a sparse checkout, non-cone mode, of only these paths: `INSTALL.md`, `bot-profiles/`, `playbooks/`, `scripts/`, `skills/`, `templates/`, `tools/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
+Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these paths: `.gitattributes`, `INSTALL.md`, `bot-profiles/`, `playbooks/`, `scripts/`, `skills/`, `templates/`, `tools/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
 
 Ask which commit to pin; the default is the newest on `main`. Check it out and note its sha.
 
 ## 3. Build the tools
 
-Build `maestro-ticket` and `maestro-play` from `.maestro/src/tools/<name>/` with Go, into a folder on `PATH`. One copy of each serves every repo on the machine, so if the copy already on `PATH` was built from a newer commit, keep it.
+Build `maestro-ticket` and `maestro-play` from `.maestro/src/tools/<name>/` with Go and `GOWORK=off`, so a `go.work` in the team's repo can't take over the build, into a folder on `PATH`. One copy of each serves every repo on the machine, so if the copy already on `PATH` was built from a newer commit, keep it.
 
 ## 4. Ask the choices
 
@@ -46,7 +46,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 
 Run `.maestro/src/scripts/install.sh apply <repo>`. It copies the skills, writes `.maestro/project/project-setup.md` once, creates the ticket store, hides `.maestro/src/`, `.maestro/worktrees/` and `.maestro/bots/` from git, and lists what it placed in its record.
 
-If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). Never pass `--replace` without their yes.
+If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). A skill a playbook step loads can't be skipped: offer to replace it and move their changes into a skill of their own, named without `maestro-`. Never pass `--replace` without their yes.
 
 ## 6. Fill in project-setup.md
 
@@ -91,7 +91,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 1. Ask which commit to move to. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person.
+4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it.
 5. Rebuild the bot blocks and tell the person which ones changed: they paste those again.
 6. Run `check`.
 

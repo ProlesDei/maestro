@@ -2,8 +2,9 @@
 # Acceptance test for scripts/install.sh and scripts/bot-bundle.sh, run
 # against a copy of Maestro in its own git repo so an update can change it.
 # apply installs hidden or committed, and a second run changes nothing; an
-# update replaces and removes only what it placed; a team's file or one
-# changed since install clashes and changes nothing, until skip: (which
+# update replaces and removes only what it placed, and leaves a team's
+# file beside them; a team's file in the way, or one changed since
+# install, clashes and changes nothing, until skip: (which
 # keeps it as the team's) or --replace; a folder where a file goes; an
 # install by the install.sh before the record is taken over; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
@@ -118,7 +119,7 @@ echo mine >>"$r/.claude/skills/maestro-recall/SKILL.md"
 refuses "clash: .claude/skills/maestro-recall/SKILL.md changed since install" "$r" apply "$r"
 echo "skip: maestro-recall" >>"$r/.maestro/project/install.yaml"
 ok apply "$r"
-says "kept as the team's, out of the record: .claude/skills/maestro-recall"
+says "kept as the team's, out of the record and no longer hidden from git: .claude/skills/maestro-recall"
 [ "$(tail -1 "$r/.claude/skills/maestro-recall/SKILL.md")" = mine ] || fail "skip: changed the team's copy"
 [ ! -e "$r/.agents/skills/maestro-recall" ] || fail "skip: kept a copy the team didn't change"
 ! grep -q maestro-recall "$r/.git/maestro/installed.list" "$r/.git/info/exclude" || fail "the team's skill is still in the record or hidden"
@@ -128,11 +129,13 @@ rm -r "$r/.claude/skills/maestro-recall"
 ok apply "$r"
 installed "$r" .claude .agents
 
-# A file Maestro ships, but at another path, or an empty one, is the team's.
+# A file Maestro ships, but at another path, or an empty one, is the
+# team's: it stays where it is, out of the record.
 cp "$m/skills/maestro-swarm/SKILL.md" "$r/.claude/skills/maestro-tdd/swarm.md"
 touch "$r/.claude/skills/maestro-tdd/empty.md"
-refuses "clash: .claude/skills/maestro-tdd/empty.md isn't Maestro's" "$r" apply "$r"
-says "clash: .claude/skills/maestro-tdd/swarm.md isn't Maestro's"
+ok apply "$r"
+[ -f "$r/.claude/skills/maestro-tdd/swarm.md" ] && [ -f "$r/.claude/skills/maestro-tdd/empty.md" ] || fail "apply removed the team's files"
+! grep -qE 'maestro-tdd/(swarm|empty)\.md' "$r/.git/maestro/installed.list" || fail "the team's files went in the record"
 rm "$r/.claude/skills/maestro-tdd/swarm.md" "$r/.claude/skills/maestro-tdd/empty.md"
 
 # A folder where Maestro places a file: an empty one goes, one with a
@@ -149,6 +152,35 @@ rm -r "$r/.agents/skills/maestro-tdd" && echo mine >"$r/.agents/skills/maestro-t
 refuses "clash: .agents/skills/maestro-tdd isn't Maestro's" "$r" apply "$r"
 ok apply --replace maestro-tdd "$r"
 installed "$r" .agents
+# A file git ignores in Maestro's skills isn't the pinned commit's: it
+# isn't copied.
+echo .DS_Store >>"$m/.git/info/exclude" && touch "$m/skills/maestro-tdd/.DS_Store"
+ok apply "$r"
+[ ! -e "$r/.claude/skills/maestro-tdd/.DS_Store" ] || fail "apply copied a file git ignores in Maestro"
+rm "$m/skills/maestro-tdd/.DS_Store"
+# A linked skill folder clashes; --replace removes the link, writes the
+# skill in its place and leaves the link's target alone.
+mv "$r/.claude/skills/maestro-swarm" "$tmp/shared-swarm" && ln -s "$tmp/shared-swarm" "$r/.claude/skills/maestro-swarm"
+refuses "clash: .claude/skills/maestro-swarm is a symlink" "$r" apply "$r"
+ok apply --replace maestro-swarm "$r"
+[ ! -L "$r/.claude/skills/maestro-swarm" ] || fail "--replace kept the link"
+installed "$r" .claude
+[ -f "$tmp/shared-swarm/SKILL.md" ] || fail "--replace changed the link's target"
+# A record line outside a harness skill folder, or one that climbs out of
+# it, stops apply and uninstall before they change anything. A last line
+# with no newline still counts.
+rec=$r/.git/maestro/installed.list
+cp "$rec" "$tmp/rec"
+echo outside >"$tmp/victim"
+for bad in "README.md" ".claude/skills/maestro-tdd/../../../../victim"; do
+	printf '%s\t%s\n' "$(git hash-object "$tmp/victim")" "$bad" >>"$rec"
+	for c in apply uninstall; do refuses "installed.list:$(wc -l <"$rec"): want a blob hash" "$r" $c "$r"; done
+	cp "$tmp/rec" "$rec"
+done
+[ -f "$tmp/victim" ] || fail "a bad record line deleted a file"
+printf %s "$(cat "$rec")" >"$rec"
+ok check "$r"
+cp "$tmp/rec" "$rec"
 
 # bot-bundle: one block per bot named, with the team's own memories.
 mkdir -p "$r/.maestro/project/bots"
@@ -165,6 +197,11 @@ grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 cp "$r/.maestro/project/install.yaml" "$tmp/choices"
 sed -i 's/$/\r/' "$r/.maestro/project/install.yaml"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle failed on a CRLF install.yaml"; }
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+# A bot name holding a path refuses.
+sed -i 's|^bots: .*|bots: ../planner|' "$r/.maestro/project/install.yaml"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took a bot name with a path"; fi
+says "no bot profile ../planner"
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
@@ -248,10 +285,16 @@ seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ -z "$(git -C "$r" ls-files .claude .agents .maestro/project/installed.list)" ] || fail "the switch to hidden left files tracked"
 ok check "$r"
 
-# --- uninstall: removes unchanged files, keeps a changed one ---
+# --- uninstall: removes unchanged files, keeps a changed one, and never
+# deletes through a linked folder ---
 echo mine >>"$r/.agents/skills/maestro-tdd/SKILL.md"
+cp -R "$r/.claude/skills/maestro-swarm" "$tmp/shared-swarm2"
+rm -r "$r/.claude/skills/maestro-swarm" && ln -s "$tmp/shared-swarm2" "$r/.claude/skills/maestro-swarm"
 if run uninstall "$r"; then fail "uninstall with a changed file exited 0"; fi
 says "kept, changed since install: .agents/skills/maestro-tdd/SKILL.md"
+says "kept, behind a symlink: .claude/skills/maestro-swarm/SKILL.md"
+[ -f "$tmp/shared-swarm2/SKILL.md" ] || fail "uninstall deleted a file through a link"
+rm "$r/.claude/skills/maestro-swarm" && rmdir "$r/.claude/skills" "$r/.claude"
 left=$(cd "$r" && { find .claude .agents -type f 2>/dev/null || true; } | sort | tr '\n' ' ')
 [ "$left" = ".agents/skills/maestro-tdd/SKILL.md " ] || fail "uninstall left: $left"
 [ ! -e "$r/.claude" ] || fail "uninstall left an empty .claude/"
@@ -285,6 +328,9 @@ before=$(snap "$r3")
 ok apply "$r3"
 [ "$before" = "$(snap "$r3")" ] || fail "a second apply over a CRLF source changed the repo"
 git -C "$r3" config --unset core.autocrlf
+echo "skip: maestro-create-ticket" >>"$r3/.maestro/project/install.yaml"
+refuses "tickets names the team's maestro-create-ticket, so don't skip it" "$r3" apply "$r3"
+sed -i '/^skip:/d' "$r3/.maestro/project/install.yaml"
 mkdir "$t/maestro-work"
 refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
 
@@ -310,6 +356,8 @@ skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-nope|no skill maestro-nope
 skip: maestro-tdd|skip: maestro-tdd is loaded by a playbook step
 bots: designer|no bot profile designer
+bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
+tickets:|tickets wants maestro-ticket or a folder
 EOF
 for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home wants committed or hidden"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
@@ -350,6 +398,13 @@ left=$(find "$r7" -name 'maestro-install.*'); [ -z "$left" ] || fail "a failed c
 sed -i 's/^## Main branch$/## Main Branch/; s/^main$/- `main`/; s/^\(- [a-z]*:\) `/\1\t`/; s/$/\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 ! grep -q "lists no checks" "$tmp/out" || fail "check missed a check with a tab in it"
+# A bullet under ## Checks that isn't a check is a problem: maestro-play
+# fails every check step on it.
+cp "$r7/.maestro/project/project-setup.md" "$tmp/setup"
+sed -i 's/^## Checks\r$/&\n- lint: run golangci-lint/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed a bad ## Checks bullet"; fi
+says "under ## Checks, want - <name>: \`<command>\`, not: - lint: run golangci-lint"
+cp "$tmp/setup" "$r7/.maestro/project/project-setup.md"
 printf '## Run\n\n<how to start it>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Run still holds"
@@ -361,6 +416,17 @@ for c in apply check uninstall; do refuses "is a linked worktree; run install.sh
 sed -i 's/^skills-home: .*/skills-home: committed/' "$tmp/wt7/.maestro/project/install.yaml"
 refuses "is a linked worktree" "$r7" apply "$tmp/wt7"
 git -C "$r7" worktree remove --force "$tmp/wt7"
+# With a bare main repo, a linked worktree takes the install, and a second
+# worktree then refuses.
+r11=$tmp/bare
+git clone -q --bare "$r2" "$r11/.git"
+git -C "$r11/.git" worktree add -q "$r11/main" main
+git -C "$r11/.git" worktree add -q -b feat "$r11/feat"
+mkdir -p "$r11/main/.maestro/project" "$r11/main/.maestro/src"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r11/main/.maestro/project/install.yaml"
+ok apply "$r11/main"
+installed "$r11/main" .claude
+refuses "Maestro is installed in $r11/main" "$r11/feat" apply "$r11/feat"
 # A file git can't hash stops check and uninstall; uninstall keeps the record.
 if [ "$(id -u)" -ne 0 ]; then
 	chmod 000 "$r7/.claude/skills/maestro-tdd/SKILL.md"
