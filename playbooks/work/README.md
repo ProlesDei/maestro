@@ -7,7 +7,7 @@ maestro-play run work                 # the next ticket: sent back first, then t
 maestro-play run work --ticket T-12   # this ticket
 ```
 
-It needs `maestro-play` and `maestro-ticket` on `PATH`, `$MAESTRO_PLAYBOOKS` set to this repo's `playbooks/`, and `.maestro/project/project-setup.md` in the target repo. `--bot` defaults to `$MAESTRO_BOT`, else `user`. A bot passes its own id.
+It needs `maestro-play` and `maestro-ticket` on `PATH`, Maestro's `playbooks/` in `.maestro/src/` (where INSTALL.md puts it) or named by `$MAESTRO_PLAYBOOKS`, and `.maestro/project/project-setup.md` in the target repo. `--bot` defaults to `$MAESTRO_BOT`, else `user`. A bot passes its own id.
 
 It prints one JSON object: `id` (the run id), `state`, `playbook`, `ticket`, `step` and `reason`. The exit code says how it ended: 0 done, 1 failed, 3 blocked, 4 lease lost, 7 stopped. A run can take a while, so wait for the process to exit.
 

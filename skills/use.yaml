@@ -1,5 +1,5 @@
 # Which skills maestro-play names in prompt steps (skills/README.md).
-# To add your own: put skills/<name>/SKILL.md here, then list it, e.g.
+# To add one to Maestro: put skills/<name>/SKILL.md here, then list it, e.g.
 #   prompts:
 #     all: [my-style]        # every prompt step
 #     build: [my-tdd]        # one step, by template name: playbooks/<playbook>/build.md

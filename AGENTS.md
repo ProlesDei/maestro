@@ -24,8 +24,8 @@ What we hold to:
 - Least friction for the team that installs it. The step sessions `maestro-play` starts run with all permissions; teams set limits as [tools/maestro-play](tools/maestro-play/README.md) shows.
 - The engine, not a prompt, decides what runs next. Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
-- Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never overwrites a file and hides its skill copies from git ([decisions](docs/decisions.md)).
-- It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`install.sh --tickets`), so a skill names `maestro-ticket` only as the default.
+- Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
+- It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`tickets:` in its `install.yaml`), so a skill names `maestro-ticket` only as the default.
 - Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
   - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
   - What the owner, the chief of staff and the planner read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.
@@ -58,9 +58,9 @@ Where Maestro takes from them: the chief of staff is a firstmate; `maestro-play`
 
 - `bot-profiles/`: the six personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
 - `playbooks/`: one folder per playbook (`work/playbook.yaml` with its step templates beside it), plus the shared `rules.md` (the rules every session gets), `_contract.md` and `_escalate.md`. Format in `playbooks/README.md`.
-- `skills/`: Maestro's 18 `maestro-*` skills and the user's own; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
+- `skills/`: Maestro's 18 `maestro-*` skills; `skills/use.yaml` names them. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
-- `scripts/install.sh`: the installer. `scripts/install_test.sh` is its test.
+- `INSTALL.md`: the install guide an agent follows in a team's repo. `scripts/install.sh` applies the choices it writes down; `scripts/bot-bundle.sh` builds each Grok bot's paste block; `scripts/install_test.sh` tests both.
 - `tools/maestro-play/`: the playbook engine. `tools/maestro-ticket/`: the ticket store and CLI.
 - `docs/decisions.md`: the rules still in force.
 - `docs/team.mermaid`, `docs/bot-anatomy.mermaid`: who does what, and how a bot works. README.md embeds a copy of each; edit the source and its embed together. `docs/design/self-improvement.mermaid`: a future design, not built. `docs/design/memory.md`: bot memory, parked.

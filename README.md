@@ -118,32 +118,31 @@ flowchart TD
 - **Least friction for your team.** Step sessions run with all permissions; you set limits if you want them ([Install](#install)).
 - **The engine decides what runs next, not a prompt.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review verdict covers one head sha. A worker's report is a claim until a run shows it.
-- **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never overwrites a file and hides its copies from git.
+- **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
 - **Read your setup, don't assume it.** Your main branch, checks and ticket flow come from `.maestro/project/project-setup.md`. You can track tickets in your own tool.
 - **Small and plain.** Cut what only exists to look impressive.
 
 ## Install
 
-Needs git 2.31+, Go 1.26+, `gh`, and Claude Code or Codex.
+Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your ticket tool, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
 
-```sh
-(cd tools/maestro-ticket && go install ./cmd/maestro-ticket)
-(cd tools/maestro-play && go install ./cmd/maestro-play)
-scripts/install.sh <target-repo>
-export MAESTRO_PLAYBOOKS=<maestro>/playbooks
-```
+It needs git 2.31+, Go 1.26+, bash 4.4+, `gh` with access to this repo, and Claude Code or Codex.
 
-The installer copies each folder in `skills/` into the target's `.claude/skills/` and `.agents/skills/`, writes `.maestro/project/project-setup.md` from [templates/project-setup.md](templates/project-setup.md), creates the ticket store and hides its copies from git. It refuses, writing nothing, if a skill folder already exists. Fill in `project-setup.md`: the main branch and the check commands the work playbook runs.
+What you get:
 
-`maestro-play` finds the playbook through `MAESTRO_PLAYBOOKS`, the full path to this repo's `playbooks/` folder. Put the `export` in your shell profile; `maestro-play run work` stops without it.
+- Maestro pinned to one commit in `.maestro/src/`, hidden from git. `maestro-play` reads its playbooks from there.
+- `maestro-ticket` and `maestro-play` on your `PATH`, one copy for every repo on the machine.
+- The skills in `.claude/skills/` and `.agents/skills/`: committed, or hidden from git.
+- `.maestro/project/project-setup.md`: your main branch, checks, how to run the app, your ticket flow.
+- One paste-ready block per Grok bot in `.maestro/bots/`.
+
+The same guide updates Maestro to a newer commit and uninstalls it.
 
 Sessions run with all permissions. To limit them, set `MAESTRO_CLAUDE_ARGS` or `MAESTRO_CODEX_ARGS`.
 
 Runs time out: a session after 30m, a check after 15m, a git or gh call after 5m. Set `MAESTRO_SESSION_TIMEOUT` and `MAESTRO_CHECK_TIMEOUT` to change them; details in [tools/maestro-play](tools/maestro-play/README.md).
 
-To use your own ticket method, add `--tickets <dir>`: a folder with `maestro-create-ticket/` and its `SKILL.md`. The installer copies it in place of Maestro's. Keep that name: the personas call it.
-
-Optional: a code graph. Install [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) and add it as an MCP server for your harness. Step sessions then use it to find symbols and callers before they grep, which costs fewer reads. The installer doesn't set it up yet.
+Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as an MCP server, step sessions find symbols and callers before they grep, which costs fewer reads. INSTALL.md offers it.
 
 ## Use
 
@@ -182,9 +181,9 @@ flowchart TD
         P1["<b>persona.md</b><br/>Who the bot is,<br/>what it runs"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"]
     end
 
-    subgraph Installed ["Their repo after install.sh"]
+    subgraph Installed ["Their repo after INSTALL.md"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Hidden by .git/info/exclude"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with"]

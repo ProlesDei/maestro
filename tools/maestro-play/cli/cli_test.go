@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,5 +112,122 @@ func TestRunReportsJSON(t *testing.T) {
 	code, out, _ = run(t, env, "run", "build-ticket", "--ticket", "T-1", "--bot", "eng-1")
 	if code != 7 || !strings.Contains(out, `"state":"stopped"`) {
 		t.Fatalf("with the stop file: exit %d: %s", code, out)
+	}
+}
+
+// With no --playbooks, a repo where the install guide cloned Maestro into
+// .maestro/src uses its playbooks.
+func TestPlaybooksFromInstall(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, ".maestro", "src")
+	os.MkdirAll(src, 0o755)
+	if err := os.CopyFS(src, os.DirFS(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	code := Main(Env{Args: []string{"lint"}, Stdout: &out, Stderr: &out, Dir: dir, Getenv: func(string) string { return "" }})
+	if code != 0 || out.String() != "7 playbooks, 0 problems\n" {
+		t.Fatalf("exit %d: %s", code, out.String())
+	}
+}
+
+// From a linked worktree, which has no .maestro/src, the main checkout's
+// install still supplies the playbooks, the main checkout holds setup and
+// worktrees, and a run with no worktree works in the linked one.
+func TestPlaybooksFromWorktree(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	git("init", "-q")
+	git("commit", "-q", "--allow-empty", "-m", "one")
+	wt := filepath.Join(dir, ".maestro", "worktrees", "T-1")
+	git("worktree", "add", "-q", wt)
+	src := filepath.Join(dir, ".maestro", "src")
+	if err := os.CopyFS(src, os.DirFS(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	var got, here string
+	code := Main(Env{Args: []string{"lint"}, Stdout: &out, Stderr: &out, Dir: wt, Getenv: func(string) string { return "" },
+		Engine: func(cfg *engine.Config) { got, here = cfg.Dir, cfg.Here }})
+	if code != 0 || out.String() != "7 playbooks, 0 problems\n" {
+		t.Fatalf("exit %d: %s", code, out.String())
+	}
+	if want, _ := filepath.EvalSymlinks(dir); got != want && got != dir {
+		t.Errorf("Dir %q, want the main checkout %q", got, dir)
+	}
+	if want, _ := filepath.EvalSymlinks(wt); here != want && here != wt {
+		t.Errorf("Here %q, want the linked worktree %q", here, wt)
+	}
+}
+
+// With a bare main repo, the root is the linked worktree that holds
+// .maestro/src, from any of its worktrees.
+func TestRootBesideBareRepo(t *testing.T) {
+	dir := t.TempDir()
+	git := func(d string, args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", d}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	src := filepath.Join(dir, "src")
+	git(dir, "init", "-q", src)
+	git(src, "commit", "-q", "--allow-empty", "-m", "one")
+	bare := filepath.Join(dir, "proj", ".git")
+	git(dir, "clone", "-q", "--bare", src, bare)
+	home, feat := filepath.Join(dir, "proj", "home"), filepath.Join(dir, "proj", "feat")
+	git(bare, "worktree", "add", "-q", "-b", "home", home)
+	git(bare, "worktree", "add", "-q", "-b", "feat", feat)
+	if got := projectRoot(feat); got != feat {
+		t.Errorf("no install: root %q, want the worktree itself %q", got, feat)
+	}
+	if err := os.CopyFS(filepath.Join(home, ".maestro", "src"), os.DirFS(fixture)); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(home)
+	for _, from := range []string{home, feat} {
+		if got, _ := filepath.EvalSymlinks(projectRoot(from)); got != want {
+			t.Errorf("from %s: root %q, want %q", from, got, want)
+		}
+	}
+}
+
+// A binary built from a commit older than the repo's pinned one warns;
+// the pinned commit itself, or one the clone doesn't know, doesn't.
+func TestWarnStale(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, ".maestro", "src")
+	git := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", src}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		b, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	os.MkdirAll(src, 0o755)
+	git("init", "-q")
+	git("commit", "-q", "--allow-empty", "-m", "one")
+	old := git("rev-parse", "HEAD")
+	git("commit", "-q", "--allow-empty", "-m", "two")
+	pin := git("rev-parse", "--short", "HEAD")
+	os.MkdirAll(filepath.Join(dir, ".maestro", "project"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".maestro", "project", "install.yaml"), []byte("maestro-sha: "+pin+"\nharnesses: claude\n"), 0o644)
+	defer func(f func() string) { buildRevision = f }(buildRevision)
+	for rev, want := range map[string]bool{old: true, git("rev-parse", "HEAD"): false, strings.Repeat("a", 40): false, "": false} {
+		buildRevision = func() string { return rev }
+		var errb bytes.Buffer
+		(&cmd{env: Env{Stderr: &errb}}).warnStale(dir)
+		if got := strings.Contains(errb.String(), "older than the pinned "+pin); got != want {
+			t.Errorf("built from %q: warned %v, want %v: %s", rev, got, want, errb.String())
+		}
 	}
 }

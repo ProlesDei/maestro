@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -31,7 +32,8 @@ no --ticket takes the first unclaimed ticket its intake matches. --bot
 defaults to $MAESTRO_BOT, else user.
 
 Flags for every command:
-  --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else ./playbooks)
+  --playbooks DIR   playbooks folder ($MAESTRO_PLAYBOOKS, else .maestro/src/playbooks
+                    when Maestro was installed there, else ./playbooks)
   --skills DIR      skills folder with use.yaml ($MAESTRO_SKILLS, else <playbooks>/../skills)
   --common DIR      Maestro's state folder ($MAESTRO_COMMON, else $(git rev-parse --git-common-dir)/maestro)
   --ticket-bin P    maestro-ticket ($MAESTRO_TICKET_BIN, else maestro-ticket)
@@ -138,6 +140,18 @@ func (c *cmd) config() (engine.Config, error) {
 			dir = top
 		}
 	}
+	var common string
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output(); err == nil {
+		common = strings.TrimSpace(string(out))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(dir, common)
+		}
+	}
+	// The project's root holds install.yaml, project-setup.md and the
+	// ticket worktrees, so a run started in a linked worktree finds them
+	// there and doesn't nest its worktrees in it. A run with no worktree
+	// step still works in dir.
+	main := projectRoot(dir)
 	get := c.env.Getenv
 	models := map[string]string{}
 	for tier, key := range map[string]string{"mid": "MAESTRO_MODEL_MID", "frontier": "MAESTRO_MODEL_FRONTIER"} {
@@ -146,7 +160,7 @@ func (c *cmd) config() (engine.Config, error) {
 		}
 	}
 	cfg := engine.Config{
-		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: dir,
+		Playbooks: c.playbooks, Skills: c.skills, Common: c.common, Dir: main, Here: dir,
 		TicketBin: c.ticketBin, GitBin: get("MAESTRO_GIT_BIN"), GhBin: get("MAESTRO_GH_BIN"),
 		ClaudeBin: get("MAESTRO_CLAUDE_BIN"), CodexBin: get("MAESTRO_CODEX_BIN"), Harness: c.harness,
 		Models: models, ClaudeArgs: strings.Fields(get("MAESTRO_CLAUDE_ARGS")), CodexArgs: strings.Fields(get("MAESTRO_CODEX_ARGS")),
@@ -168,19 +182,18 @@ func (c *cmd) config() (engine.Config, error) {
 		*d = t
 	}
 	if cfg.Playbooks == "" {
-		cfg.Playbooks = filepath.Join(dir, "playbooks")
+		// The install guide clones Maestro into .maestro/src.
+		cfg.Playbooks = filepath.Join(main, ".maestro", "src", "playbooks")
+		if fi, err := os.Stat(cfg.Playbooks); err != nil || !fi.IsDir() {
+			cfg.Playbooks = filepath.Join(dir, "playbooks")
+		}
 	}
 	if cfg.Skills == "" {
 		cfg.Skills = filepath.Join(filepath.Dir(filepath.Clean(cfg.Playbooks)), "skills")
 	}
 	if cfg.Common == "" {
-		out, err := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir").Output()
-		if err != nil {
+		if common == "" {
 			return cfg, errors.New("not in a git repo: pass --common or set MAESTRO_COMMON")
-		}
-		common := strings.TrimSpace(string(out))
-		if !filepath.IsAbs(common) {
-			common = filepath.Join(dir, common)
 		}
 		cfg.Common = filepath.Join(common, "maestro")
 	}
@@ -188,6 +201,46 @@ func (c *cmd) config() (engine.Config, error) {
 		c.env.Engine(&cfg)
 	}
 	return cfg, nil
+}
+
+// projectRoot is the checkout install.sh put Maestro in, the one holding
+// .maestro/src: dir, or another worktree of its repo. With no install, it
+// is the main checkout, or dir when the main one is a bare repo.
+func projectRoot(dir string) string {
+	installed := func(p string) bool {
+		fi, err := os.Stat(filepath.Join(p, ".maestro", "src"))
+		return err == nil && fi.IsDir()
+	}
+	if installed(dir) {
+		return dir
+	}
+	out, err := exec.Command("git", "-C", dir, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return dir
+	}
+	main := ""
+	for i, stanza := range strings.Split(string(out), "\n\n") {
+		path, bare := "", false
+		for _, l := range strings.Split(stanza, "\n") {
+			if p, ok := strings.CutPrefix(l, "worktree "); ok {
+				path = p
+			}
+			bare = bare || l == "bare"
+		}
+		if path == "" || bare {
+			continue
+		}
+		if installed(path) {
+			return path
+		}
+		if i == 0 {
+			main = path
+		}
+	}
+	if main == "" {
+		return dir
+	}
+	return main
 }
 
 func (c *cmd) engine() (*engine.Engine, int) {
@@ -200,7 +253,50 @@ func (c *cmd) engine() (*engine.Engine, int) {
 		fmt.Fprintf(c.env.Stderr, "maestro-play: %v\n", err)
 		return nil, 1
 	}
+	c.warnStale(cfg.Dir)
 	return e, 0
+}
+
+// buildRevision is the commit this binary was built from, "" if unknown.
+var buildRevision = func() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
+		}
+	}
+	return ""
+}
+
+// warnStale warns when this binary was built from a commit older than the
+// one the repo pins in .maestro/project/install.yaml: its engine may not
+// match the playbooks in .maestro/src. One maestro-play serves every repo
+// on the machine, so a newer build is fine.
+func (c *cmd) warnStale(dir string) {
+	rev, pin := buildRevision(), pinnedSHA(filepath.Join(dir, ".maestro", "project", "install.yaml"))
+	if rev == "" || pin == "" || strings.HasPrefix(rev, pin) {
+		return
+	}
+	src := filepath.Join(dir, ".maestro", "src")
+	if exec.Command("git", "-C", src, "merge-base", "--is-ancestor", rev, pin).Run() != nil {
+		return
+	}
+	fmt.Fprintf(c.env.Stderr, "maestro-play: warning: built from %.12s, older than the pinned %s; rebuild it from .maestro/src/tools/maestro-play\n", rev, pin)
+}
+
+// pinnedSHA is the maestro-sha: line of an install.yaml, "" if none.
+func pinnedSHA(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "maestro-sha:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func (c *cmd) report(r engine.Result, err error) int {
