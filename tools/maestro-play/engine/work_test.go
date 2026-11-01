@@ -333,16 +333,14 @@ func TestWorktreeAddCopiesHiddenSkills(t *testing.T) {
 	}
 
 	// The worktree's check failing after a source changed keeps the fresh
-	// copy of a skill listed before; with Codex, the step fails.
+	// copy of a skill listed before, and the step fails.
 	w.e.cfg.GitBin = filepath.Join(w.dir, "git-no-worktree-check-ignore")
 	os.WriteFile(w.e.cfg.GitBin, []byte("#!/bin/sh\ncase \"$(pwd) $*\" in */.maestro/worktrees/*check-ignore*) exit 128 ;; esac\nexec "+w.gitBin+" \"$@\"\n"), 0o755)
 	os.WriteFile(skill(w.repo, "café"), []byte("newest\n"), 0o644)
-	harness := w.e.cfg.Harness
-	w.e.cfg.Harness = "codex"
 	if r, _ := w.e.worktreeAdd(&State{ID: "r5"}, "T-1", "main"); r["status"] != "failed" || !strings.Contains(str(r["output"]), "not copied") {
-		t.Errorf("codex with a failed copy should fail the step: %v", r)
+		t.Errorf("a failed copy should fail the step: %v", r)
 	}
-	w.e.cfg.Harness, w.e.cfg.GitBin = harness, git
+	w.e.cfg.GitBin = git
 	if b, _ := os.ReadFile(skill(wt, "café")); string(b) != "newest\n" {
 		t.Errorf("a failed check dropped the fresh copy of a listed skill: %q", b)
 	}

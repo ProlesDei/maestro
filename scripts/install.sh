@@ -153,6 +153,8 @@ done
 if [ "$tickets" != maestro-ticket ]; then
 	[[ $tickets == /* ]] || tickets=$target/$tickets
 	[ -d "$tickets" ] || die "install.yaml: tickets $tickets is not a directory"
+	tickets=$(cd -- "$tickets" && pwd -P)
+	case $tickets/ in "$target"/.claude/* | "$target"/.agents/*) die "install.yaml: tickets $tickets is in a folder apply writes to; keep it elsewhere" ;; esac
 	for entry in "$tickets"/*; do
 		[ "$(basename "$entry")" = maestro-create-ticket ] || die "tickets: $tickets may hold only maestro-create-ticket/, not $(basename "$entry")"
 	done
@@ -510,7 +512,13 @@ declare -A theirs=()
 for p in "${!seen[@]}"; do
 	f=${p%/"${p#*/skills/*/}"}
 	[ -z "${writing[$f]-}" ] || continue
-	{ [ "${seen[$p]}" != link ] && [ ! -L "$(full "$p")" ] && [ "${cur[$p]}" = "${old[$p]-}" ]; } || theirs[$f]=1
+	# A file the record doesn't list, such as a .DS_Store, stays but doesn't
+	# keep Maestro's copies beside it.
+	if [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ]; then
+		theirs[$f]=1
+	elif [ -n "${old[$p]-}" ] && [ "${cur[$p]}" != "${old[$p]}" ]; then
+		theirs[$f]=1
+	fi
 done
 
 replacing() { [[ " ${replace[*]-} " == *" $(skill_of "$1") "* ]]; }

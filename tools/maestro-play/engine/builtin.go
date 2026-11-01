@@ -288,11 +288,12 @@ func (e *Engine) worktreeAdd(st *State, ticket, from string) (map[string]any, er
 	}
 	branch := "maestro/" + ticket
 	path := filepath.Join(e.cfg.Dir, ".maestro", "worktrees", ticket)
-	// done copies the hidden skills in: without them, Codex steps would run
-	// without the skills they load, so a failure fails the step.
+	// done copies the hidden skills in: without them, a Codex step, the
+	// harness's or a not-author one, would run without the skills it loads,
+	// so a failure fails the step.
 	done := func(out string) map[string]any {
 		note, broken := e.copySkills(st, path)
-		if broken && e.cfg.Harness == "codex" {
+		if broken {
 			return newReply("failed", 1, out+note)
 		}
 		return newReply("ok", 0, out+note, "path", path, "branch", branch)
