@@ -10,7 +10,7 @@
 # skills-home takes over the copies, and a switch to hidden untracks them;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
-# reads project-setup.md as maestro-play does; a linked worktree refuses;
+# reads project-setup.md; a linked worktree refuses;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; bad choices and bad repos refuse and change
@@ -39,8 +39,7 @@ nskills=$(echo "$skills" | wc -l)
 # A stand-in maestro-ticket: logs where doctor ran, fails when STUB_FAIL is set.
 mkdir "$tmp/bin"
 printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' '[ -z "${STUB_FAIL:-}" ]' >"$tmp/bin/maestro-ticket"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$tmp/bin/maestro-play"
-chmod +x "$tmp/bin/maestro-ticket" "$tmp/bin/maestro-play"
+chmod +x "$tmp/bin/maestro-ticket"
 export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log"
 : >"$STUB_LOG"
 
@@ -332,8 +331,7 @@ says "ticket method from"
 diff -r "$t/maestro-create-ticket" "$r3/.claude/skills/maestro-create-ticket" >/dev/null || fail "the team's ticket skill wasn't installed"
 [ "$(wc -l <"$STUB_LOG")" -eq "$lines" ] || fail "doctor ran with the team's own tickets"
 # With the team's own tickets, check needs no maestro-ticket.
-mkdir "$tmp/playonly" && cp "$tmp/bin/maestro-play" "$tmp/playonly/"
-PATH="$tmp/playonly:/usr/bin:/bin" run check "$r3" || { cat "$tmp/out"; fail "check wanted maestro-ticket with the team's own tickets"; }
+PATH="/usr/bin:/bin" run check "$r3" || { cat "$tmp/out"; fail "check wanted maestro-ticket with the team's own tickets"; }
 # A CRLF source, as core.autocrlf checks one out, matches its copy.
 git -C "$r3" config core.autocrlf true
 printf 'name: maestro-create-ticket\r\nOurs.\r\n' >>"$t/maestro-create-ticket/SKILL.md"
@@ -372,7 +370,7 @@ colour: blue|install.yaml:4: unknown key colour
 nonsense|install.yaml:4: want key: value
 skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-nope|no skill maestro-nope
-skip: maestro-tdd|skip: maestro-tdd is loaded by a playbook step
+skip: maestro-tdd|skip: maestro-tdd is a skill the engineers load
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
 tickets:|tickets wants maestro-ticket or a folder
@@ -411,13 +409,12 @@ seen=$(git -C "$r7" status --porcelain --untracked-files=all)
 ok apply "$r7"
 installed "$r7" .claude .agents
 left=$(find "$r7" -name 'maestro-install.*'); [ -z "$left" ] || fail "a failed copy left its temp folder: $left"
-# check reads project-setup.md as maestro-play does: any heading case, a
+# check reads project-setup.md in any heading case, with a
 # bullet or backticks round the branch, CRLF.
 sed -i 's/^## Main branch$/## Main Branch/; s/^main$/- `main`/; s/^\(- [a-z]*:\) `/\1\t`/; s/$/\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 ! grep -q "lists no checks" "$tmp/out" || fail "check missed a check with a tab in it"
-# A bullet under ## Checks that isn't a check is a problem: maestro-play
-# fails every check step on it.
+# A bullet under ## Checks that isn't a check is a problem.
 cp "$r7/.maestro/project/project-setup.md" "$tmp/setup"
 sed -i 's/^## Checks\r$/&\n- lint: run golangci-lint/' "$r7/.maestro/project/project-setup.md"
 if run check "$r7"; then fail "check passed a bad ## Checks bullet"; fi

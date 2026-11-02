@@ -24,7 +24,7 @@ Open a todo list with one item per phase below.
    | Race (`--race`): one task, rival approaches | Name each approach and the judge (the test, benchmark or rule that picks the winner) before any worker starts. No judge, no race. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, brief no workers. Run `maestro-play run work --ticket <id>` for each ticket, report the JSON each run prints, and skip to Phase D.
+4. If the slices are Maestro tickets, give each worker one ticket id. It claims the ticket as the **maestro-working-principles** skill says.
 
 ## Phase B: Launch
 

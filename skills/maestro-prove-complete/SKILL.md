@@ -16,7 +16,7 @@ Open a todo list with one item per phase below.
 1. In the worktree, `git status --porcelain` prints nothing. Your sha is `git rev-parse HEAD`. Proof from a dirty tree or another sha doesn't count.
 2. Number each acceptance criterion from `maestro-ticket get <id> --json`.
 3. Read `## Run` in `.maestro/project/project-setup.md` for how the project runs, else the README and build files.
-4. In your own session, save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/`. In a step, the reply carries the evidence.
+4. Save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/`.
 
 ## Phase B: Prove each claim
 
@@ -49,4 +49,4 @@ Stop every process you started.
 3. Give each failure its steps, expected result, actual result and error line.
 4. Name a problem outside the criteria on its own line; it doesn't fail the work.
 
-**Reply:** the sha, one line per claim (n, pass | fail | not checked, evidence), one line per failure (steps, expected, actual), problems outside the criteria, and in your own session the evidence folder. In a step, put these in the step's reply fields.
+**Reply:** the sha, one line per claim (n, pass | fail | not checked, evidence), one line per failure (steps, expected, actual), problems outside the criteria, and the evidence folder.

@@ -4,21 +4,15 @@ flowchart TD
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
         Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, QA and review"]
-        Sr["<b>Senior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
-        Jr["<b>Junior Engineer</b><br/>maestro-play run work --ticket &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
+        Sr["<b>Senior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
+        Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;pr&gt;<br/>Tests the PR head in the running app"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Another model family from the author<br/>Passes scaled to risk, one verdict per head sha"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
-    subgraph Work ["playbooks/work: one ticket to one PR"]
-        Plan["<b>Plan</b><br/>Frontier<br/>skipped on a Kickback"]
-        Build["<b>Build</b><br/>Frontier<br/>Test first (perf: measure first)<br/>mode: feature, bug, refactor, perf"]
-        Checks["<b>Project checks</b><br/>Checks list in project-setup.md<br/>No tokens · none listed passes"]
-        Verify["<b>Verify</b><br/>Mid-tier<br/>Evidence from the running code"]
-        PR["<b>Open PR</b><br/>git push · gh pr create<br/>No tokens"]
-    end
+    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · test first · project checks ·<br/>prove each criterion · open PR · ticket to in_review"]
 
     Done([Merged · ticket done])
 
@@ -41,19 +35,16 @@ flowchart TD
     Tickets -->|"routine todo"| Jr
 
     %% Build
-    Sr --> Plan
-    Jr --> Plan
-    Plan --> Build --> Checks --> Verify --> PR
-    Checks -.->|"failed"| Build
-    Verify -.->|"failed"| Build
-    Work -.->|"blocked: Escalation note"| Sr
-    Work -.->|"blocked: Escalation note"| Jr
+    Sr --> Build
+    Jr --> Build
+    Build -.->|"a question it can't settle"| Sr
+    Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
     Sr -.->|"what the ticket can't settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets
 
     %% Test and review
-    PR -->|"ticket in_review"| QA
+    Build -->|"ticket in_review"| QA
     QA -.->|"QA: pass or fail comment"| Rev
     Rev -->|"GO: gh pr merge, ticket done"| Done
     Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
@@ -62,21 +53,17 @@ flowchart TD
     %% Legend
     subgraph Legend ["Legend"]
         direction LR
-        L1["Frontier model"] ~~~ L2["Mid-tier model"] ~~~ L6["Role Grok Bot plays"] ~~~ L3["No tokens"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+        L6["Role Grok Bot plays"] ~~~ L1["Claude Code session"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
     end
 
-    %% Styles by cost tier
-    classDef frontier fill:#f8c4b4,stroke:#b5472b,color:#1a1a1a
-    classDef mid fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
-    classDef free fill:#c8e6c9,stroke:#2e7d32,color:#1a1a1a
+    %% Styles
+    classDef session fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
     classDef storage fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
     classDef person fill:#f5f5f5,stroke:#555,color:#1a1a1a
     classDef bot fill:#fff3c4,stroke:#b38f00,color:#1a1a1a
     classDef note fill:#ffffff,stroke:#999,color:#1a1a1a,stroke-dasharray:3 3
 
-    class Plan,Build,L1 frontier
-    class Verify,L2 mid
-    class Checks,PR,L3 free
+    class Build,L1 session
     class Tickets,L4 storage
     class User,Done person
     class CoS,Planner,Sr,Jr,QA,Rev,L6 bot

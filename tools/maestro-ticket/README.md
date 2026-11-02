@@ -1,6 +1,6 @@
 # maestro-ticket
 
-The maestro ticket store and its CLI. People, bots and the `maestro-play` engine call it to create, claim, move and comment on tickets. `Backlog.md` is a generated view of it.
+The maestro ticket store and its CLI. People and bots call it to create, claim, move and comment on tickets. `Backlog.md` is a generated view of it.
 
 Go, single static binary, no cgo (pure-Go SQLite driver).
 

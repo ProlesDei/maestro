@@ -70,8 +70,7 @@ common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
 [[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.31 or later"
 # One install per repo: its worktrees share the exclude file, ticket store
 # and hidden record. It goes in the main checkout, or in a linked worktree
-# when the main one is bare; maestro-play takes the checkout that holds
-# .maestro/src as the project's root.
+# when the main one is bare.
 wts=$(git -C "$target" worktree list --porcelain | sed -n 's/^worktree //p')
 if [ "$(git -C "$target" rev-parse --path-format=absolute --git-dir)" != "$common" ] &&
 	[ "$(git -C "$common" config --bool core.bare 2>/dev/null)" != true ]; then
@@ -145,10 +144,11 @@ done
 for s in ${skip[@]+"${skip[@]}"} ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
 done
-# The skills prompt steps load: never skipped, and in every harness folder.
-steps=$(sed -n '/^prompts:/,/^[a-z]/p' "$root/skills/use.yaml" | grep -o '\[[^]]*\]' | tr -d '[],' | tr ' ' '\n' | sort -u || true)
+# The skills the engineers' sessions load: never skipped, and in every
+# harness folder.
+core=$'maestro-prove-complete\nmaestro-software-engineer\nmaestro-tdd\nmaestro-working-principles'
 for s in ${skip[@]+"${skip[@]}"}; do
-	! grep -qxF -- "$s" <<<"$steps" || die "install.yaml: skip: $s is loaded by a playbook step"
+	! grep -qxF -- "$s" <<<"$core" || die "install.yaml: skip: $s is a skill the engineers load"
 	unset "from[$s]"
 done
 if [ "$tickets" != maestro-ticket ]; then
@@ -249,8 +249,7 @@ exclude_lines() {
 	done
 }
 # write_exclude <lines>: replace the marked block; no lines drops it. The
-# temp copy keeps the file's mode. Only maestro-play writes it at the same
-# moment, and its one line is in the block too.
+# temp copy keeps the file's mode.
 write_exclude() {
 	mkdir -p "$(dirname "$exclude")"
 	touch "$exclude"
@@ -300,9 +299,9 @@ if [ "$cmd" = check ]; then
 		was=$(sed -n '1s/^# Files scripts\/install\.sh placed at Maestro \([0-9a-f]*\):.*/\1/p' "$record")
 		[ -z "$was" ] || [[ $head == "$was"* ]] || problem "the record is from Maestro $was, not the pinned $sha: run apply"
 	fi
-	for n in $steps; do
+	for n in $core; do
 		for d in "${dirs[@]}"; do
-			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: playbook steps load it"
+			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: the engineers load it"
 		done
 	done
 	# Hidden skills must be ignored, committed ones not. A tracked folder
@@ -322,9 +321,9 @@ if [ "$cmd" = check ]; then
 	done
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		warn "Maestro at $root is a shallow clone: check can't tell if the tools are older than the pin; fetch its full history"
-	tools=(maestro-play)
+	tools=()
 	[ "$tickets" != maestro-ticket ] || tools+=(maestro-ticket)
-	for b in "${tools[@]}"; do
+	for b in ${tools[@]+"${tools[@]}"}; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
 		command -v go >/dev/null || continue
 		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
@@ -334,17 +333,12 @@ if [ "$cmd" = check ]; then
 			warn "$b is built from ${rev:0:12}, older than the pinned $sha; rebuild it from $root/tools/$b"
 		fi
 	done
-	if [ "$root" = "$target/.maestro/src" ] && command -v maestro-play >/dev/null; then
-		[ -z "${MAESTRO_PLAYBOOKS-}" ] || [ "$MAESTRO_PLAYBOOKS" = "$root/playbooks" ] ||
-			warn "MAESTRO_PLAYBOOKS=$MAESTRO_PLAYBOOKS overrides $root/playbooks"
-		(cd "$target" && MAESTRO_PLAYBOOKS='' maestro-play lint >/dev/null 2>&1) || problem "maestro-play lint fails in $target"
-	fi
 	setup=$target/.maestro/project/project-setup.md
 	if [ ! -f "$setup" ]; then
 		problem "no .maestro/project/project-setup.md"
 	else
 		# Each line trimmed, \r included, after its heading in lower case and
-		# as written, a tab apart: how maestro-play reads the file.
+		# as written, a tab apart.
 		sections=$(awk '{sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")}
 			/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); s=tolower(h); next}
 			$0 != "" && !/^#/ {print s "\t" h "\t" $0}' "$setup")
@@ -356,8 +350,8 @@ if [ "$cmd" = check ]; then
 			git -C "$target" rev-parse --verify --quiet "refs/remotes/origin/$main" >/dev/null ||
 			problem "project-setup.md: main branch $main doesn't exist"
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
-			warn "project-setup.md lists no checks: the work playbook runs none"
-		# Any other bullet there fails every check step.
+			warn "project-setup.md lists no checks: the engineers run none"
+		# Any other bullet there isn't a check an engineer can run.
 		while IFS= read -r l; do
 			problem "project-setup.md: under ## Checks, want - <name>: \`<command>\`, not: $l"
 		done < <(awk -F'\t' "$line"' $1=="checks" && line() ~ /^([-*+]|[0-9]+[.)])[ \t]/ && line() !~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {print line()}' <<<"$sections")
@@ -562,7 +556,7 @@ done
 for p in "${plan[@]}"; do [ -n "${seen[$p]-}" ] || writes+=("$p"); done
 if [ ${#clashes[@]} -gt 0 ]; then
 	printf 'clash: %s\n' "${clashes[@]}" | sort >&2
-	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill a playbook step loads), or replace them with --replace <skill>"
+	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill the engineers load), or replace them with --replace <skill>"
 fi
 
 # The store lives in the git common dir, outside the work tree; doctor
