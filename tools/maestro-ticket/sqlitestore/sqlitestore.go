@@ -1180,8 +1180,9 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 			return t, err
 		}
 	}
-	// Claimed or not, nothing starts work or finishes before its deps.
-	if req.To == ticket.StatusDone || (t.LiveClaim() == nil && t.Status == ticket.StatusTodo && req.To == ticket.StatusInProgress) {
+	// Claimed or not, nothing starts work before its deps. Done never waits
+	// on them: a link doesn't hold back finished work.
+	if t.LiveClaim() == nil && t.Status == ticket.StatusTodo && req.To == ticket.StatusInProgress {
 		pending, err := pendingDeps(ctx, tx, t.ID)
 		if err != nil {
 			return t, err

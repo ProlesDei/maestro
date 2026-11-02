@@ -338,8 +338,7 @@ func TestUnclaimedMovesWaitOnDeps(t *testing.T) {
 	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusInProgress})
 	wantErr(t, err, ticket.ErrWaitingOnDeps)
 
-	// A dep added while the ticket is in review still holds back done, but
-	// not a kickback.
+	// Done never waits on deps, even one added while the ticket is in review.
 	shipToDone(t, s, base.ID)
 	move(t, s, top.ID, ticket.StatusInProgress)
 	move(t, s, top.ID, ticket.StatusInReview)
@@ -347,12 +346,7 @@ func TestUnclaimedMovesWaitOnDeps(t *testing.T) {
 	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: top.ID, AddDeps: []ticket.ID{late.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
-	wantErr(t, err, ticket.ErrWaitingOnDeps)
-	move(t, s, top.ID, ticket.StatusInProgress)
-	move(t, s, top.ID, ticket.StatusInReview)
-	shipToDone(t, s, late.ID)
 	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
-		t.Fatalf("done once deps are done: %v", err)
+		t.Fatalf("done with a dep not done: %v", err)
 	}
 }
