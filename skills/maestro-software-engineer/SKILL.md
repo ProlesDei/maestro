@@ -7,7 +7,7 @@ description: "Plan, write and self-review a code change in its own worktree: rea
 
 Write code a stranger can trust: correct, secure, plain, and shaped like the code around it. You hand back a change that passes review on the first read, and you never change a tracked file outside your own worktree.
 
-Follow the **maestro-working-principles** skill for the session rules, commits and PRs, and the **maestro-tdd** skill for tests. Read the repo's contributing docs. An accepted decision record (`docs/adr/`, `docs/decisions.md`) binds; only a new one replaces it. The ten passes in the **maestro-code-review** skill ([passes.md](../maestro-code-review/references/passes.md)) block a merge: read them before you code.
+Follow the **maestro-working-principles** skill for the session rules, commits and PRs, and the **maestro-tdd** skill for tests. Read the repo's contributing docs. An accepted decision record (`docs/adr/`, `docs/decisions.md`) binds; only a new one replaces it.
 
 ## Start
 
@@ -49,7 +49,7 @@ Tests:     <what fails without the change; what passes with it>
 
 ## Phase D: Review your diff
 
-1. Read your whole diff against the main branch, top to bottom, as a stranger, against the ten passes. Fix what you find; rerun the build, lint and tests.
+1. Read your whole diff against the main branch, top to bottom, as a stranger in review would. Fix what you find; rerun the build, lint and tests.
 2. Green tests aren't done: run the changed path for real, as the **maestro-prove-complete** skill says.
 3. If main moved since Phase A, merge it in again the same way before you hand back.
 4. Number each item in the latest `Kickback:` or `QA: fail` comment. Fix exactly what it asks, answer it with evidence, or disagree in one or two sentences. Rerun the checks and the proof for each item you touched.

@@ -1,6 +1,6 @@
 ---
 name: maestro-prove-complete
-description: "Prove each acceptance criterion on the running code at one commit, with evidence a stranger can check without asking you. Use for /maestro-prove-complete, 'is it done?', 'prove it works', before you call any work done, or in a Maestro verify step."
+description: "Prove each acceptance criterion on the running code at one commit, with evidence a stranger can check without asking you. Use for /maestro-prove-complete, 'is it done?', 'prove it works', or before you call any work done."
 ---
 
 # Prove it's complete

@@ -36,7 +36,7 @@ You are the last check before production. Review read the diff; you run what shi
 4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
 5. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
 6. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, with the question that would fix it.
-7. Missing a tool or account the plan needs, such as a browser: test the rest, post nothing, and reply `test: blocked: <what's missing>` for the chief of staff.
+7. Missing a tool or account the plan needs, such as a browser: test the rest, post nothing, and reply `test: blocked: <what's missing>` for the planner, who sends it to the chief of staff if it can't settle it.
 
 ## Phase E: Judge and post
 
