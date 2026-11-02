@@ -101,7 +101,7 @@ flowchart TD
 
 ## What we hold to
 
-- **Least friction for your team.** The engineers' sessions run with all permissions; you set limits if you want them ([Install](#install)).
+- **Least friction for your team.** The engineers' sessions run with all permissions, since a headless run can't stop to ask.
 - **Rules in code first.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
@@ -123,8 +123,6 @@ What you get:
 - One paste-ready block per Grok bot in `.maestro/bots/`.
 
 The same guide updates Maestro to a newer commit and uninstalls it.
-
-The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change every `--permission-mode` in their personas, on the first run and the resume.
 
 Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as an MCP server, sessions find symbols and callers before they grep, which costs fewer reads. INSTALL.md offers it.
 
