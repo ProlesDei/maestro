@@ -19,9 +19,9 @@ func alive(pid int) bool {
 }
 
 // endsWithCommand reports whether pid shares this process's session and
-// that session has no terminal. Claude Code and Codex run each command in
-// a new session with no terminal, which ends with the command; the
-// harness runs in another. A terminal's session is a person's and lasts.
+// that session has no terminal. Claude Code, Codex and Grok Build run each
+// command in a new session with no terminal, which ends with the command;
+// the harness runs in another. A terminal's session is a person's and lasts.
 func endsWithCommand(pid int) bool {
 	sid, err := unix.Getsid(pid)
 	if err != nil {

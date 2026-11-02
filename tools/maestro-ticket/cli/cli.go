@@ -538,11 +538,10 @@ func runClaim(ctx context.Context, c *call) error {
 	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length")
 	keepPID := c.fs.Int("keepalive", 0, "start a background keepalive for this claim, alive while this process id lives")
 	return c.withStore(ctx, func(s ticket.Store) error {
-		if *keepPID < 0 || (*keepPID > 0 && !alive(*keepPID)) {
-			return usagef("claim: --keepalive %d: no such process of ours", *keepPID)
-		}
-		if *keepPID > 0 && (*keepPID == os.Getpid() || endsWithCommand(*keepPID)) {
-			return usagef("claim: --keepalive %d: exits with this command; pass the harness process, your shell's parent", *keepPID)
+		if *keepPID != 0 {
+			if why := unwatchable(*keepPID); why != "" {
+				return usagef("claim: --keepalive %d: %s", *keepPID, why)
+			}
 		}
 		req := ticket.ClaimRequest{Holder: *holder, Role: *role, TTL: *ttl, Actor: c.actor, IdempotencyKey: c.idemKey}
 		switch {
@@ -599,6 +598,17 @@ func runHeartbeat(ctx context.Context, c *call) error {
 	})
 }
 
+// unwatchable says why a keepalive can't watch pid, or "" if it can.
+func unwatchable(pid int) string {
+	switch {
+	case !alive(pid):
+		return "no such process of ours"
+	case pid == os.Getpid() || endsWithCommand(pid):
+		return "exits with this command; pass the harness process, your shell's parent"
+	}
+	return ""
+}
+
 // startKeepalive runs "maestro-ticket keepalive" for t's claim as a
 // detached process, with the same store and environment.
 func (c *call) startKeepalive(t ticket.Ticket, pid int, ttl time.Duration) error {
@@ -638,11 +648,8 @@ func runKeepalive(ctx context.Context, c *call) error {
 		if *pid <= 0 {
 			return usagef("keepalive: --pid is required")
 		}
-		if !alive(*pid) {
-			return usagef("keepalive: --pid %d: no such process of ours", *pid)
-		}
-		if *pid == os.Getpid() || endsWithCommand(*pid) {
-			return usagef("keepalive: --pid %d: exits with this command; pass the harness process, your shell's parent", *pid)
+		if why := unwatchable(*pid); why != "" {
+			return usagef("keepalive: --pid %d: %s", *pid, why)
 		}
 		interval := *every
 		if interval == 0 {

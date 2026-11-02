@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -806,6 +807,9 @@ func TestKeepalive(t *testing.T) {
 // A session that ends but is never reaped stays a zombie, which
 // kill(pid, 0) still finds. The keepalive must stop on it all the same.
 func TestKeepaliveStopsOnZombie(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("no zombie check on " + runtime.GOOS)
+	}
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "long step")
 	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
@@ -835,6 +839,7 @@ func TestKeepaliveStopsOnZombie(t *testing.T) {
 // let the lease lapse while the session works on, so claim refuses it.
 // The harness, the shell's parent ($PPID), is in another session.
 func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
+	needPgrep(t)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -846,7 +851,10 @@ func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
 		cmd := exec.Command("sh", "-c", `"$0" `+args+`; exit $?`, exe)
 		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
 		detach(cmd)
-		out, _ := cmd.CombinedOutput()
+		out, err := cmd.CombinedOutput()
+		if _, ok := err.(*exec.ExitError); err != nil && !ok {
+			t.Fatalf("sh: %v", err)
+		}
 		return cmd.ProcessState.ExitCode(), string(out)
 	}
 	claim := func(pid string) (int, string) {
@@ -913,6 +921,7 @@ func TestClaimStartsKeepalive(t *testing.T) {
 // raw 0 on made the detached keepalive exit at once with a usage error
 // nobody saw, while the claim reported success.
 func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
+	needPgrep(t)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -937,13 +946,18 @@ func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
 	}
 }
 
+// needPgrep skips a test that counts keepalives where pgrep is missing.
+// Call it before starting one, so none outlives a skipped test.
+func needPgrep(t *testing.T) {
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("no pgrep")
+	}
+}
+
 // keepalives counts keepalive processes on T-1 in store. It fails the
 // test when pgrep can't tell, so "none found" always means none.
 func keepalives(t *testing.T, store string) int {
 	t.Helper()
-	if _, err := exec.LookPath("pgrep"); err != nil {
-		t.Skip("no pgrep")
-	}
 	out, err := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output()
 	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 		return 0 // no match
