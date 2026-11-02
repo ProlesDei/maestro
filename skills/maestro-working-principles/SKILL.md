@@ -1,11 +1,11 @@
 ---
 name: maestro-working-principles
-description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off', and in every Maestro playbook step. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills) or taking a ticket to a PR (the work playbook)."
+description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off'. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills)."
 ---
 
 # Working principles
 
-How you change files day to day: in your own worktree, in small checked commits, through a PR that review merges, leaving nothing behind. Hundreds of sessions may share this repo, its tickets and its owner, so never touch the main checkout or anything another session holds. In a playbook step (your prompt starts "You are one step of a Maestro playbook"), your launch flags beat this file.
+How you change files day to day: in your own worktree, in small checked commits, through a PR that review merges, leaving nothing behind. Hundreds of sessions may share this repo, its tickets and its owner, so never touch the main checkout or anything another session holds.
 
 ## Session rules
 
@@ -18,7 +18,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 ## Share the machine
 
 - Change only what is yours: your worktree, branch, temp folder, ports and processes. Leave global config, installed tools and other sessions' branches, worktrees and locks alone.
-- Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. In a step, leave it: the engine removes the run's `TMPDIR`. Elsewhere, remove it when done by its full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one.
+- Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. Remove it when done by its full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one.
 - Start each server on port 0 so the OS picks a free one, and read back the port it got. Stop each process, and the children it started, by its PID; stopping by name or port hits other sessions' too.
 - Install into the worktree or your temp folder, never globally.
 - On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make. Leave repo-wide cleanup, such as garbage collection or pruning worktrees, to the **maestro-prune** skill.
@@ -27,9 +27,8 @@ How you change files day to day: in your own worktree, in small checked commits,
 
 - Every change to tracked files gets a worktree. Reading, answering and reviewing need none.
 - One per piece of work: `.maestro/worktrees/<name>` on branch `maestro/<name>`. `<name>` is the ticket id, else a short slug with a random suffix, such as `fix-login-typo-k3f9`, so no two sessions pick the same name.
-- In a step, the engine made your worktree. Work only there.
-- In your own session, on a ticket, first claim it in `maestro-ticket`, or the tool `## Tickets` in `.maestro/project/project-setup.md` names, as a holder no other session uses: your bot or user id and a random id, such as `engineer/k3f9`, never one built from the ticket. Renew the lease before each commit. If the claim or a renewal fails, stop and leave the ticket and its worktree alone.
-- In your own session, add the worktree from the main checkout: a new branch from the remote's main branch after a fetch, or the existing branch if there is one. Never pull in the main checkout.
+- On a ticket, first claim it in `maestro-ticket`, or the tool `## Tickets` in `.maestro/project/project-setup.md` names, as a holder no other session uses: your bot or user id and a random id, such as `engineer/k3f9`, never one built from the ticket. Renew the lease before each commit. If the claim or a renewal fails, stop and leave the ticket and its worktree alone.
+- Add the worktree from the main checkout: a new branch from the remote's main branch after a fetch, or the existing branch if there is one. Never pull in the main checkout.
 - Enter an existing worktree only if it is yours: you hold its ticket's claim, you made it in this session, or the user named it. Else make a new one. Read the trail first: the branch's commits since main, the newest `wip:` commit's body, the ticket's comments. Go on from where it stopped.
 - Main moves all the time. Merge the remote's main branch in only on a conflict or for a change you need.
 
@@ -45,7 +44,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 
 ## Pull requests
 
-- In your own session, open one when the work is done: the repo's build, lint and tests pass and the **maestro-prove-complete** skill shows each thing asked for. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's. A step never pushes: the engine does.
+- Open one when the work is done: the repo's build, lint and tests pass and the **maestro-prove-complete** skill shows each thing asked for. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's.
 - One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks. Move the ticket to `in_review` with the PR link, then release the claim.
 - Never push the main branch, merge or deploy. Review merges. Answer review with new commits on the same branch. After the merge, remove your worktree.
 
@@ -55,4 +54,4 @@ How you change files day to day: in your own worktree, in small checked commits,
 - A check you didn't run hasn't passed. Give the check and its exit code. Mark every other claim as run, read or guessed.
 - Two fixes built on the same idea failed? Test that idea on its own before a third. Still stuck? Stop. Write what happened, each try with its failing output line, two or three options, and the one question that unblocks you.
 
-**Reply:** in a step, the step's own reply. In your own session, one short line each: what changed and whether it does what was asked, the branch and sha, each check with its exit code, the PR link if you opened one, each decision you made for the user, open risks.
+**Reply:** one short line each: what changed and whether it does what was asked, the branch and sha, each check with its exit code, the PR link if you opened one, each decision you made for the user, open risks.

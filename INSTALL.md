@@ -13,21 +13,21 @@ Ground rules:
 
 First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
 
-Install in the main checkout, not a linked worktree: `install.sh` refuses one. Where the main checkout is a bare repo, install in one linked worktree. `maestro-play` takes the checkout that holds `.maestro/src/` as the project's root: it reads the setup there and puts ticket worktrees there.
+Install in the main checkout, not a linked worktree: `install.sh` refuses one. Where the main checkout is a bare repo, install in one linked worktree.
 
 ## 1. Check the machine
 
-Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code or Codex: `maestro-play` runs each playbook step through one of them. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code or Codex: the bots run each job through one of them. Check each. If one is missing, tell the person what it is and how to get it, and wait.
 
 ## 2. Get Maestro
 
-Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these patterns: `/.gitattributes`, `/INSTALL.md`, `/bot-profiles/`, `/playbooks/`, `/scripts/`, `/skills/`, `/templates/`, `/tools/`. Keep the leading `/`: without it, `skills/` also matches Maestro's own `.claude/skills/`, `.agents/skills/` and `.maestro/skills/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
+Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these patterns: `/.gitattributes`, `/INSTALL.md`, `/bot-profiles/`, `/scripts/`, `/skills/`, `/templates/`, `/tools/`. Keep the leading `/`: without it, `skills/` also matches Maestro's own `.claude/skills/`, `.agents/skills/` and `.maestro/skills/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
 
 Ask which commit to pin; the default is the newest on `main`. Check it out and note its sha.
 
 ## 3. Build the tools
 
-Build `maestro-ticket` and `maestro-play` from `.maestro/src/tools/<name>/` with Go and `GOWORK=off`, so a `go.work` in the team's repo can't take over the build, into a folder on `PATH`. One copy of each serves every repo on the machine, so if the copy already on `PATH` was built from a newer commit, keep it.
+Build `maestro-ticket` from `.maestro/src/tools/maestro-ticket/` with Go and `GOWORK=off`, so a `go.work` in the team's repo can't take over the build, into a folder on `PATH`. One copy serves every repo on the machine, so if the copy already on `PATH` was built from a newer commit, keep it.
 
 ## 4. Ask the choices
 
@@ -38,7 +38,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated. | The ones on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
-| `skip` | Skills the team doesn't want. Never skip one that a playbook step loads, listed under `prompts:` in `.maestro/src/skills/use.yaml`. | none |
+| `skip` | Skills the team doesn't want. Never skip one the engineers load: `maestro-working-principles`, `maestro-software-engineer`, `maestro-tdd`, `maestro-prove-complete`. | none |
 | `tickets` | `maestro-ticket`, or the team's own tracker. For their own, the value is a folder in their repo, from its top, that holds only `maestro-create-ticket/` with its `SKILL.md`: how to write a ticket in their tool. Keep that name; the bots call it. Write it with them if they have none. | `maestro-ticket` |
 | `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
 
@@ -46,7 +46,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 
 Run `.maestro/src/scripts/install.sh apply <repo>`. It copies the skills, writes `.maestro/project/project-setup.md` once, creates the ticket store, hides `.maestro/src/`, `.maestro/worktrees/` and `.maestro/bots/` from git, and lists what it placed in its record.
 
-If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). A skill a playbook step loads can't be skipped: offer to replace it and move their changes into a skill of their own, named without `maestro-`. Never pass `--replace` without their yes.
+If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). A skill the engineers load can't be skipped: offer to replace it and move their changes into a skill of their own, named without `maestro-`. Never pass `--replace` without their yes.
 
 ## 6. Fill in project-setup.md
 
@@ -58,15 +58,14 @@ If it prints `clash:` lines, nothing was written. Take each skill named to the p
 - **Tickets**: the tool from step 4, and for the team's own, how to find, claim, comment on and close a ticket in it.
 - **Review** and **Conventions**: high-risk paths, branch and commit style, files never to touch.
 
-Keep the shape of `## Main branch` and `## Checks`: `maestro-play` parses them.
+Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
 
 ## 7. Extras
 
 Ask about each:
 
-- **Session limits.** Playbook steps run with all permissions. To limit them, set `MAESTRO_CLAUDE_ARGS` or `MAESTRO_CODEX_ARGS` in the shell profile, for example `--permission-mode acceptEdits`.
-- **Models.** `MAESTRO_MODEL_MID` and `MAESTRO_MODEL_FRONTIER` set the models per tier; Claude's defaults are sonnet and opus.
-- **Code graph.** The codebase-memory-mcp MCP server lets step sessions find symbols and callers before they grep. It's a third-party tool: read its install steps before you run any, and add it only with the person's yes.
+- **Session limits.** The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change that flag in the engineers' blocks in `.maestro/bots/`, for example to `acceptEdits`.
+- **Code graph.** The codebase-memory-mcp MCP server lets sessions find symbols and callers before they grep. It's a third-party tool: read its install steps before you run any, and add it only with the person's yes.
 
 ## 8. Set up the bots
 

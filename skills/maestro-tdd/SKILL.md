@@ -48,7 +48,7 @@ Open a todo list with one item per phase your path in Phase A names.
 
 1. Say so in one line, with the reason: it needs production, takes too long or needs hardware.
 2. Write a repro script in a `mktemp -d` folder. Run it before and after the fix, and keep both outputs.
-3. If nothing reproduces it, stop with what you tried; in a step, reply `blocked`. A guessed fix is not a fix.
+3. If nothing reproduces it, stop with what you tried. A guessed fix is not a fix.
 
 ## Never
 
@@ -57,4 +57,4 @@ Open a todo list with one item per phase your path in Phase A names.
 - Sleep or use real time. Use a fake clock and fixed seeds.
 - Put the change and unrelated edits in one commit.
 
-**Reply:** each test (path and name) with its failure before and pass after; for a bug, its failure with the fix undone, the cause `file:line` and each other place with it; for a refactor or perf, each pin and the break it caught, and the before and after numbers; the commits. With no cheap path: the reason and both repro outputs. In a step, put these in the step's reply fields.
+**Reply:** each test (path and name) with its failure before and pass after; for a bug, its failure with the fix undone, the cause `file:line` and each other place with it; for a refactor or perf, each pin and the break it caught, and the before and after numbers; the commits. With no cheap path: the reason and both repro outputs.

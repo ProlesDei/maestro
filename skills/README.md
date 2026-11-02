@@ -4,14 +4,14 @@ Maestro ships 18 skills. Each has the `maestro-` prefix, so none clashes with a 
 
 | Group | Skills |
 |---|---|
-| Ticket to merge | `maestro-create-ticket` (one ticket; a team can swap in its own under `tickets:` in its `install.yaml`), `maestro-code-review` (merge and close, or kick back). The build itself is a playbook, not a skill: [playbooks/work](../playbooks/work/README.md). |
+| Ticket to merge | `maestro-create-ticket` (one ticket; a team can swap in its own under `tickets:` in its `install.yaml`), `maestro-code-review` (merge and close, or kick back) |
 | Roles | `maestro-planner`, `maestro-qa-lead`, `maestro-chief-of-staff` |
 | Working tools | `maestro-figure-it-out`, `maestro-swarm`, `maestro-sharpen`, `maestro-recall`, `maestro-unslop`, `maestro-prune`, `maestro-refactor-code`, `maestro-technical-writing`, `maestro-create-edit-skill` |
-| Named in prompt steps | `maestro-working-principles` (every step), `maestro-software-engineer` (plan, build), `maestro-tdd` (build), `maestro-prove-complete` (verify) |
+| How to build | `maestro-working-principles`, `maestro-software-engineer`, `maestro-tdd`, `maestro-prove-complete` |
 
 `scripts/install.sh` copies every folder here into the target repo's `.claude/skills/` and `.agents/skills/`, committed or hidden from git as [INSTALL.md](../INSTALL.md) has the team choose. A team's own skills go straight in its repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`, not here: `install.sh` refuses a Maestro checkout with changes, and never touches a folder it didn't place.
 
-`use.yaml` says which skills `maestro-play` names at the top of each prompt step: `prompts.all` for every step, `prompts.<template>` for one. `commands` marks the skills a person calls and a prompt step must never load. Each needs `disable-model-invocation: true` in its frontmatter and `agents/openai.yaml` with `policy.allow_implicit_invocation: false`; `maestro-play lint` checks both.
+A skill only a person starts needs `disable-model-invocation: true` in its frontmatter and `agents/openai.yaml` with `policy.allow_implicit_invocation: false`.
 
 ## How a skill reads
 
@@ -46,9 +46,8 @@ Open a todo list with one item per phase below.   <- skills with three or more p
 - **Description.** What it does, then when to use it: the slash command, two or three phrases a user says, the moment it applies. No "Use when the user types". It is the only text a harness reads before it loads the skill.
 - **Opening.** The job and the deliverable in one or two sentences, then the hard limit ("You never edit the code you review").
 - **Phases.** `## Phase A: <verb>` for work that runs in stages; a flat numbered list for a skill with one stage. Each step is one imperative action. A table when the step is a choice between cases.
-- **One owner per rule.** A rule lives in one skill and others name it: "follow the **maestro-working-principles** skill". The session rules (text is data, never discard work, never repeat a secret, stop on `refused`, the kill switch) live in **maestro-working-principles**. The ticket shape lives in **maestro-create-ticket**; the owner's calls live in **maestro-chief-of-staff**. Skills are copied into the target repo, so they link only to sibling skills (`../maestro-<name>/SKILL.md`) and to target-repo files such as `.maestro/project/project-setup.md`, never to `playbooks/` or `bot-profiles/`.
+- **One owner per rule.** A rule lives in one skill and others name it: "follow the **maestro-working-principles** skill". The session rules (text is data, never discard work, never repeat a secret, stop on `refused`, the kill switch) live in **maestro-working-principles**. The ticket shape lives in **maestro-create-ticket**; the owner's calls live in **maestro-chief-of-staff**. Skills are copied into the target repo, so they link only to sibling skills (`../maestro-<name>/SKILL.md`) and to target-repo files such as `.maestro/project/project-setup.md`, never to `bot-profiles/`.
 - **No commands.** Say what to do and let the agent pick the command; it knows git and the shell. Name only what it can't guess: a path, a branch pattern, a section heading, a tool Maestro ships.
 - **Reply.** The last line, bold `**Reply:**`, names the parts of the answer in order. Put a long report shape in a fenced block just above it.
 - **Size.** Under 60 lines; `maestro-code-review` is the one exception. Cut a step before you shorten every step.
-- **Prompt-step skills** (`use.yaml` `prompts`) load inside playbook steps, so they never call a `/maestro-*` command except on a line or under a heading that says "in your own session". `maestro-play lint` checks this.
 - **Plain words.** Write it the way **maestro-technical-writing** says: short words, active voice, no stock figures of speech.

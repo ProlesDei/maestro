@@ -21,7 +21,7 @@ Follow the **maestro-working-principles** skill.
 
    | Field | Values | Default |
    |---|---|---|
-   | kind | `feature`, `bug`, `refactor`, `perf`, written as the body's `Type:` line. The work playbook picks its mode from it | from the wording, else `feature` |
+   | kind | `feature`, `bug`, `refactor`, `perf`, written as the body's `Type:` line. The engineer picks the test approach from it | from the wording, else `feature` |
    | deps | ticket ids that must be `done` first; check each with `maestro-ticket get` | none |
    | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
@@ -40,9 +40,9 @@ Follow the **maestro-working-principles** skill.
    MAESTRO_TICKET_BODY
    ```
 
-   - The body's first line is `Type: <kind>`: the work playbook reads it. It is not `maestro-ticket create --type`, which takes `ship` or `scout`; leave that flag out (the default is `ship`).
+   - The body's first line is `Type: <kind>`: the engineer reads it. It is not `maestro-ticket create --type`, which takes `ship` or `scout`; leave that flag out (the default is `ship`).
    - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted; if a body line is exactly `MAESTRO_TICKET_BODY`, pick another.
    - The slug is lowercase letters, digits and hyphens. Leave out `--deps` or `--areas` when empty.
    - If the store refuses, show its message, fix only the field it names, and run again with the same key.
 
-**Reply:** the new id, title, kind, status, priority, deps and areas, then `Next: maestro-play run work --ticket <id>`.
+**Reply:** the new id, title, kind, status, priority, deps and areas, then `Next: /maestro-software-engineer <id>`.

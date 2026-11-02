@@ -22,7 +22,7 @@ Open a todo list with one item per phase below.
 
 1. Set `name` to the folder name.
 2. Write `description` on one line, in double quotes, 1024 characters at most: what it does, verb first; when to use it (the slash command, two or three phrases a user says, the moment it applies); then `Not for ...`.
-3. For a command only a person starts, add `argument-hint: "<args>"` and `disable-model-invocation: true`, and write `agents/openai.yaml` with `policy:` / `allow_implicit_invocation: false` so Codex never starts it. If playbook steps run here, also list it under `commands` in the `use.yaml` from Phase D.
+3. For a command only a person starts, add `argument-hint: "<args>"` and `disable-model-invocation: true`, and write `agents/openai.yaml` with `policy:` / `allow_implicit_invocation: false` so Codex never starts it.
 
 ## Phase C: Write the body
 
@@ -40,7 +40,6 @@ Open a todo list with one item per phase below.
 1. Read `## Skills` in `.maestro/project/project-setup.md`. If it says where skills live, place it there, follow it for the steps below, and skip step 2.
 2. Else keep the same bytes in `.agents/skills/<name>/` (Codex, Grok Build) and `.claude/skills/<name>/` (Claude Code). Edit the `.agents` copy, copy it over the `.claude` one, and check the two folders match byte for byte.
 3. To rename or retire, remove the old folders and links, search the repo for the old name, and fix every hit.
-4. For a skill playbook steps should load: put it in the skills folder `maestro-play` reads (`$MAESTRO_SKILLS`, else `<playbooks>/../skills`), list it under `prompts` in that folder's `use.yaml`, and lint the playbooks with `maestro-play`. Such a skill never tells a step to call a `/command`.
 
 ## Phase E: Test it
 

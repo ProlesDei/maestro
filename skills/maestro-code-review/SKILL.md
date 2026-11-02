@@ -76,7 +76,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    maestro-ticket transition <id> --to done --from in_review --actor-role reviewer \
      --note "Merged: $M (review GO at $H)" --idempotency-key review-<id>-$H
    ```
-3. **NO-GO.** Comment first, then move, so `maestro-play run work --ticket <id>` reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
+3. **NO-GO.** Comment first, then move, so the engineer's next run reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
    ```bash
    maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H <<'EOF'
    Kickback: <n> blockers, <n> majors at <H>

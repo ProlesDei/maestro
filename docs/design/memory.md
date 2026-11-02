@@ -5,6 +5,7 @@
 > - **Settled:** memory helps bots do their tasks; learning and self-improvement are a separate system, designed later. Short-term memory stays as it is.
 > - **My picks, not yet confirmed by the owner:** notes save at once with no review (see "The risk we accept"), they live in `memory.db` next to the ticket store, and the kinds of notes in the scope table.
 > - **Open:** whether `--until <ticket>` earns its place, and whether the chief of staff keeps what the owner wants as notes or in its persona file.
+> - **`maestro-play` is gone** (Nov 1 2026). This draft has it write and recall notes for step sessions, so a rebuild needs a new writer.
 > - **Dropped on the way (v1 to v4):** lessons reviewed in PRs, lesson inboxes, a per-bot "desk", archives and pins. The audit table below covers v4 to v5.
 
 ## In plain words
