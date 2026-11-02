@@ -738,6 +738,8 @@ func leaseExpiry(t *testing.T, h *harness, id string) time.Time {
 func startSleeper(t *testing.T) *exec.Cmd {
 	t.Helper()
 	sl := exec.Command("sleep", "60")
+	// It stands in for the harness, which runs in its own session.
+	detach(sl)
 	if err := sl.Start(); err != nil {
 		t.Skip("no sleep binary")
 	}
@@ -797,6 +799,73 @@ func TestKeepalive(t *testing.T) {
 	// session's: either would keep the lease forever.
 	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "1")
 	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", "1")
+}
+
+// A session that ends but is never reaped stays a zombie, which
+// kill(pid, 0) still finds. The keepalive must stop on it all the same.
+func TestKeepaliveStopsOnZombie(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "long step")
+	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
+	sl := startSleeper(t)
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "1", "--pid", fmt.Sprint(sl.Process.Pid), "--ttl", "6s", "--interval", "200ms")
+		done <- code
+	}()
+	time.Sleep(300 * time.Millisecond)
+	sl.Process.Kill() // no Wait: it stays a zombie until cleanup reaps it
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("keepalive exit %d after session became a zombie", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("keepalive kept a zombie's lease alive")
+	}
+}
+
+// Claude Code and Codex run each command in a new shell, in a session of
+// its own with no terminal, that exits with the command. A keepalive on
+// anything in that session ($$, a timeout wrapper) would stop at once and
+// let the lease lapse while the session works on, so claim refuses it.
+// The harness, the shell's parent ($PPID), is in another session.
+func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "long step")
+	store := h.env["MAESTRO_TICKET_STORE"]
+	claim := func(pid string) (int, string) {
+		cmd := exec.Command("sh", "-c", `"$0" claim T-1 --holder jse/s1 --ttl 6s --keepalive `+pid+`; exit $?`, exe)
+		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
+		detach(cmd)
+		out, _ := cmd.CombinedOutput()
+		return cmd.ProcessState.ExitCode(), string(out)
+	}
+	if code, out := claim("$$"); code != 2 {
+		t.Fatalf("claim --keepalive $$: exit %d; want 2\n%s", code, out)
+	}
+	var got tk
+	if h.ok(&got, "get", "T-1"); got.Claim != nil {
+		t.Fatalf("refused claim still claimed: %+v", got.Claim)
+	}
+	if code, out := claim("$PPID"); code != 0 {
+		t.Fatalf("claim --keepalive $PPID: exit %d\n%s", code, out)
+	}
+	// Its keepalive watches this test: release so it stops, and let it
+	// close the store before the temp dir goes.
+	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "1")
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		if out, _ := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output(); len(out) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("keepalive kept running after release")
+		}
+	}
 }
 
 // claim --keepalive starts the keepalive itself, as a detached process.
