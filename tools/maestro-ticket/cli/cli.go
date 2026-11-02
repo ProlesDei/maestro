@@ -94,8 +94,8 @@ including re-claiming your own lease. heartbeat and release always need
 too. All fail with exit 4 once the lease is lost.
 Heartbeats: claim --keepalive PID starts a background keepalive that
 heartbeats every ttl/3 while process PID (the harness session) lives, and
-stops when the lease is lost or released. claim refuses a PID in its own
-session when that session has no terminal: it exits with the command.
+stops when the lease is lost or released. claim and keepalive refuse a PID
+in their own session when it has no terminal: it exits with the command.
 Expired leases: reap frees them, logs lease_expired and checkpoints the
 WAL; any write to the ticket frees its expired lease too.
 
@@ -640,6 +640,9 @@ func runKeepalive(ctx context.Context, c *call) error {
 		}
 		if !alive(*pid) {
 			return usagef("keepalive: --pid %d: no such process of ours", *pid)
+		}
+		if *pid == os.Getpid() || endsWithCommand(*pid) {
+			return usagef("keepalive: --pid %d: exits with this command; pass the harness process, your shell's parent", *pid)
 		}
 		interval := *every
 		if interval == 0 {

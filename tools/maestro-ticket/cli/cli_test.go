@@ -779,8 +779,9 @@ func TestKeepalive(t *testing.T) {
 
 	// A released lease stops the keepalive with lease_lost.
 	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
+	sl = startSleeper(t)
 	go func() {
-		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(os.Getpid()), "--ttl", "6s", "--interval", "200ms")
+		code, _, _ := h.run("", "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(sl.Process.Pid), "--ttl", "6s", "--interval", "200ms")
 		done <- code
 	}()
 	time.Sleep(300 * time.Millisecond)
@@ -799,6 +800,7 @@ func TestKeepalive(t *testing.T) {
 	// session's: either would keep the lease forever.
 	h.fails(2, "claim", "T-1", "--holder", "jse/s1", "--keepalive", "1")
 	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", "1")
+	h.fails(2, "keepalive", "T-1", "--holder", "jse/s1", "--token", "2", "--pid", fmt.Sprint(os.Getpid()))
 }
 
 // A session that ends but is never reaped stays a zombie, which
@@ -821,6 +823,8 @@ func TestKeepaliveStopsOnZombie(t *testing.T) {
 			t.Fatalf("keepalive exit %d after session became a zombie", code)
 		}
 	case <-time.After(5 * time.Second):
+		h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "1")
+		<-done
 		t.Fatal("keepalive kept a zombie's lease alive")
 	}
 }
@@ -838,12 +842,15 @@ func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "long step")
 	store := h.env["MAESTRO_TICKET_STORE"]
-	claim := func(pid string) (int, string) {
-		cmd := exec.Command("sh", "-c", `"$0" claim T-1 --holder jse/s1 --ttl 6s --keepalive `+pid+`; exit $?`, exe)
+	run := func(args string) (int, string) {
+		cmd := exec.Command("sh", "-c", `"$0" `+args+`; exit $?`, exe)
 		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
 		detach(cmd)
 		out, _ := cmd.CombinedOutput()
 		return cmd.ProcessState.ExitCode(), string(out)
+	}
+	claim := func(pid string) (int, string) {
+		return run("claim T-1 --holder jse/s1 --ttl 6s --keepalive " + pid)
 	}
 	if code, out := claim("$$"); code != 2 {
 		t.Fatalf("claim --keepalive $$: exit %d; want 2\n%s", code, out)
@@ -852,14 +859,19 @@ func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
 	if h.ok(&got, "get", "T-1"); got.Claim != nil {
 		t.Fatalf("refused claim still claimed: %+v", got.Claim)
 	}
+	h.ok(nil, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s")
+	if code, out := run("keepalive T-1 --holder jse/s1 --token 1 --ttl 6s --pid $$"); code != 2 {
+		t.Fatalf("keepalive --pid $$: exit %d; want 2\n%s", code, out)
+	}
+	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "1")
 	if code, out := claim("$PPID"); code != 0 {
 		t.Fatalf("claim --keepalive $PPID: exit %d\n%s", code, out)
 	}
 	// Its keepalive watches this test: release so it stops, and let it
 	// close the store before the temp dir goes.
-	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "1")
+	h.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", "2")
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(200 * time.Millisecond) {
-		if out, _ := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output(); len(out) == 0 {
+		if keepalives(t, store) == 0 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -920,10 +932,25 @@ func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
 		t.Fatalf("claim: %v\n%s", err, out)
 	}
 	time.Sleep(1500 * time.Millisecond)
-	out, _ := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output()
-	if len(strings.Fields(string(out))) != 1 {
-		t.Fatalf("want one keepalive running for the claim, got pids %q", out)
+	if n := keepalives(t, store); n != 1 {
+		t.Fatalf("want one keepalive running for the claim, got %d", n)
 	}
+}
+
+// keepalives counts keepalive processes on T-1 in store. It fails the
+// test when pgrep can't tell, so "none found" always means none.
+func keepalives(t *testing.T, store string) int {
+	t.Helper()
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("no pgrep")
+	}
+	out, err := exec.Command("pgrep", "-f", "keepalive T-1 .*"+regexp.QuoteMeta(store)).Output()
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return 0 // no match
+	} else if err != nil {
+		t.Fatalf("pgrep: %v", err)
+	}
+	return len(strings.Fields(string(out)))
 }
 
 // A store on an unsafe filesystem is refused before it's opened, by
