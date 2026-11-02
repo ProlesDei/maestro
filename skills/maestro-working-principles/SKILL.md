@@ -1,6 +1,6 @@
 ---
 name: maestro-working-principles
-description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off'. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills)."
+description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to keep a ticket's status true to the work, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off'. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills)."
 ---
 
 # Working principles
@@ -23,14 +23,16 @@ How you change files day to day: in your own worktree, in small checked commits,
 - Install into the worktree or your temp folder, never globally.
 - On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make. Leave repo-wide cleanup, such as garbage collection or pruning worktrees, to the **maestro-prune** skill.
 
-## Worktrees
+## Tickets and worktrees
 
 - Every change to tracked files gets a worktree. Reading, answering and reviewing need none.
 - One per piece of work: `.maestro/worktrees/<name>` on branch `maestro/<name>`. `<name>` is the ticket id, else a short slug with a random suffix, such as `fix-login-typo-k3f9`, so no two sessions pick the same name.
-- On a ticket, first claim it in `maestro-ticket`, or the tool `## Tickets` in `.maestro/project/project-setup.md` names, as a holder no other session uses: your bot or user id and a random id, such as `engineer/k3f9`, never one built from the ticket. Renew the lease before each commit. If the claim or a renewal fails, stop and leave the ticket and its worktree alone.
+- On a ticket, keep its status true to the work at every step, in `maestro-ticket` or the tool `## Tickets` in `.maestro/project/project-setup.md` names. First claim it as a holder no other session uses: your bot or user id and a random id, such as `engineer/k3f9`, never one built from the ticket. Tie the claim to a keepalive on your harness's process (the parent of the shell you run commands in, never that shell), so the lease lives as long as your session; with no keepalive, renew the lease before each commit. Then move it to `in_progress` if it isn't there yet, as on a resume after a block. If the claim or a renewal fails, stop and leave the ticket and its worktree alone.
 - Add the worktree from the main checkout: a new branch from the remote's main branch after a fetch, or the existing branch if there is one. Never pull in the main checkout.
 - Enter an existing worktree only if it is yours: you hold its ticket's claim, you made it in this session, or the user named it. Else make a new one. Read the trail first: the branch's commits since main, the newest `wip:` commit's body, the ticket's comments. Go on from where it stopped.
 - Main moves all the time. Merge the remote's main branch in only on a conflict or for a change you need.
+- Stopping stuck on a ticket, as the last section says? Commit and push a `wip:`, then post that write-up as a comment that opens `Escalation: <one line>` and ends `Return-role: <the ticket's role>`. Move the ticket to `blocked` and release the claim.
+- PR open for a ticket? Post a comment that opens `Handoff:` with the PR link, branch, head sha, each check with its exit code, each acceptance criterion with its proof, and a line `author-family: <claude or openai>`, your model's family; the reviewer reads it. Then move the ticket to `in_review` and release the claim.
 
 ## Commits
 
@@ -45,7 +47,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 ## Pull requests
 
 - Open one when the work is done: the repo's build, lint and tests pass and the **maestro-prove-complete** skill shows each thing asked for. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's.
-- One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks. Move the ticket to `in_review` with the PR link, then release the claim.
+- One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks. Then hand off its ticket, as the `Handoff:` bullet above says.
 - Never push the main branch, merge or deploy. Review merges. Answer review with new commits on the same branch. After the merge, remove your worktree.
 
 ## Ask, prove, get unstuck
