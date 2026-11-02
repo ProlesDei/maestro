@@ -11,7 +11,7 @@ You clear out what no one needs (worktrees, branches, rebuildable folders, temp 
 
 ## Start
 
-Open a todo list with one item per phase below. From the main checkout, run `git fetch --prune origin` (retry once if it fails on a lock) and `df -h .`. Merges land on the remote, never on local `<main>`, so every merge check below uses `origin/<main>`. Hundreds of sessions may share this repo, its ticket store and its run files. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: `maestro-ticket list --json`, `git worktree list --porcelain`, the `worktree` field of each `<common>/runs/*.json`, and `lsof -d cwd -Fn`.
+Open a todo list with one item per phase below. From the main checkout, run `git fetch --prune origin` (retry once if it fails on a lock) and `df -h .`. Merges land on the remote, never on local `<main>`, so every merge check below uses `origin/<main>`. Hundreds of sessions may share this repo, and its ticket store. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: `maestro-ticket list --json`, `git worktree list --porcelain` and `lsof -d cwd -Fn`.
 
 ## Phase A: Find candidates (read only)
 
@@ -26,14 +26,14 @@ Open a todo list with one item per phase below. From the main checkout, run `git
 
 ## Phase B: Label and sort each candidate
 
-- `in-use`: its ticket shows a `claim` with `expired: false`; a saved run `worktree` field equals its path (a done run deletes its file, so any left can resume); `git worktree list` marks it `locked`; or the saved `lsof` list has a line that is `n<path>` or starts `n<path>/` (skip this test where `lsof` is missing).
+- `in-use`: its ticket shows a `claim` with `expired: false`; `git worktree list` marks it `locked`; or the saved `lsof` list has a line that is `n<path>` or starts `n<path>/` (skip this test where `lsof` is missing).
 - `dirty`: a worktree whose `git -C <path> status --porcelain` prints anything. `unpushed`: a worktree head or branch tip that isn't `merged` and that `git branch -r --contains <sha>` doesn't list. `recent`: `find <path> -name node_modules -prune -o -mmin -1440 -print -quit` prints something. `merged`: `git merge-base --is-ancestor <sha> origin/<main>` passes, or, after a squash merge, `git merge-tree --write-tree origin/<main> <sha> | head -1` prints `git rev-parse 'origin/<main>^{tree}'`. `unverified`: the fetch failed.
 
 | Sort | What goes there |
 |---|---|
 | Safe | no keep label, and nothing lost: `merged` worktrees and branches, those of `cancelled` tickets (a remote branch holds the tip), `qa-<id>` and `review-<id>-*` worktrees whose ticket isn't `in_review`, scratch files, temp folders with no `.git` inside, `prunable` entries |
 | Ask first | the rest with none of the keep labels: other pushed but unmerged worktrees and branches, evidence folders, rebuildable folders, temp files, empty folders, temp folders holding a `.git` |
-| Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; `.maestro/project/`, `.maestro/worktrees/` itself, harness folders (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, `<common>/tickets.db*`, `<common>/backups/`, `<common>/runs/`, `<common>/STOP`, and every `*.lock` file: a live git or tool call holds it |
+| Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; `.maestro/project/`, `.maestro/worktrees/` itself, harness folders (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, `<common>/tickets.db*`, `<common>/backups/`, `<common>/STOP`, and every `*.lock` file: a live git or tool call holds it |
 
 If no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates, and remove them after Phase D, as [references/code.md](references/code.md) says.
 

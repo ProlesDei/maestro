@@ -21,7 +21,7 @@ How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot p
 6. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
 
 What we hold to:
-- Least friction for the team that installs it. The engineers' sessions run with all permissions; a team sets limits by changing the `--permission-mode` in the engineer personas.
+- Least friction for the team that installs it. The engineers' sessions run with all permissions, and Maestro offers no limit to set ([decisions](docs/decisions.md), 12).
 - Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
