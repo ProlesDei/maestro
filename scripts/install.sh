@@ -12,7 +12,6 @@
 #   harnesses: claude codex grok    claude reads .claude/skills, codex and
 #                                   grok .agents/skills (required)
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
-#   skip: <skill> ...               skills not to install
 #   tickets: maestro-ticket|<dir>   <dir>, from the repo's top, holds the
 #                                   team's maestro-create-ticket/
 #   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
@@ -24,7 +23,8 @@
 # <git-common-dir>/maestro/installed.list. It never writes over a file it
 # didn't place or one changed since; it lists each such clash and writes
 # nothing. --replace <skill> lets it replace what clashed in that skill's
-# folder, though a team's file beside Maestro's stays; skip: keeps it. A
+# folder, though a team's file beside Maestro's stays. Every skill installs;
+# a team keeps its own under a name without maestro-. A
 # file Maestro once shipped at that path counts as placed, so it takes
 # over an install by the install.sh before the record. Run it
 # again after an update, or after a run that failed partway: it replaces
@@ -84,7 +84,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha= harnesses=() home= skip=() tickets=maestro-ticket bots=()
+sha= harnesses=() home= tickets=maestro-ticket bots=()
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -98,7 +98,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	maestro-sha) sha=$val ;;
 	harnesses) read -ra harnesses <<<"$val" ;;
 	skills-home) home=$val ;;
-	skip) read -ra skip <<<"$val" ;;
+	skip) die "install.yaml:$n: skip: is gone: every skill installs; remove the line" ;;
 	tickets) tickets=$val ;;
 	bots) read -ra bots <<<"$val" ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
@@ -141,15 +141,8 @@ for d in "$root"/skills/*/; do
 	from[$name]=$root/skills/$name
 done
 [ ${#from[@]} -gt 0 ] || die "no skills in $root/skills"
-for s in ${skip[@]+"${skip[@]}"} ${replace[@]+"${replace[@]}"}; do
+for s in ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
-done
-# The skills the workflow runs on, from ticket to merge: the bots' and the
-# engineers'. Never skipped, and in every harness folder.
-core=$'maestro-chief-of-staff\nmaestro-code-review\nmaestro-create-ticket\nmaestro-planner\nmaestro-prove-complete\nmaestro-qa-lead\nmaestro-software-engineer\nmaestro-tdd\nmaestro-working-principles'
-for s in ${skip[@]+"${skip[@]}"}; do
-	! grep -qxF -- "$s" <<<"$core" || die "install.yaml: skip: $s is a skill the workflow runs on"
-	unset "from[$s]"
 done
 if [ "$tickets" != maestro-ticket ]; then
 	[[ $tickets == /* ]] || tickets=$target/$tickets
@@ -298,9 +291,9 @@ if [ "$cmd" = check ]; then
 		was=$(sed -n '1s/^# Files scripts\/install\.sh placed at Maestro \([0-9a-f]*\):.*/\1/p' "$record")
 		[ -z "$was" ] || [[ $head == "$was"* ]] || problem "the record is from Maestro $was, not the pinned $sha: run apply"
 	fi
-	for n in $core; do
+	for n in "${!from[@]}"; do
 		for d in "${dirs[@]}"; do
-			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: the workflow runs on it"
+			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing"
 		done
 	done
 	# Hidden skills must be ignored, committed ones not. A tracked folder
@@ -503,8 +496,8 @@ for p in "${!cur[@]}"; do
 	[ -n "${old[$p]-}" ] || [ -z "${shipped["${cur[$p]} ${p#*/skills/}"]-}" ] || old[$p]=${cur[$p]}
 done
 
-# A skill folder this install no longer writes to (the skill skipped,
-# dropped by Maestro, or its harness gone) that the team changed is
+# A skill folder this install no longer writes to (the skill dropped by
+# Maestro, or its harness gone) that the team changed is
 # theirs now: it stays as it is and leaves the record. One they didn't
 # change goes.
 declare -A theirs=()
@@ -555,7 +548,7 @@ done
 for p in "${plan[@]}"; do [ -n "${seen[$p]-}" ] || writes+=("$p"); done
 if [ ${#clashes[@]} -gt 0 ]; then
 	printf 'clash: %s\n' "${clashes[@]}" | sort >&2
-	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill the workflow runs on), or replace them with --replace <skill>"
+	die "nothing was written; move the team's changes to a skill named without maestro-, then replace them with --replace <skill>"
 fi
 
 # The store lives in the git common dir, outside the work tree; doctor

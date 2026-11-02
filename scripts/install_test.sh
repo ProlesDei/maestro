@@ -4,8 +4,8 @@
 # apply installs hidden or committed, and a second run changes nothing; an
 # update replaces and removes only what it placed, and leaves a team's
 # file beside them; a team's file in the way, or one changed since
-# install, clashes and changes nothing, until skip: (which
-# keeps it as the team's) or --replace; a folder where a file goes; an
+# install, clashes and changes nothing, until --replace; a dropped skill
+# the team changed stays as theirs; a folder where a file goes; an
 # install by the install.sh before the record is taken over; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
 # a CRLF source or checkout, the record's too, still matches the record, from any
@@ -116,26 +116,6 @@ rm "$r/.claude/skills/maestro-tdd/NOTES.md"
 installed "$r" .claude .agents
 ok check "$r"
 
-# skip: keeps a copy the team changed as theirs, out of the record, and
-# removes one they didn't.
-echo mine >>"$r/.claude/skills/maestro-recall/SKILL.md"
-refuses "clash: .claude/skills/maestro-recall/SKILL.md changed since install" "$r" apply "$r"
-echo "skip: maestro-recall" >>"$r/.maestro/project/install.yaml"
-touch "$r/.agents/skills/maestro-recall/.DS_Store"
-ok apply "$r"
-! grep -q "kept as the team's.*\.agents/skills/maestro-recall" "$tmp/out" || fail "a .DS_Store kept Maestro's copies as the team's"
-says "kept as the team's, out of the record and no longer hidden from git: .claude/skills/maestro-recall"
-[ "$(tail -1 "$r/.claude/skills/maestro-recall/SKILL.md")" = mine ] || fail "skip: changed the team's copy"
-[ ! -e "$r/.agents/skills/maestro-recall/SKILL.md" ] || fail "skip: kept a copy the team didn't change"
-[ -f "$r/.agents/skills/maestro-recall/.DS_Store" ] || fail "skip: removed a file the record doesn't list"
-rm -r "$r/.agents/skills/maestro-recall"
-! grep -q maestro-recall "$r/.git/maestro/installed.list" "$r/.git/info/exclude" || fail "the team's skill is still in the record or hidden"
-ok check "$r"
-sed -i '/^skip:/d' "$r/.maestro/project/install.yaml"
-rm -r "$r/.claude/skills/maestro-recall"
-ok apply "$r"
-installed "$r" .claude .agents
-
 # A file Maestro ships, but at another path, or an empty one, is the
 # team's: it stays where it is, out of the record.
 cp "$m/skills/maestro-swarm/SKILL.md" "$r/.claude/skills/maestro-tdd/swarm.md"
@@ -217,7 +197,11 @@ says "no bot profile ../planner"
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
+# The team changed one copy of the dropped skill: that one stays as
+# theirs, out of the record; the other goes, but a file beside it stays.
 before_exclude=$(cat "$r/.git/info/exclude")
+echo mine >>"$r/.claude/skills/maestro-prune/SKILL.md"
+touch "$r/.agents/skills/maestro-prune/.DS_Store"
 echo "new line" >>"$m/skills/maestro-tdd/SKILL.md"
 echo new >"$m/skills/maestro-recall/extra.md"
 git -C "$m" rm -rq skills/maestro-prune
@@ -228,6 +212,13 @@ sed -i "s/^maestro-sha: .*/maestro-sha: $sha2/" "$r/.maestro/project/install.yam
 if run check "$r"; then fail "check passed with copies from the old pin"; fi
 says "the record is from Maestro $sha, not the pinned $sha2: run apply"
 ok apply "$r"
+says "kept as the team's, out of the record and no longer hidden from git: .claude/skills/maestro-prune"
+! grep -q "kept as the team's.*\.agents/skills/maestro-prune" "$tmp/out" || fail "a .DS_Store kept Maestro's copies as the team's"
+[ "$(tail -1 "$r/.claude/skills/maestro-prune/SKILL.md")" = mine ] || fail "update changed the team's copy of a dropped skill"
+[ ! -e "$r/.agents/skills/maestro-prune/SKILL.md" ] || fail "update kept a dropped skill's copy the team didn't change"
+[ -f "$r/.agents/skills/maestro-prune/.DS_Store" ] || fail "update removed a file the record doesn't list"
+! grep -q maestro-prune "$r/.git/maestro/installed.list" || fail "the team's copy is still in the record"
+rm -r "$r/.claude/skills/maestro-prune" "$r/.agents/skills/maestro-prune"
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 installed "$r" .claude .agents
 [ ! -e "$r/.claude/skills/maestro-prune" ] && [ ! -e "$r/.agents/skills/maestro-prune" ] || fail "update kept a skill Maestro dropped"
@@ -255,16 +246,17 @@ installed "$r10" .claude .agents
 git -C "$r10" status --porcelain --untracked-files=all | grep -q '^?? .claude/skills/maestro-tdd/SKILL.md$' || fail "committed skills are still hidden"
 ok check "$r10"
 
-# A team's skill folder by a Maestro name clashes until skip:.
+# A team's skill folder by a Maestro name clashes, and the team moves it.
 r2=$tmp/own
 repo "$r2" "harnesses: codex" "skills-home: hidden"
 mkdir -p "$r2/.agents/skills/maestro-swarm" "$r2/.agents/skills/review"
 echo mine >"$r2/.agents/skills/maestro-swarm/SKILL.md"
 echo mine >"$r2/.agents/skills/review/SKILL.md"
 refuses "clash: .agents/skills/maestro-swarm/SKILL.md isn't Maestro's" "$r2" apply "$r2"
-echo "skip: maestro-swarm" >>"$r2/.maestro/project/install.yaml"
+says "move the team's changes to a skill named without maestro-"
+[ "$(cat "$r2/.agents/skills/maestro-swarm/SKILL.md")" = mine ] || fail "a refused apply changed the team's skill"
+mv "$r2/.agents/skills/maestro-swarm" "$r2/.agents/skills/swarm"
 ok apply "$r2"
-[ "$(cat "$r2/.agents/skills/maestro-swarm/SKILL.md")" = mine ] || fail "apply changed the team's skill"
 [ "$(cat "$r2/.agents/skills/review/SKILL.md")" = mine ] || fail "apply changed the team's own review skill"
 [ ! -e "$r2/.claude" ] || fail "codex alone wrote .claude/"
 
@@ -344,9 +336,6 @@ git -C "$r3" config --unset core.autocrlf
 sed -i 's|^tickets: .*|tickets: .claude/skills|' "$r3/.maestro/project/install.yaml"
 refuses "is in a folder apply writes to" "$r3" apply "$r3"
 sed -i 's|^tickets: .*|tickets: our tickets|' "$r3/.maestro/project/install.yaml"
-echo "skip: maestro-create-ticket" >>"$r3/.maestro/project/install.yaml"
-refuses "skip: maestro-create-ticket is a skill the workflow runs on" "$r3" apply "$r3"
-sed -i '/^skip:/d' "$r3/.maestro/project/install.yaml"
 mkdir "$t/maestro-work"
 refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
 
@@ -369,9 +358,7 @@ done <<'EOF'
 colour: blue|install.yaml:4: unknown key colour
 nonsense|install.yaml:4: want key: value
 skills-home: hidden|install.yaml:4: skills-home twice
-skip: maestro-nope|no skill maestro-nope
-skip: maestro-tdd|skip: maestro-tdd is a skill the workflow runs on
-skip: maestro-code-review|skip: maestro-code-review is a skill the workflow runs on
+skip: maestro-recall|install.yaml:4: skip: is gone: every skill installs
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
 tickets:|tickets wants maestro-ticket or a folder
@@ -381,6 +368,7 @@ for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home w
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
+refuses "no skill maestro-nope in" "$r4" apply --replace maestro-nope "$r4"
 sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r4/.maestro/project/install.yaml"
 refuses "but install.yaml pins 0000000" "$r4" apply "$r4"
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
