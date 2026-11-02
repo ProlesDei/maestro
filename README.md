@@ -124,7 +124,7 @@ What you get:
 
 The same guide updates Maestro to a newer commit and uninstalls it.
 
-The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change that flag in their personas.
+The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change every `--permission-mode` in their personas, on the first run and the resume.
 
 Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as an MCP server, sessions find symbols and callers before they grep, which costs fewer reads. INSTALL.md offers it.
 

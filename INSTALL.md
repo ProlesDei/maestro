@@ -64,7 +64,7 @@ Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses th
 
 Ask about each:
 
-- **Session limits.** The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change that flag in the engineers' blocks in `.maestro/bots/`, for example to `acceptEdits`.
+- **Session limits.** The engineer bots run Claude Code with `--permission-mode bypassPermissions`. To limit them, change every `--permission-mode` in the engineers' blocks (the first run and the resume) in `.maestro/bots/`, for example to `acceptEdits`.
 - **Code graph.** The codebase-memory-mcp MCP server lets sessions find symbols and callers before they grep. It's a third-party tool: read its install steps before you run any, and add it only with the person's yes.
 
 ## 8. Set up the bots
