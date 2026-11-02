@@ -883,6 +883,9 @@ func pruneBackups(dir string, keep int, store string) ([]string, error) {
 			continue
 		}
 		info, err := e.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // another backup pruned it first
+		}
 		if err != nil {
 			return pruned, err
 		}

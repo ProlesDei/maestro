@@ -91,3 +91,26 @@ func TestBackupSamePathRace(t *testing.T) {
 		}
 	}
 }
+
+// A crashed backup leaves only path.partial, never a file at path that
+// looks whole, and that leftover blocks the name until someone removes it.
+func TestBackupPartialLeftover(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newStore(t)
+	p := filepath.Join(t.TempDir(), "b.db")
+	if err := os.WriteFile(p+".partial", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, s.Backup(ctx, p), ticket.ErrInvalid)
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatalf("a failed backup left %s: %v", p, err)
+	}
+	os.Remove(p + ".partial")
+	if err := s.Backup(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p + ".partial"); !os.IsNotExist(err) {
+		t.Fatalf("a backup left its .partial file: %v", err)
+	}
+	wantErr(t, s.Backup(ctx, p), ticket.ErrInvalid)
+}
