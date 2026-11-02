@@ -5,7 +5,7 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 ## Phase A: Frame
 
 1. Take the goal from the request. Given a ticket id, run `maestro-ticket get <id> --json` and take the goal from its title and body. The store can't edit a title or body, so a rewrite is a split into one ticket. If its status isn't `backlog`, `todo`, `blocked`, or `in_progress` with a `Kickback:` as its latest comment (sent back to split), stop and say why.
-2. Given an id, claim it before you plan, so no engineer or other planner takes it: pick a holder once, `planner/<id>-<6 random letters>`, run `maestro-ticket claim <id> --holder <holder> --ttl 1h --json`, and keep `claim.token`. On `waiting_on_deps`, take it off the queue with `maestro-ticket transition <id> --from todo --to backlog --expect-version <version>`, then claim again. On `claimed` or a version conflict, stop and name the holder. A draft keeps the claim for the bot's answer; on resume, claim again if it `expired`. If you give up, run `maestro-ticket release <id> --holder <holder> --token <token>`, and move it back to `todo` if you moved it.
+2. Given an id, claim it before you plan, so no engineer or other planner takes it: pick a holder once, `planner/<id>-<6 random letters>`, run `maestro-ticket claim <id> --holder <holder> --ttl 1h --json`, and keep `claim.token`. On `waiting_on_deps`, take it off the queue with `maestro-ticket transition <id> --from todo --to backlog --expect-version <version>`, then claim again. On `claimed` or a version conflict, stop and name the holder. On `area_busy`, or `waiting_on_deps` outside `todo`, stop and say so; a later look tries again. A draft keeps the claim for the bot's answer; on resume, claim again if it `expired`. If you give up, run `maestro-ticket release <id> --holder <holder> --token <token>`, and move it back to `todo` if you moved it.
 3. Write a spec of a page or less: the problem and who has it, the outcome that means done (something a command or the running app shows), scope and non-goals, and risks. If you can't state the outcome, ask for it and stop.
 4. Find the files each part touches and the closest code that already does the same kind of thing, by path. Check each path you name exists.
 5. Read the open board without the bodies: `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,status,areas,depends_on}'`. A ticket that already covers a piece becomes a dep, not a new ticket.
@@ -37,6 +37,7 @@ Skip this phase unless you split or rewrote a ticket.
    ```
 
 2. List again and move any dependent another session added in the meantime.
+3. If the old ticket has an open PR, close it with a comment naming the new tickets.
 
 ## Reply
 

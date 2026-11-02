@@ -25,7 +25,7 @@ Open a todo list with one item per phase below.
 
 ## Phase B: Gather
 
-1. **Ticket.** From `maestro-ticket get <id> --json`: each acceptance criterion word for word, `areas`, `depends_on` (each must be `done`, or NO-GO), the latest `Handoff:` note with its `author-family:` line, and every `Kickback:` comment.
+1. **Ticket.** From `maestro-ticket get <id> --json`: each acceptance criterion word for word, `areas`, the latest `Handoff:` note with its `author-family:` line, and every `Kickback:` comment.
 2. **Diff from the merge base,** never the moving tip: `B=$(git merge-base origin/<main> $H)`, `git diff --stat $B $H`, `git log --oneline $B..$H`. Make `C=$(mktemp -d)` and write the diff there, unprinted: `git diff $B $H > $C/diff.patch`. Check it merges: `git merge-tree --write-tree origin/<main> $H`; a conflict is NO-GO.
 3. **Blast radius.** For each changed symbol, find callers and siblings (`git grep`, or a code graph). List every reader and writer of each field or state it touches.
 4. **Earlier feedback.** `gh pr view <n> --comments`, the inline comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments --paginate --jq '.[]|{id,path,line,user:.user.login,body}'`), each `Kickback:` comment and the latest `QA:` comment. Each item must be fixed or refuted with evidence. Rerun `QA: fail` items in pass 1; a `QA:` comment at a sha other than `H` is stale.
@@ -58,13 +58,13 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; deps `done`; you would ship it to production yourself.
+**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
-- the ticket already has two `Kickback:` comments and every surviving blocker and major was raised before, and `--drop` names none of them. List each with the author's answer and your evidence.
+- the ticket already has `Kickback:` comments at two different shas and every surviving blocker and major was raised before, and `--drop` names none of them. List each with the author's answer and your evidence.
 
-Never escalate twice at one `H`. If the latest comment is an `Answer:` to your `Escalation: review at <H>`, give GO or NO-GO; an answer that says no, or leaves a finding standing, is a blocker.
+Never escalate twice at one `H`. If the latest comment is an `Answer:` to your `Escalation: review at <H>`, give GO or NO-GO. An answer that says no, or leaves a finding standing, is a blocker, and so is a change that needs a person's yes without `--approved <H>`.
 
 Otherwise **NO-GO**. In report-only mode, stop here.
 
