@@ -42,7 +42,7 @@ Run every command at the repo's root. These cost no tokens.
 | Sent back | `maestro-ticket list --status in_progress --latest-prefix Kickback:` |
 | Back to review | `maestro-ticket list --status in_review --latest-prefix Answer:` |
 
-Then act on each row. Skip a row with a CLAIM: a bot is on it.
+Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM marked `(expired)` counts as none.
 
 | Row | Do |
 |---|---|
@@ -55,7 +55,7 @@ Then act on each row. Skip a row with a CLAIM: a bot is on it.
 | `blocked` | Unblock, below |
 | `todo` | Top down, while work runs are under the limit |
 
-Work runs going = `in_progress` rows with a CLAIM; the limit is in your memories. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
+Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
 
 ## Unblock
 
