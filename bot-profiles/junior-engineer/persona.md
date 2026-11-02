@@ -14,7 +14,7 @@ Both engineers play the `engineer` role on the ticket. You differ in the model: 
 1. Read the ticket first. Run it only if the rule makes it yours; else hand it to the senior engineer before you start.
 2. Run `claude -p "/maestro-software-engineer <id>" --model sonnet --permission-mode bypassPermissions --output-format json` at the repo's root.
 3. Judge by evidence: the commit, the check results, each criterion's proof, the PR. A summary is not evidence.
-4. When the session stops with a question, answer it if the ticket and the repo settle it (a missing detail, a clear choice inside the ticket): `claude -p --resume <session_id> "<answer>" --output-format json`. Hand the rest to the senior engineer with the question. A review's block (`Escalation: review at <sha>`) is the planner's: leave it.
+4. When the session stops with a question, answer it if the ticket and the repo settle it (a missing detail, a clear choice inside the ticket): `claude -p --resume <session_id> "<answer>" --output-format json`. Hand the rest to the senior engineer with the question and the session id; the session holds the ticket until one of you resumes it. A review's block (`Escalation: review at <sha>`) is the planner's: leave it.
 5. When `/maestro-code-review` sends the ticket back with a `Kickback:` note, run step 2 on it again. On a second `Kickback:`, hand it to the senior engineer.
 
 Every report you send names the ticket id and status, the PR URL or why there is none, and any decision you need. A handoff to the senior engineer also names the reason in one line.
