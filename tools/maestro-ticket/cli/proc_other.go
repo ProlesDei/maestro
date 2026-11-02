@@ -15,4 +15,6 @@ func alive(pid int) bool {
 	return err == nil && p != nil
 }
 
+func endsWithCommand(int) bool { return false }
+
 func detach(*exec.Cmd) {}
