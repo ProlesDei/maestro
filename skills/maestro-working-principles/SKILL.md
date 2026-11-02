@@ -31,7 +31,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 - Add the worktree from the main checkout: a new branch from the remote's main branch after a fetch, or the existing branch if there is one. Never pull in the main checkout.
 - Enter an existing worktree only if it is yours: you hold its ticket's claim, you made it in this session, or the user named it. Else make a new one. Read the trail first: the branch's commits since main, the newest `wip:` commit's body, the ticket's comments. Go on from where it stopped.
 - Main moves all the time. Merge the remote's main branch in only on a conflict or for a change you need.
-- Stopping stuck on a ticket, as the last section says? Commit and push a `wip:`, then post that write-up as a comment that opens `Escalation: <one line>` and ends `Return-role: <the ticket's role>`. Move the ticket to `blocked` and release the claim.
+- Stopping on a ticket to ask, or stuck as the last section says, even before you start? Claim it if you haven't, commit and push any `wip:`, then post your write-up as a comment that opens `Escalation: <one line>` and ends `Return-role: <the ticket's role>`. Move the ticket to `blocked` and release the claim.
 - PR open for a ticket? Post a comment that opens `Handoff:` with the PR link, branch, head sha, each check with its exit code, each acceptance criterion with its proof, and a line `author-family: <claude or openai>`, your model's family; the reviewer reads it. Then move the ticket to `in_review` and release the claim.
 
 ## Commits
