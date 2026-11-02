@@ -12,8 +12,6 @@
 #   harnesses: claude codex grok    claude reads .claude/skills, codex and
 #                                   grok .agents/skills (required)
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
-#   tickets: maestro-ticket|<dir>   <dir>, from the repo's top, holds the
-#                                   team's maestro-create-ticket/
 #   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
 #
 # apply copies each skill in skills/ beside this script into every harness
@@ -84,7 +82,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha= harnesses=() home= tickets=maestro-ticket bots=()
+sha= harnesses=() home= bots=()
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -99,7 +97,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 	harnesses) read -ra harnesses <<<"$val" ;;
 	skills-home) home=$val ;;
 	skip) die "install.yaml:$n: skip: is gone: every skill installs; remove the line" ;;
-	tickets) tickets=$val ;;
+	# Older installs wrote the default; any other tracker is gone.
+	tickets) [ "$val" = maestro-ticket ] || die "install.yaml:$n: tickets: Maestro's bots run only on maestro-ticket; remove the line" ;;
 	bots) read -ra bots <<<"$val" ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
 	esac
@@ -125,7 +124,6 @@ done
 for b in ${bots[@]+"${bots[@]}"}; do
 	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$root/bot-profiles/$b/persona.md" ]; } || die "install.yaml: no bot profile $b"
 done
-[ -n "$tickets" ] || die "install.yaml: tickets wants maestro-ticket or a folder"
 
 # skill <dir> <label>: die unless <dir> is a skill folder. The name goes
 # into paths and exclude lines, so no glob or space characters.
@@ -144,17 +142,6 @@ done
 for s in ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
 done
-if [ "$tickets" != maestro-ticket ]; then
-	[[ $tickets == /* ]] || tickets=$target/$tickets
-	[ -d "$tickets" ] || die "install.yaml: tickets $tickets is not a directory"
-	tickets=$(cd -- "$tickets" && pwd -P)
-	case $tickets/ in "$target"/.claude/* | "$target"/.agents/*) die "install.yaml: tickets $tickets is in a folder apply writes to; keep it elsewhere" ;; esac
-	for entry in "$tickets"/*; do
-		[ "$(basename "$entry")" = maestro-create-ticket ] || die "tickets: $tickets may hold only maestro-create-ticket/, not $(basename "$entry")"
-	done
-	skill "$tickets/maestro-create-ticket" "tickets: $tickets/maestro-create-ticket"
-	from[maestro-create-ticket]=$tickets/maestro-create-ticket
-fi
 
 records=("$target/.maestro/project/installed.list" "$common/maestro/installed.list")
 if [ "$home" = committed ]; then record=${records[0]} other=${records[1]}; else record=${records[1]} other=${records[0]}; fi
@@ -313,9 +300,7 @@ if [ "$cmd" = check ]; then
 	done
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		warn "Maestro at $root is a shallow clone: check can't tell if the tools are older than the pin; fetch its full history"
-	tools=()
-	[ "$tickets" != maestro-ticket ] || tools+=(maestro-ticket)
-	for b in ${tools[@]+"${tools[@]}"}; do
+	for b in maestro-ticket; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
 		command -v go >/dev/null || continue
 		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
@@ -553,10 +538,8 @@ fi
 
 # The store lives in the git common dir, outside the work tree; doctor
 # creates it and checks the repo can hold one, before anything is written.
-if [ "$tickets" = maestro-ticket ]; then
-	command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
-	(cd "$target" && maestro-ticket doctor >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
-fi
+command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
+(cd "$target" && maestro-ticket doctor >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
 
 # Hide the old and new skills before the first copy, so a run that stops
 # partway shows nothing in git status. Each file lands whole (a temp file,
@@ -607,7 +590,7 @@ if [ "$home" = hidden ]; then
 fi
 rm -f -- "$other"
 
-[ "$tickets" = maestro-ticket ] && echo "ticket store ready" || echo "ticket method from $tickets"
+echo "ticket store ready"
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.

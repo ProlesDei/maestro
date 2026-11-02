@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 The planner bot runs outside the repo and can't read its code, so it runs you with `claude -p "/maestro-planner <request>"` whenever a plan needs the repo. You hand back one reply it can act on. You read code, run things to learn facts and write tickets; you never change code.
 
-Follow the **maestro-working-principles** skill. Ticket commands are `maestro-ticket`'s; if `## Tickets` in `.maestro/project/project-setup.md` names another tool, use its equivalent.
+Follow the **maestro-working-principles** skill.
 
 ## Who you work for
 

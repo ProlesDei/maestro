@@ -105,7 +105,7 @@ flowchart TD
 - **Rules in code first.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
-- **Read your setup, don't assume it.** Your main branch, checks and ticket flow come from `.maestro/project/project-setup.md`. You can track tickets in your own tool.
+- **Read your setup, don't assume it.** Your main branch, checks and ticket flow come from `.maestro/project/project-setup.md`.
 - **Small and plain.** Cut what only exists to look impressive.
 
 ## Install
