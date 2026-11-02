@@ -327,3 +327,32 @@ func TestOnlyWorkClaimsUseAreasAndDeps(t *testing.T) {
 		t.Fatalf("work beside review and escalation claims: %v", err)
 	}
 }
+
+// A move without a claim can't skip the deps a claim checks: a ticket
+// neither starts from todo nor reaches done before its deps are done.
+func TestUnclaimedMovesWaitOnDeps(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	base := mustCreate(t, s, "base", "", 2)
+	top := create(t, s, ticket.CreateRequest{Title: "top", DependsOn: []ticket.ID{base.ID}})
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusInProgress})
+	wantErr(t, err, ticket.ErrWaitingOnDeps)
+
+	// A dep added while the ticket is in review still holds back done, but
+	// not a kickback.
+	shipToDone(t, s, base.ID)
+	move(t, s, top.ID, ticket.StatusInProgress)
+	move(t, s, top.ID, ticket.StatusInReview)
+	late := mustCreate(t, s, "late", "", 2)
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: top.ID, AddDeps: []ticket.ID{late.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
+	wantErr(t, err, ticket.ErrWaitingOnDeps)
+	move(t, s, top.ID, ticket.StatusInProgress)
+	move(t, s, top.ID, ticket.StatusInReview)
+	shipToDone(t, s, late.ID)
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+		t.Fatalf("done once deps are done: %v", err)
+	}
+}

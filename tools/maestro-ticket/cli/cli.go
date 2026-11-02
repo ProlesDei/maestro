@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -469,6 +470,9 @@ func runList(ctx context.Context, c *call) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
+		if err := ticket.ValidateRole(*role); err != nil {
+			return err
+		}
 		f := ticket.ListFilter{Role: *role, Holder: *holder, Limit: *limit}
 		byComment := *latest != "" || *notLatest != ""
 		if byComment {
@@ -889,7 +893,8 @@ func pruneBackups(dir string, keep int, store string) ([]string, error) {
 	}
 	sort.Strings(names)
 	for len(names) > keep {
-		if err := os.Remove(names[0]); err != nil {
+		// Another backup may have pruned it first.
+		if err := os.Remove(names[0]); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return pruned, err
 		}
 		pruned = append(pruned, names[0])

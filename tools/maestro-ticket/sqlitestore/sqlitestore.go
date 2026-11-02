@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -1179,6 +1180,16 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 			return t, err
 		}
 	}
+	// Claimed or not, nothing starts work or finishes before its deps.
+	if req.To == ticket.StatusDone || (t.LiveClaim() == nil && t.Status == ticket.StatusTodo && req.To == ticket.StatusInProgress) {
+		pending, err := pendingDeps(ctx, tx, t.ID)
+		if err != nil {
+			return t, err
+		}
+		if len(pending) > 0 {
+			return t, fmt.Errorf("%w: %s waits on %v, not done yet", ticket.ErrWaitingOnDeps, t.ID, pending)
+		}
+	}
 	role := t.Role
 	if req.Role != "" {
 		role = req.Role
@@ -1449,12 +1460,20 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(abs); err == nil {
-		return fmt.Errorf("%w: backup %s already exists", ticket.ErrInvalid, abs)
-	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return fmt.Errorf("create backup dir: %w", err)
 	}
+	// Take the name first: a second backup to the same path fails here,
+	// before it writes, so it never removes the first one's file. VACUUM
+	// INTO accepts an empty file.
+	f, err := os.OpenFile(abs, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("%w: backup %s already exists", ticket.ErrInvalid, abs)
+	}
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	f.Close()
 	err = retryBusy(ctx, func() error {
 		_, err := s.r.ExecContext(ctx, "VACUUM INTO ?", abs)
 		return err

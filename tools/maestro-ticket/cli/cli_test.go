@@ -1032,4 +1032,8 @@ func TestListLatestPrefix(t *testing.T) {
 	if code, out, _ := h.run("", "list", "--latest-prefix", "Handoff:"); code != 0 || !strings.Contains(out, "T-2") || strings.Contains(out, "T-1 ") {
 		t.Fatalf("human list: exit %d %q", code, out)
 	}
+	// An unknown role is a typo, not an empty board.
+	if code, _, _ := h.run("", "list", "--role", "nonsense"); code != 2 {
+		t.Fatalf("list --role nonsense: exit %d, want 2", code)
+	}
 }
