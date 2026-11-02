@@ -144,11 +144,11 @@ done
 for s in ${skip[@]+"${skip[@]}"} ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
 done
-# The skills the engineers' sessions load: never skipped, and in every
-# harness folder.
-core=$'maestro-prove-complete\nmaestro-software-engineer\nmaestro-tdd\nmaestro-working-principles'
+# The skills the workflow runs on, from ticket to merge: the bots' and the
+# engineers'. Never skipped, and in every harness folder.
+core=$'maestro-chief-of-staff\nmaestro-code-review\nmaestro-create-ticket\nmaestro-planner\nmaestro-prove-complete\nmaestro-qa-lead\nmaestro-software-engineer\nmaestro-tdd\nmaestro-working-principles'
 for s in ${skip[@]+"${skip[@]}"}; do
-	! grep -qxF -- "$s" <<<"$core" || die "install.yaml: skip: $s is a skill the engineers load"
+	! grep -qxF -- "$s" <<<"$core" || die "install.yaml: skip: $s is a skill the workflow runs on"
 	unset "from[$s]"
 done
 if [ "$tickets" != maestro-ticket ]; then
@@ -160,7 +160,6 @@ if [ "$tickets" != maestro-ticket ]; then
 		[ "$(basename "$entry")" = maestro-create-ticket ] || die "tickets: $tickets may hold only maestro-create-ticket/, not $(basename "$entry")"
 	done
 	skill "$tickets/maestro-create-ticket" "tickets: $tickets/maestro-create-ticket"
-	[ -n "${from[maestro-create-ticket]-}" ] || die "install.yaml: tickets names the team's maestro-create-ticket, so don't skip it"
 	from[maestro-create-ticket]=$tickets/maestro-create-ticket
 fi
 
@@ -301,7 +300,7 @@ if [ "$cmd" = check ]; then
 	fi
 	for n in $core; do
 		for d in "${dirs[@]}"; do
-			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: the engineers load it"
+			[ -f "$target/$d/skills/$n/SKILL.md" ] || problem "$d/skills/$n is missing: the workflow runs on it"
 		done
 	done
 	# Hidden skills must be ignored, committed ones not. A tracked folder
@@ -556,7 +555,7 @@ done
 for p in "${plan[@]}"; do [ -n "${seen[$p]-}" ] || writes+=("$p"); done
 if [ ${#clashes[@]} -gt 0 ]; then
 	printf 'clash: %s\n' "${clashes[@]}" | sort >&2
-	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill the engineers load), or replace them with --replace <skill>"
+	die "nothing was written; keep the team's files with skip: <skill> in install.yaml (not for a skill the workflow runs on), or replace them with --replace <skill>"
 fi
 
 # The store lives in the git common dir, outside the work tree; doctor

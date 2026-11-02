@@ -38,7 +38,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated. | The ones on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
-| `skip` | Skills the team doesn't want. Never skip one the engineers load: `maestro-working-principles`, `maestro-software-engineer`, `maestro-tdd`, `maestro-prove-complete`. | none |
+| `skip` | Skills the team doesn't want. Never skip one the workflow runs on: `maestro-chief-of-staff`, `maestro-planner`, `maestro-create-ticket`, `maestro-qa-lead`, `maestro-code-review`, `maestro-working-principles`, `maestro-software-engineer`, `maestro-tdd`, `maestro-prove-complete`. | none |
 | `tickets` | `maestro-ticket`, or the team's own tracker. For their own, the value is a folder in their repo, from its top, that holds only `maestro-create-ticket/` with its `SKILL.md`: how to write a ticket in their tool. Keep that name; the bots call it. Write it with them if they have none. | `maestro-ticket` |
 | `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
 
@@ -46,7 +46,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 
 Run `.maestro/src/scripts/install.sh apply <repo>`. It copies the skills, writes `.maestro/project/project-setup.md` once, creates the ticket store, hides `.maestro/src/`, `.maestro/worktrees/` and `.maestro/bots/` from git, and lists what it placed in its record.
 
-If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). A skill the engineers load can't be skipped: offer to replace it and move their changes into a skill of their own, named without `maestro-`. Never pass `--replace` without their yes.
+If it prints `clash:` lines, nothing was written. Take each skill named to the person: keep their copy (add the skill to `skip:`: a copy they changed becomes theirs and leaves the record), or replace it (run again with `--replace <skill>`). A skill the workflow runs on can't be skipped: offer to replace it and move their changes into a skill of their own, named without `maestro-`. Never pass `--replace` without their yes.
 
 ## 6. Fill in project-setup.md
 

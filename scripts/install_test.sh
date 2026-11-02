@@ -258,13 +258,13 @@ ok check "$r10"
 # A team's skill folder by a Maestro name clashes until skip:.
 r2=$tmp/own
 repo "$r2" "harnesses: codex" "skills-home: hidden"
-mkdir -p "$r2/.agents/skills/maestro-code-review" "$r2/.agents/skills/review"
-echo mine >"$r2/.agents/skills/maestro-code-review/SKILL.md"
+mkdir -p "$r2/.agents/skills/maestro-swarm" "$r2/.agents/skills/review"
+echo mine >"$r2/.agents/skills/maestro-swarm/SKILL.md"
 echo mine >"$r2/.agents/skills/review/SKILL.md"
-refuses "clash: .agents/skills/maestro-code-review/SKILL.md isn't Maestro's" "$r2" apply "$r2"
-echo "skip: maestro-code-review" >>"$r2/.maestro/project/install.yaml"
+refuses "clash: .agents/skills/maestro-swarm/SKILL.md isn't Maestro's" "$r2" apply "$r2"
+echo "skip: maestro-swarm" >>"$r2/.maestro/project/install.yaml"
 ok apply "$r2"
-[ "$(cat "$r2/.agents/skills/maestro-code-review/SKILL.md")" = mine ] || fail "apply changed the team's skill"
+[ "$(cat "$r2/.agents/skills/maestro-swarm/SKILL.md")" = mine ] || fail "apply changed the team's skill"
 [ "$(cat "$r2/.agents/skills/review/SKILL.md")" = mine ] || fail "apply changed the team's own review skill"
 [ ! -e "$r2/.claude" ] || fail "codex alone wrote .claude/"
 
@@ -345,7 +345,7 @@ sed -i 's|^tickets: .*|tickets: .claude/skills|' "$r3/.maestro/project/install.y
 refuses "is in a folder apply writes to" "$r3" apply "$r3"
 sed -i 's|^tickets: .*|tickets: our tickets|' "$r3/.maestro/project/install.yaml"
 echo "skip: maestro-create-ticket" >>"$r3/.maestro/project/install.yaml"
-refuses "tickets names the team's maestro-create-ticket, so don't skip it" "$r3" apply "$r3"
+refuses "skip: maestro-create-ticket is a skill the workflow runs on" "$r3" apply "$r3"
 sed -i '/^skip:/d' "$r3/.maestro/project/install.yaml"
 mkdir "$t/maestro-work"
 refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
@@ -370,7 +370,8 @@ colour: blue|install.yaml:4: unknown key colour
 nonsense|install.yaml:4: want key: value
 skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-nope|no skill maestro-nope
-skip: maestro-tdd|skip: maestro-tdd is a skill the engineers load
+skip: maestro-tdd|skip: maestro-tdd is a skill the workflow runs on
+skip: maestro-code-review|skip: maestro-code-review is a skill the workflow runs on
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
 tickets:|tickets wants maestro-ticket or a folder
