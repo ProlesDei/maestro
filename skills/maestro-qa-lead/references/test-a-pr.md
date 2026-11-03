@@ -4,10 +4,12 @@ You are the last check before production. Review read the diff; you run what shi
 
 ## Phase A: Resolve
 
-1. Find the ticket, branch and PR from the input. Ticket `T-12` is branch `maestro/T-12`. From the PR, read its URL, state, head sha (`H`), changed files and whether it comes from a fork.
-2. Refuse, with the reason, if the PR isn't open, comes from a fork (never run a fork's code), or `maestro-ticket get <id> --json` shows a status other than `in_review` or a live claim (name the holder). A PR with no ticket: `<id>` is `pr-<n>`, its body is the spec, and you invent no criteria.
-3. If the ticket's latest `QA:` comment is already at `H`, give it and stop, unless the ask says to test again.
-4. Name this run `qa-<id>-<6 random letters>`; call it `<run>`. No other session shares it. Fetch, add a detached worktree at `H` in `.maestro/worktrees/<run>`, and check its HEAD is `H`. Evidence goes in `maestro/evidence/<id>/<run>/` in the repo's shared git folder, never in the worktree.
+1. Find the ticket, branch and PR from the input. Ticket `T-12` is branch `maestro/T-12`, and its PR is the newest on that branch, open or not. From the PR, read its URL, state, head sha (`H`), merge commit, changed files and whether it comes from a fork. Name this run `qa-<id>-<6 random letters>`; call it `<run>`. No other session shares it.
+2. Refuse, with the reason and writing nothing, if `maestro-ticket get <id> --json` shows a status other than `in_review` or a live claim (name the holder): both clear without you. A PR with no ticket: `<id>` is `pr-<n>`, its body is the spec, and you invent no criteria. Else end every way out of this job with a comment that is the ticket's latest, so the planner never sends QA again for nothing:
+   - The PR merged, and the branch on the remote is gone or still at `H`: test nothing. Post `Escalation: QA at <H>: PR <url> merged as <merge commit>` with a last line `Return-role: <the ticket's role>`, keyed `<run>`, then move the ticket from `in_review` to `blocked`, keyed `<run>-move`. The planner closes it. With no ticket, say so and post nothing.
+   - No PR, a PR closed unmerged, a merged PR the branch has moved past, or one from a fork (never run a fork's code): test nothing. Post `QA: fail at <H> (PR <url>): not tested: <why>` as Phase E step 4 says, with `none` for a missing PR or sha. Review sends it back.
+3. If the ticket's latest `QA:` comment is a test at `H`, not a `not tested:` one, give its verdict and stop, unless the ask says to test again. If another comment came after it and the latest isn't an `Answer:` (the planner hands those on), first post it again, keyed `<run>`, so review sees it next.
+4. Fetch, add a detached worktree at `H` in `.maestro/worktrees/<run>`, and check its HEAD is `H`. Evidence goes in `maestro/evidence/<id>/<run>/` in the repo's shared git folder, never in the worktree.
 5. Read `## QA` and `## Run` in `.maestro/project/project-setup.md`, else the README and build files, for how production builds and starts the app and which user flows must never break. If nothing says how it runs, stop and escalate (below) with what's missing.
 
 ## Phase B: Plan by risk

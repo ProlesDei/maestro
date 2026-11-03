@@ -172,7 +172,8 @@ func ParseType(s string) (Type, error) {
 // lease_expired.
 const SystemActor = "maestro-ticket"
 
-// Roles. Only the reviewer sets ship tickets done, after it merges the PR.
+// Roles. Only the reviewer sets ship tickets done, after it merges the PR, or
+// the planner when the PR merged outside a review.
 // The QA lead records results as a comment starting "QA: pass" or
 // "QA: fail", not as a status.
 const (
@@ -315,17 +316,18 @@ func (t Ticket) CanMove(to Status) bool {
 }
 
 // CheckGate decides whether actor, acting as actorRole, may move t to
-// status to. Only the reviewer sets a ship ticket done; only its owner sets
-// a scout ticket done. Run it after CanMove.
+// status to. Only the reviewer sets a ship ticket done, or the planner once
+// its PR merged outside a review; only its owner sets a scout ticket done.
+// Run it after CanMove.
 func (t Ticket) CheckGate(to Status, actor, actorRole string) error {
 	if to != StatusDone {
 		return nil
 	}
 	switch t.Type {
 	case TypeShip:
-		if actorRole != RoleReviewer {
-			return fmt.Errorf("%w: only %s sets ship tickets done (actor role %q; pass --actor-role)",
-				ErrForbidden, RoleReviewer, actorRole)
+		if actorRole != RoleReviewer && actorRole != RolePlanner {
+			return fmt.Errorf("%w: only %s or %s sets ship tickets done (actor role %q; pass --actor-role)",
+				ErrForbidden, RoleReviewer, RolePlanner, actorRole)
 		}
 	case TypeScout:
 		if t.Owner == "" || t.Owner == "unknown" || actor != t.Owner {
