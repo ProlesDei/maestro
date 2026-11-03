@@ -28,7 +28,7 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 Skip this phase unless you split or rewrote a ticket.
 
-1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. A ticket whose deps still name a cancelled ticket can never be claimed, so move each onto the new tickets first, then cancel with your claim:
+1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. The store won't cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first, then cancel with your claim:
 
    ```sh
    maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>
@@ -36,7 +36,7 @@ Skip this phase unless you split or rewrote a ticket.
    maestro-ticket transition <id> --to cancelled --holder <holder> --token <token>
    ```
 
-2. List again and move any dependent another session added in the meantime.
+2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again.
 3. If the old ticket has an open PR, close it with a comment naming the new tickets.
 
 ## Reply

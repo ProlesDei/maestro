@@ -17,6 +17,7 @@ var (
 	ErrNoWork              = errors.New("no work available")
 	ErrWaitingOnDeps       = errors.New("waiting on dependencies")
 	ErrAreaBusy            = errors.New("code area busy")
+	ErrHasDependents       = errors.New("open tickets depend on it")
 )
 
 // Exit codes shared by the CLI and documented for bots.
@@ -46,6 +47,7 @@ var errorKinds = []struct {
 	{ErrNoWork, "no_work", ExitNoWork},
 	{ErrWaitingOnDeps, "waiting_on_deps", ExitConflict},
 	{ErrAreaBusy, "area_busy", ExitConflict},
+	{ErrHasDependents, "has_dependents", ExitConflict},
 }
 
 // Classify maps an error to a stable machine code and process exit code.

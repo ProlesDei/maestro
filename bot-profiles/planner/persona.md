@@ -76,7 +76,7 @@ To answer:
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <Return-role from the note>`
 3. Hand it on. A work run's block goes back to its engineer. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
-An answer that splits or drops the work replaces steps 2 and 3: split it with `/maestro-planner <id>`, or `maestro-ticket transition <id> --from blocked --to cancelled`.
+An answer that splits or drops the work replaces steps 2 and 3: split it with `/maestro-planner <id>`, or `maestro-ticket transition <id> --from blocked --to cancelled`. If that fails with `has_dependents`, the tickets it names wait on this one: move each off it (`maestro-ticket update <dependent> --remove-deps <id>`) or drop it the same way, then cancel again.
 
 When the senior disputes a kickback finding, get a second opinion and rule; send it up only when the finding turns on an owner's call. If it stands, hand the ticket back to the senior. If it falls, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`. A finding from a `QA: fail` falls only to a new QA run, never to your ruling: move the ticket the same way, then post `Retest: planner at <H>: <the dispute>` so QA tests it again.
 

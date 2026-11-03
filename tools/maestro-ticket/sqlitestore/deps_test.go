@@ -52,7 +52,7 @@ func TestClaimWaitsOnDeps(t *testing.T) {
 	s.Release(ctx, ticket.ReleaseRequest{ID: base.ID, Holder: "jse/a", Token: got.Claim.Token})
 
 	shipToDone(t, s, base.ID)
-	move(t, s, other.ID, ticket.StatusCancelled) // cancelled is not done
+	move(t, s, other.ID, ticket.StatusBlocked) // only done counts
 	got, err = s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/a"})
 	wantErr(t, err, ticket.ErrNoWork)
 	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: top.ID, Holder: "jse/a"})
@@ -426,4 +426,42 @@ func TestStartWaitsOnDeps(t *testing.T) {
 	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
 		t.Fatalf("done with a dep not done: %v", err)
 	}
+}
+
+// A cancelled dependency never finishes, so its dependents would wait
+// forever: the store refuses to cancel a ticket open tickets depend on,
+// and to add a dependency on a cancelled one.
+func TestNoOpenTicketWaitsOnCancelled(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	base := mustCreate(t, s, "base", "", 2)
+	dep := create(t, s, ticket.CreateRequest{Title: "dependent", DependsOn: []ticket.ID{base.ID}})
+
+	move(t, s, base.ID, ticket.StatusBlocked)
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: base.ID, To: ticket.StatusCancelled})
+	wantErr(t, err, ticket.ErrHasDependents)
+
+	// Once the dependent lets go, the cancel goes through.
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: dep.ID, RemoveDeps: []ticket.ID{base.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	move(t, s, base.ID, ticket.StatusCancelled)
+
+	_, err = s.Create(ctx, ticket.CreateRequest{Title: "late", DependsOn: []ticket.ID{base.ID}})
+	wantErr(t, err, ticket.ErrInvalid)
+	_, err = s.Update(ctx, ticket.UpdateRequest{ID: dep.ID, AddDeps: []ticket.ID{base.ID}})
+	wantErr(t, err, ticket.ErrInvalid)
+
+	// A finished dependent doesn't hold a cancel back.
+	other := mustCreate(t, s, "other", "", 2)
+	fin := mustCreate(t, s, "finished", "", 2)
+	move(t, s, fin.ID, ticket.StatusInProgress)
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: fin.ID, AddDeps: []ticket.ID{other.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	move(t, s, fin.ID, ticket.StatusInReview)
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: fin.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+		t.Fatal(err)
+	}
+	move(t, s, other.ID, ticket.StatusCancelled)
 }
