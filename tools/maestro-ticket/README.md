@@ -47,7 +47,7 @@ Statuses and moves live in `ticket/ticket.go` (`workflows`), one table per ticke
 - **ship:** `backlog → todo → in_progress → in_review → done`. Only `--actor-role reviewer` (or `$MAESTRO_TICKET_ROLE=reviewer`) sets done, or `--actor-role planner` when the PR merged outside a review.
 - **scout:** `backlog → todo → in_progress → in_review → done`. Only the ticket's owner (`create --owner`, default the creator) sets done, as `--actor`.
 
-Both allow `in_review → in_progress` (send-back), `in_progress → todo` (escalation) and `todo → backlog`. Any non-terminal status can go to `blocked` or `cancelled`; `blocked` goes back only to the status it came from (`blocked_from`). `claim --next` never hands out `backlog`; claim those by id. A send-back adds one to a ship ticket's `tries`; a scout send-back doesn't.
+Both allow `in_review → in_progress` (send-back), `in_progress → todo` (escalation) and `todo → backlog`. Any non-terminal status can go to `blocked` or `cancelled`; `blocked` goes back only to the status it came from (`blocked_from`). `claim --next` never hands out `backlog`; claim those by id. A send-back adds one to a ship ticket's `tries`; a scout send-back doesn't. `create --split-from <id>` starts the new ticket at that ticket's `tries`, so a split or rewrite keeps the count.
 
 The reviewer needs no claim to close or send back an unclaimed ticket:
 

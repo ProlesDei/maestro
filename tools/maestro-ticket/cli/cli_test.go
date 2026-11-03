@@ -504,6 +504,33 @@ func TestCreateTypeOwnerBacklog(t *testing.T) {
 	}
 }
 
+// A split or rewrite keeps the old ticket's tries, so the send-back count
+// that sends a ticket up can't start over.
+func TestCreateSplitFromKeepsTries(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "old")
+	h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	for i := 0; i < 2; i++ {
+		h.ok(nil, "transition", "T-1", "--to", "in_review")
+		h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	}
+	var n struct{ Tries int }
+	h.ok(&n, "create", "--title", "rewrite", "--split-from", "T-1")
+	if n.Tries != 2 {
+		t.Fatalf("split from a ticket with 2 tries starts at %d", n.Tries)
+	}
+	h.ok(&n, "create", "--title", "fresh")
+	if n.Tries != 0 {
+		t.Fatalf("a ticket split from none starts at %d", n.Tries)
+	}
+	if code := h.fails(3, "create", "--title", "x", "--split-from", "T-99"); code != "not_found" {
+		t.Fatalf("split from a missing ticket code %q", code)
+	}
+	if code := h.fails(2, "create", "--title", "x", "--split-from", "nope"); code != "invalid" {
+		t.Fatalf("bad split-from code %q", code)
+	}
+}
+
 func TestDoneGateFlags(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "ship it")

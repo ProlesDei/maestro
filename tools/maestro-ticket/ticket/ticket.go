@@ -411,22 +411,29 @@ type Event struct {
 // backlog, todo (default) or blocked; a ticket created blocked returns to
 // todo. Owner defaults to the actor.
 type CreateRequest struct {
-	Title          string   `json:"title"`
-	Body           string   `json:"body"`
-	Type           Type     `json:"type"`
-	Role           string   `json:"role"`
-	Priority       *int     `json:"priority,omitempty"`
-	Status         Status   `json:"status"`
-	Owner          string   `json:"owner"`
-	DependsOn      []ID     `json:"depends_on,omitempty"`
-	Areas          []string `json:"areas,omitempty"`
-	Actor          string   `json:"actor"`
-	IdempotencyKey string   `json:"-"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	Type      Type     `json:"type"`
+	Role      string   `json:"role"`
+	Priority  *int     `json:"priority,omitempty"`
+	Status    Status   `json:"status"`
+	Owner     string   `json:"owner"`
+	DependsOn []ID     `json:"depends_on,omitempty"`
+	Areas     []string `json:"areas,omitempty"`
+	// SplitFrom names the ticket this one splits or rewrites. The new
+	// ticket starts with its tries, so a rewrite can't reset the count
+	// that sends repeated send-backs up.
+	SplitFrom      ID     `json:"split_from,omitempty"`
+	Actor          string `json:"actor"`
+	IdempotencyKey string `json:"-"`
 }
 
 // Validate checks the request and fills defaults.
 func (r *CreateRequest) Validate() error {
 	var err error
+	if r.SplitFrom < 0 {
+		return fmt.Errorf("%w: bad ticket id %d", ErrInvalid, r.SplitFrom)
+	}
 	if r.Areas, err = NormalizeAreas(r.Areas); err != nil {
 		return err
 	}

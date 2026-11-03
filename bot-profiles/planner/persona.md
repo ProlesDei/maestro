@@ -53,7 +53,8 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Back to review | Reviewer or QA lead, as Unblock step 3 says |
 | Waiting for review | Reviewer, even on `QA: fail` |
 | Sent back, TRIES 0 or 1 | Same engineer again |
-| Sent back, TRIES 2+ | A junior's ticket: senior, one run. A senior's: split or rewrite it, one more run. Sent back again: chief of staff |
+| Sent back, TRIES 2 | A junior's ticket: senior, one run. A senior's: split or rewrite it; the new tickets keep its tries |
+| Sent back, TRIES 3+ | Chief of staff: three builds of the same work failed |
 | `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first |
 | `blocked`, not sent up | Unblock, below |
 | Sent up | Leave it: the chief of staff has it. Count it in your report |
