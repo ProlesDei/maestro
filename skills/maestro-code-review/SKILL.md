@@ -21,11 +21,11 @@ Open a todo list with one item per phase below.
 2. Turn the input into ticket, branch and PR. Ticket `T-12` is branch `maestro/T-12`. From a branch: `gh pr list --head <branch> --json number`. From a PR: `gh pr view <n> --json number,url,title,body,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository`. Ticket commands below are `maestro-ticket`'s; if `## Tickets` in `.maestro/project/project-setup.md` names another tool, use its equivalent.
 3. Set `<main>` to the line under `## Main branch` in `project-setup.md`, and `H=<headRefOid>`. Every verdict names `H`.
 4. Refuse, with the reason, if the base isn't `<main>`, the PR comes from a fork (never run a fork's code), or `maestro-ticket get <id> --json` shows a live claim (name the holder). Outside report-only, also refuse a draft or closed PR, or a ticket not in `in_review`. A PR with no ticket is not a refusal: its body is the spec, and you invent no criteria.
-5. `git fetch origin`, then `git worktree add --detach .maestro/worktrees/review-<id>-<unix time> $H`; call it `$R`. Never review in the main checkout.
+5. `git fetch origin`, set `S` to the unix time, then `git worktree add --detach .maestro/worktrees/review-<id>-$S $H`; call it `$R`. Never review in the main checkout.
 
 ## Phase B: Gather
 
-1. **Ticket.** From `maestro-ticket get <id> --json`: each acceptance criterion word for word, `areas`, `depends_on` (each must be `done`, or NO-GO), the latest `Handoff:` note with its `author-family:` line, and every `Kickback:` comment.
+1. **Ticket.** From `maestro-ticket get <id> --json`: each acceptance criterion word for word, `areas`, the latest `Handoff:` note with its `author-family:` line, and every `Kickback:` comment.
 2. **Diff from the merge base,** never the moving tip: `B=$(git merge-base origin/<main> $H)`, `git diff --stat $B $H`, `git log --oneline $B..$H`. Make `C=$(mktemp -d)` and write the diff there, unprinted: `git diff $B $H > $C/diff.patch`. Check it merges: `git merge-tree --write-tree origin/<main> $H`; a conflict is NO-GO.
 3. **Blast radius.** For each changed symbol, find callers and siblings (`git grep`, or a code graph). List every reader and writer of each field or state it touches.
 4. **Earlier feedback.** `gh pr view <n> --comments`, the inline comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments --paginate --jq '.[]|{id,path,line,user:.user.login,body}'`), each `Kickback:` comment and the latest `QA:` comment. Each item must be fixed or refuted with evidence. Rerun `QA: fail` items in pass 1; a `QA:` comment at a sha other than `H` is stale.
@@ -58,11 +58,13 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; deps `done`; you would ship it to production yourself.
+**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
-- it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion). If the latest comment is an `Answer:` to your `Escalation: review at <H>` and it says no, NO-GO with that answer as a blocker instead;
-- the ticket already has two `Kickback:` comments and every surviving blocker and major was raised before, and `--drop` names none of them. List each with the author's answer and your evidence.
+- it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
+- the ticket already has `Kickback:` comments at two different shas and every surviving blocker and major was raised before, and `--drop` names none of them. List each with the author's answer and your evidence.
+
+Never escalate twice at one `H`. If the latest comment is an `Answer:` to your `Escalation: review at <H>`, give GO or NO-GO. An answer that says no, or leaves a finding standing, is a blocker, and so is a change that needs a person's yes without `--approved <H>`.
 
 Otherwise **NO-GO**. In report-only mode, stop here.
 
@@ -78,14 +80,14 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    ```
 3. **NO-GO.** Comment first, then move, so the engineer's next run reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
    ```bash
-   maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H <<'EOF'
+   maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H-$S <<'EOF'
    Kickback: <n> blockers, <n> majors at <H>
    - F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...
    EOF
    maestro-ticket transition <id> --to in_progress --from in_review \
-     --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H
+     --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H-$S
    ```
-4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H`. With no ticket, post it with `gh pr comment <n> --body-file -`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
+4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H-$S`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H-$S`. With no ticket, post it with `gh pr comment <n> --body-file -`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
 5. Revert any pass 6 mutation, then `git worktree remove $R` and remove `$C` as **maestro-working-principles** says.
 
 ```
