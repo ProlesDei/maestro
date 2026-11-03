@@ -31,6 +31,10 @@ mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
 mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
 touch "$m/templates/empty" # an empty blob in Maestro's history
+# Filled in, as INSTALL.md step 6 leaves it, so check passes; the real
+# template's placeholder is tested below.
+sed -i 's/^<each check .*>$/- test: `true`/' "$m/templates/project-setup.md"
+grep -qx -- '- test: `true`' "$m/templates/project-setup.md" || fail "the template's ## Checks placeholder moved"
 # Decision 12: a headless run can't answer a permission prompt.
 if grep -rn 'claude -p' "$m"/bot-profiles/*/persona.md | grep -v -- '--permission-mode bypassPermissions' >"$tmp/out"; then
 	fail "a persona's claude -p runs without all permissions"
@@ -105,6 +109,11 @@ ok apply "$r"
 
 ok check "$r"
 says "ok: hidden install of $nskills skills at $sha"
+# The template's ## Checks placeholder fails check: engineers would run it.
+cp "$here/../templates/project-setup.md" "$r/.maestro/project/project-setup.md"
+if run check "$r"; then fail "check passed the template's ## Checks text"; fi
+says "problem: project-setup.md: ## Checks still holds the template's <...> text"
+cp "$m/templates/project-setup.md" "$r/.maestro/project/project-setup.md"
 echo mine >>"$r/.claude/skills/maestro-tdd/SKILL.md"
 rm "$r/.agents/skills/maestro-swarm/SKILL.md"
 if run check "$r"; then fail "check passed with a changed and a missing file"; fi
