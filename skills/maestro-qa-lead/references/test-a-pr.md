@@ -46,7 +46,7 @@ You are the last check before production. Review read the diff; you run what shi
 1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; or the upgrade or rollback breaks. Else `pass`. A `waived` check fails nothing. List every other problem as a possible new ticket, worst first.
 2. Stop every process you started and close each browser.
 3. If the PR's head has moved past `H`, post at `H` anyway and say so in the reply.
-4. Post this comment on the ticket with `maestro-ticket comment`, keyed by `--idempotency-key <run>` so a retry replays instead of posting twice. With no ticket, comment on the PR.
+4. Post this comment on the ticket with `maestro-ticket comment`, sent as **maestro-working-principles** says for quoted text, keyed by `--idempotency-key <run>` so a retry replays instead of posting twice. With no ticket, comment on the PR.
 
    ```text
    QA: <pass|fail> at <H> (PR <url>), tier <n>

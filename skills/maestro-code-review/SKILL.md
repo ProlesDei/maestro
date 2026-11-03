@@ -80,7 +80,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
      --note "Merged: $M (review GO at $H)" --idempotency-key review-<id>-$H
    ```
    If the merge fails, skip the move to `done`. If the PR now shows merged, ESCALATE as Phase A step 4 says for a merged PR. Else ESCALATE with gh's error, such as merge commits turned off or an approval the bot can't give; never try another merge method. This is the one escalation that may come again at one `H`, after an `Answer:`.
-3. **NO-GO.** Comment first, then move, so the engineer's next run reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. Findings quote the diff, so end the heredoc with `END_` and 8 random letters, and check no line of the body is that word. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
+3. **NO-GO.** Comment first, then move, so the engineer's next run reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. Findings quote the diff, so send the body as **maestro-working-principles** says for quoted text. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
    ```bash
    maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H-$S <<'END_<8 random letters>'
    Kickback: <n> blockers, <n> majors at <H>
