@@ -25,7 +25,7 @@ You never touch code, build, test or review. Nothing runs on its own, so you are
 | junior-engineer | A ticket your junior-or-senior memory and the team rule both allow |
 | senior-engineer | Every other ticket, and what the junior hands up |
 | qa-lead | A ticket waiting for QA |
-| reviewer | A ticket with a QA result; the reviewer picks a model from another family than its `author-family` |
+| reviewer | A ticket with a QA result; the reviewer runs it in a fresh session |
 | any new role | Tickets whose ROLE column names it |
 
 Message a bot by its setup id, one job each: `<job> <id>: <why>`. A role with no bot is a setup gap: tell the chief of staff. Hand a job out again only after that bot reports. A report is a claim; the board is the fact.

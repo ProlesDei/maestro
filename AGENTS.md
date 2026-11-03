@@ -17,7 +17,7 @@ How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot p
 2. The planner runs the team day to day, as product owner and project manager in one. It turns goals into tickets in `maestro-ticket`, hands each ticket's build, QA and review to the right bot ([its persona](bot-profiles/planner/persona.md)), and reports status and the blocks it can't settle to the chief of staff.
 3. An engineer takes one ticket to an open PR in a Claude Code session running `/maestro-software-engineer`: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones.
 4. The QA lead tests the PR in the running app and comments `QA: pass` or `QA: fail` on the ticket.
-5. The reviewer, from another model family than the author when one is installed, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
+5. The reviewer, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO merges the PR and closes the ticket; NO-GO sends it back with a `Kickback:` note.
 6. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
 
 What we hold to:
@@ -25,7 +25,7 @@ What we hold to:
 - Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
-- It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch, checks and ticket flow from their `.maestro/project/project-setup.md`. A team may track tickets in its own tool instead of `maestro-ticket` (`tickets:` in its `install.yaml`), so a skill names `maestro-ticket` only as the default.
+- It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch and checks from their `.maestro/project/project-setup.md`.
 - Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
   - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
   - What the owner, the chief of staff and the planner read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.

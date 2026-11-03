@@ -38,7 +38,6 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated. | The ones on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
-| `tickets` | `maestro-ticket`, or the team's own tracker. For their own, the value is a folder in their repo, from its top, that holds only `maestro-create-ticket/` with its `SKILL.md`: how to write a ticket in their tool. Keep that name; the bots call it. Write it with them if they have none. | `maestro-ticket` |
 | `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
 
 ## 5. Apply
@@ -54,7 +53,6 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 - **Main branch**: the branch PRs merge into.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first: it must pass and leave `git status` clean. Offer the ones that don't to the person as fixes, not as checks.
 - **Run** and **QA**: how to start the app and see it work, as a person would.
-- **Tickets**: the tool from step 4, and for the team's own, how to find, claim, comment on and close a ticket in it.
 - **Review** and **Conventions**: high-risk paths, branch and commit style, files never to touch.
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.

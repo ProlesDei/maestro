@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Create a ticket
 
-You draft one ticket, ask once, and make one `maestro-ticket create` call. This skill owns the ticket shape; a team can install its own in its place. The store checks deps and cycles: don't redo that here.
+You draft one ticket, ask once, and make one `maestro-ticket create` call. This skill owns the ticket shape. The store checks deps and cycles: don't redo that here.
 
 Follow the **maestro-working-principles** skill.
 
@@ -25,12 +25,13 @@ Follow the **maestro-working-principles** skill.
    | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
+   | role | who picks it up: `engineer`, `qa-lead`, `reviewer`, `planner` or `chief-of-staff` | `engineer` |
 
    Waiting on another ticket is a dep, never `blocked`.
 4. **Create.** Show the command, then run it:
 
    ```sh
-   maestro-ticket create --json --title '<title>' --priority <n> --status <todo|backlog> \
+   maestro-ticket create --json --title '<title>' --priority <n> --status <todo|backlog> --role <role> \
      --deps '<T-1,T-2>' --areas '<path,path>' \
      --idempotency-key 'create:<yyyy-mm-dd>:<title slug>' \
      --body-file - <<'MAESTRO_TICKET_BODY'

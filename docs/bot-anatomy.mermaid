@@ -13,7 +13,7 @@ flowchart TD
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>An engineer's session: all permissions,<br/>its own worktree on maestro/&lt;id&gt;"]
 
-    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer from another model family"]
+    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
 
     subgraph Roles ["One Grok Bot, six profiles: what each role does"]
         direction LR

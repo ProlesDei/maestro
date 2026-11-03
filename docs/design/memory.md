@@ -49,7 +49,7 @@ Three kinds of scope, so hundreds of bots each read a short list instead of ever
 | `role:<role>` | bots in that role | `role:reviewer`: "CI test X fails at random. Rerun it once before you call it broken." |
 | `area:<path>` | bots whose work touches that path | `area:services/billing`: the example above |
 
-A note can also say `--until T-34`: "the auth rewrite is half done across T-30 to T-34". Once T-34 is done or cancelled, the note stops showing. Nothing runs in the background to do it; `recall` checks the ticket in `maestro-ticket` when it reads. A team on its own ticket tool ends such a note with `forget`.
+A note can also say `--until T-34`: "the auth rewrite is half done across T-30 to T-34". Once T-34 is done or cancelled, the note stops showing. Nothing runs in the background to do it; `recall` checks the ticket in `maestro-ticket` when it reads.
 
 ## 2. Writing a note
 
@@ -145,7 +145,7 @@ Checked against the code:
 
 - `maestro-play` already has a `memory` field in every step reply (`tools/maestro-play/engine/prompt.go:81`), but writes it to a folder nothing reads (`memory-inbox/`, `engine/wrap.go:157`), and only when a run is done or ended: a blocked run drops it (`engine/wrap.go:176`). v5 reuses the field, writes to the store at the end of each step, and drops the folder.
 - `maestro-play` already calls `maestro-ticket` as a separate program (`engine/engine.go:25`), so it calls `maestro-memory` the same way.
-- The ticket store's code already refuses network drives, takes file locks, and has `doctor` and `backup` (`tools/maestro-ticket/README.md`). `maestro-memory` is a second command in the same Go module and reuses all of it, in its own file, so a team that uses its own ticket tool can still use memory.
+- The ticket store's code already refuses network drives, takes file locks, and has `doctor` and `backup` (`tools/maestro-ticket/README.md`). `maestro-memory` is a second command in the same Go module and reuses all of it, in its own file.
 - Step sessions never write tickets (`playbooks/rules.md`). Memory keeps that rule: `maestro-play` writes for them.
 
 ## The risk we accept
