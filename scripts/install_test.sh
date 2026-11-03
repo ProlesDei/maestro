@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2015,SC2012,SC2035 # literal backticks, a && b || fail, ls of known names
 # Acceptance test for scripts/install.sh and scripts/bot-bundle.sh, run
 # against a copy of Maestro in its own git repo so an update can change it.
 # apply installs hidden or committed, and a second run changes nothing; an

@@ -13,6 +13,7 @@
 set -euo pipefail
 shopt -s nullglob
 unset CDPATH
+# shellcheck disable=SC2046 # one variable name per word
 unset $(git rev-parse --local-env-vars)
 
 die() { echo "bot-bundle.sh: $*" >&2; exit 1; }

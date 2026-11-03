@@ -42,6 +42,7 @@ set -euo pipefail
 shopt -s nullglob
 unset CDPATH
 # A GIT_DIR or GIT_WORK_TREE from the caller would point git at another repo.
+# shellcheck disable=SC2046 # one variable name per word
 unset $(git rev-parse --local-env-vars)
 
 die() { echo "install.sh: $*" >&2; exit 1; }
@@ -83,7 +84,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha= harnesses=() home= bots=()
+sha='' harnesses=() home='' bots=()
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -304,6 +305,7 @@ if [ "$cmd" = check ]; then
 	done
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		warn "Maestro at $root is a shallow clone: check can't tell if the tools are older than the pin; fetch its full history"
+	# shellcheck disable=SC2043 # one tool today; the loop takes more
 	for b in maestro-ticket; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
 		command -v go >/dev/null || continue
@@ -324,6 +326,7 @@ if [ "$cmd" = check ]; then
 			/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); s=tolower(h); next}
 			$0 != "" && !/^#/ {print s "\t" h "\t" $0}' "$setup")
 		# line: the setup line after the two tabs; it may hold tabs too.
+		# shellcheck disable=SC2016 # awk code, not shell
 		line='function line() { t=$0; sub(/^[^\t]*\t[^\t]*\t/, "", t); return t }'
 		main=$(awk -F'\t' "$line"' $1=="main branch" {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print t; exit}' <<<"$sections")
 		[ -n "$main" ] || problem "project-setup.md: no branch under ## Main branch"
@@ -434,13 +437,13 @@ shipped_read=
 read_shipped() {
 	[ -z "$shipped_read" ] || return 0
 	shipped_read=1
-	local out a b c h st path
+	local out h path _
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		die "Maestro at $root is a shallow clone, so apply can't tell an older install's copies from the team's files; fetch its full history (git fetch --unshallow); nothing was changed"
 	# -m lists a copy a merge made; the -c keeps a user's log.diffMerges
 	# from narrowing it, and git before 2.31 ignores it.
 	out=$(git -C "$root" -c log.diffMerges=separate log -m --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
-	while read -r a b c h st path; do
+	while read -r _ _ _ h _ path; do
 		[ -n "$path" ] || continue
 		path=${path#skills/}
 		shipped["$h $path"]=1
@@ -475,7 +478,7 @@ for p in "${!old[@]}"; do folders[${p%/"${p#*/skills/*/}"}]=1; done
 for l in $legacy; do folders[${l%/}]=1; done
 for dir in "${!folders[@]}"; do
 	if [ -L "$target/$dir" ]; then
-		seen[$dir]=link
+		seen[$dir]='link'
 	elif [ -d "$target/$dir" ]; then
 		while IFS= read -r -d '' f; do
 			seen["${f#"$target/"}"]=1
@@ -617,4 +620,4 @@ echo "record: $record"
 visible=
 [ "$home" != hidden ] || visible=" and no longer hidden from git"
 for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record$visible: $f"; done
-[ $untracked -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"
+[ "$untracked" -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"
