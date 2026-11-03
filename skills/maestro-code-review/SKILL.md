@@ -22,7 +22,7 @@ Open a todo list with one item per phase below.
 3. Set `<main>` to the line under `## Main branch` in `project-setup.md`, and `H=<headRefOid>`. Every verdict names `H`.
 4. Refuse, with the reason and writing nothing, if `maestro-ticket get <id> --json` shows a live claim (name the holder) or, outside report-only, a ticket not in `in_review`: both clear without you. If the ticket's branch has no PR or has moved past a merged one, the base isn't `<main>` or the PR comes from a fork (never run a fork's code), or, outside report-only, is a draft or closed unmerged, set `S` to the unix time and give NO-GO with that one blocker (Phase G step 3), with `H` as `none` when there's no PR: the author can fix each. A PR merged already, with the branch on the remote gone or still at `H`: set `S` to the unix time and ESCALATE (Phase G step 4) with the first line `Escalation: review at <H>: PR <url> merged as <merge commit>`, even if you escalated at `H` before; the planner closes the ticket. A PR with no ticket is not a refusal: its body is the spec, and you invent no criteria.
 5. On a ticket, review only what QA ran: if its latest `QA:` comment isn't at `H`, post `Retest: review at <H>: QA tested <its sha | none>` with `maestro-ticket comment <id> --body-file - --idempotency-key retest-<id>-$H`, and stop with that one line as the report. A `Retest:` on top sends the ticket back to QA, and nothing reaches `done` untested. In report-only, write nothing and name it a blocker.
-6. `git fetch origin`, set `S` to the unix time, then `git worktree add --detach .maestro/worktrees/review-<id>-$S $H`; call it `$R`. Never review in the main checkout.
+6. `git fetch origin`, set `S` to the unix time, then `R=$(mktemp -d)/review-<id>-$S` and `git worktree add --detach $R $H`. Never review in the main checkout or a folder inside it: the harness loads a `CLAUDE.md` or `AGENTS.md` under your session's folder as your instructions, and the PR controls the ones in its tree.
 
 ## Phase B: Gather
 
@@ -48,7 +48,7 @@ Open a todo list with one item per phase below.
 ## Phase D: Run the passes
 
 1. Read [references/passes.md](references/passes.md) and run the tier's passes in order. A pass the tier skips is `not run: tier <n>`.
-2. At tier 2, run passes 9 and 10 each in a new subagent at full reasoning effort. Pass 9 gets only `$C` and its pass text. Pass 10 gets `$C`, the findings as claims (no reasoning) and its pass text. With no subagent tool, start a fresh headless session (`claude -p` or `codex exec`) the same way, with all permissions. Never resume an earlier review session or reuse your notes. If no fresh session can run, say so and drop Confidence one step.
+2. At tier 2, run passes 9 and 10 each in a new subagent at full reasoning effort. Pass 9 gets only `$C` and its pass text. Pass 10 gets `$C`, the findings as claims (no reasoning) and its pass text. With no subagent tool, start a fresh headless session (`claude -p` or `codex exec`) the same way, with all permissions, at the repo's root, never in `$R`. Never resume an earlier review session or reuse your notes. If no fresh session can run, say so and drop Confidence one step.
 3. A subagent stops at about 25 tool calls, reports what it has and lists what it didn't check. Unchecked tier-2 scope is NO-GO.
 4. Rate the findings and merge them into one list, as [passes.md](references/passes.md#rate-each-finding) says.
 
@@ -90,7 +90,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
      --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H-$S
    ```
 4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H-$S`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H-$S`. With no ticket, post it with `gh pr comment <n> --body-file -`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
-5. Revert any pass 6 mutation, then `git worktree remove $R` and remove `$C` as **maestro-working-principles** says.
+5. Revert any pass 6 mutation, then `git worktree remove $R` and remove its temp folder and `$C` as **maestro-working-principles** says.
 
 ```
 # Code review: <id> <title>
