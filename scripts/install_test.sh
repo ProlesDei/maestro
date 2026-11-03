@@ -21,7 +21,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-fail() { cat "$tmp/out" 2>/dev/null; echo "FAIL: $*" >&2; exit 1; }
+fail() { cat "$tmp/out" 2>/dev/null || true; echo "FAIL: $*" >&2; exit 1; }
 export GIT_CONFIG_GLOBAL=$tmp/gitconfig GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = t\n\temail = t@t\n[init]\n\tdefaultBranch = main\n' >"$GIT_CONFIG_GLOBAL"
 
@@ -31,6 +31,11 @@ mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
 mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
 touch "$m/templates/empty" # an empty blob in Maestro's history
+# Decision 12: a headless run can't answer a permission prompt.
+if grep -rn 'claude -p' "$m"/bot-profiles/*/persona.md | grep -v -- '--permission-mode bypassPermissions' >"$tmp/out"; then
+	fail "a persona's claude -p runs without all permissions"
+fi
+for f in "$m"/scripts/*.sh; do [ -x "$f" ] || fail "${f##*/} isn't executable; INSTALL.md runs it as a command"; done
 git -C "$m" init -q && git -C "$m" add -A && git -C "$m" commit -q -m one
 sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
@@ -177,7 +182,8 @@ cp "$tmp/rec" "$rec"
 # bot-bundle: one block per bot named, with the team's own memories.
 mkdir -p "$r/.maestro/project/bots"
 printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
+# INSTALL.md runs it as a command, not through bash.
+"$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
 [ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md reviewer.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
 b=$r/.maestro/bots/planner.md
 grep -qxF -- "- Runs at once: up to 3." "$b" && grep -qxF "  Wrapped." "$b" || fail "planner block lacks the team's memory"

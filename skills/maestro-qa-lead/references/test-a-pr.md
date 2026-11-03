@@ -8,7 +8,7 @@ You are the last check before production. Review read the diff; you run what shi
 2. Refuse, with the reason, if the PR isn't open, comes from a fork (never run a fork's code), or `maestro-ticket get <id> --json` shows a status other than `in_review` or a live claim (name the holder). A PR with no ticket: `<id>` is `pr-<n>`, its body is the spec, and you invent no criteria.
 3. If the ticket's latest `QA:` comment is already at `H`, give it and stop, unless the ask says to test again.
 4. Name this run `qa-<id>-<6 random letters>`; call it `<run>`. No other session shares it. Fetch, add a detached worktree at `H` in `.maestro/worktrees/<run>`, and check its HEAD is `H`. Evidence goes in `maestro/evidence/<id>/<run>/` in the repo's shared git folder, never in the worktree.
-5. Read `## QA` and `## Run` in `.maestro/project/project-setup.md`, else the README and build files, for how production builds and starts the app and which user flows must never break. If nothing says how it runs, stop and say so, posting nothing.
+5. Read `## QA` and `## Run` in `.maestro/project/project-setup.md`, else the README and build files, for how production builds and starts the app and which user flows must never break. If nothing says how it runs, stop and escalate (below) with what's missing.
 
 ## Phase B: Plan by risk
 
@@ -36,7 +36,7 @@ You are the last check before production. Review read the diff; you run what shi
 4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
 5. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
 6. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, with the question that would fix it.
-7. Missing a tool or account the plan needs, such as a browser: test the rest, post nothing, and reply `test: blocked: <what's missing>` for the planner, who sends it to the chief of staff if it can't settle it.
+7. Missing a tool or account the plan needs, such as a browser: test the rest, then escalate, so no one sends QA again until it's there. Post `Escalation: QA at <H>`, what's missing, what you tested, and a last line `Return-role: <the ticket's role>`, keyed `<run>`. Then move the ticket from `in_review` to `blocked`, keyed `<run>-move`. With no ticket, comment on the PR. Reply `test: blocked: <what's missing>`.
 
 ## Phase E: Judge and post
 

@@ -101,7 +101,7 @@ flowchart TD
 
 ## What we hold to
 
-- **Least friction for your team.** The engineers' sessions run with all permissions, since a headless run can't stop to ask.
+- **Least friction for your team.** Every bot's sessions run with all permissions, since a headless run can't stop to ask.
 - **Rules in code first.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
@@ -128,7 +128,7 @@ Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/c
 
 ## Use
 
-Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --output-format json`):
+Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --permission-mode bypassPermissions --output-format json`):
 
 - `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets and creates them. Given a ticket id, it splits or rewrites that ticket. It also checks a plan, finds what keeps the board from running in parallel, or answers a code question a plan turns on, for the planner bot, which can't read the repo.
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
@@ -160,7 +160,7 @@ flowchart TD
         S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
-    H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>An engineer's session: all permissions,<br/>its own worktree on maestro/&lt;id&gt;"]
+    H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
 
