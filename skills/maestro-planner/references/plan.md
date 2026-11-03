@@ -36,7 +36,7 @@ Skip this phase unless you split or rewrote a ticket.
    maestro-ticket transition <id> --to cancelled --holder <holder> --token <token>
    ```
 
-2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again.
+2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again. If moving a dependent fails with `claimed`, don't wait for its holder: post `Escalation: split into T-a, T-b; cancel this once <dependent> (held by <holder>) is off it` with a last line `Return-role: <the ticket's role>`, move the ticket to `blocked` if it isn't there, and release your claim, so no engineer builds it. The planner cancels it on a later look.
 3. If the old ticket has an open PR, close it with a comment naming the new tickets.
 
 ## Reply
