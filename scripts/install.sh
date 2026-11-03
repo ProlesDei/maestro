@@ -335,7 +335,10 @@ if [ "$cmd" = check ]; then
 		# Older installs wrote a ## Tickets section; nothing reads it now.
 		grep -qiE '^[[:space:]]*## [[:space:]]*tickets[[:space:]]*$' "$setup" &&
 			warn "project-setup.md: ## Tickets is gone, since every team uses maestro-ticket; delete the section"
-		awk -F'\t' "$line"' $1!="tickets" && line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
+		# Engineers run what ## Checks lists, so the template's text there fails.
+		awk -F'\t' "$line"' $1=="checks" && line() ~ /^<.*>$/ {f=1} END{exit !f}' <<<"$sections" &&
+			problem "project-setup.md: ## Checks still holds the template's <...> text: list each check as - <name>: \`<command>\`, or delete the line for none"
+		awk -F'\t' "$line"' $1!="tickets" && $1!="checks" && line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
 			warn "project-setup.md: ## $s still holds the template's <...> text"
 		done
 	fi
@@ -380,10 +383,6 @@ if [ "$cmd" = uninstall ]; then
 fi
 
 # --- apply ---
-for p in .claude .claude/skills .agents .agents/skills .maestro .maestro/project; do
-	# A copy behind a symlink would land outside the repo, where exclude can't hide it.
-	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install writes only inside the repo"
-done
 
 # srcfiles <skill>: its files, NUL-separated: for Maestro's, the ones git
 # tracks, so a file git ignores (.DS_Store, a swap file) isn't the pinned
@@ -450,6 +449,18 @@ if [ ${#old[@]} -eq 0 ]; then
 	[ -z "$lines" ] || read_shipped
 	for l in $lines; do [ -z "${names[$(skill_of "$l")]-}" ] || legacy+=$l$'\n'; done
 fi
+# A write or delete behind a symlink lands where the record and exclude
+# don't look: outside the repo, or in another harness's folder. Guard each
+# harness folder apply writes to or the record names; a link elsewhere,
+# such as .claude/skills for a codex-only install, is the team's.
+guard=(.maestro .maestro/project)
+for d in "${dirs[@]}" "${!old[@]}" $legacy; do
+	d=${d%%/*}
+	[[ " ${guard[*]} " == *" $d "* ]] || guard+=("$d" "$d/skills")
+done
+for p in "${guard[@]}"; do
+	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install won't write or delete through one: make it a real folder"
+done
 # The folders to scan: each this install writes to, and each one the
 # record or a legacy line names, since the team may have changed it.
 declare -A writing=() folders=() seen=()

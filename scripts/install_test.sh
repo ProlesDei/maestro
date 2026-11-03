@@ -31,6 +31,10 @@ mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
 mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
 touch "$m/templates/empty" # an empty blob in Maestro's history
+# Filled in, as INSTALL.md step 6 leaves it, so check passes; the real
+# template's placeholder is tested below.
+sed -i 's/^<each check .*>$/- test: `true`/' "$m/templates/project-setup.md"
+grep -qx -- '- test: `true`' "$m/templates/project-setup.md" || fail "the template's ## Checks placeholder moved"
 # Decision 12: a headless run can't answer a permission prompt.
 if grep -rn 'claude -p' "$m"/bot-profiles/*/persona.md | grep -v -- '--permission-mode bypassPermissions' >"$tmp/out"; then
 	fail "a persona's claude -p runs without all permissions"
@@ -105,6 +109,11 @@ ok apply "$r"
 
 ok check "$r"
 says "ok: hidden install of $nskills skills at $sha"
+# The template's ## Checks placeholder fails check: engineers would run it.
+cp "$here/../templates/project-setup.md" "$r/.maestro/project/project-setup.md"
+if run check "$r"; then fail "check passed the template's ## Checks text"; fi
+says "problem: project-setup.md: ## Checks still holds the template's <...> text"
+cp "$m/templates/project-setup.md" "$r/.maestro/project/project-setup.md"
 echo mine >>"$r/.claude/skills/maestro-tdd/SKILL.md"
 rm "$r/.agents/skills/maestro-swarm/SKILL.md"
 if run check "$r"; then fail "check passed with a changed and a missing file"; fi
@@ -375,6 +384,21 @@ r5=$tmp/link
 repo "$r5" "harnesses: claude" "skills-home: hidden"
 mkdir "$tmp/elsewhere" && ln -s "$tmp/elsewhere" "$r5/.claude"
 refuses "is a symlink" "$r5" apply "$r5"
+# A link in a harness folder install neither writes to nor names in its
+# record is the team's: a codex-only install goes ahead.
+r5b=$tmp/link-other
+repo "$r5b" "harnesses: codex" "skills-home: hidden"
+mkdir -p "$r5b/.agents/skills" "$r5b/.claude" && ln -s ../.agents/skills "$r5b/.claude/skills"
+ok apply "$r5b"
+installed "$r5b" .agents
+# Dropping a harness whose folder is now a link to the other's: a delete
+# through it would take the kept harness's copies, so apply refuses.
+r5c=$tmp/link-dropped
+repo "$r5c" "harnesses: claude codex" "skills-home: hidden"
+ok apply "$r5c"
+rm -r "$r5c/.claude/skills" && ln -s ../.agents/skills "$r5c/.claude/skills"
+sed -i 's/^harnesses: .*/harnesses: codex/' "$r5c/.maestro/project/install.yaml"
+refuses "$r5c/.claude/skills is a symlink" "$r5c" apply "$r5c"
 r6=$tmp/nostore
 repo "$r6" "harnesses: claude" "skills-home: hidden"
 STUB_FAIL=1 refuses "doctor failed" "$r6" apply "$r6"

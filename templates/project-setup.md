@@ -18,8 +18,7 @@ main
 
 ## Checks
 
-- lint: `make lint`
-- test: `make test`
+<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`>
 
 ## Run
 
