@@ -145,7 +145,7 @@ Checked against the code:
 
 - `maestro-play` already has a `memory` field in every step reply (`tools/maestro-play/engine/prompt.go:81`), but writes it to a folder nothing reads (`memory-inbox/`, `engine/wrap.go:157`), and only when a run is done or ended: a blocked run drops it (`engine/wrap.go:176`). v5 reuses the field, writes to the store at the end of each step, and drops the folder.
 - `maestro-play` already calls `maestro-ticket` as a separate program (`engine/engine.go:25`), so it calls `maestro-memory` the same way.
-- The ticket store's code already refuses network drives, takes file locks, and has `doctor` and `backup` (`tools/maestro-ticket/README.md`). `maestro-memory` is a second command in the same Go module and reuses all of it, in its own file
+- The ticket store's code already refuses network drives, takes file locks, and has `doctor` and `backup` (`tools/maestro-ticket/README.md`). `maestro-memory` is a second command in the same Go module and reuses all of it, in its own file.
 - Step sessions never write tickets (`playbooks/rules.md`). Memory keeps that rule: `maestro-play` writes for them.
 
 ## The risk we accept
