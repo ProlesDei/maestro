@@ -105,12 +105,12 @@ flowchart TD
 - **Rules in code first.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
-- **Read your setup, don't assume it.** Your main branch, checks and ticket flow come from `.maestro/project/project-setup.md`. You can track tickets in your own tool.
+- **Read your setup, don't assume it.** Your main branch and checks come from `.maestro/project/project-setup.md`.
 - **Small and plain.** Cut what only exists to look impressive.
 
 ## Install
 
-Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your ticket tool, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
+Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
 
 It needs git 2.31+, Go 1.26+, bash 4.4+, `gh` with access to this repo, and Claude Code or Codex.
 
@@ -119,7 +119,7 @@ What you get:
 - Maestro pinned to one commit in `.maestro/src/`, hidden from git.
 - `maestro-ticket` on your `PATH`, one copy for every repo on the machine.
 - The skills in `.claude/skills/` and `.agents/skills/`: committed, or hidden from git.
-- `.maestro/project/project-setup.md`: your main branch, checks, how to run the app, your ticket flow.
+- `.maestro/project/project-setup.md`: your main branch, checks, how to run the app.
 - One paste-ready block per Grok bot in `.maestro/bots/`.
 
 The same guide updates Maestro to a newer commit and uninstalls it.

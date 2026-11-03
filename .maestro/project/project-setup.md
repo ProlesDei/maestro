@@ -39,10 +39,6 @@ cd $s/repo && PATH=$GOBIN:$PATH maestro-ticket create --title "try it" --status 
 
 `install.sh apply` refuses uncommitted Maestro: commit first, since it pins `HEAD`. To try INSTALL.md itself, give a fresh agent session in the scratch repo only "follow INSTALL.md in <worktree>". Never test against this repo's own ticket store; it holds the real backlog.
 
-## Tickets
-
-maestro-ticket
-
 ## Skills
 
 - Our own working skills drop the `maestro-` prefix and live once in `.maestro/skills/<name>/`. `.claude/skills/` and `.agents/skills/` hold only symlinks to them, so every harness reads one copy: from each harness folder, `ln -s ../../.maestro/skills/<name>`. Never put a real folder in a harness folder.

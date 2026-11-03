@@ -310,34 +310,22 @@ grep -qxF /.maestro/src/ "$r/.git/info/exclude" && grep -qxF /.maestro/bots/ "$r
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "uninstall changed the user's exclude line"
 [ -f "$r/.maestro/project/install.yaml" ] && [ -f "$r/.maestro/project/project-setup.md" ] || fail "uninstall removed the team's choices or setup"
 
-# --- tickets: the team's maestro-create-ticket replaces Maestro's ---
-r3=$tmp/team
-repo "$r3" "harnesses: claude" "skills-home: hidden" "tickets: our tickets"
-t="$r3/our tickets"
-mkdir -p "$t/maestro-create-ticket/agents" "$t/.git"
-printf '%s\n' '---' 'name: maestro-create-ticket' '---' 'Our tickets.' >"$t/maestro-create-ticket/SKILL.md"
-echo 'policy: {}' >"$t/maestro-create-ticket/agents/openai.yaml"
-lines=$(wc -l <"$STUB_LOG")
-ok apply "$r3"
-says "ticket method from"
-diff -r "$t/maestro-create-ticket" "$r3/.claude/skills/maestro-create-ticket" >/dev/null || fail "the team's ticket skill wasn't installed"
-[ "$(wc -l <"$STUB_LOG")" -eq "$lines" ] || fail "doctor ran with the team's own tickets"
-# With the team's own tickets, check needs no maestro-ticket.
-PATH="/usr/bin:/bin" run check "$r3" || { cat "$tmp/out"; fail "check wanted maestro-ticket with the team's own tickets"; }
-# A CRLF source, as core.autocrlf checks one out, matches its copy.
+# --- A CRLF checkout of Maestro, as core.autocrlf makes one, matches its copies ---
+r3=$tmp/crlf
+repo "$r3" "harnesses: claude" "skills-home: hidden" "tickets: maestro-ticket"
+f=$m/skills/maestro-tdd/SKILL.md
+git -C "$m" config core.autocrlf true
+rm "$f" && git -C "$m" checkout -q -- skills/maestro-tdd/SKILL.md
+grep -q $'\r$' "$f" || fail "the autocrlf checkout wrote no CRLF"
 git -C "$r3" config core.autocrlf true
-printf 'name: maestro-create-ticket\r\nOurs.\r\n' >>"$t/maestro-create-ticket/SKILL.md"
 ok apply "$r3"
+grep -q $'\r$' "$r3/.claude/skills/maestro-tdd/SKILL.md" || fail "the copy lost the CRLF source's bytes"
 ok check "$r3"
 before=$(snap "$r3")
 ok apply "$r3"
 [ "$before" = "$(snap "$r3")" ] || fail "a second apply over a CRLF source changed the repo"
-git -C "$r3" config --unset core.autocrlf
-sed -i 's|^tickets: .*|tickets: .claude/skills|' "$r3/.maestro/project/install.yaml"
-refuses "is in a folder apply writes to" "$r3" apply "$r3"
-sed -i 's|^tickets: .*|tickets: our tickets|' "$r3/.maestro/project/install.yaml"
-mkdir "$t/maestro-work"
-refuses "may hold only maestro-create-ticket/" "$r3" apply "$r3"
+git -C "$m" config --unset core.autocrlf
+rm "$f" && git -C "$m" checkout -q -- skills/maestro-tdd/SKILL.md
 
 # --- refusals ---
 mkdir "$tmp/plain"
@@ -361,7 +349,7 @@ skills-home: hidden|install.yaml:4: skills-home twice
 skip: maestro-recall|install.yaml:4: skip: is gone: every skill installs
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
-tickets:|tickets wants maestro-ticket or a folder
+tickets: our-tickets|install.yaml:4: tickets: Maestro's bots run only on maestro-ticket
 EOF
 for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home wants committed or hidden"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
@@ -412,6 +400,11 @@ cp "$tmp/setup" "$r7/.maestro/project/project-setup.md"
 printf '## Run\n\n<how to start it>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Run still holds"
+# An older install's ## Tickets section, CRLF or not: one warn to delete it.
+printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md: ## Tickets is gone"
+! grep -q "## Tickets still holds" "$tmp/out" || fail "check warned twice about ## Tickets"
 # A linked worktree refuses, hidden or committed: it shares the main
 # checkout's exclude file and record.
 git -C "$r7" add .maestro/project && git -C "$r7" commit -qm setup

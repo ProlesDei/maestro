@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Prune
 
-You clear out what no one needs (worktrees, branches, rebuildable folders, temp files and folders, Maestro leftovers), each with its proof. You never remove work that exists nowhere else, or anything a live session holds. Follow the **maestro-working-principles** skill. Below, `<main>` is the branch under `## Main branch` in `.maestro/project/project-setup.md` (default `main`), `<common>` is `$(git rev-parse --git-common-dir)/maestro`, and ticket commands are `maestro-ticket`'s; if `## Tickets` there names another tool, use its equivalent.
+You clear out what no one needs (worktrees, branches, rebuildable folders, temp files and folders, Maestro leftovers), each with its proof. You never remove work that exists nowhere else, or anything a live session holds. Follow the **maestro-working-principles** skill. Below, `<main>` is the branch under `## Main branch` in `.maestro/project/project-setup.md` (default `main`), and `<common>` is `$(git rev-parse --git-common-dir)/maestro`.
 
 ## Start
 
