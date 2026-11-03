@@ -10,7 +10,8 @@
 # "key: value" per line; a line starting with # is a comment:
 #   maestro-sha: <sha>              the commit this Maestro is on (required)
 #   harnesses: claude codex grok    claude reads .claude/skills, codex and
-#                                   grok .agents/skills (required)
+#                                   grok .agents/skills (required; must
+#                                   hold claude, which every bot runs)
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
 #   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
 #
@@ -121,6 +122,9 @@ for h in "${harnesses[@]}"; do
 	esac
 	[[ " ${dirs[*]-} " == *" $d "* ]] || dirs+=("$d")
 done
+# Every bot runs its jobs with claude -p, which reads only .claude/skills.
+[ "$cmd" = uninstall ] || [[ " ${harnesses[*]} " == *" claude "* ]] ||
+	die "install.yaml: harnesses must include claude: every bot runs its jobs through Claude Code"
 for b in ${bots[@]+"${bots[@]}"}; do
 	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$root/bot-profiles/$b/persona.md" ]; } || die "install.yaml: no bot profile $b"
 done

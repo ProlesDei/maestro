@@ -17,7 +17,7 @@ Install in the main checkout, not a linked worktree: `install.sh` refuses one. W
 
 ## 1. Check the machine
 
-Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code or Codex: the bots run each job through one of them. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code: the bots run each job through it. Codex is optional. Check each. If one is missing, tell the person what it is and how to get it, and wait.
 
 ## 2. Get Maestro
 
@@ -36,7 +36,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | Key | Ask | Default |
 |---|---|---|
 | `maestro-sha` | Nothing: the sha from step 2. | |
-| `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated. | The ones on this machine |
+| `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated; must include `claude`, which every bot runs. | `claude`, plus any other on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
 
