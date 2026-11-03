@@ -606,10 +606,20 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 			if req.Status == ticket.StatusBlocked {
 				blockedFrom = ticket.StatusTodo
 			}
+			tries := 0
+			if req.SplitFrom != 0 {
+				err := tx.QueryRowContext(ctx, "SELECT tries FROM tickets WHERE id = ?", req.SplitFrom).Scan(&tries)
+				if errors.Is(err, sql.ErrNoRows) {
+					return ticket.Ticket{}, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, req.SplitFrom)
+				}
+				if err != nil {
+					return ticket.Ticket{}, err
+				}
+			}
 			res, err := tx.ExecContext(ctx, `INSERT INTO tickets
-				(title, body, type, status, role, priority, created_by, owner, blocked_from, version, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-				req.Title, req.Body, req.Type, req.Status, req.Role, *req.Priority, req.Actor, req.Owner, blockedFrom, now, now)
+				(title, body, type, status, role, priority, created_by, owner, blocked_from, tries, version, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+				req.Title, req.Body, req.Type, req.Status, req.Role, *req.Priority, req.Actor, req.Owner, blockedFrom, tries, now, now)
 			if err != nil {
 				return ticket.Ticket{}, err
 			}
@@ -633,6 +643,10 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 			}
 			if len(req.Areas) > 0 {
 				data["areas"] = req.Areas
+			}
+			if req.SplitFrom != 0 {
+				data["split_from"] = req.SplitFrom
+				data["tries"] = tries
 			}
 			err = appendEvent(ctx, tx, id, ticket.EventCreated, req.Actor, data, now)
 			if err != nil {

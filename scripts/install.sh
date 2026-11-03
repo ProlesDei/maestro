@@ -433,7 +433,9 @@ read_shipped() {
 	local out a b c h st path
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		die "Maestro at $root is a shallow clone, so apply can't tell an older install's copies from the team's files; fetch its full history (git fetch --unshallow); nothing was changed"
-	out=$(git -C "$root" log --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
+	# -m lists a copy a merge made; the -c keeps a user's log.diffMerges
+	# from narrowing it, and git before 2.31 ignores it.
+	out=$(git -C "$root" -c log.diffMerges=separate log -m --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
 	while read -r a b c h st path; do
 		[ -n "$path" ] || continue
 		path=${path#skills/}

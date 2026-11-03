@@ -6,7 +6,8 @@
 # file beside them; a team's file in the way, or one changed since
 # install, clashes and changes nothing, until --replace; a dropped skill
 # the team changed stays as theirs; a folder where a file goes; an
-# install by the install.sh before the record is taken over; a switch of
+# install by the install.sh before the record is taken over, a copy a
+# merge made too; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
@@ -483,5 +484,26 @@ touch "$r8/.maestro/src/AGENTS.md"
 ln -s "$tmp" "$tmp/via"
 if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned" >"$tmp/out" 2>&1; then fail "check passed with AGENTS.md in .maestro/src"; fi
 says "problem: .maestro/src/AGENTS.md exists"
+
+# --- an install by the install.sh before the record, from a commit where
+# a merge made a skill's copy: that copy is Maestro's too.
+git -C "$m" checkout -q -b side
+echo side >>"$m/skills/maestro-tdd/SKILL.md" && git -C "$m" commit -qam side
+git -C "$m" checkout -q main
+echo main >>"$m/skills/maestro-tdd/SKILL.md" && git -C "$m" commit -qam main
+if git -C "$m" merge -q side >/dev/null 2>&1; then fail "the test merge had no conflict"; fi
+git -C "$m" show main:skills/maestro-tdd/SKILL.md >"$m/skills/maestro-tdd/SKILL.md"
+echo both >>"$m/skills/maestro-tdd/SKILL.md"
+git -C "$m" commit -qam merge
+merged=$(git -C "$m" rev-parse HEAD)
+echo after >>"$m/skills/maestro-tdd/SKILL.md" && git -C "$m" commit -qam after
+sha=$(git -C "$m" rev-parse --short HEAD)
+r11=$tmp/legacy-merge
+repo "$r11" "harnesses: claude" "skills-home: committed"
+mkdir "$r11/.claude" && git -C "$m" archive "$merged" skills | tar -x -C "$r11/.claude"
+find "$r11/.claude/skills" -maxdepth 1 -type f -delete
+for n in $(cd "$r11/.claude/skills" && ls); do echo ".claude/skills/$n/"; done >>"$r11/.git/info/exclude"
+ok apply "$r11"
+installed "$r11" .claude
 
 echo "ok: install.sh applies hidden and committed installs, updates and switches cleanly, refuses clashes and bad choices, survives a failed copy and a CRLF checkout, and uninstalls only what it placed; bot-bundle builds each bot's block"

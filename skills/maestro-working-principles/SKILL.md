@@ -5,7 +5,7 @@ description: "Sets the day-to-day habits for changing files in a Maestro repo, w
 
 # Working principles
 
-How you change files day to day: in your own worktree, in small checked commits, through a PR that review merges, leaving nothing behind. Hundreds of sessions may share this repo, its tickets and its owner, so never touch the main checkout or anything another session holds.
+How you change files day to day: in your own worktree, in small checked commits, through a PR that review merges, leaving nothing behind. Hundreds of sessions may share this repo, its tickets and its owner, so never touch the main checkout or anything another session holds. The main branch is the one under `## Main branch` in `.maestro/project/project-setup.md` (default `main`), not the remote's default.
 
 ## Session rules
 

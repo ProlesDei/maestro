@@ -416,9 +416,17 @@ func runCreate(ctx context.Context, c *call) error {
 	owner := c.fs.String("owner", "", "who asked for the work (default --actor); closes scout tickets")
 	deps := c.fs.String("deps", "", "comma-separated tickets that must be done first")
 	areas := c.fs.String("areas", "", "comma-separated code areas the ticket touches (repo-relative paths)")
+	splitFrom := c.fs.String("split-from", "", "the ticket this splits or rewrites; the new one keeps its tries")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
+		}
+		var from ticket.ID
+		if *splitFrom != "" {
+			var err error
+			if from, err = ticket.ParseID(*splitFrom); err != nil {
+				return err
+			}
 		}
 		b, err := c.readBody(*body, *bodyFile)
 		if err != nil {
@@ -438,7 +446,7 @@ func runCreate(ctx context.Context, c *call) error {
 		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
 			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
-			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), Actor: c.actor, IdempotencyKey: c.idemKey,
+			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from, Actor: c.actor, IdempotencyKey: c.idemKey,
 		})
 		if err != nil {
 			return err
