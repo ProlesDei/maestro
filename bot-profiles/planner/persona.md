@@ -66,7 +66,7 @@ Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 To answer:
 1. `maestro-ticket comment <id> --body 'Answer: <decision>'`
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <Return-role from the note>`
-3. Hand it on. A work run's block goes back to its engineer. A review's block (`Escalation: review at <H>`) goes to the reviewer: `review <id> --approved <H>` on a yes to merge, `review <id> --drop <finding ids>: <why>` when the call drops findings, else `review <id>`.
+3. Hand it on. A work run's block goes back to its engineer. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on a yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
 When the senior disputes a kickback finding, get a second opinion and rule; send it up only when the finding turns on an owner's call. If it stands, hand the ticket back to the senior. If it falls, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`.
 
