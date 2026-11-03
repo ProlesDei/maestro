@@ -31,6 +31,10 @@ mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
 mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
 touch "$m/templates/empty" # an empty blob in Maestro's history
+# Decision 12: a headless run can't answer a permission prompt.
+if grep -rn 'claude -p' "$m"/bot-profiles/*/persona.md | grep -v -- '--permission-mode bypassPermissions' >"$tmp/out"; then
+	fail "a persona's claude -p runs without all permissions"
+fi
 for f in "$m"/scripts/*.sh; do [ -x "$f" ] || fail "${f##*/} isn't executable; INSTALL.md runs it as a command"; done
 git -C "$m" init -q && git -C "$m" add -A && git -C "$m" commit -q -m one
 sha=$(git -C "$m" rev-parse --short HEAD)

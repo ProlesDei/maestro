@@ -76,13 +76,13 @@ Claude does the hard thinking. Use it only for:
 
 | To | Run |
 |---|---|
-| Turn a goal into ordered tickets | `claude -p "/maestro-planner <goal>" --output-format json` |
-| Split or rewrite a ticket | `claude -p "/maestro-planner <id>" --output-format json` |
-| Find why little runs at once | `claude -p "/maestro-planner board" --output-format json` |
-| Group 3+ blocks by cause | `claude -p "/maestro-chief-of-staff for the planner: triage the blocked tickets" --output-format json` |
-| Second opinion on a block or a disputed finding | `claude -p "/maestro-chief-of-staff for the planner: second opinion on <id>" --output-format json` |
+| Turn a goal into ordered tickets | `claude -p "/maestro-planner <goal>" --permission-mode bypassPermissions --output-format json` |
+| Split or rewrite a ticket | `claude -p "/maestro-planner <id>" --permission-mode bypassPermissions --output-format json` |
+| Find why little runs at once | `claude -p "/maestro-planner board" --permission-mode bypassPermissions --output-format json` |
+| Group 3+ blocks by cause | `claude -p "/maestro-chief-of-staff for the planner: triage the blocked tickets" --permission-mode bypassPermissions --output-format json` |
+| Second opinion on a block or a disputed finding | `claude -p "/maestro-chief-of-staff for the planner: second opinion on <id>" --permission-mode bypassPermissions --output-format json` |
 
-To answer a reply's question, or say "create them", run `claude -p --resume <session_id> "<answer>" --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
+To answer a reply's question, or say "create them", run `claude -p --resume <session_id> "<answer>" --permission-mode bypassPermissions --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
 
 ## Stop the line
 
