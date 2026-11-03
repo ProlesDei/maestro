@@ -196,8 +196,23 @@ func Run(ctx context.Context, args []string, env Env) int {
 	return c.fail(err)
 }
 
-// parse parses flags, allowing positional arguments anywhere.
+// parse parses flags, allowing positional arguments anywhere. It refuses a
+// flag given twice: the flag package keeps only the last, so
+// --areas a --areas b would drop a without a word.
 func (c *call) parse() error {
+	orig := map[string]flag.Value{}
+	set := map[string]bool{}
+	c.fs.VisitAll(func(f *flag.Flag) {
+		orig[f.Name] = f.Value
+		f.Value = onceValue{f.Value, f.Name, set}
+	})
+	restore := func() { c.fs.VisitAll(func(f *flag.Flag) { f.Value = orig[f.Name] }) }
+	defer restore()
+	c.fs.Usage = func() {
+		restore() // PrintDefaults reads each flag's own type for its default
+		fmt.Fprintf(c.fs.Output(), "Usage of %s:\n", c.fs.Name())
+		c.fs.PrintDefaults()
+	}
 	rest := c.args
 	var pos []string
 	for {
@@ -215,6 +230,26 @@ func (c *call) parse() error {
 	}
 	c.args = pos
 	return nil
+}
+
+// onceValue refuses a second Set of the flag it wraps.
+type onceValue struct {
+	flag.Value
+	name string
+	set  map[string]bool
+}
+
+func (o onceValue) Set(s string) error {
+	if o.set[o.name] {
+		return errors.New("given twice; a list flag takes one comma-separated value")
+	}
+	o.set[o.name] = true
+	return o.Value.Set(s)
+}
+
+func (o onceValue) IsBoolFlag() bool {
+	b, ok := o.Value.(interface{ IsBoolFlag() bool })
+	return ok && b.IsBoolFlag()
 }
 
 func (c *call) idArg() (ticket.ID, error) {

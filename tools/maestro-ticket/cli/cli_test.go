@@ -113,6 +113,29 @@ func TestHelpAndUsage(t *testing.T) {
 	}
 }
 
+// A flag given twice refuses rather than keep only the last: --areas a
+// --areas b would leave area a open to a second claim.
+func TestRepeatedFlagRefused(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{
+		{"create", "--title", "A", "--areas", "tools", "--areas", "skills"},
+		{"create", "--title", "A", "--deps=T-1", "--deps", "T-2"},
+		{"list", "--status", "todo", "--status", "blocked"},
+		{"list", "--json", "--json"},
+	} {
+		code, _, errs := h.run("", args...)
+		if code != 2 || !strings.Contains(errs, "given twice") {
+			t.Fatalf("%v: %d %q", args, code, errs)
+		}
+		if strings.Contains(errs, "default 0") || strings.Contains(errs, "panic") {
+			t.Fatalf("%v: usage reads the wrapped flags: %q", args, errs)
+		}
+	}
+	if code, out, _ := h.run("", "list", "--json"); code != 0 || !strings.Contains(out, `"tickets": []`) {
+		t.Fatalf("store changed: %d %q", code, out)
+	}
+}
+
 func TestLifecycleJSON(t *testing.T) {
 	h := newHarness(t)
 	h.env["MAESTRO_TICKET_ACTOR"] = "cos"
