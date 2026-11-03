@@ -29,7 +29,7 @@ Open a todo list with one item per phase below.
 1. **Ticket.** From `maestro-ticket get <id> --json`: each acceptance criterion word for word, `areas`, the latest `Handoff:` note, and every `Kickback:` comment.
 2. **Diff from the merge base,** never the moving tip: `B=$(git merge-base origin/<main> $H)`, `git diff --stat $B $H`, `git log --oneline $B..$H`. Make `C=$(mktemp -d)` and write the diff there, unprinted: `git diff $B $H > $C/diff.patch`. Check it merges: `git merge-tree --write-tree origin/<main> $H`; a conflict is NO-GO.
 3. **Blast radius.** For each changed symbol, find callers and siblings (`git grep`, or a code graph). List every reader and writer of each field or state it touches.
-4. **Earlier feedback.** `gh pr view <n> --comments`, the inline comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments --paginate --jq '.[]|{id,path,line,user:.user.login,body}'`), each `Kickback:` comment and the latest `QA:` comment. Each item must be fixed or refuted with evidence. Rerun `QA: fail` items in pass 1; a `QA:` comment at a sha other than `H` is stale.
+4. **Earlier feedback.** `gh pr view <n> --comments`, the inline comments (`gh api repos/{owner}/{repo}/pulls/<n>/comments --paginate --jq '.[]|{id,path,line,user:.user.login,body}'`), each `Kickback:` comment and the latest `QA:` comment. Each item must be fixed or refuted with evidence. A `QA: fail` item at `H` is a blocker you never refute, even after a clean rerun or `--drop`: only a new QA run at `H` clears it. Rerun it in pass 1 only to add evidence to the Kickback. A `QA:` comment at a sha other than `H` is stale.
 5. **Scope.** A file outside `areas` is a major unless the PR says why.
 
 ## Phase C: Pick the tier and mode
@@ -59,7 +59,7 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
+**GO** only if all hold: on a ticket, its latest `QA:` comment is a pass at `H`; no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);

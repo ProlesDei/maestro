@@ -14,8 +14,8 @@
 # reads project-setup.md; a linked worktree refuses;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
-# stops check and uninstall; bad choices and bad repos refuse and change
-# nothing.
+# stops check and uninstall; harnesses without claude stop apply and
+# check; bad choices and bad repos refuse and change nothing.
 # Run from anywhere: bash scripts/install_test.sh
 set -euo pipefail
 
@@ -264,7 +264,7 @@ ok check "$r10"
 
 # A team's skill folder by a Maestro name clashes, and the team moves it.
 r2=$tmp/own
-repo "$r2" "harnesses: codex" "skills-home: hidden"
+repo "$r2" "harnesses: claude codex" "skills-home: hidden"
 mkdir -p "$r2/.agents/skills/maestro-swarm" "$r2/.agents/skills/review"
 echo mine >"$r2/.agents/skills/maestro-swarm/SKILL.md"
 echo mine >"$r2/.agents/skills/review/SKILL.md"
@@ -274,7 +274,6 @@ says "move the team's changes to a skill named without maestro-"
 mv "$r2/.agents/skills/maestro-swarm" "$r2/.agents/skills/swarm"
 ok apply "$r2"
 [ "$(cat "$r2/.agents/skills/review/SKILL.md")" = mine ] || fail "apply changed the team's own review skill"
-[ ! -e "$r2/.claude" ] || fail "codex alone wrote .claude/"
 
 # --- switch hidden to committed: the copies show up in git ---
 sed -i 's/^skills-home: .*/skills-home: committed/' "$r/.maestro/project/install.yaml"
@@ -367,7 +366,7 @@ bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
 tickets: our-tickets|install.yaml:4: tickets: Maestro's bots run only on maestro-ticket
 EOF
-for bad in "harnesses: vim|unknown harness vim" "skills-home: user|skills-home wants committed or hidden"; do
+for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
@@ -386,20 +385,28 @@ repo "$r5" "harnesses: claude" "skills-home: hidden"
 mkdir "$tmp/elsewhere" && ln -s "$tmp/elsewhere" "$r5/.claude"
 refuses "is a symlink" "$r5" apply "$r5"
 # A link in a harness folder install neither writes to nor names in its
-# record is the team's: a codex-only install goes ahead.
+# record is the team's: a claude-only install goes ahead.
 r5b=$tmp/link-other
-repo "$r5b" "harnesses: codex" "skills-home: hidden"
-mkdir -p "$r5b/.agents/skills" "$r5b/.claude" && ln -s ../.agents/skills "$r5b/.claude/skills"
+repo "$r5b" "harnesses: claude" "skills-home: hidden"
+mkdir -p "$r5b/.claude/skills" "$r5b/.agents" && ln -s ../.claude/skills "$r5b/.agents/skills"
 ok apply "$r5b"
-installed "$r5b" .agents
+installed "$r5b" .claude
 # Dropping a harness whose folder is now a link to the other's: a delete
 # through it would take the kept harness's copies, so apply refuses.
 r5c=$tmp/link-dropped
 repo "$r5c" "harnesses: claude codex" "skills-home: hidden"
 ok apply "$r5c"
-rm -r "$r5c/.claude/skills" && ln -s ../.agents/skills "$r5c/.claude/skills"
-sed -i 's/^harnesses: .*/harnesses: codex/' "$r5c/.maestro/project/install.yaml"
-refuses "$r5c/.claude/skills is a symlink" "$r5c" apply "$r5c"
+rm -r "$r5c/.agents/skills" && ln -s ../.claude/skills "$r5c/.agents/skills"
+sed -i 's/^harnesses: .*/harnesses: claude/' "$r5c/.maestro/project/install.yaml"
+refuses "$r5c/.agents/skills is a symlink" "$r5c" apply "$r5c"
+# An install without claude leaves every bot without its skills: check
+# fails, and uninstall still works.
+r5d=$tmp/no-claude
+repo "$r5d" "harnesses: claude codex" "skills-home: hidden"
+ok apply "$r5d"
+sed -i 's/^harnesses: .*/harnesses: codex/' "$r5d/.maestro/project/install.yaml"
+refuses "harnesses must include claude" "$r5d" check "$r5d"
+ok uninstall "$r5d"
 r6=$tmp/nostore
 repo "$r6" "harnesses: claude" "skills-home: hidden"
 STUB_FAIL=1 refuses "doctor failed" "$r6" apply "$r6"

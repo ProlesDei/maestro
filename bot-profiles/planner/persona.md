@@ -54,7 +54,7 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Waiting for review | Reviewer, even on `QA: fail` |
 | Sent back, TRIES 0 or 1 | Same engineer again |
 | Sent back, TRIES 2 | A junior's ticket: senior, one run. A senior's: split or rewrite it; the new tickets keep its tries |
-| Sent back, TRIES 3+ | Chief of staff: three builds of the same work failed |
+| Sent back, TRIES 3+ | Three builds of the same work failed: block it, then send it up as Unblock says. Post `Escalation: build at TRIES <n>: <what failed each time; the question>` with a last line `Return-role: engineer`, then `maestro-ticket transition <id> --from in_progress --to blocked` |
 | `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first |
 | `blocked`, not sent up | Unblock, below |
 | Sent up | Leave it: the chief of staff has it. Count it in your report |
@@ -69,14 +69,16 @@ Work runs going = `in_progress` rows with a live CLAIM; the limit is in your mem
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 - `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Check `gh pr view <url> --json state,mergeCommit,headRefOid` shows `MERGED` at that commit, and the ticket's branch on the remote is gone or still at `headRefOid`; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <commit> (closed by the planner)'`.
 - Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
-- An owner's call, or one on your ask-first list: send it to the chief of staff, then `maestro-ticket comment <id> --body 'Sent up: chief of staff: <the question>'`, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
+- An owner's call, one on your ask-first list, or `Escalation: build at TRIES <n>`: send it to the chief of staff, then `maestro-ticket comment <id> --body 'Sent up: chief of staff: <the question>'`, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
 
 To answer:
 1. `maestro-ticket comment <id> --body 'Answer: <decision>'`
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <Return-role from the note>`
 3. Hand it on. A work run's block goes back to its engineer. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on a yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
-When the senior disputes a kickback finding, get a second opinion and rule; send it up only when the finding turns on an owner's call. If it stands, hand the ticket back to the senior. If it falls, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`.
+An answer that splits or drops the work replaces steps 2 and 3: split it with `/maestro-planner <id>`, or `maestro-ticket transition <id> --from blocked --to cancelled`.
+
+When the senior disputes a kickback finding, get a second opinion and rule; send it up only when the finding turns on an owner's call. If it stands, hand the ticket back to the senior. If it falls, the ticket is `in_progress` with a `Kickback:` note. Move it first, so no work run takes it: `maestro-ticket transition <id> --from in_progress --to in_review`. Then post the ruling as an `Answer:`, and hand the reviewer `review <id> --drop <finding ids>: <why>`. A finding from a `QA: fail` falls only to a new QA run, never to your ruling: move the ticket the same way, then post `Retest: planner at <H>: <the dispute>` so QA tests it again.
 
 ## When you need Claude
 
