@@ -383,10 +383,6 @@ if [ "$cmd" = uninstall ]; then
 fi
 
 # --- apply ---
-for p in .claude .claude/skills .agents .agents/skills .maestro .maestro/project; do
-	# A copy behind a symlink would land outside the repo, where exclude can't hide it.
-	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install writes only inside the repo"
-done
 
 # srcfiles <skill>: its files, NUL-separated: for Maestro's, the ones git
 # tracks, so a file git ignores (.DS_Store, a swap file) isn't the pinned
@@ -453,6 +449,18 @@ if [ ${#old[@]} -eq 0 ]; then
 	[ -z "$lines" ] || read_shipped
 	for l in $lines; do [ -z "${names[$(skill_of "$l")]-}" ] || legacy+=$l$'\n'; done
 fi
+# A write or delete behind a symlink lands where the record and exclude
+# don't look: outside the repo, or in another harness's folder. Guard each
+# harness folder apply writes to or the record names; a link elsewhere,
+# such as .claude/skills for a codex-only install, is the team's.
+guard=(.maestro .maestro/project)
+for d in "${dirs[@]}" "${!old[@]}" $legacy; do
+	d=${d%%/*}
+	[[ " ${guard[*]} " == *" $d "* ]] || guard+=("$d" "$d/skills")
+done
+for p in "${guard[@]}"; do
+	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install won't write or delete through one: make it a real folder"
+done
 # The folders to scan: each this install writes to, and each one the
 # record or a legacy line names, since the team may have changed it.
 declare -A writing=() folders=() seen=()

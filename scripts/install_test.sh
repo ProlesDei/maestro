@@ -384,6 +384,21 @@ r5=$tmp/link
 repo "$r5" "harnesses: claude" "skills-home: hidden"
 mkdir "$tmp/elsewhere" && ln -s "$tmp/elsewhere" "$r5/.claude"
 refuses "is a symlink" "$r5" apply "$r5"
+# A link in a harness folder install neither writes to nor names in its
+# record is the team's: a codex-only install goes ahead.
+r5b=$tmp/link-other
+repo "$r5b" "harnesses: codex" "skills-home: hidden"
+mkdir -p "$r5b/.agents/skills" "$r5b/.claude" && ln -s ../.agents/skills "$r5b/.claude/skills"
+ok apply "$r5b"
+installed "$r5b" .agents
+# Dropping a harness whose folder is now a link to the other's: a delete
+# through it would take the kept harness's copies, so apply refuses.
+r5c=$tmp/link-dropped
+repo "$r5c" "harnesses: claude codex" "skills-home: hidden"
+ok apply "$r5c"
+rm -r "$r5c/.claude/skills" && ln -s ../.agents/skills "$r5c/.claude/skills"
+sed -i 's/^harnesses: .*/harnesses: codex/' "$r5c/.maestro/project/install.yaml"
+refuses "$r5c/.claude/skills is a symlink" "$r5c" apply "$r5c"
 r6=$tmp/nostore
 repo "$r6" "harnesses: claude" "skills-home: hidden"
 STUB_FAIL=1 refuses "doctor failed" "$r6" apply "$r6"
