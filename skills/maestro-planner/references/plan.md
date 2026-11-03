@@ -21,7 +21,7 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 ## Phase C: Create
 
-1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries.
+1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries. `--split-from` carries no deps: give each new ticket the old ticket's deps that aren't `done`, unless the spec says why that part doesn't need one.
 2. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
 
 ## Phase D: Close the old ticket
