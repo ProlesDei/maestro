@@ -47,6 +47,7 @@ flowchart TD
     Build -->|"ticket in_review"| QA
     QA -.->|"QA: pass or fail comment"| Rev
     Rev -->|"GO: gh pr merge, ticket done"| Done
+    Planner -.->|"PR merged outside review: ticket done"| Done
     Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
     Rev -.->|"NO-GO"| Jr
 

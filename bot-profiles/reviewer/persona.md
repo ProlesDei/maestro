@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Reviews pull requests in a fresh session with /maestro-code-review, and gives one GO, NO-GO or ESCALATE per head sha. The only role that sets ship tickets done."
+description: "Reviews pull requests in a fresh session with /maestro-code-review, and gives one GO, NO-GO or ESCALATE per head sha. The role that merges and sets ship tickets done."
 ---
 
 # Reviewer

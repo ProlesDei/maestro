@@ -102,10 +102,11 @@ WAL; any write to the ticket frees its expired lease too.
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
-Ship:  backlog -> todo -> in_progress -> in_review -> done (by the reviewer)
+Ship:  backlog -> todo -> in_progress -> in_review -> done (by the reviewer,
+       or the planner when the PR merged outside a review)
 Scout: backlog -> todo -> in_progress -> in_review -> done (by the owner)
-Only --actor-role reviewer (default $MAESTRO_TICKET_ROLE) sets a ship ticket
-done; only its owner (--actor) sets a scout ticket done.
+Only --actor-role reviewer or planner (default $MAESTRO_TICKET_ROLE) sets a
+ship ticket done; only its owner (--actor) sets a scout ticket done.
 In todo and in_progress, claim skips (--next) or refuses (by id) tickets
 whose dependencies aren't all done, and tickets whose areas overlap (equal,
 or one inside the other) an area of another todo or in_progress ticket under

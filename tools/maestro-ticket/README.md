@@ -44,7 +44,7 @@ Roles: `chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`. The QA le
 
 Statuses and moves live in `ticket/ticket.go` (`workflows`), one table per ticket type (`create --type`, default `ship`):
 
-- **ship:** `backlog → todo → in_progress → in_review → done`. Only `--actor-role reviewer` (or `$MAESTRO_TICKET_ROLE=reviewer`) sets done.
+- **ship:** `backlog → todo → in_progress → in_review → done`. Only `--actor-role reviewer` (or `$MAESTRO_TICKET_ROLE=reviewer`) sets done, or `--actor-role planner` when the PR merged outside a review.
 - **scout:** `backlog → todo → in_progress → in_review → done`. Only the ticket's owner (`create --owner`, default the creator) sets done, as `--actor`.
 
 Both allow `in_review → in_progress` (send-back), `in_progress → todo` (escalation) and `todo → backlog`. Any non-terminal status can go to `blocked` or `cancelled`; `blocked` goes back only to the status it came from (`blocked_from`). `claim --next` never hands out `backlog`; claim those by id. A send-back adds one to a ship ticket's `tries`; a scout send-back doesn't.

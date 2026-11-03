@@ -1123,7 +1123,7 @@ func TestClaimReplayAfterLeaseLoss(t *testing.T) {
 // An engineer once moved an unclaimed ticket to in_progress, then straight
 // to done. Ship tickets reach done only from in_review, and only by the
 // reviewer.
-func TestOnlyReviewerSetsShipDone(t *testing.T) {
+func TestReviewerOrPlannerSetsShipDone(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "engineer", 2)
@@ -1135,7 +1135,7 @@ func TestOnlyReviewerSetsShipDone(t *testing.T) {
 
 	move(t, s, tk.ID, ticket.StatusInReview)
 	before, _ := s.LastSeq(ctx)
-	for _, role := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead"} {
+	for _, role := range []string{"", "chief-of-staff", "engineer", "qa-lead"} {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "x", ActorRole: role})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
@@ -1156,6 +1156,14 @@ func TestOnlyReviewerSetsShipDone(t *testing.T) {
 	json.Unmarshal(evs[len(evs)-1].Data, &data)
 	if data["to"] != "done" || data["actor_role"] != ticket.RoleReviewer {
 		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleReviewer)
+	}
+
+	// The planner closes a ticket whose PR merged outside a review.
+	tk2 := mustCreate(t, s, "y", "engineer", 2)
+	move(t, s, tk2.ID, ticket.StatusInProgress)
+	move(t, s, tk2.ID, ticket.StatusInReview)
+	if done, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk2.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "plan", ActorRole: ticket.RolePlanner}); err != nil || done.Status != ticket.StatusDone {
+		t.Fatalf("planner done %+v, %v", done, err)
 	}
 }
 
