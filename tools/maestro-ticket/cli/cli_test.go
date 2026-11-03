@@ -1031,6 +1031,26 @@ func TestUnsafeFilesystemRefused(t *testing.T) {
 	h.ok(nil, "create", "--title", "x")
 }
 
+// list --ready leaves out what a claim would refuse, so the planner starts
+// no run that ends at waiting_on_deps or area_busy.
+func TestListReady(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "base", "--areas", "src")
+	h.ok(nil, "create", "--title", "waits", "--deps", "T-1")
+	h.ok(nil, "create", "--title", "near", "--areas", "src/x")
+	var l struct{ Tickets []tk }
+	h.ok(&l, "list", "--status", "todo", "--ready")
+	if len(l.Tickets) != 2 || l.Tickets[0].ID != "T-1" || l.Tickets[1].ID != "T-3" {
+		t.Fatalf("ready %+v; want T-1, T-3", l.Tickets)
+	}
+	h.ok(nil, "claim", "T-1", "--holder", "jse/a")
+	h.ok(&l, "list", "--status", "todo", "--ready")
+	if len(l.Tickets) != 0 {
+		t.Fatalf("ready with T-1 claimed %+v; want none", l.Tickets)
+	}
+	h.fails(2, "list", "--claimed", "--ready")
+}
+
 // list --latest-prefix and --not-latest-prefix match the latest comment, so
 // the playbook engine can pick intake without reading every ticket.
 func TestListLatestPrefix(t *testing.T) {
