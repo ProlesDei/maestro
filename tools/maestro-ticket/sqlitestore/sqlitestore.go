@@ -1494,10 +1494,19 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 		return err
 	}
 	// Link, unlike rename, never replaces a file at path.
-	if err := os.Link(partial, abs); errors.Is(err, fs.ErrExist) {
+	err = os.Link(partial, abs)
+	if errors.Is(err, fs.ErrExist) {
 		return exists
-	} else if err != nil {
-		return fmt.Errorf("backup to %s: %w", abs, err)
+	}
+	if err != nil {
+		// No hard links here (FAT, exFAT, some FUSE mounts): look once
+		// more, then rename.
+		if _, err := os.Lstat(abs); err == nil {
+			return exists
+		}
+		if err := os.Rename(partial, abs); err != nil {
+			return fmt.Errorf("backup to %s: %w", abs, err)
+		}
 	}
 	return nil
 }

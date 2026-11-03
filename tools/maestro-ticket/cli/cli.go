@@ -879,7 +879,21 @@ func pruneBackups(dir string, keep int, store string) ([]string, error) {
 	storeInfo, _ := os.Stat(store)
 	var names []string
 	for _, e := range entries {
-		if !e.Type().IsRegular() || !backupName.MatchString(e.Name()) {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		// A killed backup leaves <name>.partial. A live one keeps writing
+		// to its own, so only an hour-old one is a leftover.
+		if base, ok := strings.CutSuffix(e.Name(), ".partial"); ok && backupName.MatchString(base) {
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > time.Hour {
+				p := filepath.Join(dir, e.Name())
+				if err := os.Remove(p); err == nil {
+					pruned = append(pruned, p)
+				}
+			}
+			continue
+		}
+		if !backupName.MatchString(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
