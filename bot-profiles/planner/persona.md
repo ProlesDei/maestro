@@ -60,7 +60,7 @@ Work runs going = `in_progress` rows with a live CLAIM; the limit is in your mem
 ## Unblock
 
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
-- `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Check `gh pr view <url> --json state,mergeCommit` shows `MERGED` at that commit; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <commit> (closed by the planner)'`.
+- `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Check `gh pr view <url> --json state,mergeCommit,headRefOid` shows `MERGED` at that commit, and the ticket's branch on the remote is gone or still at `headRefOid`; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <commit> (closed by the planner)'`.
 - Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
 - An owner's call, or one on your ask-first list: send it to the chief of staff. Never answer it yourself. When it sends the answer back, post it as below.
 
