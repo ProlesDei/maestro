@@ -333,7 +333,7 @@ if [ "$cmd" = check ]; then
 			problem "project-setup.md: under ## Checks, want - <name>: \`<command>\`, not: $l"
 		done < <(awk -F'\t' "$line"' $1=="checks" && line() ~ /^([-*+]|[0-9]+[.)])[ \t]/ && line() !~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {print line()}' <<<"$sections")
 		# Older installs wrote a ## Tickets section; nothing reads it now.
-		grep -qiE '^##[[:space:]]+tickets[[:space:]]*$' "$setup" &&
+		grep -qiE '^[[:space:]]*## [[:space:]]*tickets[[:space:]]*$' "$setup" &&
 			warn "project-setup.md: ## Tickets is gone, since every team uses maestro-ticket; delete the section"
 		awk -F'\t' "$line"' $1!="tickets" && line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
 			warn "project-setup.md: ## $s still holds the template's <...> text"

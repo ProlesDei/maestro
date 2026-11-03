@@ -401,7 +401,7 @@ printf '## Run\n\n<how to start it>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Run still holds"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
-printf '## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
+printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Tickets is gone"
 ! grep -q "## Tickets still holds" "$tmp/out" || fail "check warned twice about ## Tickets"
