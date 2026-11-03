@@ -59,7 +59,7 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: on a ticket, its latest `QA:` comment is a pass at `H`; no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
+**GO** only if all hold: on a ticket, its latest `QA:` comment is a pass at `H`; no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence, or waived as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
