@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -105,6 +106,71 @@ func TestDepsValidation(t *testing.T) {
 	}
 	_, err = s.Create(ctx, ticket.CreateRequest{Title: "x", Areas: []string{"../etc"}})
 	wantErr(t, err, ticket.ErrInvalid)
+}
+
+// List with Ready shows what ClaimNext would hand out, in its order: no
+// ticket waiting on a dep or a busy area, and none under a live claim.
+func TestListReadyMatchesClaimNext(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	ready := func(limit int) string {
+		t.Helper()
+		l, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusTodo}, Ready: true, Limit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []ticket.ID
+		for _, x := range l {
+			ids = append(ids, x.ID)
+		}
+		return fmt.Sprint(ids)
+	}
+	p0, p1 := 0, 1
+	base := create(t, s, ticket.CreateRequest{Title: "base", Priority: &p1, Areas: []string{"src"}})
+	waits := create(t, s, ticket.CreateRequest{Title: "waits", Priority: &p0, DependsOn: []ticket.ID{base.ID}})
+	near := create(t, s, ticket.CreateRequest{Title: "near", Priority: &p0, Areas: []string{"src/x"}})
+	free := create(t, s, ticket.CreateRequest{Title: "free", Priority: &p1, Areas: []string{"docs"}})
+	if got, want := ready(0), fmt.Sprint([]ticket.ID{near.ID, base.ID, free.ID}); got != want {
+		t.Fatalf("ready %s; want %s (waits is waiting on base)", got, want)
+	}
+	cl, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: base.ID, Holder: "jse/a", TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// base is claimed, and its area holds near.
+	if got, want := ready(0), fmt.Sprint([]ticket.ID{free.ID}); got != want {
+		t.Fatalf("ready with base claimed %s; want %s", got, want)
+	}
+	cf, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/b", TTL: time.Hour})
+	if err != nil || cf.ID != free.ID {
+		t.Fatalf("claim next %s, %v; want %s, as ready said", cf.ID, err, free.ID)
+	}
+	if got := ready(0); got != "[]" {
+		t.Fatalf("ready with all claimed %s", got)
+	}
+	// An expired claim holds nothing.
+	clk.Advance(2 * time.Minute)
+	if got, want := ready(1), fmt.Sprint([]ticket.ID{near.ID}); got != want {
+		t.Fatalf("ready after expiry, limit 1: %s; want %s", got, want)
+	}
+	// The limit counts after the area check: near is skipped, free shows.
+	cl, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: base.ID, Holder: "jse/a", TTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Release(ctx, ticket.ReleaseRequest{ID: free.ID, Holder: "jse/b", Token: cf.Claim.Token}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ready(1), fmt.Sprint([]ticket.ID{free.ID}); got != want {
+		t.Fatalf("ready, limit 1, near skipped: %s; want %s", got, want)
+	}
+	if _, err := s.Release(ctx, ticket.ReleaseRequest{ID: base.ID, Holder: "jse/a", Token: cl.Claim.Token}); err != nil {
+		t.Fatal(err)
+	}
+	shipToDone(t, s, base.ID)
+	if got, want := ready(0), fmt.Sprint([]ticket.ID{waits.ID, near.ID, free.ID}); got != want {
+		t.Fatalf("ready with base done %s; want %s", got, want)
+	}
 }
 
 // Tickets whose areas overlap never run at the same time.

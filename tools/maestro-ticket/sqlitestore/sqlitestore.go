@@ -801,12 +801,22 @@ func (s *Store) List(ctx context.Context, f ticket.ListFilter) ([]ticket.Ticket,
 			}
 			args = append(args, now)
 		}
+		var busy areaSet
+		if f.Ready {
+			where = append(where, unclaimedWhere, depsDoneWhere)
+			args = append(args, now)
+			var err error
+			if busy, err = busyAreas(ctx, tx, 0, now); err != nil {
+				return err
+			}
+		}
 		q := "SELECT " + ticketCols + " FROM tickets"
 		if len(where) > 0 {
 			q += " WHERE " + strings.Join(where, " AND ")
 		}
 		q += " ORDER BY priority, id"
-		if f.Limit > 0 {
+		// With areas to skip, the limit counts after them.
+		if f.Limit > 0 && len(busy.areas) == 0 {
 			q += " LIMIT ?"
 			args = append(args, f.Limit)
 		}
@@ -816,9 +826,15 @@ func (s *Store) List(ctx context.Context, f ticket.ListFilter) ([]ticket.Ticket,
 		}
 		defer rows.Close()
 		for rows.Next() {
+			if f.Limit > 0 && len(out) == f.Limit {
+				break
+			}
 			t, err := s.scanTicket(rows, now)
 			if err != nil {
 				return err
+			}
+			if f.Ready && !areasFree(t, busy) {
+				continue
 			}
 			out = append(out, t)
 		}
@@ -893,12 +909,7 @@ func (s *Store) pickClaimable(ctx context.Context, tx *sql.Tx, req ticket.ClaimR
 	if err != nil {
 		return ticket.Ticket{}, err
 	}
-	where := []string{
-		"status IN (" + placeholders(len(req.Statuses)) + ")",
-		"(lease_holder IS NULL OR lease_expires_at <= ?)",
-		`(status NOT IN ('todo', 'in_progress') OR NOT EXISTS (SELECT 1 FROM deps JOIN tickets dep ON dep.id = deps.depends_on
-			WHERE deps.ticket_id = tickets.id AND dep.status != 'done'))`,
-	}
+	where := []string{"status IN (" + placeholders(len(req.Statuses)) + ")", unclaimedWhere, depsDoneWhere}
 	var args []any
 	for _, st := range req.Statuses {
 		args = append(args, string(st))
@@ -922,7 +933,7 @@ func (s *Store) pickClaimable(ctx context.Context, tx *sql.Tx, req ticket.ClaimR
 		if err != nil {
 			return t, err
 		}
-		if _, _, ok := ticket.AnyAreaOverlaps(t.Areas, busy.areas); !ok || !t.Status.WritesCode() {
+		if areasFree(t, busy) {
 			return t, nil
 		}
 	}
@@ -930,6 +941,22 @@ func (s *Store) pickClaimable(ctx context.Context, tx *sql.Tx, req ticket.ClaimR
 		return ticket.Ticket{}, err
 	}
 	return ticket.Ticket{}, ticket.ErrNoWork
+}
+
+// unclaimedWhere and depsDoneWhere pick the tickets a claim could start
+// now, with areasFree; ClaimNext and List's Ready share them so the two
+// always agree. unclaimedWhere takes now as its one argument.
+const (
+	unclaimedWhere = "(lease_holder IS NULL OR lease_expires_at <= ?)"
+	depsDoneWhere  = `(status NOT IN ('todo', 'in_progress') OR NOT EXISTS (SELECT 1 FROM deps JOIN tickets dep ON dep.id = deps.depends_on
+		WHERE deps.ticket_id = tickets.id AND dep.status != 'done'))`
+)
+
+// areasFree reports whether t could start without overlapping busy: only
+// work in todo or in_progress holds areas.
+func areasFree(t ticket.Ticket, busy areaSet) bool {
+	_, _, overlaps := ticket.AnyAreaOverlaps(t.Areas, busy.areas)
+	return !overlaps || !t.Status.WritesCode()
 }
 
 // checkStart refuses work on t while a dependency isn't done or one of its

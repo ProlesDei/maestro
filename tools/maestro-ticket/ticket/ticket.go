@@ -619,12 +619,16 @@ type ListFilter struct {
 	Role     string
 	Holder   string // tickets with a live claim by this holder
 	Claimed  *bool  // true: live claim; false: no live claim
-	Limit    int
+	// Ready keeps only tickets a claim could start now, as ClaimNext picks
+	// them: no live claim, and in todo or in_progress every dep done and no
+	// area overlapping a live claim's.
+	Ready bool
+	Limit int
 }
 
 // ClaimRequest leases the next matching ticket, or a specific one when ID is
 // set. For --next claims Statuses defaults to [todo]. Backlog tickets are
-// claimed only by id, when the chief of staff grooms them, never by --next.
+// claimed only by id, when the planner grooms them, never by --next.
 type ClaimRequest struct {
 	ID             ID            `json:"id,omitempty"`
 	Statuses       []Status      `json:"statuses,omitempty"`

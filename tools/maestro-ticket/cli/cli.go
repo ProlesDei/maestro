@@ -63,7 +63,7 @@ Commands:
               [--status backlog|todo|blocked] [--owner NAME] [--deps T-1,T-2] [--areas path,path]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--holder H --token N]
   get         <id>
-  list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed] [--limit N]
+  list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
               [--latest-prefix P] [--not-latest-prefix P]   (ordered by priority, then id)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
@@ -499,6 +499,7 @@ func runList(ctx context.Context, c *call) error {
 	holder := c.fs.String("holder", "", "only tickets with a live claim by this holder")
 	claimed := c.fs.Bool("claimed", false, "only tickets with a live claim")
 	unclaimed := c.fs.Bool("unclaimed", false, "only tickets without a live claim")
+	ready := c.fs.Bool("ready", false, "only tickets a claim could start now: unclaimed, deps done, areas free")
 	limit := c.fs.Int("limit", 0, "max results (0 = all)")
 	latest := c.fs.String("latest-prefix", "", "only tickets whose latest comment starts with this")
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
@@ -509,7 +510,7 @@ func runList(ctx context.Context, c *call) error {
 		if err := ticket.ValidateRole(*role); err != nil {
 			return err
 		}
-		f := ticket.ListFilter{Role: *role, Holder: *holder, Limit: *limit}
+		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit}
 		byComment := *latest != "" || *notLatest != ""
 		if byComment {
 			f.Limit = 0 // the limit applies after the comment filter
@@ -521,6 +522,8 @@ func runList(ctx context.Context, c *call) error {
 		switch {
 		case *claimed && *unclaimed:
 			return usagef("use --claimed or --unclaimed, not both")
+		case *claimed && *ready:
+			return usagef("use --claimed or --ready, not both: a ready ticket has no live claim")
 		case *claimed:
 			f.Claimed = claimed
 		case *unclaimed:

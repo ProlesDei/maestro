@@ -36,7 +36,9 @@ Run every command at the repo's root. These cost no tokens.
 
 | Query | Command |
 |---|---|
-| Open board | `maestro-ticket list --status todo,in_progress,in_review,blocked` |
+| Open board | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked` |
+| Ready to start | `maestro-ticket list --status todo --ready` |
+| Parked by a plan | `maestro-ticket list --status backlog --latest-prefix Parked:` |
 | Waiting for QA | `maestro-ticket list --status in_review --not-latest-prefix QA:` |
 | Waiting for review | `maestro-ticket list --status in_review --latest-prefix QA:` |
 | Sent back | `maestro-ticket list --status in_progress --latest-prefix Kickback:` |
@@ -53,7 +55,9 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Sent back, TRIES 2+ | A junior's ticket: senior, one run. A senior's: split or rewrite it, one more run. Sent back again: chief of staff |
 | `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first |
 | `blocked` | Unblock, below |
-| `todo` | Top down, while work runs are under the limit |
+| `todo` in Ready to start | Top down, while work runs are under the limit. A `todo` row not in it waits on a dep or a busy area: leave it |
+| Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
+| `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
 
 Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
 
@@ -105,7 +109,7 @@ Reports go to the chief of staff, a bot: `key: value` lines, ids not titles. Sen
 
 ```text
 goal: <one line>
-board: done <n>, review <n>, build <n>, blocked <n>, todo <n>
+board: done <n>, review <n>, build <n>, blocked <n>, todo <n>, backlog <n>
 runs: <n>/<limit>
 eta: <date> | slipping: <why>
 stuck: <id> <cause>; ... | none
