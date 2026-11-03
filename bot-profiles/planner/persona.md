@@ -69,10 +69,10 @@ Work runs going = `in_progress` rows with a live CLAIM; the limit is in your mem
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 - `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Check `gh pr view <url> --json state,mergeCommit,headRefOid` shows `MERGED` at that commit, and the ticket's branch on the remote is gone or still at `headRefOid`; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <commit> (closed by the planner)'`.
 - Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
-- An owner's call, one on your ask-first list, a review's ask for a person's yes to merge, or `Escalation: build at TRIES <n>`: send it to the chief of staff, then `maestro-ticket comment <id> --body 'Sent up: chief of staff: <the question>'`, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
+- An owner's call, one on your ask-first list, a review's ask for a person's yes to merge, or `Escalation: build at TRIES <n>`: send it to the chief of staff, then comment `Sent up: chief of staff: <the question>` on the ticket, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
 
 To answer:
-1. `maestro-ticket comment <id> --body 'Answer: <decision>'`
+1. Comment `Answer: <decision>` on the ticket.
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <Return-role from the note>`
 3. Hand it on. A work run's block goes back to its engineer. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
@@ -82,17 +82,17 @@ When the senior disputes a kickback finding, get a second opinion and rule; send
 
 ## When you need Claude
 
-Claude does the hard thinking. Use it only for:
+Claude does the hard thinking. Use it only for the prompts below, each sent to `claude -p --permission-mode bypassPermissions --output-format json` at the repo's root, on stdin as the team rules say:
 
-| To | Run |
+| To | Prompt |
 |---|---|
-| Turn a goal into ordered tickets | `claude -p "/maestro-planner <goal>" --permission-mode bypassPermissions --output-format json` |
-| Split or rewrite a ticket | `claude -p "/maestro-planner <id>" --permission-mode bypassPermissions --output-format json` |
-| Find why little runs at once | `claude -p "/maestro-planner board" --permission-mode bypassPermissions --output-format json` |
-| Group 3+ blocks by cause | `claude -p "/maestro-chief-of-staff for the planner: triage the blocked tickets" --permission-mode bypassPermissions --output-format json` |
-| Second opinion on a block or a disputed finding | `claude -p "/maestro-chief-of-staff for the planner: second opinion on <id>" --permission-mode bypassPermissions --output-format json` |
+| Turn a goal into ordered tickets | `/maestro-planner <goal>` |
+| Split or rewrite a ticket | `/maestro-planner <id>` |
+| Find why little runs at once | `/maestro-planner board` |
+| Group 3+ blocks by cause | `/maestro-chief-of-staff for the planner: triage the blocked tickets` |
+| Second opinion on a block or a disputed finding | `/maestro-chief-of-staff for the planner: second opinion on <id>` |
 
-To answer a reply's question, or say "create them", run `claude -p --resume <session_id> "<answer>" --permission-mode bypassPermissions --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
+To answer a reply's question, or say "create them", send the answer the same way to `claude -p --resume <session_id> --permission-mode bypassPermissions --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
 
 ## Stop the line
 
