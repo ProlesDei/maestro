@@ -43,6 +43,7 @@ Run every command at the repo's root. These cost no tokens.
 | Waiting for review | `maestro-ticket list --status in_review --latest-prefix QA:` |
 | Sent back | `maestro-ticket list --status in_progress --latest-prefix Kickback:` |
 | Back to review | `maestro-ticket list --status in_review --latest-prefix Answer:` |
+| Sent up | `maestro-ticket list --status blocked --latest-prefix 'Sent up:'` |
 
 Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM marked `(expired)` counts as none.
 
@@ -54,7 +55,8 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Sent back, TRIES 0 or 1 | Same engineer again |
 | Sent back, TRIES 2+ | A junior's ticket: senior, one run. A senior's: split or rewrite it, one more run. Sent back again: chief of staff |
 | `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first |
-| `blocked` | Unblock, below |
+| `blocked`, not sent up | Unblock, below |
+| Sent up | Leave it: the chief of staff has it. Count it in your report |
 | `todo` in Ready to start | Top down, while work runs are under the limit. A `todo` row not in it waits on a dep or a busy area: leave it |
 | Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
 | `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
@@ -66,7 +68,7 @@ Work runs going = `in_progress` rows with a live CLAIM; the limit is in your mem
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 - `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Check `gh pr view <url> --json state,mergeCommit,headRefOid` shows `MERGED` at that commit, and the ticket's branch on the remote is gone or still at `headRefOid`; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <commit> (closed by the planner)'`.
 - Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
-- An owner's call, or one on your ask-first list: send it to the chief of staff. Never answer it yourself. When it sends the answer back, post it as below.
+- An owner's call, or one on your ask-first list: send it to the chief of staff, then `maestro-ticket comment <id> --body 'Sent up: chief of staff: <the question>'`, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
 
 To answer:
 1. `maestro-ticket comment <id> --body 'Answer: <decision>'`
@@ -113,5 +115,6 @@ board: done <n>, review <n>, build <n>, blocked <n>, todo <n>, backlog <n>
 runs: <n>/<limit>
 eta: <date> | slipping: <why>
 stuck: <id> <cause>; ... | none
+sent up: <ids> | none
 needs: <one card in the team rules' shape> | none
 ```
