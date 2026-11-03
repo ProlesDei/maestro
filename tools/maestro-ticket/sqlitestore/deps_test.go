@@ -327,3 +327,37 @@ func TestOnlyWorkClaimsUseAreasAndDeps(t *testing.T) {
 		t.Fatalf("work beside review and escalation claims: %v", err)
 	}
 }
+
+// Claimed or not, a ticket can't start from todo before its deps are done,
+// even a dep added after the claim. Done never waits on deps.
+func TestStartWaitsOnDeps(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	base := mustCreate(t, s, "base", "", 2)
+	top := create(t, s, ticket.CreateRequest{Title: "top", DependsOn: []ticket.ID{base.ID}})
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusInProgress})
+	wantErr(t, err, ticket.ErrWaitingOnDeps)
+
+	held := create(t, s, ticket.CreateRequest{Title: "held"})
+	cl, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: held.ID, Holder: "jse/held"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: held.ID, AddDeps: []ticket.ID{base.ID}, Holder: "jse/held", Token: cl.Claim.Token}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: held.ID, To: ticket.StatusInProgress, Holder: "jse/held", Token: cl.Claim.Token})
+	wantErr(t, err, ticket.ErrWaitingOnDeps)
+
+	// Done never waits on deps, even one added while the ticket is in review.
+	shipToDone(t, s, base.ID)
+	move(t, s, top.ID, ticket.StatusInProgress)
+	move(t, s, top.ID, ticket.StatusInReview)
+	late := mustCreate(t, s, "late", "", 2)
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: top.ID, AddDeps: []ticket.ID{late.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+		t.Fatalf("done with a dep not done: %v", err)
+	}
+}

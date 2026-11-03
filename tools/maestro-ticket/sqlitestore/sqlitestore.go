@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -1179,6 +1180,18 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 			return t, err
 		}
 	}
+	// Claimed or not, nothing starts work before its deps, even one added
+	// after the claim. Done never waits on them: a link doesn't hold back
+	// finished work.
+	if t.Status == ticket.StatusTodo && req.To == ticket.StatusInProgress {
+		pending, err := pendingDeps(ctx, tx, t.ID)
+		if err != nil {
+			return t, err
+		}
+		if len(pending) > 0 {
+			return t, fmt.Errorf("%w: %s waits on %v, not done yet", ticket.ErrWaitingOnDeps, t.ID, pending)
+		}
+	}
 	role := t.Role
 	if req.Role != "" {
 		role = req.Role
@@ -1449,23 +1462,51 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(abs); err == nil {
-		return fmt.Errorf("%w: backup %s already exists", ticket.ErrInvalid, abs)
-	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return fmt.Errorf("create backup dir: %w", err)
 	}
+	exists := fmt.Errorf("%w: backup %s already exists", ticket.ErrInvalid, abs)
+	if _, err := os.Lstat(abs); err == nil {
+		return exists
+	}
+	// Write to path.partial and link it to path once checked, so path only
+	// ever names a whole snapshot, even after a crash. The exclusive create
+	// makes a second backup to the same path fail before it writes, so it
+	// never removes the first one's file. VACUUM INTO accepts an empty file.
+	partial := abs + ".partial"
+	f, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("%w: backup %s is being written, or a crashed one left %s", ticket.ErrInvalid, abs, partial)
+	}
+	if err != nil {
+		return fmt.Errorf("create backup: %w", err)
+	}
+	f.Close()
+	defer os.Remove(partial)
 	err = retryBusy(ctx, func() error {
-		_, err := s.r.ExecContext(ctx, "VACUUM INTO ?", abs)
+		_, err := s.r.ExecContext(ctx, "VACUUM INTO ?", partial)
 		return err
 	})
 	if err != nil {
-		os.Remove(abs)
 		return fmt.Errorf("backup to %s: %w", abs, err)
 	}
-	if err := checkBackup(ctx, abs); err != nil {
-		os.Remove(abs)
+	if err := checkBackup(ctx, partial); err != nil {
 		return err
+	}
+	// Link, unlike rename, never replaces a file at path.
+	err = os.Link(partial, abs)
+	if errors.Is(err, fs.ErrExist) {
+		return exists
+	}
+	if err != nil {
+		// No hard links here (FAT, exFAT, some FUSE mounts): look once
+		// more, then rename.
+		if _, err := os.Lstat(abs); err == nil {
+			return exists
+		}
+		if err := os.Rename(partial, abs); err != nil {
+			return fmt.Errorf("backup to %s: %w", abs, err)
+		}
 	}
 	return nil
 }

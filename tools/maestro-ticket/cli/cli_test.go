@@ -628,6 +628,23 @@ func TestBackupAndExport(t *testing.T) {
 	// Same name twice is refused, not overwritten.
 	clock = clock.Add(-time.Hour)
 	h.fails(2, "backup")
+	// Pruning removes a killed backup's hour-old .partial, but not a fresh
+	// one: a backup may still be writing it.
+	stale := filepath.Join(h.dir, "backups", "tickets-20200101T000000.000Z.db.partial")
+	fresh := filepath.Join(h.dir, "backups", "tickets-20200102T000000.000Z.db.partial")
+	os.WriteFile(stale, nil, 0o644)
+	os.WriteFile(fresh, nil, 0o644)
+	old := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(stale, old, old)
+	clock = clock.Add(2 * time.Hour)
+	h.ok(nil, "backup", "--keep", "2")
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("pruning kept a stale .partial: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("pruning removed a fresh .partial: %v", err)
+	}
+	os.Remove(fresh)
 
 	// Pruning touches only snapshot names: not a store or another file that
 	// happens to match tickets-*.db in the same folder.
@@ -1031,5 +1048,9 @@ func TestListLatestPrefix(t *testing.T) {
 	}
 	if code, out, _ := h.run("", "list", "--latest-prefix", "Handoff:"); code != 0 || !strings.Contains(out, "T-2") || strings.Contains(out, "T-1 ") {
 		t.Fatalf("human list: exit %d %q", code, out)
+	}
+	// An unknown role is a typo, not an empty board.
+	if code, _, _ := h.run("", "list", "--role", "nonsense"); code != 2 {
+		t.Fatalf("list --role nonsense: exit %d, want 2", code)
 	}
 }
