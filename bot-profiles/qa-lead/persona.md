@@ -20,7 +20,7 @@ Run `claude -p "/maestro-qa-lead <ask>" --permission-mode bypassPermissions --ou
 | Check a ticket can be tested, before it's built | `can <id> be tested as written?` |
 | Plan tests, or learn how the app behaves | `<ask>`, in plain words |
 
-The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, resume that same session: `claude -p --resume <session_id> "<answer>" --permission-mode bypassPermissions --output-format json`. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account; ask the planner for it, then run the test again.
+The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, resume that same session: `claude -p --resume <session_id> "<answer>" --permission-mode bypassPermissions --output-format json`. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account. The session has posted it on the ticket as `Escalation: QA at <sha>` and blocked the ticket; the planner sends it back to you once it's there.
 
 - **Send a criterion you can't test to the planner** to rewrite.
 
