@@ -5,7 +5,7 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 ## Phase A: Frame
 
 1. Take the goal from the request. Given a ticket id, run `maestro-ticket get <id> --json` and take the goal from its title and body. The store can't edit a title or body, so a rewrite is a split into one ticket. If its status isn't `backlog`, `todo`, `blocked`, or `in_progress` with a `Kickback:` as its latest comment (sent back to split), stop and say why.
-2. Given an id, claim it before you plan, so no engineer or other planner takes it: pick a holder once, `planner/<id>-<6 random letters>`, run `maestro-ticket claim <id> --holder <holder> --ttl 1h --json`, and keep `claim.token`. On `waiting_on_deps` or `area_busy` in `todo`, take it off the queue with `maestro-ticket transition <id> --from todo --to backlog --expect-version <version>`, claim again, and comment `Parked: planning` under the claim, so the planner moves it back if this session stops. On either outside `todo`, stop and say so; a later look tries again. On `claimed` or a version conflict, stop and name the holder. A draft keeps the claim for the bot's answer; on resume, claim again if it `expired`. If you give up, run `maestro-ticket release <id> --holder <holder> --token <token>`, and move it back to `todo` if you moved it.
+2. Given an id, claim it before you plan, so no engineer or other planner takes it: pick a holder once, `planner/<id>-<6 random letters>`, run `maestro-ticket claim <id> --holder <holder> --ttl 1h --json`, and keep `claim.token`. On `waiting_on_deps` or `area_busy` in `todo`, take it off the queue with `maestro-ticket transition <id> --from todo --to backlog --expect-version <version>`, claim again, and comment `Parked: planning` under the claim, so the planner moves it back if this session stops. On either outside `todo`, stop and say so; a later look tries again. On `claimed` or a version conflict, stop and name the holder. A draft keeps the claim for the bot's answer. On resume, if it `expired`, read the ticket again: if its status left step 1's list, or a `Handoff:` came after your draft, someone built it meanwhile, so stop and say so; else claim again. If you give up before you post `Split into`, cancel each ticket this session created, latest first, and name in the reply any the store refuses with `has_dependents`; then run `maestro-ticket release <id> --holder <holder> --token <token>`, and move it back to `todo` if you moved it.
 3. Write a spec of a page or less: the problem and who has it, the outcome that means done (something a command or the running app shows), scope and non-goals, and risks. If you can't state the outcome, ask for it and stop.
 4. Find the files each part touches and the closest code that already does the same kind of thing, by path. Check each path you name exists.
 5. Read the open board without the bodies: `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,status,areas,depends_on}'`. A ticket that already covers a piece becomes a dep, not a new ticket.
@@ -21,23 +21,24 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 ## Phase C: Create
 
-1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries.
-2. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
+1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries. `--split-from` carries no deps: give each new ticket the old ticket's deps that aren't `done`, unless the spec says why that part doesn't need one.
+2. When you split or rewrite a ticket, post `Split into <new ids>` on it under your claim right after the last create, so a planner can finish the split if this session stops.
+3. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
 
 ## Phase D: Close the old ticket
 
 Skip this phase unless you split or rewrote a ticket.
 
-1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. A ticket whose deps still name a cancelled ticket can never be claimed, so move each onto the new tickets first, then cancel with your claim:
+1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. The store won't cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first, then cancel with your claim:
 
    ```sh
    maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>
-   maestro-ticket comment <id> --holder <holder> --token <token> --body 'Split into T-a, T-b'
    maestro-ticket transition <id> --to cancelled --holder <holder> --token <token>
    ```
 
-2. List again and move any dependent another session added in the meantime.
-3. If the old ticket has an open PR, close it with a comment naming the new tickets.
+2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again. If moving a dependent fails with `claimed`, don't wait for its holder: post `Escalation: split into T-a, T-b; cancel this once <dependent> (held by <holder>) is off it` with a last line `Return-role: <the ticket's role>`, move the ticket to `blocked` if it isn't there, and release your claim, so no engineer builds it. The planner cancels it on a later look.
+3. If a write under your claim fails with `lease_lost`, claim again as the same holder and go on; if that claim is refused for any reason, stop and say so: the planner finishes the split.
+4. If the old ticket has an open PR, close it with a comment naming the new tickets.
 
 ## Reply
 

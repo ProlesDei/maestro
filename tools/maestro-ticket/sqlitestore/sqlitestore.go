@@ -660,17 +660,21 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 }
 
 // addDeps records that id depends on each of deps. Every dependency must
-// exist, and none may already depend on id, directly or not: a cycle would
-// leave every ticket in it waiting forever.
+// exist and not be cancelled, and none may already depend on id, directly or
+// not: a cancelled dependency or a cycle would leave id waiting forever.
 func addDeps(ctx context.Context, tx *sql.Tx, id ticket.ID, deps []ticket.ID) error {
 	for _, d := range deps {
 		var one int
-		err := tx.QueryRowContext(ctx, "SELECT 1 FROM tickets WHERE id = ?", d).Scan(&one)
+		var status ticket.Status
+		err := tx.QueryRowContext(ctx, "SELECT status FROM tickets WHERE id = ?", d).Scan(&status)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: dependency %s", ticket.ErrNotFound, d)
 		}
 		if err != nil {
 			return err
+		}
+		if status == ticket.StatusCancelled {
+			return fmt.Errorf("%w: dependency %s is cancelled and will never be done", ticket.ErrInvalid, d)
 		}
 		err = tx.QueryRowContext(ctx, `WITH RECURSIVE up(id) AS (
 				SELECT ? UNION SELECT deps.depends_on FROM deps JOIN up ON deps.ticket_id = up.id)
@@ -1002,10 +1006,30 @@ func checkAreas(ctx context.Context, tx *sql.Tx, id ticket.ID, areas []string, n
 }
 
 // pendingDeps lists the tickets id depends on that aren't done. Only done
-// counts: a cancelled dependency keeps id waiting until someone removes it.
+// counts: a cancelled dependency, left from before the store refused them,
+// keeps id waiting until someone removes it.
 func pendingDeps(ctx context.Context, tx *sql.Tx, id ticket.ID) ([]ticket.ID, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT deps.depends_on FROM deps JOIN tickets dep ON dep.id = deps.depends_on
 		WHERE deps.ticket_id = ? AND dep.status != 'done' ORDER BY deps.depends_on`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ticket.ID
+	for rows.Next() {
+		var d ticket.ID
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// openDependents lists the tickets not yet done or cancelled that depend on id.
+func openDependents(ctx context.Context, tx *sql.Tx, id ticket.ID) ([]ticket.ID, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT deps.ticket_id FROM deps JOIN tickets t ON t.id = deps.ticket_id
+		WHERE deps.depends_on = ? AND t.status NOT IN ('done', 'cancelled') ORDER BY deps.ticket_id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1213,6 +1237,17 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 	}
 	if err := t.CheckGate(req.To, req.Actor, req.ActorRole); err != nil {
 		return t, err
+	}
+	// A cancelled ticket is never done, so an open ticket that depends on
+	// it would wait forever: its dependents move off it first.
+	if req.To == ticket.StatusCancelled {
+		dependents, err := openDependents(ctx, tx, t.ID)
+		if err != nil {
+			return t, err
+		}
+		if len(dependents) > 0 {
+			return t, fmt.Errorf("%w: %v depend on %s; remove the dep or cancel them first", ticket.ErrHasDependents, dependents, t.ID)
+		}
 	}
 	// A held ticket moving into work holds its areas from now on: check
 	// what its claim in another status skipped.
