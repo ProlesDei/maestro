@@ -22,7 +22,8 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 ## Phase C: Create
 
 1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries. `--split-from` carries no deps: give each new ticket the old ticket's deps that aren't `done`, unless the spec says why that part doesn't need one.
-2. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
+2. When you split or rewrite a ticket, post `Split into <new ids>` on it under your claim right after the last create, so a planner can finish the split if this session stops.
+3. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
 
 ## Phase D: Close the old ticket
 
@@ -32,12 +33,12 @@ Skip this phase unless you split or rewrote a ticket.
 
    ```sh
    maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>
-   maestro-ticket comment <id> --holder <holder> --token <token> --body 'Split into T-a, T-b'
    maestro-ticket transition <id> --to cancelled --holder <holder> --token <token>
    ```
 
-2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again. If moving a dependent fails with `claimed`, don't wait for its holder: post `Split into T-a, T-b` if you haven't, then `Escalation: split into T-a, T-b; cancel this once <dependent> (held by <holder>) is off it` with a last line `Return-role: <the ticket's role>`, move the ticket to `blocked` if it isn't there, and release your claim, so no engineer builds it. The planner cancels it on a later look.
-3. If the old ticket has an open PR, close it with a comment naming the new tickets.
+2. If the cancel fails with `has_dependents`, another session added a dependent in the meantime: move each one it names the same way, then cancel again. If moving a dependent fails with `claimed`, don't wait for its holder: post `Escalation: split into T-a, T-b; cancel this once <dependent> (held by <holder>) is off it` with a last line `Return-role: <the ticket's role>`, move the ticket to `blocked` if it isn't there, and release your claim, so no engineer builds it. The planner cancels it on a later look.
+3. If a write under your claim fails with `lease_lost`, claim again as the same holder and go on; on `claimed`, stop and say so: the planner finishes the split.
+4. If the old ticket has an open PR, close it with a comment naming the new tickets.
 
 ## Reply
 

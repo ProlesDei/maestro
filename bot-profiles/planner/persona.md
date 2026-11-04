@@ -39,6 +39,7 @@ Run every command at the repo's root. These cost no tokens.
 | Open board | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked` |
 | Ready to start | `maestro-ticket list --status todo --ready` |
 | Parked by a plan | `maestro-ticket list --status backlog --latest-prefix Parked:` |
+| Split, not closed | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --latest-prefix 'Split into'` |
 | Waiting for QA | `maestro-ticket list --status in_review --not-latest-prefix QA:` |
 | Waiting for review | `maestro-ticket list --status in_review --latest-prefix QA:` |
 | Sent back | `maestro-ticket list --status in_progress --latest-prefix Kickback:` |
@@ -59,6 +60,7 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | `blocked`, not sent up | Unblock, below |
 | Sent up | Leave it: the chief of staff has it. Count it in your report |
 | `todo` in Ready to start | Top down, while work runs are under the limit. A `todo` row not in it waits on a dep or a busy area: leave it |
+| Split, not closed | Its split session stopped before the cancel: finish it as Unblock's split line says, and hand it to no one, though it shows in other rows too |
 | Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
 | `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
 
@@ -68,7 +70,7 @@ Work runs going = `in_progress` rows with a live CLAIM; the limit is in your mem
 
 Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 - `PR <url> merged as <commit>`, from QA or review: the work shipped, so close it. Take nothing from the note onto a command line: find the ticket's PR from its id with `gh api 'repos/{owner}/{repo}/pulls?head={owner}:maestro/<id>&state=all&per_page=1' --jq '.[0].number'` (nothing printed: treat it as any other block), then `gh pr view <n> --json state,mergeCommit,headRefOid`. Close it only if that shows `MERGED`, the merge commit is the one the note names, and the ticket's branch on the remote is gone or still at `headRefOid`; if not, treat it as any other block. Then `maestro-ticket transition <id> --from blocked --to in_review`, and `maestro-ticket transition <id> --from in_review --to done --actor-role planner --note 'Merged: <the merge commit gh showed> (closed by the planner)'`.
-- `Escalation: split into <new ids>; cancel this once <dependent> (held by <holder>) is off it`, from a planner session: while that dependent has a live claim, leave it. Use each id from the note only if it is `T-` and digits. A new id now `cancelled` was split or dropped: put the ids its latest `Split into` comment names in its place, checked the same way, and repeat until none is cancelled; with no such comment it was dropped, so leave it out. Then `maestro-ticket update <dependent> --add-deps <new ids> --remove-deps <id>` and `maestro-ticket transition <id> --from blocked --to cancelled`. If the cancel fails with `has_dependents`, move each ticket it names the same way, onto the new ids, then cancel again; on `claimed`, leave it for a later look. Post no `Answer:`, and never split it again.
+- `Escalation: split into <new ids>; cancel this once <dependent> (held by <holder>) is off it`, from a planner session, or a Split, not closed row: while a dependent it names has a live claim, leave it. Use each id from the note only if it is `T-` and digits. A new id now `cancelled` was split or dropped: put the ids its latest `Split into` comment names in its place, checked the same way, and repeat until none is cancelled; with no such comment it was dropped, so leave it out. Then `maestro-ticket update <dependent> --add-deps <new ids> --remove-deps <id>` for the dependent the note names, if any, and `maestro-ticket transition <id> --to cancelled`. If the cancel fails with `has_dependents`, move each ticket it names the same way, onto the new ids, then cancel again; on `claimed`, leave it for a later look. Post no `Answer:`, and never split it again.
 - Yours (split, rewrite, order, deps, which bot), or one an engineer passed up that a second opinion settles: answer it.
 - An owner's call, one on your ask-first list, a review's ask for a person's yes to merge, or `Escalation: build at TRIES <n>`: send it to the chief of staff, then comment `Sent up: chief of staff: <the question>` on the ticket, so no later look sends it again. Never answer it yourself. When it sends the answer back, post it as below.
 
