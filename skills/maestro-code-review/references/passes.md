@@ -13,7 +13,7 @@ Read this in Phase D of [SKILL.md](../SKILL.md). Run the passes your tier calls 
 9. **Red team.** You are an attacker who never saw passes 1-8. Try to forge, replay, race two requests, cross users, exhaust a worker, or inject through any string. At tier 2, also try to get past whatever made it tier 2: the guard, the check, the lock. Each idea that works becomes a finding with a repro.
 10. **Skeptic.** Challenge each finding: is it real (rerun it), is the severity right, was it already on `$B`? Pre-existing is out of scope unless the diff makes it worse. Challenge the clean passes: what did nobody look at? Take one look across the changed files at how they interact (shared config, paired timeouts, one writer and two readers). Drop what doesn't survive. The short version, at tiers 0 and 1: reread your own findings and clean passes once with these questions, inline.
 
-Only run-proven findings count: a failing test, a repro script, command output against the real code. A finding no run can show (a committed secret, a file out of scope) needs the quoted `file:line`. The rest go to Dropped. No findings is a valid result.
+Only run-proven findings count: a failing test, a repro script, command output against the real code. A finding no run can show (a committed secret, a file out of scope) needs its `file:line`, quoted for a file but never the secret's value: the Kickback and PR comments are read widely. The rest go to Dropped. No findings is a valid result.
 
 ## Rate each finding
 
