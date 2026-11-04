@@ -79,7 +79,7 @@ for b in "${bots[@]}"; do
 			printf '\n## Starting memories\n\nSave each bullet as one memory the first time you start.\n\n'
 			bullets "$memory"
 		fi
-		printf '\n## Where you work\n\n- Repo: %s\n- Profile: %s\n- Maestro: %s\n' "$target" "$b" "${sha:-unknown}"
+		printf '\n## Where you work\n\n- Repo: %s\n- Profile: %s\n- Maestro: %s\n' "$target" "$b" "$sha"
 	} >"$out"
 	echo "$b: $(wc -c <"$out" | tr -d ' ') chars in .maestro/bots/$b.md"
 done
