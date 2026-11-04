@@ -174,6 +174,13 @@ ok apply --replace maestro-swarm "$r"
 [ ! -L "$r/.claude/skills/maestro-swarm" ] || fail "--replace kept the link"
 installed "$r" .claude
 [ -f "$tmp/shared-swarm/SKILL.md" ] || fail "--replace changed the link's target"
+# A linked file the same: --replace writes Maestro's copy where the link was.
+mv "$r/.claude/skills/maestro-swarm/SKILL.md" "$tmp/swarm-skill.md" && ln -s "$tmp/swarm-skill.md" "$r/.claude/skills/maestro-swarm/SKILL.md"
+refuses "clash: .claude/skills/maestro-swarm/SKILL.md is a symlink" "$r" apply "$r"
+ok apply --replace maestro-swarm "$r"
+[ -f "$r/.claude/skills/maestro-swarm/SKILL.md" ] && [ ! -L "$r/.claude/skills/maestro-swarm/SKILL.md" ] || fail "--replace removed a linked file and wrote nothing in its place"
+installed "$r" .claude
+[ -f "$tmp/swarm-skill.md" ] || fail "--replace changed the link's target"
 # A record line outside a harness skill folder, or one that climbs out of
 # it, stops apply and uninstall before they change anything. A last line
 # with no newline still counts.
