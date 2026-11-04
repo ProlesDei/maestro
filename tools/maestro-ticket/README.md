@@ -54,9 +54,9 @@ The reviewer needs no claim to close or send back an unclaimed ticket:
 ```sh
 maestro-ticket transition T-12 --from in_review --to done --actor-role reviewer --actor reviewer --note "merged <sha>"
 maestro-ticket transition T-12 --from in_review --to in_progress --actor reviewer
-maestro-ticket comment T-12 --actor reviewer --body-file - <<'EOF'
+maestro-ticket comment T-12 --actor reviewer --body-file - <<'END_<8 random letters>'
 Kickback: <findings>
-EOF
+END_<the same 8 letters>
 ```
 
 If someone holds a live claim on the ticket, both moves fail with exit 4 `claimed` until the holder releases it or the lease expires.
