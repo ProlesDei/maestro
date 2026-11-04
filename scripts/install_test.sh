@@ -198,32 +198,6 @@ for f in "$rec" "$r/.maestro/project/installed.list"; do
 done
 [ -f "$r/.claude/skills/team-deploy/SKILL.md" ] || fail "a record line deleted the team's own skill"
 rm -r "$r/.claude/skills/team-deploy"
-# Nor does a line for a file Maestro never shipped, in a maestro- folder:
-# the team's file beside Maestro's, or a team skill with the prefix. Apply
-# keeps each, and uninstall keeps and names each.
-echo ours >"$r/.claude/skills/maestro-tdd/notes.md"
-mkdir "$r/.claude/skills/maestro-deploy" && echo ours >"$r/.claude/skills/maestro-deploy/SKILL.md"
-for f in "$rec" "$r/.maestro/project/installed.list"; do
-	for p in .claude/skills/maestro-tdd/notes.md .claude/skills/maestro-deploy/SKILL.md; do
-		printf '%s\t%s\n' "$(git hash-object "$r/$p")" "$p" >>"$f"
-	done
-	ok apply "$r"
-	says "0 files written, 0 removed"
-	[ -f "$r/.claude/skills/maestro-tdd/notes.md" ] && [ -f "$r/.claude/skills/maestro-deploy/SKILL.md" ] || fail "apply deleted a file Maestro never shipped"
-	[ "$f" = "$rec" ] || rm -f "$f"
-done
-cp "$rec" "$tmp/rec2"
-for p in .claude/skills/maestro-tdd/notes.md .claude/skills/maestro-deploy/SKILL.md; do
-	printf '%s\t%s\n' "$(git hash-object "$r/$p")" "$p" >>"$rec"
-done
-if run uninstall "$r"; then fail "uninstall exited 0 with files it kept"; fi
-says "kept, not a file Maestro shipped: .claude/skills/maestro-deploy/SKILL.md"
-[ -f "$r/.claude/skills/maestro-tdd/notes.md" ] && [ -f "$r/.claude/skills/maestro-deploy/SKILL.md" ] || fail "uninstall deleted a file Maestro never shipped"
-cp "$tmp/rec2" "$rec"
-rm -r "$r/.claude/skills/maestro-deploy" "$r/.claude/skills/maestro-tdd/notes.md"
-ok apply "$r"
-installed "$r" .claude .agents
-cp "$tmp/rec" "$rec"
 printf %s "$(cat "$rec")" >"$rec"
 ok check "$r"
 cp "$tmp/rec" "$rec"

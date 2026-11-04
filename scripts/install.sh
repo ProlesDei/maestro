@@ -358,43 +358,13 @@ if [ "$cmd" = check ]; then
 	exit 0
 fi
 
-# read_shipped: read once, when needed, each skill file Maestro ever shipped,
-# into shipped["<blob> <skill>/<path>"], and each skill name into names.
-declare -A shipped=() names=()
-shipped_read=
-read_shipped() {
-	[ -z "$shipped_read" ] || return 0
-	shipped_read=1
-	local out h path _
-	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
-		die "Maestro at $root is a shallow clone, so install.sh can't tell Maestro's copies from the team's files; fetch its full history (git fetch --unshallow); nothing was changed"
-	# -m lists a copy a merge made; the -c keeps a user's log.diffMerges
-	# from narrowing it, and git before 2.31 ignores it.
-	out=$(git -C "$root" -c log.diffMerges=separate log -m --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
-	while read -r _ _ _ h _ path; do
-		[ -n "$path" ] || continue
-		path=${path#skills/}
-		shipped["$h $path"]=1
-		names[${path%%/*}]=1
-	done <<<"$out"
-}
-# ours <record path>: true if the record's hash for the path is a file
-# Maestro shipped there. A committed record is anyone's to edit, so a line
-# naming the team's file, with its hash, doesn't make the file Maestro's.
-ours() {
-	read_shipped
-	[ -n "${shipped["${old[$1]-} ${1#*/skills/}"]-}" ]
-}
-
 # --- uninstall ---
 if [ "$cmd" = uninstall ]; then
 	[ -f "$record" ] || die "no record at $record: nothing to remove"
-	kept=() behind=() foreign=() removed=0 paths=() want=()
+	kept=() behind=() removed=0 paths=() want=()
 	for p in "${!old[@]}"; do
 		if linked "$p"; then
 			behind+=("$p")
-		elif ! ours "$p"; then
-			[ ! -e "$(full "$p")" ] || foreign+=("$p")
 		elif [ -f "$(full "$p")" ]; then
 			paths+=("$p") want+=("${old[$p]}")
 		fi
@@ -416,8 +386,7 @@ if [ "$cmd" = uninstall ]; then
 	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/, .maestro/bots/ and the ticket store at $common/maestro/"
 	[ ${#kept[@]} -eq 0 ] || printf 'kept, changed since install: %s\n' "${kept[@]}"
 	[ ${#behind[@]} -eq 0 ] || printf 'kept, behind a symlink: %s\n' "${behind[@]}"
-	[ ${#foreign[@]} -eq 0 ] || printf 'kept, not a file Maestro shipped: %s\n' "${foreign[@]}"
-	[ ${#kept[@]} -eq 0 ] && [ ${#behind[@]} -eq 0 ] && [ ${#foreign[@]} -eq 0 ] || exit 1
+	[ ${#kept[@]} -eq 0 ] && [ ${#behind[@]} -eq 0 ] || exit 1
 	exit 0
 fi
 
@@ -462,6 +431,26 @@ done
 
 # Every file now in a folder this install writes to, or listed in the
 # record, is in the plan, the record, or neither (the team's).
+# read_shipped: read once, when needed, each skill file Maestro ever shipped,
+# into shipped["<blob> <skill>/<path>"], and each skill name into names.
+declare -A shipped=() names=()
+shipped_read=
+read_shipped() {
+	[ -z "$shipped_read" ] || return 0
+	shipped_read=1
+	local out h path _
+	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
+		die "Maestro at $root is a shallow clone, so apply can't tell an older install's copies from the team's files; fetch its full history (git fetch --unshallow); nothing was changed"
+	# -m lists a copy a merge made; the -c keeps a user's log.diffMerges
+	# from narrowing it, and git before 2.31 ignores it.
+	out=$(git -C "$root" -c log.diffMerges=separate log -m --format= --raw --no-abbrev --no-renames -- skills) || die "git log failed in $root; nothing was changed"
+	while read -r _ _ _ h _ path; do
+		[ -n "$path" ] || continue
+		path=${path#skills/}
+		shipped["$h $path"]=1
+		names[${path%%/*}]=1
+	done <<<"$out"
+}
 # The install.sh before the record hid each skill it placed with a line
 # like .claude/skills/<name>/ outside the marked block. With no record,
 # such a line for a skill Maestro has shipped is its: apply drops it.
@@ -556,8 +545,7 @@ for p in "${!seen[@]}"; do
 		elif [ "${cur[$p]}" = "${old[$p]-}" ] || replacing "$p"; then writes+=("$p")
 		elif [ -n "${old[$p]-}" ]; then clashes+=("$p changed since install")
 		else clashes+=("$p isn't Maestro's"); fi
-	elif [ "${cur[$p]}" = "${old[$p]-}" ]; then
-		if ours "$p"; then deletes+=("$p"); fi
+	elif [ "${cur[$p]}" = "${old[$p]-}" ]; then deletes+=("$p")
 	# The team's file beside Maestro's, such as a .DS_Store, stays, even
 	# with --replace: no clash named it.
 	elif [ -z "${old[$p]-}" ] && ! in_way "$p"; then :
