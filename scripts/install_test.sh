@@ -224,6 +224,21 @@ sed -i 's|^bots: .*|bots: ../planner|' "$r/.maestro/project/install.yaml"
 if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took a bot name with a path"; fi
 says "no bot profile ../planner"
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+# A block or a memory file that is a symlink, which a PR can commit,
+# refuses: bot-bundle would write through it, or paste its target into
+# the block.
+echo outside >"$tmp/victim"
+mv "$b" "$tmp/planner.md" && ln -s "$tmp/victim" "$b"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked block"; fi
+says ".maestro/bots/planner.md is a symlink"
+[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked block"
+rm "$b" && mv "$tmp/planner.md" "$b"
+mem=$r/.maestro/project/bots/planner.memory.md
+mv "$mem" "$tmp/memory" && printf -- '- token: s3cr3t\n' >"$tmp/victim" && ln -s "$tmp/victim" "$mem"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle read a symlinked memory file"; fi
+says ".maestro/project/bots/planner.memory.md is a symlink"
+! grep -qF s3cr3t "$b" || fail "bot-bundle pasted a symlink's target into the block"
+rm "$mem" && mv "$tmp/memory" "$mem"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
 # The team changed one copy of the dropped skill: that one stays as
