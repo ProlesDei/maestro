@@ -171,10 +171,11 @@ hashes() {
 declare -A old=()
 reads=("$record")
 [ "$cmd" != apply ] || reads+=("$other")
-# A record path names a file in a harness skill folder, with no . or ..
+# A record path names a file in a maestro- skill folder, with no . or ..
 # part: a committed record is anyone's to edit, and apply and uninstall
-# delete what it lists.
-recpath='^\.(claude|agents)/skills/[a-z0-9]+(-[a-z0-9]+)*/[^/]'
+# delete what it lists. Every record lists only maestro- skills: the
+# record came after the prefix.
+recpath='^\.(claude|agents)/skills/maestro-[a-z0-9]+(-[a-z0-9]+)*/[^/]'
 for r in "${reads[@]}"; do
 	[ -f "$r" ] || continue
 	n=0
@@ -183,7 +184,7 @@ for r in "${reads[@]}"; do
 		[[ $h == '#'* || -z $h ]] && continue
 		p=${p%$'\r'} # a CRLF checkout of the committed record
 		[[ $h =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && $p =~ $recpath && /$p/ != */../* && /$p/ != */./* && $p != *//* && $p != */ ]] ||
-			die "$r:$n: want a blob hash, a tab and a file under .claude/skills/<skill>/ or .agents/skills/<skill>/; nothing was changed"
+			die "$r:$n: want a blob hash, a tab and a file under .claude/skills/maestro-<skill>/ or .agents/skills/maestro-<skill>/; nothing was changed"
 		old[$p]=$h
 	done <"$r"
 done

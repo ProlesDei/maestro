@@ -186,6 +186,18 @@ for bad in "README.md" ".claude/skills/maestro-tdd/../../../../victim"; do
 	cp "$tmp/rec" "$rec"
 done
 [ -f "$tmp/victim" ] || fail "a bad record line deleted a file"
+# A record line for a skill that isn't Maestro's, with the hash of the
+# team's file there, stops apply and uninstall too: a committed record is
+# anyone's to edit, and a hidden install reads it as the other record.
+mkdir "$r/.claude/skills/team-deploy" && echo ours >"$r/.claude/skills/team-deploy/SKILL.md"
+for f in "$rec" "$r/.maestro/project/installed.list"; do
+	printf '%s\t%s\n' "$(git hash-object "$r/.claude/skills/team-deploy/SKILL.md")" .claude/skills/team-deploy/SKILL.md >>"$f"
+	refuses "installed.list:$(wc -l <"$f"): want a blob hash" "$r" apply "$r"
+	[ "$f" != "$rec" ] || refuses "installed.list:$(wc -l <"$f"): want a blob hash" "$r" uninstall "$r"
+	if [ "$f" = "$rec" ]; then cp "$tmp/rec" "$rec"; else rm "$f"; fi
+done
+[ -f "$r/.claude/skills/team-deploy/SKILL.md" ] || fail "a record line deleted the team's own skill"
+rm -r "$r/.claude/skills/team-deploy"
 printf %s "$(cat "$rec")" >"$rec"
 ok check "$r"
 cp "$tmp/rec" "$rec"
@@ -211,6 +223,31 @@ cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 sed -i 's|^bots: .*|bots: ../planner|' "$r/.maestro/project/install.yaml"
 if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took a bot name with a path"; fi
 says "no bot profile ../planner"
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+# A block or a memory file that is a symlink, which a PR can commit,
+# refuses: bot-bundle would write through it, or paste its target into
+# the block.
+echo outside >"$tmp/victim"
+mv "$b" "$tmp/planner.md" && ln -s "$tmp/victim" "$b"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked block"; fi
+says ".maestro/bots/planner.md is a symlink"
+[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked block"
+rm "$b" && mv "$tmp/planner.md" "$b"
+mem=$r/.maestro/project/bots/planner.memory.md
+mv "$mem" "$tmp/memory" && printf -- '- token: s3cr3t\n' >"$tmp/victim" && ln -s "$tmp/victim" "$mem"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle read a symlinked memory file"; fi
+says ".maestro/project/bots/planner.memory.md is a symlink"
+! grep -qF s3cr3t "$b" || fail "bot-bundle pasted a symlink's target into the block"
+rm "$mem" && mv "$tmp/memory" "$mem"
+# The blocks come from the pinned commit, as install.sh's copies do.
+echo "- An edit no one reviewed." >>"$m/bot-profiles/team-rules.md"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took uncommitted bot-profiles"; fi
+says "uncommitted changes in bot-profiles/"
+! grep -qF "no one reviewed" "$b" || fail "bot-bundle put an uncommitted edit in the block"
+git -C "$m" checkout -q -- bot-profiles/team-rules.md
+sed -i "s/^maestro-sha: .*/maestro-sha: 0000000/" "$r/.maestro/project/install.yaml"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle ran off its pin"; fi
+says "but install.yaml pins 0000000"
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---

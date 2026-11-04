@@ -34,6 +34,12 @@ while IFS= read -r line || [ -n "$line" ]; do
 	maestro-sha:*) sha=${line#maestro-sha:} sha=${sha//[[:space:]]/} ;;
 	esac
 done <"$choices"
+# The blocks must be the pinned commit's, as install.sh's copies are.
+[[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
+head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
+[[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
+[ -z "$(git -C "$root" status --porcelain -- bot-profiles)" ] ||
+	die "Maestro at $root has uncommitted changes in bot-profiles/; commit them and pin that commit"
 if [ ${#bots[@]} -eq 0 ]; then
 	for d in "$profiles"/*/; do bots+=("$(basename "$d")"); done
 fi
@@ -43,14 +49,28 @@ body() { awk 'NR==1 && $0=="---" {fm=1; next} fm && $0=="---" {fm=0; next} !fm' 
 # bullets <file>: the bullets of a memory file, each with its wrapped lines.
 bullets() { awk '/^- /{b=1; print; next} b && /^  /{print; next} {b=0}' "$1"; }
 
+# linked <path from the repo's top>: true if the path, or a folder on the
+# way to it, is a symlink. A PR can commit one, and a read or write
+# through it lands outside .maestro/.
+linked() {
+	local p=$1
+	while :; do
+		[ ! -L "$target/$p" ] || return 0
+		[[ $p == */* ]] || return 1
+		p=${p%/*}
+	done
+}
+
 mkdir -p "$target/.maestro/bots"
 for b in "${bots[@]}"; do
 	persona=$profiles/$b/persona.md
 	# The name goes into paths, so no / or ..
 	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$persona" ]; } || die "no bot profile $b in $profiles"
 	memory=$target/.maestro/project/bots/$b.memory.md
+	! linked ".maestro/project/bots/$b.memory.md" || die ".maestro/project/bots/$b.memory.md is a symlink; copy the real file"
 	[ -f "$memory" ] || memory=$profiles/$b/memory.md
 	out=$target/.maestro/bots/$b.md
+	! linked ".maestro/bots/$b.md" || die ".maestro/bots/$b.md is a symlink; remove it"
 	{
 		body "$persona"
 		echo
@@ -59,7 +79,7 @@ for b in "${bots[@]}"; do
 			printf '\n## Starting memories\n\nSave each bullet as one memory the first time you start.\n\n'
 			bullets "$memory"
 		fi
-		printf '\n## Where you work\n\n- Repo: %s\n- Profile: %s\n- Maestro: %s\n' "$target" "$b" "${sha:-unknown}"
+		printf '\n## Where you work\n\n- Repo: %s\n- Profile: %s\n- Maestro: %s\n' "$target" "$b" "$sha"
 	} >"$out"
 	echo "$b: $(wc -c <"$out" | tr -d ' ') chars in .maestro/bots/$b.md"
 done

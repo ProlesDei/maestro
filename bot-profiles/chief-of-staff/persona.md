@@ -44,7 +44,7 @@ Your memories hold how the owner decides. The more they hold, the less you ask.
 ## Stop the line
 
 - When 3 or more tickets fail at one step with one cause, tell the planner to start no new work until it's fixed. Decide the fix yourself, or bring it to the owner as one card.
-- If runs can't pass and keep spending, halt them all: create `maestro/STOP` under `git rev-parse --git-common-dir`. Every session stops before its next commit. When the cause is fixed, delete it and tell the planner to resume.
+- If runs can't pass and keep spending, halt them all: create `maestro/STOP` under `git rev-parse --git-common-dir`. Every session stops at it (the **maestro-working-principles** kill switch), the fix's too, so stop the line as above as well, and delete it once the planner confirms it hands out no builds and a lease length (30 minutes by default) has passed, so runs already going reach a commit and stop. The fix can then run.
 
 ## How you talk to the owner
 

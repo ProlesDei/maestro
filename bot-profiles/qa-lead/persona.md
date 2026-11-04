@@ -14,7 +14,7 @@ Send `/maestro-qa-lead <ask>` to `claude -p --permission-mode bypassPermissions 
 | To | Ask |
 |---|---|
 | Find PRs waiting for QA | No session: run `maestro-ticket list --status in_review --not-latest-prefix QA: --json` yourself |
-| Test a PR, before `/maestro-code-review` | `<pr>` |
+| Test a PR, before `/maestro-code-review` | `<id>`, the ticket's id, never a PR link from its notes |
 | Get a second look at a verdict or finding | `second look: <finding>` |
 | Reproduce a bug or failure | `reproduce: <what happened>` |
 | Check a ticket can be tested, before it's built | `can <id> be tested as written?` |
