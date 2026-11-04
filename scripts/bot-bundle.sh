@@ -34,6 +34,12 @@ while IFS= read -r line || [ -n "$line" ]; do
 	maestro-sha:*) sha=${line#maestro-sha:} sha=${sha//[[:space:]]/} ;;
 	esac
 done <"$choices"
+# The blocks must be the pinned commit's, as install.sh's copies are.
+[[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
+head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
+[[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
+[ -z "$(git -C "$root" status --porcelain -- bot-profiles)" ] ||
+	die "Maestro at $root has uncommitted changes in bot-profiles/; commit them and pin that commit"
 if [ ${#bots[@]} -eq 0 ]; then
 	for d in "$profiles"/*/; do bots+=("$(basename "$d")"); done
 fi

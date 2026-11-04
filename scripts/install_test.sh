@@ -239,6 +239,16 @@ if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle 
 says ".maestro/project/bots/planner.memory.md is a symlink"
 ! grep -qF s3cr3t "$b" || fail "bot-bundle pasted a symlink's target into the block"
 rm "$mem" && mv "$tmp/memory" "$mem"
+# The blocks come from the pinned commit, as install.sh's copies do.
+echo "- An edit no one reviewed." >>"$m/bot-profiles/team-rules.md"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took uncommitted bot-profiles"; fi
+says "uncommitted changes in bot-profiles/"
+! grep -qF "no one reviewed" "$b" || fail "bot-bundle put an uncommitted edit in the block"
+git -C "$m" checkout -q -- bot-profiles/team-rules.md
+sed -i "s/^maestro-sha: .*/maestro-sha: 0000000/" "$r/.maestro/project/install.yaml"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle ran off its pin"; fi
+says "but install.yaml pins 0000000"
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
 # The team changed one copy of the dropped skill: that one stays as
