@@ -186,6 +186,18 @@ for bad in "README.md" ".claude/skills/maestro-tdd/../../../../victim"; do
 	cp "$tmp/rec" "$rec"
 done
 [ -f "$tmp/victim" ] || fail "a bad record line deleted a file"
+# A record line for a skill that isn't Maestro's, with the hash of the
+# team's file there, stops apply and uninstall too: a committed record is
+# anyone's to edit, and a hidden install reads it as the other record.
+mkdir "$r/.claude/skills/team-deploy" && echo ours >"$r/.claude/skills/team-deploy/SKILL.md"
+for f in "$rec" "$r/.maestro/project/installed.list"; do
+	printf '%s\t%s\n' "$(git hash-object "$r/.claude/skills/team-deploy/SKILL.md")" .claude/skills/team-deploy/SKILL.md >>"$f"
+	refuses "installed.list:$(wc -l <"$f"): want a blob hash" "$r" apply "$r"
+	[ "$f" != "$rec" ] || refuses "installed.list:$(wc -l <"$f"): want a blob hash" "$r" uninstall "$r"
+	if [ "$f" = "$rec" ]; then cp "$tmp/rec" "$rec"; else rm "$f"; fi
+done
+[ -f "$r/.claude/skills/team-deploy/SKILL.md" ] || fail "a record line deleted the team's own skill"
+rm -r "$r/.claude/skills/team-deploy"
 printf %s "$(cat "$rec")" >"$rec"
 ok check "$r"
 cp "$tmp/rec" "$rec"
