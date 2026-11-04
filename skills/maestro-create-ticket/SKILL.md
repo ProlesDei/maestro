@@ -34,13 +34,13 @@ Follow the **maestro-working-principles** skill.
    maestro-ticket create --json --title '<title>' --priority <n> --status <todo|backlog> --role <role> \
      --deps '<T-1,T-2>' --areas '<path,path>' \
      --idempotency-key 'create:<yyyy-mm-dd>:<title slug>' \
-     --body-file - <<'MAESTRO_TICKET_BODY'
+     --body-file - <<'END_<8 random letters>'
    <body>
-   MAESTRO_TICKET_BODY
+   END_<the same 8 letters>
    ```
 
    - Leave out `--type`: the default, `ship`, is a ticket that ends in a merged PR.
-   - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted; if a body line is exactly `MAESTRO_TICKET_BODY`, pick another.
+   - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted and new each time, as **maestro-working-principles** says for quoted text.
    - The slug is lowercase letters, digits and hyphens. Leave out `--deps` or `--areas` when empty.
    - If the store refuses, show its message, fix only the field it names, and run again with the same key. On `idempotency_conflict`, another ticket got this title today: read it; if it is this work, reply with its id, else change the title, and with it the key.
 
