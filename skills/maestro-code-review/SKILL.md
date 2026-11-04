@@ -59,7 +59,7 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: on a ticket, its latest `QA:` comment is a pass at `H`, and no `QA: fail at <H>` came after the latest `Retest:` at `H` (or at all, if there is none), since two QA runs can finish in either order; no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence, or waived as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
+**GO** only if all hold: on a ticket, its latest `QA:` comment is a pass at `H`, and no `QA: fail at <H>` other than a `not tested:` one came after the latest `Retest:` at `H` (or at all, if there is none), since two QA runs can finish in either order; no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence, or waived as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs a person's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
@@ -71,7 +71,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
 
 ## Phase G: Act
 
-1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if it is a fail at `H`, decide again in Phase F. Run step 5's cleanup whenever you stop here.
+1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if Phase F's QA condition no longer holds, decide again in Phase F. Run step 5's cleanup whenever you stop here.
 2. **GO.** Never squash, rebase, force-push or `--no-verify`. With no ticket, skip the transition.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
