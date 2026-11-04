@@ -31,7 +31,7 @@ Open a todo list with one item per phase below.
 1. Write each brief to stand alone. Workers share no chat, scratch file or branch. Each brief names:
    - the goal and its one slice or approach
    - the files it owns and the files it must not touch
-   - its own worktree and branch: for a ticket, the ones the **maestro-working-principles** skill names (`maestro/<id>`), so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha
+   - its own worktree and branch: for a ticket, the ones the **maestro-working-principles** skill names (`maestro/<id>`), so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha, with `<tag>` a short slug and 4 random letters, so no other swarm or earlier run has the branch
    - done criteria and the proof to return: command, exit code, paths
    - the reply shape: `done`, `partial` or `blocked`; branch and sha; files; proof; open questions
 2. Launch them all in one message: parallel subagents, else one headless session per worker with all permissions. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
