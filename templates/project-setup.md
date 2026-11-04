@@ -34,4 +34,4 @@ main
 
 ## Conventions
 
-<branch and commit style, where tests live, files never to touch>
+<commit style, where tests live, files never to touch>

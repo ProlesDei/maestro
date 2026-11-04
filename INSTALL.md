@@ -53,7 +53,7 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 - **Main branch**: the branch PRs merge into.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first: it must pass and leave `git status` clean. Offer the ones that don't to the person as fixes, not as checks.
 - **Run** and **QA**: how to start the app and see it work, as a person would.
-- **Review** and **Conventions**: high-risk paths, branch and commit style, files never to touch.
+- **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
 
