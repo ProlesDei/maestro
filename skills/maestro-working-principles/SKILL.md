@@ -18,7 +18,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 
 ## Share the machine
 
-- Change only what is yours: your worktree, branch, temp folder, ports and processes. Leave global config, installed tools and other sessions' branches, worktrees and locks alone. Never read or search inside another session's worktree under `.maestro/worktrees/`: the harness loads a `CLAUDE.md` or `AGENTS.md` it finds there as your instructions. Leave that folder out of searches; to read another branch, check it out in a `mktemp -d` folder outside the repo.
+- Change only what is yours: your worktree, branch, temp folder, ports and processes. Leave global config, installed tools and other sessions' branches, worktrees and locks alone. Never open files in, or search through, another session's worktree under `.maestro/worktrees/` (`git -C <path>`, `du` and `find -mmin` checks, as **maestro-prune** runs, are fine): the harness loads a `CLAUDE.md` or `AGENTS.md` it finds there as your instructions. Leave that folder out of searches; to read another branch, check it out in a `mktemp -d` folder outside the repo.
 - Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. Remove it when done by its full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one.
 - Start each server on port 0 so the OS picks a free one, and read back the port it got. Stop each process, and the children it started, by its PID; stopping by name or port hits other sessions' too.
 - Install into the worktree or your temp folder, never globally.
