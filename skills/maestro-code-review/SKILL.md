@@ -76,7 +76,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
    M=$(gh pr view <n> --json state,mergeCommit -q 'select(.state == "MERGED") | .mergeCommit.oid')
-   maestro-ticket transition <id> --to done --from in_review --actor-role reviewer \
+   [ -n "$M" ] && maestro-ticket transition <id> --to done --from in_review --actor-role reviewer \
      --note "Merged: $M (review GO at $H)" --idempotency-key review-<id>-$H
    ```
    If the merge fails, or `M` is empty because gh only queued the PR (a merge queue exits 0 before it merges), skip the move to `done`. If the PR now shows merged, ESCALATE as Phase A step 4 says for a merged PR. Else ESCALATE with gh's output, such as merge commits turned off or an approval the bot can't give; never try another merge method. This is the one escalation that may come again at one `H`, after an `Answer:`.
