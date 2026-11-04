@@ -71,7 +71,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
 
 ## Phase G: Act
 
-1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is no longer a pass at `H`, decide again in Phase F.
+1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if it is a fail at `H`, decide again in Phase F. Run step 5's cleanup whenever you stop here.
 2. **GO.** Never squash, rebase, force-push or `--no-verify`. With no ticket, skip the transition.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
