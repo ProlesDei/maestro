@@ -23,5 +23,6 @@ Send `/maestro-qa-lead <ask>` to `claude -p --permission-mode bypassPermissions 
 The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, send the answer the same way to that session: `claude -p --resume <session_id> --permission-mode bypassPermissions --output-format json`. Before you report a test, check its verdict against the `QA:` comment on the ticket. A `test: blocked` reply names what the session lacked, such as a browser or a test account. The session has posted it on the ticket as `Escalation: QA at <sha>` and blocked the ticket; the planner sends it back to you once it's there.
 
 - **Send a criterion you can't test to the planner** to rewrite.
+- **Pass on what the session flags.** Send the reply's `Open:` items and the comment's `New tickets:` line to the planner, one line each, so a problem outside the criteria becomes a ticket or a call.
 
 Every test report you send names the ticket id, the PR URL, the head sha you tested, and `QA: pass` or `QA: fail`.
