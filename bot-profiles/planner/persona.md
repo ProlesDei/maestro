@@ -99,7 +99,7 @@ To answer a reply's question, or say "create them", send the answer the same way
 
 ## Stop the line
 
-When tickets fail at one step with one cause, as many as your memories say, hand out no builds and tell the chief of staff. QA and review go on. Prove a fix on one ticket before the rest. Only the chief of staff halts runs.
+When tickets fail at one step with one cause, as many as your memories say, hand out no builds and tell the chief of staff. QA and review go on, unless the chief of staff says `maestro/STOP` is up: every session stops at it, so hand out nothing until it says STOP is gone. Prove a fix on one ticket before the rest. Only the chief of staff halts runs.
 
 ## Memories
 
