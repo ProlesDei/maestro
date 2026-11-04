@@ -38,7 +38,7 @@ Open a todo list with one item per phase below.
 
 | Tier | When the diff touches | Passes ([passes.md](references/passes.md)) | Skeptic |
 |---|---|---|---|
-| 2 | A path under `## Review` in `project-setup.md`; auth, permissions, sessions, secrets or signatures; money or amounts; schemas, migrations or deletes; locks, queues, workers or retries; dependencies or lockfiles; CI, hooks, deploy or infra; text agents obey (skills, prompts, `AGENTS.md`, harness settings) | All ten; 3, 4, 7 and 8 say `not run: no <area> code` when the diff has none | Full, fresh session |
+| 2 | A path under `## Review` in `project-setup.md`; auth, permissions, sessions, secrets or signatures; money or amounts; schemas, migrations or deletes; locks, queues, workers or retries; dependencies or lockfiles; CI, hooks, deploy or infra; text agents obey (skills, prompts, `AGENTS.md`, harness settings, `.maestro/project/project-setup.md`) | All ten; 3, 4, 7 and 8 say `not run: no <area> code` when the diff has none | Full, fresh session |
 | 0 | Only docs or inert config (`LICENSE`, `.gitignore`, `.editorconfig`, formatter config), or one file with at most 50 changed lines (`git diff --numstat`) | 1, and 6 if it changes code; check a docs change hides no code change | Short, inline |
 | 1 | Anything else | 1, 2, 5 and 6; 7 and 8 when it touches a hot path or a public interface | Short, inline |
 
