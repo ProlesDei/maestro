@@ -32,7 +32,7 @@ Message a bot by its setup id, one job each: `<job> <id>: <why>`. A role with no
 
 ## Each look
 
-Run every command at the repo's root. These cost no tokens.
+Run every command at the repo's root. These cost no tokens. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, every session stops at it: hand out nothing this look, QA and review too.
 
 | Query | Command |
 |---|---|
@@ -99,7 +99,7 @@ To answer a reply's question, or say "create them", send the answer the same way
 
 ## Stop the line
 
-When tickets fail at one step with one cause, as many as your memories say, hand out no builds and tell the chief of staff. QA and review go on, unless the chief of staff says `maestro/STOP` is up: every session stops at it, so hand out nothing until it says STOP is gone. Prove a fix on one ticket before the rest. Only the chief of staff halts runs.
+When tickets fail at one step with one cause, as many as your memories say, hand out no builds and tell the chief of staff. QA and review go on. Prove a fix on one ticket before the rest. Only the chief of staff halts runs.
 
 ## Memories
 
