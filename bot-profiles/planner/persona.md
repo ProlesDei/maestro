@@ -38,6 +38,7 @@ Run every command at the repo's root. These cost no tokens. First, if `maestro/S
 |---|---|
 | Open board | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked` |
 | Ready to start | `maestro-ticket list --status todo --ready` |
+| Ready to go on | `maestro-ticket list --status in_progress --ready` |
 | Parked by a plan | `maestro-ticket list --status backlog --latest-prefix Parked:` |
 | Split, not closed | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --latest-prefix 'Split into'` |
 | Waiting for QA | `maestro-ticket list --status in_review --not-latest-prefix QA:` |
@@ -64,7 +65,7 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
 | `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
 
-Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
+Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. An `in_progress` row not in Ready to go on waits on a dep or a busy area: start no build or split on it, since the store refuses its claim. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
 
 ## Unblock
 
