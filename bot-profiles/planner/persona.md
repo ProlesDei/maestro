@@ -38,6 +38,7 @@ Run every command at the repo's root. These cost no tokens. First, if `maestro/S
 |---|---|
 | Open board | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked` |
 | Ready to start | `maestro-ticket list --status todo --ready` |
+| Ready to go on | `maestro-ticket list --status in_progress --ready` |
 | Parked by a plan | `maestro-ticket list --status backlog --latest-prefix Parked:` |
 | Split, not closed | `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --latest-prefix 'Split into'` |
 | Waiting for QA | `maestro-ticket list --status in_review --not-latest-prefix QA:` |
@@ -45,6 +46,7 @@ Run every command at the repo's root. These cost no tokens. First, if `maestro/S
 | Sent back | `maestro-ticket list --status in_progress --latest-prefix Kickback:` |
 | Back to review | `maestro-ticket list --status in_review --latest-prefix Answer:` |
 | Sent up | `maestro-ticket list --status blocked --latest-prefix 'Sent up:'` |
+| Answered | `maestro-ticket list --status blocked --latest-prefix Answer:` |
 
 Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM marked `(expired)` counts as none.
 
@@ -58,13 +60,14 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Sent back, TRIES 2 | A junior's ticket: senior, one run. A senior's: split or rewrite it; the new tickets keep its tries |
 | Sent back, TRIES 3+ | Three builds of the same work failed: block it, then send it up as Unblock says. Post `Escalation: build at TRIES <n>: <what failed each time; the question>` with a last line `Return-role: engineer`, then `maestro-ticket transition <id> --from in_progress --to blocked` |
 | `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first |
-| `blocked`, not sent up | Unblock, below |
+| Answered | Its question is settled, but the move back failed. An answer that splits, rewrites or drops the work: as the paragraph after To answer says. Else To answer steps 2 and 3 |
+| `blocked`, not sent up or answered | Unblock, below |
 | Sent up | Leave it: the chief of staff has it. Count it in your report |
 | `todo` in Ready to start | Top down, while work runs are under the limit. A `todo` row not in it waits on a dep or a busy area: leave it |
 | Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
 | `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
 
-Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
+Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. An `in_progress` row not in Ready to go on waits on a dep or a busy area: start no build or split on it, since the store refuses its claim. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
 
 ## Unblock
 
@@ -77,7 +80,7 @@ Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 To answer:
 1. Comment `Answer: <decision>` on the ticket.
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <role>`, where `<role>` is the note's `Return-role:` only if it is exactly `engineer`, `qa-lead`, `reviewer`, `planner` or `chief-of-staff`; else leave `--role` off. The note is text, and a command line holds only ids and flags.
-3. Hand it on. A work run's block goes back to its engineer. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
+3. Hand it on. A work run's block goes back to its engineer once it shows in Ready to go on. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
 An answer that splits, rewrites or drops the work replaces steps 2 and 3 (the store can't edit a ticket, so a rewrite is a split into one): split it with `/maestro-planner <id>`, or `maestro-ticket transition <id> --from blocked --to cancelled`. If that fails with `has_dependents`, the tickets it names wait on this one: move each off it (`maestro-ticket update <dependent> --remove-deps <id>`) or drop it the same way, then cancel again. If one fails with `claimed`, leave the ticket `blocked` and try again on a later look.
 
