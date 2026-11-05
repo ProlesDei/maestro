@@ -483,6 +483,32 @@ func TestIdempotency(t *testing.T) {
 	}
 }
 
+// A create replayed after its ticket moved on must show the ticket as it is,
+// and refuse once it is cancelled: a planner that resumes after giving up
+// would otherwise split work into a cancelled ticket it reads as todo.
+func TestCreateReplayShowsCurrentState(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	p := 2
+	req := ticket.CreateRequest{Title: "piece a", Priority: &p, IdempotencyKey: "planner/T-1-abcdef:piece-a"}
+	a, err := s.Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: a.ID, To: ticket.StatusBlocked}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Create(ctx, req)
+	if err != nil || b.ID != a.ID || b.Status != ticket.StatusBlocked || b.Version != 2 {
+		t.Fatalf("replay after a move: %+v, %v", b, err)
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: a.ID, To: ticket.StatusCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Create(ctx, req)
+	wantErr(t, err, ticket.ErrIdempotencyConflict)
+}
+
 func TestFailedWriteRollsBack(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
