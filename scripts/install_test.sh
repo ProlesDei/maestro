@@ -345,6 +345,7 @@ sed -i 's/^skills-home: .*/skills-home: hidden/' "$r/.maestro/project/install.ya
 n=$(($(git -C "$r" ls-files .claude .agents | wc -l) + 1))
 ok apply "$r"
 says "untracked $n files git tracked: commit that"
+says "every other clone loses the skills on its next pull until it runs the install"
 git -C "$r" commit -qam hide
 seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ -z "$seen" ] || fail "after the switch to hidden, git still sees: $seen"

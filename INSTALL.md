@@ -86,7 +86,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 1. Ask which commit to move to. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it.
+4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
 5. Rebuild the bot blocks and tell the person which ones changed: they paste those again.
 6. Run `check`.
 
