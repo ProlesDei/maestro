@@ -42,6 +42,6 @@ Follow the **maestro-working-principles** skill.
    - Leave out `--type`: the default, `ship`, is a ticket that ends in a merged PR.
    - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted and new each time, as **maestro-working-principles** says for quoted text.
    - The slug is lowercase letters, digits and hyphens. Leave out `--deps` or `--areas` when empty.
-   - If the store refuses, show its message, fix only the field it names, and run again with the same key. On `idempotency_conflict`, another ticket got this title today: read it; if it is this work, reply with its id, else change the title, and with it the key.
+   - If the store refuses, show its message, fix only the field it names, and run again with the same key. On `idempotency_conflict`, another ticket got this title today: read it; if it is this work and not `cancelled`, reply with its id, else change the title, and with it the key.
 
 **Reply:** the new id, title, status, priority, deps and areas, then `Next: /maestro-software-engineer <id>`.

@@ -171,6 +171,8 @@ func TestCreateValidate(t *testing.T) {
 		{Title: "x", Status: StatusDone}, {Title: "x", Status: StatusInProgress}, {Title: "x", Priority: ptr(9)},
 		{Title: "x", Type: "epic"}, {Title: "x", Type: TypeScout}, // a scout needs an owner
 		{Title: "x", Owner: "a\nb"},
+		// tabwriter breaks a line on \f and \v, so either forges a row in list.
+		{Title: "a\fT-1\tship"}, {Title: "a\vb"}, {Title: "a\x1bb"}, {Title: "x", Owner: "a\fb"},
 	}
 	for _, r := range bad {
 		if err := r.Validate(); !errors.Is(err, ErrInvalid) {

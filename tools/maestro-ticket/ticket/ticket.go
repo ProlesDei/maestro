@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ID identifies a ticket. It prints and marshals as "T-<n>".
@@ -444,8 +445,8 @@ func (r *CreateRequest) Validate() error {
 	if r.Title == "" {
 		return fmt.Errorf("%w: title is required", ErrInvalid)
 	}
-	if strings.ContainsAny(r.Title, "\r\n") {
-		return fmt.Errorf("%w: title must be one line", ErrInvalid)
+	if hasControl(r.Title) {
+		return fmt.Errorf("%w: title must be one line of text, with no control characters", ErrInvalid)
 	}
 	if r.Type == "" {
 		r.Type = TypeShip
@@ -471,13 +472,20 @@ func (r *CreateRequest) Validate() error {
 	}
 	r.Actor = actorFor(r.Actor, "")
 	r.Owner = actorFor(r.Owner, r.Actor)
-	if strings.ContainsAny(r.Owner, "\r\n") {
+	if hasControl(r.Owner) {
 		return fmt.Errorf("%w: owner must be one line", ErrInvalid)
 	}
 	if r.Type == TypeScout && r.Owner == "unknown" {
 		return fmt.Errorf("%w: scout tickets need an owner to close them (--owner or --actor)", ErrInvalid)
 	}
 	return nil
+}
+
+// hasControl reports a control character, such as a newline, tab, form feed
+// or escape: list prints titles through a tabwriter, which starts a new line
+// on \f and \v as well as \n, so any of them could forge a row.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, unicode.IsControl) >= 0
 }
 
 var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)

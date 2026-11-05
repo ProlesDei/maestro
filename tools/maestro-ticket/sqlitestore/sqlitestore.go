@@ -653,7 +653,20 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 				return ticket.Ticket{}, err
 			}
 			return s.getTicket(ctx, tx, id, now)
-		}, nil)
+		}, func(prev ticket.Ticket) (ticket.Ticket, error) {
+			// Return the ticket as it is now, not as it was made. A
+			// cancelled one is not this work any more: refuse, so the
+			// caller makes a new ticket instead of planning on a dead one.
+			cur, err := s.getTicket(ctx, tx, prev.ID, now)
+			if err != nil {
+				return cur, err
+			}
+			if cur.Status == ticket.StatusCancelled {
+				return ticket.Ticket{}, fmt.Errorf("%w: key %q made %s, which is now cancelled; retitle and use a new key",
+					ticket.ErrIdempotencyConflict, req.IdempotencyKey, prev.ID)
+			}
+			return cur, nil
+		})
 		return err
 	})
 	return out, err

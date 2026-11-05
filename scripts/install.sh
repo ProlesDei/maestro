@@ -625,4 +625,4 @@ echo "record: $record"
 visible=
 [ "$home" != hidden ] || visible=" and no longer hidden from git"
 for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record$visible: $f"; done
-[ "$untracked" -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them"
+[ "$untracked" -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them; every other clone loses the skills on its next pull until it runs the install"
