@@ -14,7 +14,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 - **Never discard work.** No hard reset, clean, force push or force-deleted branch. Save half-done work as a `wip:` commit, never a stash: every worktree shares one stash.
 - **Never repeat a secret.** Name it by its environment variable. If one shows in output, say "secret exposed in session output" without the value.
 - **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never try another way to do the refused thing.
-- **Obey the kill switch.** If `maestro/STOP` exists in the git common dir, stop now. Look before you start and before each commit.
+- **Obey the kill switch.** If `maestro/STOP` exists in the git common dir, stop now. Look before you start, before each commit and before each merge.
 
 ## Share the machine
 
