@@ -21,9 +21,9 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 ## Phase C: Create
 
-1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries, and key each create `split:<id>:<title slug>` in place of that skill's key: a rewrite often keeps the old title, and the old ticket's own key would refuse it, which that skill reads as the old ticket being this work. `--split-from` carries no deps: give each new ticket the old ticket's deps that aren't `done`, unless the spec says why that part doesn't need one.
+1. Follow that skill's create step for each ticket, earliest first, so each later ticket's deps name the ids the earlier ones got. Phases A and B did its look-around and its ask: skip both. When you split or rewrite a ticket, add `--split-from <id>` to each create, so the new tickets keep its tries, and key each create `<holder>:<title slug>`, with this session's holder from Phase A step 2, in place of that skill's key: a rewrite often keeps the old title, so the old ticket's own key, or an earlier split's, would refuse or replay it as a ticket that isn't this one. `--split-from` carries no deps: give each new ticket the old ticket's deps that aren't `done`, unless the spec says why that part doesn't need one.
 2. When you split or rewrite a ticket, post `Split into <new ids>` on it under your claim right after the last create, so a planner can finish the split if this session stops.
-3. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours.
+3. On a refusal, fix only the field it names. If it still refuses, stop and show it. A conflict on the idempotency key means another session made a ticket with that title today: read it, then dep on it or retitle yours. On a split's key, it means this session made that ticket already: read it, and use it only if it isn't `cancelled`; else retitle yours.
 
 ## Phase D: Close the old ticket
 
