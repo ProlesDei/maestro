@@ -54,7 +54,7 @@ Open a todo list with one item per phase below.
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && git merge --no-edit $G && echo $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$B` too. Never skip hooks or tests.
+1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$B` too. Never skip hooks or tests.
 2. Read `gh pr checks <n>` for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
