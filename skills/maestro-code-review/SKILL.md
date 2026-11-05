@@ -75,11 +75,12 @@ Otherwise **NO-GO**. In report-only mode, stop here.
 2. **GO.** Never squash, rebase, force-push or `--no-verify`. With no ticket, skip the transition.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
-   M=$(gh pr view <n> --json mergeCommit -q .mergeCommit.oid)
-   maestro-ticket transition <id> --to done --from in_review --actor-role reviewer \
+   M=$(gh pr view <n> --json state,mergeCommit -q 'select(.state == "MERGED") | .mergeCommit.oid')
+   [ -n "$M" ] || { gh pr merge <n> --disable-auto; gh pr view <n> --json autoMergeRequest -q '"auto-merge off: \(.autoMergeRequest == null)"'; }
+   [ -n "$M" ] && maestro-ticket transition <id> --to done --from in_review --actor-role reviewer \
      --note "Merged: $M (review GO at $H)" --idempotency-key review-<id>-$H
    ```
-   If the merge fails, skip the move to `done`. If the PR now shows merged, ESCALATE as Phase A step 4 says for a merged PR. Else ESCALATE with gh's error, such as merge commits turned off or an approval the bot can't give; never try another merge method. This is the one escalation that may come again at one `H`, after an `Answer:`.
+   If the merge fails, or `M` is empty because gh only queued the PR or turned on auto-merge (on a branch with a merge queue it exits 0 before it merges), skip the move to `done`; turning auto-merge off keeps GitHub from merging a later push no one reviewed. If it prints `auto-merge off: false`, say first in the escalation that auto-merge is still on. If the PR now shows merged, ESCALATE as Phase A step 4 says for a merged PR. Else ESCALATE with gh's output, such as merge commits turned off or an approval the bot can't give; never try another merge method. This is the one escalation that may come again at one `H`, after an `Answer:`.
 3. **NO-GO.** Comment first, then move, so the engineer's next run reads the kickback as the latest note. One line per surviving blocker and major; `ask-user` findings last, each as a question. Findings quote the diff, so send the body as **maestro-working-principles** says for quoted text. With no ticket, post the body with `gh pr comment <n> --body-file -` and move nothing.
    ```bash
    maestro-ticket comment <id> --body-file - --idempotency-key kickback-<id>-$H-$S <<'END_<8 random letters>'

@@ -539,7 +539,11 @@ for p in "${!seen[@]}"; do
 	if [ -n "${theirs[${p%/"${p#*/skills/*/}"}]-}" ]; then
 		continue
 	elif [ "${seen[$p]}" = link ] || [ -L "$(full "$p")" ]; then
-		if replacing "$p"; then deletes+=("$p"); else clashes+=("$p is a symlink"); fi
+		# A linked file Maestro places is deleted, then written in its place.
+		if replacing "$p"; then
+			deletes+=("$p")
+			[ -z "${new[$p]-}" ] || writes+=("$p")
+		else clashes+=("$p is a symlink"); fi
 	elif [ -n "${new[$p]-}" ]; then
 		if [ "${cur[$p]}" = "${new[$p]}" ]; then :
 		elif [ "${cur[$p]}" = "${old[$p]-}" ] || replacing "$p"; then writes+=("$p")

@@ -32,7 +32,7 @@ Message a bot by its setup id, one job each: `<job> <id>: <why>`. A role with no
 
 ## Each look
 
-Run every command at the repo's root. These cost no tokens.
+Run every command at the repo's root. These cost no tokens. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, every session stops at it: hand out nothing this look, QA and review too.
 
 | Query | Command |
 |---|---|

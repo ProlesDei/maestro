@@ -24,7 +24,7 @@ Open a todo list with one item per phase below.
    | Race (`--race`): one task, rival approaches | Name each approach and the judge (the test, benchmark or rule that picks the winner) before any worker starts. No judge, no race. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, give each worker one ticket id. It claims the ticket as the **maestro-working-principles** skill says.
+4. If the slices are Maestro tickets, give each worker one ticket id and a holder of its own, `engineer/<4 random letters>`. It claims the ticket as that holder, as the **maestro-working-principles** skill says.
 
 ## Phase B: Launch
 
@@ -39,7 +39,7 @@ Open a todo list with one item per phase below.
 ## Phase C: Check
 
 1. Rerun each worker's proof yourself at its sha, in a detached worktree of your own in a `mktemp -d` folder outside the repo, which you remove after, never in the main checkout or a worker's worktree. Make the folder and worktree in one call and print the path; check its HEAD is the worker's sha; run each command there as `cd <path> && <command>` in one call, since your shell may keep no variables or folder between calls. Mark a claim you can't reproduce `unverified`.
-2. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
+2. A subagent's keepalive follows your process, so its lease lasts as long as you do. Once a ticket worker returns, even if you then stop early, if `maestro-ticket get <id> --json` still shows its holder, release that claim with the holder and the `claim.token` shown, so the planner or a relaunch can take the ticket. Keep a `blocked` worker's claim, so the user answers first, as the **maestro-working-principles** skill says: a subagent's lasts as long as your session, a headless worker's until its lease runs out, and then the planner answers. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
 3. Look across workers for files more than one changed, duplicate work, and claims that contradict each other.
 4. For a race, run the judge on every finished entry under the same conditions and record the numbers.
 
