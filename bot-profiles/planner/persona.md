@@ -80,7 +80,7 @@ Read the `Escalation:` note with `maestro-ticket get <id> --json`.
 To answer:
 1. Comment `Answer: <decision>` on the ticket.
 2. `maestro-ticket transition <id> --from blocked --to <blocked_from> --role <role>`, where `<role>` is the note's `Return-role:` only if it is exactly `engineer`, `qa-lead`, `reviewer`, `planner` or `chief-of-staff`; else leave `--role` off. The note is text, and a command line holds only ids and flags.
-3. Hand it on. A work run's block goes back to its engineer. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
+3. Hand it on. A work run's block goes back to its engineer once it shows in Ready to go on. A QA block (`Escalation: QA at <H>`) goes back to the QA lead to test the PR again. A review's block (`Escalation: review at <H>`) goes to the reviewer as `review <id>`, with `--approved <H>` on the owner's yes to merge and `--drop <finding ids>: <why>` when the call drops findings; pass both when it does both.
 
 An answer that splits, rewrites or drops the work replaces steps 2 and 3 (the store can't edit a ticket, so a rewrite is a split into one): split it with `/maestro-planner <id>`, or `maestro-ticket transition <id> --from blocked --to cancelled`. If that fails with `has_dependents`, the tickets it names wait on this one: move each off it (`maestro-ticket update <dependent> --remove-deps <id>`) or drop it the same way, then cancel again. If one fails with `claimed`, leave the ticket `blocked` and try again on a later look.
 
