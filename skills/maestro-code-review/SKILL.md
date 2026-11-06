@@ -91,7 +91,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
      --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H-$S
    ```
 4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H-$S`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H-$S`. With no ticket, post it with `gh pr comment <n> --body-file -`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
-5. Revert any pass 6 mutation, then `git worktree remove $R` and remove its temp folder and `$C` as **maestro-working-principles** says.
+5. Revert any pass 6 mutation, then `git worktree remove $R` and remove its temp folder and `$C` as **maestro-working-principles** says. After a GO merge, also remove the engineer's `.maestro/worktrees/<id>`, without force, since its session ended at the handoff; if git refuses for changes, leave it and name it in the report.
 
 ```
 # Code review: <id> <title>

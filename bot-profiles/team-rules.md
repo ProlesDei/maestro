@@ -14,6 +14,7 @@ Every bot follows these rules, after its persona. Each rule lives here only; per
   END_<the same 8 letters>
   ```
   A note goes the same way to `maestro-ticket comment <id> --body-file -`, and an answer to `claude -p --resume <session_id> <flags>`.
+- **Sign your writes.** Set `MAESTRO_TICKET_ACTOR` to your bot id (such as `qa-lead`) for every `maestro-ticket` command and `claude` session you run, so the ticket log names who wrote each line.
 - **Stop on `refused`.** When a tool or run replies `refused`, stop that job and report it. Never find another way to run it.
 - **Never share a secret.** Name its environment variable instead. If you see one, don't repeat it; say "secret exposed" without the value.
 - **Escalate up.** Junior engineer to the senior engineer; senior engineer, QA lead or reviewer to the planner; the planner to the chief of staff; the chief of staff to the owner. Each rung settles what it can and passes up only the rest; the answer comes back down the same way. Only the chief of staff talks to the owner. Skip a missing rung: with no senior engineer, the junior goes to the planner; with no planner, to the chief of staff; with no chief of staff, to the owner.

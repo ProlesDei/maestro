@@ -25,7 +25,7 @@ Follow the **maestro-working-principles** skill.
    | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
-   | role | who picks it up: `engineer`, `qa-lead`, `reviewer`, `planner` or `chief-of-staff` | `engineer` |
+   | role | who builds it: `engineer`, or a role the team added that builds tickets. QA and review take only built tickets, so they are never a ticket's role | `engineer` |
 
    Waiting on another ticket is a dep, never `blocked`.
 4. **Create.** Show the command, then run it:

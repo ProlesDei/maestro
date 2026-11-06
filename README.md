@@ -11,7 +11,7 @@ Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or w
 
 ## Who drives it
 
-Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the six profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code or Codex with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the six profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 ## How work moves
 
@@ -113,7 +113,7 @@ flowchart TD
 
 Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
 
-It needs git 2.31+, Go 1.26+, bash 4.4+, `gh` with access to this repo, and Claude Code or Codex.
+It needs git 2.31+, Go 1.26+, bash 4.4+, `jq`, `gh` with access to this repo, and Claude Code; Codex is optional.
 
 What you get:
 

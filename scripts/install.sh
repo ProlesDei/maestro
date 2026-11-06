@@ -346,7 +346,8 @@ if [ "$cmd" = check ]; then
 		# Engineers run what ## Checks lists, so the template's text there fails.
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^<.*>$/ {f=1} END{exit !f}' <<<"$sections" &&
 			problem "project-setup.md: ## Checks still holds the template's <...> text: list each check as - <name>: \`<command>\`, or delete the line for none"
-		awk -F'\t' "$line"' $1!="tickets" && $1!="checks" && line() ~ /^<.*>$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
+		# A bare <...> line, or a bullet such as - Name: <name>.
+		awk -F'\t' "$line"' $1!="tickets" && $1!="checks" && line() ~ /^(<.*>|[-*][ \t]+[^:<]+:[ \t]*<[^>]*>)$/ {print $2}' <<<"$sections" | sort -u | while IFS= read -r s; do
 			warn "project-setup.md: ## $s still holds the template's <...> text"
 		done
 	fi

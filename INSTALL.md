@@ -17,7 +17,12 @@ Install in the main checkout, not a linked worktree: `install.sh` refuses one. W
 
 ## 1. Check the machine
 
-Maestro needs git 2.31 or later, Go 1.26 or later, bash 4.4 or later, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code: the bots run each job through it. Codex is optional. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+Maestro needs git 2.31 or later with `user.name` and `user.email` set (the bots commit and merge), Go 1.26 or later, bash 4.4 or later, `jq`, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code: the bots run each job through it. Codex is optional. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+
+Also check:
+
+- The bots run as a user other than root: Claude Code refuses all-permissions mode as root.
+- `origin` is the GitHub repo PRs merge into, not a fork, and `gh repo set-default --view` names it. With no default, `gh` picks an `upstream` remote first, so every PR opens from a fork and review turns it down. Set the default with the person's yes.
 
 ## 2. Get Maestro
 
@@ -50,8 +55,8 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 `.maestro/project/project-setup.md` tells every session how this project works. Its header explains each section. Draft each section from the repo (CI config, Makefile, `package.json` or other task runners, README, contributing docs), then ask the person about it:
 
-- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. Tell the person, and settle with them how the bot's merges get through, before you go on.
-- **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first: it must pass and leave `git status` clean. Offer the ones that don't to the person as fixes, not as checks.
+- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. So does a repo that turns off merge commits or asks for linear history: review merges with a merge commit, and engineers merge main into their branch. Tell the person, and settle with them how the bot's merges get through, before you go on.
+- **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks.
 - **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person.
 - **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
 
