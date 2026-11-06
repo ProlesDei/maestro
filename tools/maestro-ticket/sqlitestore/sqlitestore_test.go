@@ -287,7 +287,7 @@ func TestHeartbeatAfterExpiry(t *testing.T) {
 }
 
 func TestStopFileRefusesClaims(t *testing.T) {
-	s, _ := newStore(t)
+	s, clk := newStore(t)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	stop := filepath.Join(filepath.Dir(s.Path()), StopFile)
@@ -302,9 +302,18 @@ func TestStopFileRefusesClaims(t *testing.T) {
 		t.Fatalf("code %q, err %v", code, err)
 	}
 	os.Remove(stop)
-	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1"}); err != nil {
+	c, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", TTL: time.Minute})
+	if err != nil {
 		t.Fatal(err)
 	}
+	// A lease that ran out isn't revived while the switch is on.
+	clk.Advance(2 * time.Minute)
+	if err := os.WriteFile(stop, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token, TTL: time.Minute})
+	wantErr(t, err, ticket.ErrLeaseLost)
+	wantErr(t, err, ticket.ErrStopped)
 }
 
 // A heartbeat must carry the current token: a leftover process of a session
@@ -780,6 +789,15 @@ func openV1(t *testing.T) string {
 func TestMigrateV1(t *testing.T) {
 	path := openV1(t)
 	ctx := context.Background()
+	// A migration killed mid-snapshot leaves a .partial; the next open
+	// writes the snapshot anyway.
+	snap := filepath.Join(filepath.Dir(path), "backups", "v1-pre-schema-v1.db")
+	if err := os.MkdirAll(filepath.Dir(snap), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snap+".partial", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s, err := Open(ctx, path, Options{Now: func() time.Time { return time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC) }})
 	if err != nil {
 		t.Fatal(err)
@@ -791,7 +809,6 @@ func TestMigrateV1(t *testing.T) {
 		t.Fatalf("user_version %d; want %d", v, schemaVersion)
 	}
 	// The store as it was before the migration is kept.
-	snap := filepath.Join(filepath.Dir(path), "backups", "tickets-pre-schema-v1.db")
 	if err := checkBackup(ctx, snap, 1); err != nil {
 		t.Fatal(err)
 	}

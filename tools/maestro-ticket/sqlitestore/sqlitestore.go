@@ -254,7 +254,8 @@ func Open(ctx context.Context, path string, opts Options) (*Store, error) {
 func (s *Store) Path() string { return s.path }
 
 // StopFile is the kill switch: while a file of this name sits next to the
-// store, every claim is refused, so no session starts or resumes work.
+// store, every claim and lease revival is refused, so no session starts
+// or resumes work.
 const StopFile = "STOP"
 
 func (s *Store) checkStop() error {
@@ -314,13 +315,19 @@ func (s *Store) migrate(ctx context.Context) error {
 	})
 }
 
-// snapshotBeforeMigrate writes backups/tickets-pre-schema-v<v>.db next to
+// snapshotBeforeMigrate writes backups/<store>-pre-schema-v<v>.db next to
 // the store, once: a store that failed to migrate keeps its first snapshot.
 // The name isn't a backup's, so backup --keep never prunes it.
 func (s *Store) snapshotBeforeMigrate(ctx context.Context, v int) error {
-	path := filepath.Join(filepath.Dir(s.path), "backups", fmt.Sprintf("tickets-pre-schema-v%d.db", v))
+	base := strings.TrimSuffix(filepath.Base(s.path), filepath.Ext(s.path))
+	path := filepath.Join(filepath.Dir(s.path), "backups", fmt.Sprintf("%s-pre-schema-v%d.db", base, v))
 	if _, err := os.Lstat(path); err == nil {
 		return nil
+	}
+	// Only a killed migration leaves this: the caller holds the write lock,
+	// so no other snapshot of this store is being written.
+	if err := os.Remove(path + ".partial"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("snapshot before migrating schema %d: %w", v, err)
 	}
 	if err := s.backupTo(ctx, path, v); err != nil {
 		return fmt.Errorf("snapshot before migrating schema %d: %w", v, err)
@@ -1204,6 +1211,11 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		c := t.Claim
 		if c == nil || c.Holder != req.Holder || c.Token != req.Token {
 			return fmt.Errorf("%w: %s has no live lease by %s with token %d", ticket.ErrLeaseLost, t.ID, req.Holder, req.Token)
+		}
+		if c.Expired {
+			if err := s.checkStop(); err != nil {
+				return fmt.Errorf("%w: %s lease ran out, and %w", ticket.ErrLeaseLost, t.ID, err)
+			}
 		}
 		if c.Expired && t.Status.WritesCode() {
 			if err := checkAreas(ctx, tx, t.ID, t.Areas, now); err != nil {
