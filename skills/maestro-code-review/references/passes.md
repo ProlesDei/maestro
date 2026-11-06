@@ -21,7 +21,7 @@ Only run-proven findings count: a failing test, a repro script, command output a
 - **major**, blocks GO: a real defect, an untested behaviour change, a missing index on a new query, an unhandled failure mode, a contract break, a file out of scope with no reason given.
 - **minor** (low risk, fix soon) and **nit** (taste) don't block.
 
-Give each finding an `action`: `auto-fix` (fixable without asking about intent: correctness, errors, security, performance, tests); `ask-user` (product behaviour, the author's deliberate choice, or a fix that adds state, a schema or a subsystem; the default when unsure); `no-op` (for the record). Merge every pass's and subagent's findings into one list:
+Give each finding an `action`: `auto-fix` (fixable without asking about intent: correctness, errors, security, performance, tests); `ask-user` (product behaviour, the author's deliberate choice, or a fix that adds state, a schema or a subsystem; the default when unsure); `no-op` (for the record). Merge every pass's and subagent's findings into one list. A finding raised in an earlier `Kickback:` keeps its id; number new ones after the highest id in those comments, so a `--drop` names one finding across every review of the ticket:
 
 ```json
 {"head": "<H>", "verdict": "GO|NO-GO|ESCALATE", "tier": 0, "mode": "full|incremental",

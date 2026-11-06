@@ -50,9 +50,9 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 `.maestro/project/project-setup.md` tells every session how this project works. Its header explains each section. Draft each section from the repo (CI config, Makefile, `package.json` or other task runners, README, contributing docs), then ask the person about it:
 
-- **Main branch**: the branch PRs merge into.
+- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. Tell the person, and settle with them how the bot's merges get through, before you go on.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first: it must pass and leave `git status` clean. Offer the ones that don't to the person as fixes, not as checks.
-- **Run** and **QA**: how to start the app and see it work, as a person would.
+- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person.
 - **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
