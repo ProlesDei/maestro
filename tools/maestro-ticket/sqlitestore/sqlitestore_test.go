@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -237,14 +238,73 @@ func TestLeaseExpiryAndHeartbeat(t *testing.T) {
 	}
 }
 
-func TestHeartbeatAfterExpiryFails(t *testing.T) {
-	s, clk := newStore(t)
+// A machine that slept past the lease keeps it on waking, as long as no
+// one wrote to the ticket or claimed one of its areas meanwhile.
+func TestHeartbeatAfterExpiry(t *testing.T) {
+	ctx := context.Background()
+	two := 2
+	t.Run("untouched lease revives", func(t *testing.T) {
+		s, clk := newStore(t)
+		tk := mustCreate(t, s, "x", "", 2)
+		c, _ := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", TTL: time.Minute})
+		clk.Advance(2 * time.Minute)
+		before, _ := s.LastSeq(ctx)
+		hb, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token, TTL: time.Minute})
+		if err != nil || hb.LiveClaim() == nil || hb.LeaseExpiries != 0 {
+			t.Fatalf("heartbeat %+v, %v", hb, err)
+		}
+		if types := eventTypes(t, s, before); fmt.Sprint(types) != "[lease_revived]" {
+			t.Fatalf("events %v; want [lease_revived]", types)
+		}
+	})
+	t.Run("a write since loses it", func(t *testing.T) {
+		s, clk := newStore(t)
+		tk := mustCreate(t, s, "x", "", 2)
+		c, _ := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", TTL: time.Minute})
+		clk.Advance(2 * time.Minute)
+		if _, err := s.Comment(ctx, ticket.CommentRequest{ID: tk.ID, Body: "status?", Actor: "cos"}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token})
+		wantErr(t, err, ticket.ErrLeaseLost)
+	})
+	t.Run("an area taken since loses it", func(t *testing.T) {
+		s, clk := newStore(t)
+		a, _ := s.Create(ctx, ticket.CreateRequest{Title: "a", Priority: &two, Actor: "cos", Areas: []string{"api"}})
+		b, _ := s.Create(ctx, ticket.CreateRequest{Title: "b", Priority: &two, Actor: "cos", Areas: []string{"api/auth"}})
+		c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: a.ID, Holder: "jse/s1", TTL: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(2 * time.Minute)
+		if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: b.ID, Holder: "jse/s2", TTL: time.Hour}); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: a.ID, Holder: "jse/s1", Token: c.Claim.Token})
+		wantErr(t, err, ticket.ErrLeaseLost)
+		wantErr(t, err, ticket.ErrAreaBusy)
+	})
+}
+
+func TestStopFileRefusesClaims(t *testing.T) {
+	s, _ := newStore(t)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
-	c, _ := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", TTL: time.Minute})
-	clk.Advance(2 * time.Minute)
-	_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token})
-	wantErr(t, err, ticket.ErrLeaseLost)
+	stop := filepath.Join(filepath.Dir(s.Path()), StopFile)
+	if err := os.WriteFile(stop, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1"})
+	wantErr(t, err, ticket.ErrStopped)
+	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "jse/s1"})
+	wantErr(t, err, ticket.ErrStopped)
+	if code, _ := ticket.Classify(err); code != "stopped" || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("code %q, err %v", code, err)
+	}
+	os.Remove(stop)
+	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A heartbeat must carry the current token: a leftover process of a session
@@ -647,8 +707,9 @@ func TestNewerSchemaRefused(t *testing.T) {
 	db, _ := sql.Open("sqlite", path)
 	db.Exec("PRAGMA user_version = 99")
 	db.Close()
-	if _, err := Open(context.Background(), path, Options{}); err == nil {
-		t.Fatal("should refuse a newer schema")
+	_, err := Open(context.Background(), path, Options{})
+	if code, exit := ticket.Classify(err); code != "store_too_new" || exit != ticket.ExitUsage {
+		t.Fatalf("err %v: code %q exit %d; want store_too_new, %d", err, code, exit, ticket.ExitUsage)
 	}
 }
 
@@ -728,6 +789,11 @@ func TestMigrateV1(t *testing.T) {
 	s.w.QueryRow("PRAGMA user_version").Scan(&v)
 	if v != schemaVersion || schemaVersion < 2 {
 		t.Fatalf("user_version %d; want %d", v, schemaVersion)
+	}
+	// The store as it was before the migration is kept.
+	snap := filepath.Join(filepath.Dir(path), "backups", "tickets-pre-schema-v1.db")
+	if err := checkBackup(ctx, snap, 1); err != nil {
+		t.Fatal(err)
 	}
 	all, err := s.List(ctx, ticket.ListFilter{})
 	if err != nil || len(all) != 3 {
@@ -1291,5 +1357,12 @@ func TestCheckpoint(t *testing.T) {
 	frames, done, err := s.Checkpoint(context.Background())
 	if err != nil || frames == 0 || done != frames {
 		t.Fatalf("checkpoint frames %d done %d, %v", frames, done, err)
+	}
+}
+
+func TestBusyAfterRetriesIsBusy(t *testing.T) {
+	err := retryBusy(context.Background(), func() error { return busyErr{} })
+	if code, _ := ticket.Classify(err); code != "busy" || !isBusy(err) {
+		t.Fatalf("err %v: code %q", err, code)
 	}
 }

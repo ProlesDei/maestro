@@ -391,6 +391,7 @@ const (
 	EventCreated      = "created"
 	EventClaimed      = "claimed"
 	EventLeaseExpired = "lease_expired"
+	EventLeaseRevived = "lease_revived"
 	EventReleased     = "released"
 	EventTransitioned = "transitioned"
 	EventCommented    = "commented"
