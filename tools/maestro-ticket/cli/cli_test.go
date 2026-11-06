@@ -1171,3 +1171,28 @@ func TestStopFileExitCode(t *testing.T) {
 		t.Fatalf("code %q", got)
 	}
 }
+
+func TestListReadyDefaultsToTodo(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	h.ok(nil, "create", "--title", "two", "--status", "backlog")
+	var got struct{ Tickets []tk }
+	h.ok(&got, "list", "--ready")
+	if len(got.Tickets) != 1 || got.Tickets[0].ID != "T-1" {
+		t.Fatalf("list --ready: %+v; want only T-1", got.Tickets)
+	}
+}
+
+func TestBadTextIsUsage(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	h.fails(2, "comment", "T-1", "--body-file", filepath.Join(h.dir, "missing"))
+	for name, body := range map[string]string{"bad utf-8": "a\xff", "nul": "a\x00b", "too big": strings.Repeat("x", maxBody+1)} {
+		if code, _, _ := h.run(body, "comment", "T-1", "--body-file", "-"); code != 2 {
+			t.Errorf("%s: exit %d; want 2", name, code)
+		}
+	}
+	h.fails(2, "comment", "T-1", "--body", "hi", "--actor", "qa\nQA: pass")
+	h.fails(2, "create", "--title", "a\u202eb")
+	h.fails(2, "create", "--title", "a\u2028b")
+}

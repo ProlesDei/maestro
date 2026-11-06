@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
@@ -234,6 +235,9 @@ func (c *call) parse() error {
 		rest = c.fs.Args()[1:]
 	}
 	c.args = pos
+	if ticket.HasControl(c.actor) {
+		return usagef("--actor (or $MAESTRO_TICKET_ACTOR) must be one line, with no control characters")
+	}
 	return nil
 }
 
@@ -411,16 +415,39 @@ func (c *call) readBody(body, file string) (string, error) {
 		return "", usagef("use --body or --body-file, not both")
 	}
 	if file == "" {
-		return body, nil
+		return body, checkBody(body)
 	}
 	var b []byte
 	var err error
 	if file == "-" {
-		b, err = io.ReadAll(c.env.Stdin)
+		b, err = io.ReadAll(io.LimitReader(c.env.Stdin, maxBody+1))
 	} else {
-		b, err = os.ReadFile(file)
+		var f *os.File
+		if f, err = os.Open(file); err == nil {
+			b, err = io.ReadAll(io.LimitReader(f, maxBody+1))
+			f.Close()
+		}
 	}
-	return string(b), err
+	if err != nil {
+		return "", usagef("read --body-file: %v", err)
+	}
+	return string(b), checkBody(string(b))
+}
+
+// maxBody caps a body or comment: every list --latest-prefix reads the
+// latest comment of each ticket it lists.
+const maxBody = 1 << 20
+
+func checkBody(s string) error {
+	switch {
+	case len(s) > maxBody:
+		return usagef("body is over %d bytes: put long output in a file and name its path", maxBody)
+	case !utf8.ValidString(s):
+		return usagef("body is not valid UTF-8")
+	case strings.ContainsRune(s, 0):
+		return usagef("body holds a NUL byte")
+	}
+	return nil
 }
 
 func runCreate(ctx context.Context, c *call) error {
@@ -525,7 +552,7 @@ func runList(ctx context.Context, c *call) error {
 	holder := c.fs.String("holder", "", "only tickets with a live claim by this holder")
 	claimed := c.fs.Bool("claimed", false, "only tickets with a live claim")
 	unclaimed := c.fs.Bool("unclaimed", false, "only tickets without a live claim")
-	ready := c.fs.Bool("ready", false, "only tickets a claim could start now: unclaimed, deps done, areas free")
+	ready := c.fs.Bool("ready", false, "only tickets a claim could start now: unclaimed, deps done, areas free (default --status todo)")
 	limit := c.fs.Int("limit", 0, "max results (0 = all)")
 	latest := c.fs.String("latest-prefix", "", "only tickets whose latest comment starts with this")
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
@@ -544,6 +571,9 @@ func runList(ctx context.Context, c *call) error {
 		var err error
 		if f.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
+		}
+		if *ready && len(f.Statuses) == 0 {
+			f.Statuses = []ticket.Status{ticket.StatusTodo} // as claim --next
 		}
 		switch {
 		case *claimed && *unclaimed:

@@ -446,7 +446,7 @@ func (r *CreateRequest) Validate() error {
 	if r.Title == "" {
 		return fmt.Errorf("%w: title is required", ErrInvalid)
 	}
-	if hasControl(r.Title) {
+	if HasControl(r.Title) {
 		return fmt.Errorf("%w: title must be one line of text, with no control characters", ErrInvalid)
 	}
 	if r.Type == "" {
@@ -473,7 +473,7 @@ func (r *CreateRequest) Validate() error {
 	}
 	r.Actor = actorFor(r.Actor, "")
 	r.Owner = actorFor(r.Owner, r.Actor)
-	if hasControl(r.Owner) {
+	if HasControl(r.Owner) {
 		return fmt.Errorf("%w: owner must be one line", ErrInvalid)
 	}
 	if r.Type == TypeScout && r.Owner == "unknown" {
@@ -482,11 +482,15 @@ func (r *CreateRequest) Validate() error {
 	return nil
 }
 
-// hasControl reports a control character, such as a newline, tab, form feed
-// or escape: list prints titles through a tabwriter, which starts a new line
-// on \f and \v as well as \n, so any of them could forge a row.
-func hasControl(s string) bool {
-	return strings.IndexFunc(s, unicode.IsControl) >= 0
+// HasControl reports a control character, such as a newline, tab, form feed
+// or escape, or an invisible format or separator character, such as a bidi
+// mark or U+2028: list prints titles through a tabwriter, which starts a new
+// line on \f and \v as well as \n, so any of them could forge a row, and a
+// bidi mark can show a title in another order than it reads.
+func HasControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool {
+		return unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp)
+	}) >= 0
 }
 
 var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
