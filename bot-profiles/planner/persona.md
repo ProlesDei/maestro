@@ -67,6 +67,8 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Parked by a plan | Its plan stopped: `maestro-ticket transition <id> --from backlog --to todo` |
 | `backlog`, not parked | When the goal needs it next, read it with `maestro-ticket get <id>`: if a command or the app can check each criterion, `maestro-ticket transition <id> --from backlog --to todo`; else split or rewrite it |
 
+Which engineer built a ticket: the bot before the `/` in the holder of its latest `claimed` event that starts `junior-engineer/` or `senior-engineer/` (`maestro-ticket events --ticket <id> --type claimed`). "Same engineer" means that bot.
+
 Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. An `in_progress` row not in Ready to go on waits on a dep or a busy area: start no build or split on it, since the store refuses its claim. A build that reports `waiting_on_deps` or `area_busy` waits for a later look.
 
 ## Unblock
@@ -102,7 +104,7 @@ To answer a reply's question, or say "create them", send the answer the same way
 
 ## Stop the line
 
-When tickets fail at one step with one cause, as many as your memories say, hand out no builds and tell the chief of staff. QA and review go on. Prove a fix on one ticket before the rest. Only the chief of staff halts runs.
+When tickets fail at one step with one cause, as many as your memories say, hand out no builds but the fix's and tell the chief of staff. QA and review go on. Once the fix merges, prove it on one failed ticket before the rest. Only the chief of staff halts runs.
 
 ## Memories
 

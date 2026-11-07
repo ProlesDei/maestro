@@ -253,6 +253,21 @@ func Open(ctx context.Context, path string, opts Options) (*Store, error) {
 // Path returns the absolute path of the database file.
 func (s *Store) Path() string { return s.path }
 
+// StopFile is the kill switch: while a file of this name sits next to the
+// store, every claim and lease revival is refused, so no session starts
+// or resumes work.
+const StopFile = "STOP"
+
+func (s *Store) checkStop() error {
+	p := filepath.Join(filepath.Dir(s.path), StopFile)
+	if _, err := os.Lstat(p); err == nil {
+		return fmt.Errorf("%w: %s exists; stop, and claim nothing until it is gone", ticket.ErrStopped, p)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: can't tell if %s exists: %v", ticket.ErrStopped, p, err)
+	}
+	return nil
+}
+
 // Close closes both pools.
 func (s *Store) Close() error {
 	return errors.Join(s.w.Close(), s.r.Close())
@@ -270,7 +285,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return nil
 	}
 	if v > schemaVersion {
-		return fmt.Errorf("schema version %d is newer than this maestro-ticket (%d); upgrade maestro-ticket", v, schemaVersion)
+		return fmt.Errorf("%w: schema %d, this binary knows %d; rebuild maestro-ticket from the newest Maestro this machine uses", ticket.ErrStoreTooNew, v, schemaVersion)
 	}
 	// All steps run in one transaction: the store is either fully on the new
 	// version or untouched. Re-read the version under the write lock, since
@@ -282,6 +297,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		if v >= schemaVersion {
 			return nil
 		}
+		// Snapshot a store with tickets in it before changing its schema,
+		// through the reader pool while this transaction holds the write
+		// lock, so the snapshot is the store just before the migration.
+		if v > 0 {
+			if err := s.snapshotBeforeMigrate(ctx, v); err != nil {
+				return err
+			}
+		}
 		for ; v < schemaVersion; v++ {
 			if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
 				return fmt.Errorf("migrate schema %d -> %d: %w", v, v+1, err)
@@ -290,6 +313,26 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion))
 		return err
 	})
+}
+
+// snapshotBeforeMigrate writes backups/<store>-pre-schema-v<v>.db next to
+// the store, once: a store that failed to migrate keeps its first snapshot.
+// The name isn't a backup's, so backup --keep never prunes it.
+func (s *Store) snapshotBeforeMigrate(ctx context.Context, v int) error {
+	base := strings.TrimSuffix(filepath.Base(s.path), filepath.Ext(s.path))
+	path := filepath.Join(filepath.Dir(s.path), "backups", fmt.Sprintf("%s-pre-schema-v%d.db", base, v))
+	if _, err := os.Lstat(path); err == nil {
+		return nil
+	}
+	// Only a killed migration leaves this: the caller holds the write lock,
+	// so no other snapshot of this store is being written.
+	if err := os.Remove(path + ".partial"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("snapshot before migrating schema %d: %w", v, err)
+	}
+	if err := s.backupTo(ctx, path, v); err != nil {
+		return fmt.Errorf("snapshot before migrating schema %d: %w", v, err)
+	}
+	return nil
 }
 
 // write runs fn in a BEGIN IMMEDIATE transaction, retrying briefly if the
@@ -347,7 +390,7 @@ func retryBusy(ctx context.Context, fn func() error) error {
 		case <-time.After(d):
 		}
 	}
-	return err
+	return fmt.Errorf("%w after %d tries; try again later: %w", ticket.ErrBusy, maxBusyRetry, err)
 }
 
 func isBusy(err error) bool {
@@ -605,6 +648,18 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 			var blockedFrom any
 			if req.Status == ticket.StatusBlocked {
 				blockedFrom = ticket.StatusTodo
+			}
+			// Check deps before the insert, so a dep on the id this
+			// ticket is about to get reads as missing, not as a cycle.
+			for _, d := range req.DependsOn {
+				var one int
+				err := tx.QueryRowContext(ctx, "SELECT 1 FROM tickets WHERE id = ?", d).Scan(&one)
+				if errors.Is(err, sql.ErrNoRows) {
+					return ticket.Ticket{}, fmt.Errorf("%w: dependency %s", ticket.ErrNotFound, d)
+				}
+				if err != nil {
+					return ticket.Ticket{}, err
+				}
 			}
 			tries := 0
 			if req.SplitFrom != 0 {
@@ -881,6 +936,9 @@ func (s *Store) ClaimNext(ctx context.Context, req ticket.ClaimRequest) (ticket.
 	if err := req.Validate(); err != nil {
 		return ticket.Ticket{}, err
 	}
+	if err := s.checkStop(); err != nil {
+		return ticket.Ticket{}, err
+	}
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *sql.Tx, now int64) error {
 		var err error
@@ -1134,8 +1192,12 @@ func containsStatus(list []ticket.Status, s ticket.Status) bool {
 }
 
 // Heartbeat implements ticket.Store. It fails with ErrLeaseLost unless the
-// live lease is the caller's, with the caller's token; the session must stop
-// work and re-claim.
+// lease is the caller's, with the caller's token; the session must stop
+// work and re-claim. A lease that ran out with nothing written since (a
+// machine asleep, a paused VM) comes back to life: every write frees an
+// expired lease first and every claim takes a new token, so a lease still
+// on the row with the caller's token means no one else acted on the
+// ticket. It stays lost if another claim took one of its areas meanwhile.
 func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (ticket.Ticket, error) {
 	if err := req.Validate(); err != nil {
 		return ticket.Ticket{}, err
@@ -1146,9 +1208,19 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		if err != nil {
 			return err
 		}
-		c := t.LiveClaim()
+		c := t.Claim
 		if c == nil || c.Holder != req.Holder || c.Token != req.Token {
 			return fmt.Errorf("%w: %s has no live lease by %s with token %d", ticket.ErrLeaseLost, t.ID, req.Holder, req.Token)
+		}
+		if c.Expired {
+			if err := s.checkStop(); err != nil {
+				return fmt.Errorf("%w: %s lease ran out, and %w", ticket.ErrLeaseLost, t.ID, err)
+			}
+		}
+		if c.Expired && t.Status.WritesCode() {
+			if err := checkAreas(ctx, tx, t.ID, t.Areas, now); err != nil {
+				return fmt.Errorf("%w: %s lease ran out, and meanwhile %w", ticket.ErrLeaseLost, t.ID, err)
+			}
 		}
 		// Guard on the token too, so the extension can only land on the
 		// lease that was checked.
@@ -1159,6 +1231,14 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
 			return fmt.Errorf("%w: %s lease changed during heartbeat", ticket.ErrLeaseLost, t.ID)
+		}
+		if c.Expired {
+			err := appendEvent(ctx, tx, t.ID, ticket.EventLeaseRevived, ticket.SystemActor, map[string]any{
+				"holder": c.Holder, "token": c.Token, "expired_at": c.ExpiresAt,
+			}, now)
+			if err != nil {
+				return err
+			}
 		}
 		out, err = s.getTicket(ctx, tx, t.ID, now)
 		return err
@@ -1547,6 +1627,11 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 // reader connection, so writers carry on, and writes a compact file with no
 // WAL. The result is opened and checked before Backup returns.
 func (s *Store) Backup(ctx context.Context, path string) error {
+	return s.backupTo(ctx, path, schemaVersion)
+}
+
+// backupTo writes a checked snapshot of a store on schema version to path.
+func (s *Store) backupTo(ctx context.Context, path string, version int) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -1579,7 +1664,7 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("backup to %s: %w", abs, err)
 	}
-	if err := checkBackup(ctx, partial); err != nil {
+	if err := checkBackup(ctx, partial, version); err != nil {
 		return err
 	}
 	// Link, unlike rename, never replaces a file at path.
@@ -1600,7 +1685,7 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	return nil
 }
 
-func checkBackup(ctx context.Context, path string) error {
+func checkBackup(ctx context.Context, path string, version int) error {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return err
@@ -1614,8 +1699,8 @@ func checkBackup(ctx context.Context, path string) error {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return fmt.Errorf("check backup %s: %w", path, err)
 	}
-	if check != "ok" || v != schemaVersion {
-		return fmt.Errorf("backup %s failed its check: quick_check %q, schema %d (want ok, %d)", path, check, v, schemaVersion)
+	if check != "ok" || v != version {
+		return fmt.Errorf("backup %s failed its check: quick_check %q, schema %d (want ok, %d)", path, check, v, version)
 	}
 	return nil
 }

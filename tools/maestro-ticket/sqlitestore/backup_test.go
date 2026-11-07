@@ -86,7 +86,7 @@ func TestBackupSamePathRace(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("trial %d: the winner's backup is gone: %v", i, err)
 		}
-		if err := checkBackup(ctx, p); err != nil {
+		if err := checkBackup(ctx, p, schemaVersion); err != nil {
 			t.Fatalf("trial %d: %v", i, err)
 		}
 	}

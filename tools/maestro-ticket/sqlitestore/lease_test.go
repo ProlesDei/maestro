@@ -148,9 +148,10 @@ func TestLeaseExpiresAtExactMillisecond(t *testing.T) {
 	if got, _ := s.Get(ctx, tk.ID); got.LiveClaim() != nil || !got.Claim.ExpiresAt.Equal(clk.Now()) {
 		t.Fatalf("lease still live at its expiry: %+v", got.Claim)
 	}
-	_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token})
-	wantErr(t, err, ticket.ErrLeaseLost)
 	if res, _ := s.Reap(ctx); len(res.Reaped) != 1 {
 		t.Fatal("lease not reaped at its expiry")
 	}
+	// The reap wrote to the ticket, so the lease can't come back.
+	_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token})
+	wantErr(t, err, ticket.ErrLeaseLost)
 }

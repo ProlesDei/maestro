@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
@@ -60,7 +61,8 @@ Usage: maestro-ticket <command> [flags]
 
 Commands:
   create      --title T [--body B | --body-file F|-] [--type ship|scout] [--role R] [--priority 0-3]
-              [--status backlog|todo|blocked] [--owner NAME] [--deps T-1,T-2] [--areas path,path]
+              [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
+              [--areas path,path] [--split-from T-1]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--holder H --token N]
   get         <id>
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
@@ -98,7 +100,10 @@ heartbeats every ttl/3 while process PID (the harness session) lives, and
 stops when the lease is lost or released. claim and keepalive refuse a PID
 in their own session when it has no terminal: it exits with the command.
 Expired leases: reap frees them, logs lease_expired and checkpoints the
-WAL; any write to the ticket frees its expired lease too.
+WAL; any write to the ticket frees its expired lease too. Until then, the
+holder's heartbeat revives it (lease_revived), as after a machine sleeps.
+Kill switch: while a file named STOP sits next to the store, claim refuses
+(stopped, exit 4).
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
@@ -113,7 +118,7 @@ or one inside the other) an area of another todo or in_progress ticket under
 a live claim.
 Blocked returns only to the status it was blocked from. Send-backs from
 in_review to in_progress add one to a ship ticket's tries.
-Exit codes: 0 ok, 1 internal, 2 usage/invalid, 3 not found, 4 conflict, 5 no work
+Exit codes: 0 ok, 1 internal, 2 usage/invalid, 3 not found, 4 conflict or busy, 5 no work
 `
 
 type command struct {
@@ -230,6 +235,9 @@ func (c *call) parse() error {
 		rest = c.fs.Args()[1:]
 	}
 	c.args = pos
+	if ticket.HasControl(c.actor) {
+		return usagef("--actor (or $MAESTRO_TICKET_ACTOR) must be one line, with no control characters")
+	}
 	return nil
 }
 
@@ -304,10 +312,13 @@ func (c *call) out(v any, human func(w io.Writer)) error {
 }
 
 // storePath resolves the store: --store, then $MAESTRO_TICKET_STORE, then the git
-// common dir, which every worktree of a repo shares. A relative path is
-// taken from the working directory. The git default refuses a bare repo
-// (no work tree to run sessions in) and a submodule (its store would be
-// split from the superproject's); pass --store there.
+// common dir, which every worktree of a repo shares. A relative --store is
+// taken from the working directory; a relative $MAESTRO_TICKET_STORE is
+// refused, since each worktree would read it as a store of its own. The git
+// default refuses a bare repo (no work tree to run sessions in), a
+// submodule (its store would be split from the superproject's) and
+// Maestro's own copy in .maestro/src (a second, empty store); pass --store
+// there.
 func (c *call) storePath() (path, source string, err error) {
 	abs := func(p string) string {
 		if filepath.IsAbs(p) {
@@ -319,7 +330,10 @@ func (c *call) storePath() (path, source string, err error) {
 		return abs(c.storeFlag), "--store", nil
 	}
 	if p := c.env.Getenv("MAESTRO_TICKET_STORE"); p != "" {
-		return abs(p), "MAESTRO_TICKET_STORE", nil
+		if !filepath.IsAbs(p) {
+			return "", "", fmt.Errorf("%w: MAESTRO_TICKET_STORE %q must be an absolute path: a relative one names a different store in each worktree", ticket.ErrInvalid, p)
+		}
+		return p, "MAESTRO_TICKET_STORE", nil
 	}
 	out, err := c.git("rev-parse", "--path-format=absolute", "--git-common-dir", "--is-bare-repository", "--show-superproject-working-tree")
 	if err != nil {
@@ -327,11 +341,19 @@ func (c *call) storePath() (path, source string, err error) {
 	}
 	lines := strings.Split(out, "\n")
 	common := lines[0]
+	// Git before 2.31 doesn't know --path-format and prints it back.
+	if strings.HasPrefix(common, "--path-format") {
+		return "", "", fmt.Errorf("%w: maestro-ticket needs git 2.31 or later to find the store; upgrade git, or pass --store", ticket.ErrInvalid)
+	}
 	switch {
 	case len(lines) > 1 && lines[1] == "true":
 		return "", "", fmt.Errorf("%w: %s is a bare repo; run from a work tree, or pass --store", ticket.ErrInvalid, common)
 	case len(lines) > 2 && lines[2] != "":
 		return "", "", fmt.Errorf("%w: this is a submodule of %s; run maestro-ticket from the superproject, or pass --store", ticket.ErrInvalid, lines[2])
+	case filepath.Base(common) == ".git" && filepath.Base(filepath.Dir(common)) == "src" &&
+		filepath.Base(filepath.Dir(filepath.Dir(common))) == ".maestro":
+		project := filepath.Dir(filepath.Dir(filepath.Dir(common)))
+		return "", "", fmt.Errorf("%w: this is Maestro's own copy in %s; run maestro-ticket from %s, or pass --store", ticket.ErrInvalid, filepath.Dir(common), project)
 	}
 	return filepath.Join(common, "maestro", "tickets.db"), "git common dir", nil
 }
@@ -393,16 +415,39 @@ func (c *call) readBody(body, file string) (string, error) {
 		return "", usagef("use --body or --body-file, not both")
 	}
 	if file == "" {
-		return body, nil
+		return body, checkBody(body)
 	}
 	var b []byte
 	var err error
 	if file == "-" {
-		b, err = io.ReadAll(c.env.Stdin)
+		b, err = io.ReadAll(io.LimitReader(c.env.Stdin, maxBody+1))
 	} else {
-		b, err = os.ReadFile(file)
+		var f *os.File
+		if f, err = os.Open(file); err == nil {
+			b, err = io.ReadAll(io.LimitReader(f, maxBody+1))
+			f.Close()
+		}
 	}
-	return string(b), err
+	if err != nil {
+		return "", usagef("read --body-file: %v", err)
+	}
+	return string(b), checkBody(string(b))
+}
+
+// maxBody caps a body or comment: every list --latest-prefix reads the
+// latest comment of each ticket it lists.
+const maxBody = 1 << 20
+
+func checkBody(s string) error {
+	switch {
+	case len(s) > maxBody:
+		return usagef("body is over %d bytes: put long output in a file and name its path", maxBody)
+	case !utf8.ValidString(s):
+		return usagef("body is not valid UTF-8")
+	case strings.ContainsRune(s, 0):
+		return usagef("body holds a NUL byte")
+	}
+	return nil
 }
 
 func runCreate(ctx context.Context, c *call) error {
@@ -507,7 +552,7 @@ func runList(ctx context.Context, c *call) error {
 	holder := c.fs.String("holder", "", "only tickets with a live claim by this holder")
 	claimed := c.fs.Bool("claimed", false, "only tickets with a live claim")
 	unclaimed := c.fs.Bool("unclaimed", false, "only tickets without a live claim")
-	ready := c.fs.Bool("ready", false, "only tickets a claim could start now: unclaimed, deps done, areas free")
+	ready := c.fs.Bool("ready", false, "only tickets a claim could start now: unclaimed, deps done, areas free (default --status todo)")
 	limit := c.fs.Int("limit", 0, "max results (0 = all)")
 	latest := c.fs.String("latest-prefix", "", "only tickets whose latest comment starts with this")
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
@@ -526,6 +571,9 @@ func runList(ctx context.Context, c *call) error {
 		var err error
 		if f.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
+		}
+		if *ready && len(f.Statuses) == 0 {
+			f.Statuses = []ticket.Status{ticket.StatusTodo} // as claim --next
 		}
 		switch {
 		case *claimed && *unclaimed:
@@ -710,9 +758,12 @@ func runKeepalive(ctx context.Context, c *call) error {
 			return usagef("keepalive: --interval must be shorter than --ttl")
 		}
 		// Check the process often, so a dead session stops heartbeating
-		// within a second, not a whole interval.
+		// within a second, not a whole interval. next carries no monotonic
+		// reading, so it is compared on the wall clock: after the machine
+		// sleeps, the next check heartbeats at once, as a lease's expiry
+		// runs on the wall clock too.
 		check := min(interval, time.Second)
-		next := time.Now()
+		next := time.Now().Round(0)
 		for {
 			if !alive(*pid) {
 				return nil
@@ -728,9 +779,9 @@ func runKeepalive(ctx context.Context, c *call) error {
 					// Transient (a busy store, a full disk): try again soon,
 					// while the lease still has time left.
 					fmt.Fprintf(c.env.Stderr, "maestro-ticket keepalive: %v; retrying\n", err)
-					next = time.Now().Add(min(interval, 5*time.Second))
+					next = time.Now().Add(min(interval, 5*time.Second)).Round(0)
 				default:
-					next = time.Now().Add(interval)
+					next = time.Now().Add(interval).Round(0)
 				}
 			}
 			select {

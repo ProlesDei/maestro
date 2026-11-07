@@ -1124,3 +1124,75 @@ func TestListLatestPrefix(t *testing.T) {
 		t.Fatalf("list --role nonsense: exit %d, want 2", code)
 	}
 }
+
+// Maestro's own clone in .maestro/src is a git repo too; its default store
+// would be a second, empty one.
+func TestStorePathTraps(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	project := t.TempDir()
+	git(t, project, "init", "-q")
+	src := filepath.Join(project, ".maestro", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "init", "-q")
+	h := &harness{t: t, dir: src, env: map[string]string{}}
+	code, out, _ := h.run("", "list", "--json")
+	if code != 2 || !strings.Contains(out, "Maestro's own copy") {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(src, ".git", "maestro")); err == nil {
+		t.Fatal("made a store in .maestro/src")
+	}
+
+	rel := &harness{t: t, dir: project, env: map[string]string{"MAESTRO_TICKET_STORE": "tickets.db"}}
+	if got := rel.fails(2, "list"); got != "invalid" {
+		t.Fatalf("relative MAESTRO_TICKET_STORE: code %q", got)
+	}
+}
+
+func TestCreateDepOnNextIDIsNotFound(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	if got := h.fails(3, "create", "--title", "two", "--deps", "T-2"); got != "not_found" {
+		t.Fatalf("code %q", got)
+	}
+}
+
+func TestStopFileExitCode(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	if err := os.WriteFile(filepath.Join(h.dir, "STOP"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.fails(4, "claim", "--next", "--holder", "eng/a"); got != "stopped" {
+		t.Fatalf("code %q", got)
+	}
+}
+
+func TestListReadyDefaultsToTodo(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	h.ok(nil, "create", "--title", "two", "--status", "backlog")
+	var got struct{ Tickets []tk }
+	h.ok(&got, "list", "--ready")
+	if len(got.Tickets) != 1 || got.Tickets[0].ID != "T-1" {
+		t.Fatalf("list --ready: %+v; want only T-1", got.Tickets)
+	}
+}
+
+func TestBadTextIsUsage(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "one")
+	h.fails(2, "comment", "T-1", "--body-file", filepath.Join(h.dir, "missing"))
+	for name, body := range map[string]string{"bad utf-8": "a\xff", "nul": "a\x00b", "too big": strings.Repeat("x", maxBody+1)} {
+		if code, _, _ := h.run(body, "comment", "T-1", "--body-file", "-"); code != 2 {
+			t.Errorf("%s: exit %d; want 2", name, code)
+		}
+	}
+	h.fails(2, "comment", "T-1", "--body", "hi", "--actor", "qa\nQA: pass")
+	h.fails(2, "create", "--title", "a\u202eb")
+	h.fails(2, "create", "--title", "a\u2028b")
+}

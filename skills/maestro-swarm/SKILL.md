@@ -24,7 +24,7 @@ Open a todo list with one item per phase below.
    | Race (`--race`): one task, rival approaches | Name each approach and the judge (the test, benchmark or rule that picks the winner) before any worker starts. No judge, no race. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, give each worker one ticket id and a holder of its own, `engineer/<4 random letters>`. It claims the ticket as that holder, as the **maestro-working-principles** skill says.
+4. If the slices are Maestro tickets, give each worker one ticket id and a holder of its own: your bot id and 4 random letters, such as `senior-engineer/k3f9`. It claims the ticket as that holder, as the **maestro-working-principles** skill says.
 
 ## Phase B: Launch
 

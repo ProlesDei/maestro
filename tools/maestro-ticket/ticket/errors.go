@@ -18,6 +18,9 @@ var (
 	ErrWaitingOnDeps       = errors.New("waiting on dependencies")
 	ErrAreaBusy            = errors.New("code area busy")
 	ErrHasDependents       = errors.New("open tickets depend on it")
+	ErrStopped             = errors.New("refused: the kill switch is on")
+	ErrBusy                = errors.New("store busy")
+	ErrStoreTooNew         = errors.New("store is newer than this maestro-ticket")
 )
 
 // Exit codes shared by the CLI and documented for bots.
@@ -48,6 +51,9 @@ var errorKinds = []struct {
 	{ErrWaitingOnDeps, "waiting_on_deps", ExitConflict},
 	{ErrAreaBusy, "area_busy", ExitConflict},
 	{ErrHasDependents, "has_dependents", ExitConflict},
+	{ErrStopped, "stopped", ExitConflict},
+	{ErrBusy, "busy", ExitConflict},
+	{ErrStoreTooNew, "store_too_new", ExitUsage},
 }
 
 // Classify maps an error to a stable machine code and process exit code.
