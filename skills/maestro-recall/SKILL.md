@@ -22,7 +22,7 @@ Open a todo list with one item per phase below.
 ## Phase B: Search, newest first
 
 1. **Chat history.** Search the harness's session logs, newest file first (`ls -t`). Read only the matching exchanges, never whole transcripts. Skip the current session.
-   - Claude Code: `~/.claude/projects/<cwd with each / as ->/*.jsonl`, plus that project's `memory/` folder.
+   - Claude Code: `~/.claude/projects/<cwd with each character but a letter or digit as ->/*.jsonl`, plus that project's `memory/` folder.
    - Codex: `~/.codex/sessions/`.
    - Other harnesses: their own session store, if you know where it is. If you don't, skip it and say so.
 2. **Tickets.** `maestro-ticket list --json`, then `maestro-ticket get <id> --json` and `maestro-ticket events --ticket <id> --json` for each match.
