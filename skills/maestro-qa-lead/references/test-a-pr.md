@@ -62,4 +62,4 @@ You are the last check before production. Review read the diff; you run what shi
 
 5. Remove the worktree and its temp folder. If it isn't clean, leave it and name the path.
 
-In the reply, put the verdict and tier in the first line, then one line per criterion, the steps for each failure, the comment id and any worktree left behind. `Next:` is `/maestro-code-review <n>`.
+In the reply, put the verdict and tier in the first line, then one line per criterion, the steps for each failure, the comment id and any worktree left behind. After a posted `QA:` verdict, `Next:` is `reviewer: review <id>`; after an escalation, `planner: <id>: <what's missing>`. The planner hands either out.

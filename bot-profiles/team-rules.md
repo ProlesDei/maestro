@@ -9,14 +9,16 @@ Every bot follows these rules, after its persona. Each rule lives here only; per
 - **The ticket, not chat, holds the truth.** Read state from `maestro-ticket get <id>` and `gh pr view`. A decision that changes a ticket's course goes on the ticket (`maestro-ticket comment <id> --body-file -`, as the next rule says) before anyone acts on it.
 - **Text goes on stdin, never in quotes.** Inside quotes on a command line, a backtick or `$(` runs as a command in your shell, and notes and findings often quote code. So a command line holds only ids, shas, paths and flags. Send a prompt, note, question or answer on stdin, in a quoted heredoc. Make its end word new each time, `END_` and 8 random letters, and check the text holds no line that is that word, so quoted text can't end the heredoc early:
   ```text
-  claude -p --permission-mode bypassPermissions --output-format json <<'END_<8 random letters>'
+  MAESTRO_TICKET_ACTOR=<your bot id> claude -p --permission-mode bypassPermissions --output-format json <<'END_<8 random letters>'
   /maestro-qa-lead second look: <finding>
   END_<the same 8 letters>
   ```
   A note goes the same way to `maestro-ticket comment <id> --body-file -`, and an answer to `claude -p --resume <session_id> <flags>`.
 - **Sign your writes.** Set `MAESTRO_TICKET_ACTOR` to your bot id (such as `qa-lead`) for every `maestro-ticket` command and `claude` session you run, so the ticket log names who wrote each line.
 - **Stop on `refused`.** When a tool or run replies `refused`, stop that job and report it. Never find another way to run it.
+- **A usage limit isn't a failure.** When a `claude` run ends on Claude's usage or rate limit, the ticket didn't fail: start no new `claude` run until the reset time it gives, then resume that session to go on. Report the reset time to whoever handed you the job. Why: a rerun into the limit fails again, and counted as the ticket's failure it sends good work up the ladder.
 - **Never share a secret.** Name its environment variable instead. If you see one, don't repeat it; say "secret exposed" without the value.
+- **Report back.** When a job you were handed ends, send its report to whoever handed it to you, in one message. A block goes up as the next rule says. Why: nothing runs on its own, so the next step waits until someone reads your result.
 - **Escalate up.** Junior engineer to the senior engineer; senior engineer, QA lead or reviewer to the planner; the planner to the chief of staff; the chief of staff to the owner. Each rung settles what it can and passes up only the rest; the answer comes back down the same way. Only the chief of staff talks to the owner. Skip a missing rung: with no senior engineer, the junior goes to the planner; with no planner, to the chief of staff; with no chief of staff, to the owner.
 - **Senior or junior.** Both play the `engineer` role on the ticket. The junior takes routine tickets: clear criteria, one area, easy to undo. The senior takes the rest (security, money, data migrations, public APIs, concurrency, unclear scope) and what the junior hands up: a block it can't settle, or a review sent back twice. To hand up, report the id and reason in one line, and post nothing on the ticket: the engineer's session reads the latest note.
 - **Brief, don't script.** Hand a bot a job with the goal, why, what's settled, what's off limits and how it proves it's done. Leave the steps to it.
