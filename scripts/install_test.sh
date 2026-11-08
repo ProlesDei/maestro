@@ -101,7 +101,7 @@ mkdir -p "$r/.maestro/src" "$r/.maestro/worktrees/T-1" "$r/.maestro/bots" && tou
 seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
-[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
+[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor --create" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
 [ "$(grep -c . "$r/.git/maestro/installed.list")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2 + 1)) ] ||
 	fail "the record should list every file in both harness folders"
 
@@ -540,6 +540,21 @@ touch "$r8/.maestro/src/AGENTS.md"
 ln -s "$tmp" "$tmp/via"
 if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned" >"$tmp/out" 2>&1; then fail "check passed with AGENTS.md in .maestro/src"; fi
 says "problem: .maestro/src/AGENTS.md exists"
+
+# --- check warns until origin/<main> has project-setup.md as the repo has
+# it: each ticket's worktree branches from there.
+r12=$tmp/pushed
+repo "$r12" "harnesses: claude" "skills-home: hidden"
+git init -q --bare "$tmp/pushed.git" && git -C "$r12" remote add origin "$tmp/pushed.git" && git -C "$r12" push -q origin main
+ok apply "$r12"
+ok check "$r12"
+says "warn: project-setup.md isn't on origin/main"
+git -C "$r12" add .maestro/project && git -C "$r12" commit -qm setup && git -C "$r12" push -q origin main
+ok check "$r12"
+! grep -q "origin/main" "$tmp/out" || fail "check warned with project-setup.md pushed"
+echo extra >>"$r12/.maestro/project/project-setup.md"
+ok check "$r12"
+says "warn: project-setup.md differs from origin/main's copy"
 
 # --- an install by the install.sh before the record, from a commit where
 # a merge made a skill's copy: that copy is Maestro's too.

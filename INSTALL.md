@@ -55,9 +55,9 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 `.maestro/project/project-setup.md` tells every session how this project works. Its header explains each section. Draft each section from the repo (CI config, Makefile, `package.json` or other task runners, README, contributing docs), then ask the person about it:
 
-- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. So does a repo that turns off merge commits or asks for linear history: review merges with a merge commit, and engineers merge main into their branch. Tell the person, and settle with them how the bot's merges get through, before you go on.
+- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. So does a repo that turns off merge commits or asks for linear history: review merges with a merge commit, and engineers merge main into their branch. Signed commits and a CODEOWNERS review fail it the same way, and a required status check that is slow or flaky stalls every merge until it's green. Tell the person, and settle with them how the bot's merges get through, before you go on.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks.
-- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person.
+- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person. Start the app from a fresh worktree, twice at once, as QA sessions do: a gitignored `.env`, a fixed port or a fixed container name breaks them, so settle each with the person.
 - **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
@@ -84,6 +84,8 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 - `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
+- Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
+- Run every bot from this checkout or its worktrees. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
 - Paste each bot block into Grok.
 
 ## Update

@@ -80,7 +80,7 @@ Commands:
   backup      [--dir D] [--keep N]   (default dir: backups/ next to the store)
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
-  doctor
+  doctor      [--create]
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -386,10 +386,19 @@ func (c *call) git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// open opens the store. From the git default it opens only a store that
+// exists: a separate clone of the repo has its own git common dir, so a
+// store made there would be a second, empty one. doctor --create, which
+// install.sh apply runs, makes it.
 func (c *call) open(ctx context.Context) (*sqlitestore.Store, error) {
-	path, _, err := c.storePath()
+	path, source, err := c.storePath()
 	if err != nil {
 		return nil, err
+	}
+	if source == "git common dir" {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and one made there would be an empty second board", ticket.ErrInvalid, path)
+		}
 	}
 	if err := envcheck.Err(c.envChecks(path)); err != nil {
 		return nil, err
@@ -1090,6 +1099,7 @@ func runRender(ctx context.Context, c *call) error {
 var errDoctorFailed = errors.New("doctor found problems")
 
 func runDoctor(ctx context.Context, c *call) error {
+	create := c.fs.Bool("create", false, "make the store if it's missing (install.sh apply passes this)")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -1101,11 +1111,16 @@ func runDoctor(ctx context.Context, c *call) error {
 		return err
 	}
 	rep := ticket.DoctorReport{Checks: []ticket.Check{{Name: "store", OK: true, Detail: fmt.Sprintf("%s (from %s)", path, source)}}}
-	checks, err := c.doctorChecks(ctx, path)
-	if err != nil {
-		return err
+	// From the git default, only --create makes a store, as open says.
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) && source == "git common dir" && !*create {
+		rep.Checks[0] = ticket.Check{Name: "store", OK: false, Detail: fmt.Sprintf("no store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", path)}
+	} else {
+		checks, err := c.doctorChecks(ctx, path)
+		if err != nil {
+			return err
+		}
+		rep.Checks = append(rep.Checks, checks...)
 	}
-	rep.Checks = append(rep.Checks, checks...)
 	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {
 		return err
