@@ -99,7 +99,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
 
 ## Uninstall
 

@@ -101,7 +101,7 @@ mkdir -p "$r/.maestro/src" "$r/.maestro/worktrees/T-1" "$r/.maestro/bots" && tou
 seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
-[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor --create" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
+[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
 [ "$(grep -c . "$r/.git/maestro/installed.list")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2 + 1)) ] ||
 	fail "the record should list every file in both harness folders"
 

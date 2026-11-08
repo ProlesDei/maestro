@@ -577,10 +577,10 @@ if [ ${#clashes[@]} -gt 0 ]; then
 fi
 
 # The store lives in the git common dir, outside the work tree; doctor
-# --create makes it and checks the repo can hold one, before anything is
-# written. Only this makes it, so a separate clone gets no second board.
+# creates it and checks the repo can hold one, before anything is written.
+# No other maestro-ticket command makes one, so a stray clone gets none.
 command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
-(cd "$target" && maestro-ticket doctor --create >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
+(cd "$target" && maestro-ticket doctor >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
 
 # Hide the old and new skills before the first copy, so a run that stops
 # partway shows nothing in git status. Each file lands whole (a temp file,

@@ -327,11 +327,11 @@ func TestGitDefaultsSharedAcrossWorktrees(t *testing.T) {
 
 	main := &harness{t: t, dir: repo, env: map[string]string{}}
 	linked := &harness{t: t, dir: wt, env: map[string]string{}}
-	// Only doctor --create, which install.sh apply runs, makes the store.
+	// Only doctor, which install.sh apply runs, makes the store.
 	if code := main.fails(2, "list"); code != "invalid" {
 		t.Fatalf("list with no store: %q", code)
 	}
-	main.ok(nil, "doctor", "--create")
+	main.ok(nil, "doctor")
 	main.ok(nil, "create", "--title", "shared")
 
 	var l struct{ Tickets []tk }
@@ -622,7 +622,7 @@ func TestGitDefaultRefusesBareAndSubmodule(t *testing.T) {
 		t.Fatalf("list in submodule: exit %d %s", code, out)
 	}
 	top := &harness{t: t, dir: super, env: map[string]string{}}
-	top.ok(nil, "doctor", "--create")
+	top.ok(nil, "doctor")
 	top.ok(nil, "list")
 }
 
@@ -636,27 +636,20 @@ func TestGitDefaultRefusesCloneWithNoStore(t *testing.T) {
 	git(t, repo, "init", "-q")
 	git(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
 	main := &harness{t: t, dir: repo, env: map[string]string{}}
-	main.ok(nil, "doctor", "--create")
+	main.ok(nil, "doctor")
 	main.ok(nil, "create", "--title", "shared")
 
 	clone := filepath.Join(t.TempDir(), "clone")
 	git(t, repo, "clone", "-q", repo, clone)
 	c := &harness{t: t, dir: clone, env: map[string]string{}}
-	for _, args := range [][]string{{"list"}, {"get", "T-1"}, {"create", "--title", "stray"}, {"claim", "--next", "--holder", "a/b"}, {"doctor"}} {
-		if args[0] == "doctor" {
-			code, out, _ := c.run("", "doctor", "--json")
-			if code != 1 || !strings.Contains(out, "no store at") {
-				t.Fatalf("doctor in a clone: exit %d %s", code, out)
-			}
-			continue
-		}
+	for _, args := range [][]string{{"list"}, {"get", "T-1"}, {"create", "--title", "stray"}, {"claim", "--next", "--holder", "a/b"}} {
 		code, out, _ := c.run("", append(args, "--json")...)
 		if code != 2 || !strings.Contains(out, "no ticket store") {
 			t.Fatalf("%v in a clone: exit %d %s", args, code, out)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(clone, ".git", "maestro")); !os.IsNotExist(err) {
-		t.Fatalf("clone got a store dir: %v", err)
+	if _, err := os.Stat(filepath.Join(clone, ".git", "maestro", "tickets.db")); !os.IsNotExist(err) {
+		t.Fatalf("clone got a store: %v", err)
 	}
 }
 
