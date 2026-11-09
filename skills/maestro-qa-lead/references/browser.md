@@ -6,7 +6,7 @@ Read this for anything a user sees: a page, a form, an email preview, a chart. A
 
 1. Use the browser `## QA` in `.maestro/project/project-setup.md` names, read from main's copy as [test-a-pr.md](test-a-pr.md) Phase A says. Else use what the harness has: a browser tool, a browser MCP server, or a headless browser driven by a script (Playwright or the like) if the project already has one.
 2. Run it headless, with a profile of your own and no saved logins, so no other session shares its cookies or storage.
-3. With no browser at all, never guess from markup. Mark each screen check `not checked: no browser` and reply `test: blocked: no browser` as Phase D of [test-a-pr.md](test-a-pr.md) says.
+3. With no browser at all, never guess from markup. Mark each screen check `not checked: no browser` and reply `test: blocked`, with `no browser` under `Answer:`, as Phase D of [test-a-pr.md](test-a-pr.md) says.
 
 ## Check each changed screen
 
