@@ -71,7 +71,8 @@ for b in "${bots[@]}"; do
 	[ -f "$memory" ] || memory=$profiles/$b/memory.md
 	out=$target/.maestro/bots/$b.md
 	! linked ".maestro/bots/$b.md" || die ".maestro/bots/$b.md is a symlink; remove it"
-	{
+	# The x keeps the final newlines, so the block compares exactly.
+	text=$(
 		body "$persona"
 		echo
 		body "$profiles/team-rules.md"
@@ -80,6 +81,22 @@ for b in "${bots[@]}"; do
 			bullets "$memory"
 		fi
 		printf '\n## Where you work\n\n- Repo: %s\n- Profile: %s\n- Maestro: %s\n' "$target" "$b" "$sha"
-	} >"$out"
-	echo "$b: $(wc -c <"$out" | tr -d ' ') chars in .maestro/bots/$b.md"
+		echo x
+	)
+	text=${text%x}
+	# The person pastes again only the blocks that changed.
+	if [ ! -f "$out" ]; then state=new
+	elif [ "$(cat "$out"; echo x)" = "${text}x" ]; then state=same
+	else state=changed
+	fi
+	[ "$state" = same ] || printf '%s' "$text" >"$out"
+	echo "$b: $state, $(wc -c <"$out" | tr -d ' ') chars in .maestro/bots/$b.md"
+done
+# A block for a bot no longer listed would be pasted by mistake.
+for d in "$profiles"/*/; do
+	p=$(basename "$d") out=$target/.maestro/bots/$p.md
+	[[ " ${bots[*]} " == *" $p "* ]] || [ ! -f "$out" ] || linked ".maestro/bots/$p.md" || {
+		rm -f -- "$out"
+		echo "$p: removed .maestro/bots/$p.md: not in bots:"
+	}
 done

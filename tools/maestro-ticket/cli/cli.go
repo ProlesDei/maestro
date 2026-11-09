@@ -226,6 +226,16 @@ func (c *call) parse() error {
 			if errors.Is(err, flag.ErrHelp) {
 				return err
 			}
+			// The parse stops at the bad flag, so a --json after it
+			// was never read; a bot that asked for JSON still gets it.
+			for _, a := range c.args {
+				if a == "--" {
+					break
+				}
+				if a == "--json" || a == "-json" || a == "--json=true" || a == "-json=true" {
+					c.jsonOut = true
+				}
+			}
 			return usageError{err.Error()}
 		}
 		if c.fs.NArg() == 0 {

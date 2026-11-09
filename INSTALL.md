@@ -72,7 +72,7 @@ Ask about each:
 
 For each bot in `bots:`, read its starting memories in `.maestro/src/bot-profiles/<bot>/memory.md` and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
 
-Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
+Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size and whether it's `new`, `changed` or `same`; it removes the block of a bot no longer under `bots:`. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
 
 ## 9. Prove it
 
@@ -94,7 +94,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
 4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
-5. Rebuild the bot blocks and tell the person which ones changed: they paste those again.
+5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those.
 6. Run `check`.
 
 ## A teammate's checkout

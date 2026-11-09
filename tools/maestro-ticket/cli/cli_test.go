@@ -108,6 +108,10 @@ func TestHelpAndUsage(t *testing.T) {
 	if code, _, _ := h.run("", "list", "--nope"); code != 2 {
 		t.Fatalf("bad flag: %d", code)
 	}
+	// The parse stops at the bad flag; the error still comes as JSON.
+	if code := h.fails(2, "list", "--nope"); code != "usage" {
+		t.Fatalf("bad flag before --json: %q", code)
+	}
 	if code, _, _ := h.run("", "list", "-h"); code != 0 {
 		t.Fatalf("-h: %d", code)
 	}
