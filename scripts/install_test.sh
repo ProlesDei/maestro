@@ -47,9 +47,13 @@ sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 nskills=$(echo "$skills" | wc -l)
 
-# A stand-in maestro-ticket: logs where doctor ran, fails when STUB_FAIL is set.
+# A stand-in maestro-ticket: logs where doctor ran, fails when STUB_FAIL is
+# set, and otherwise makes the store as doctor does.
 mkdir "$tmp/bin"
-printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' '[ -z "${STUB_FAIL:-}" ]' >"$tmp/bin/maestro-ticket"
+# shellcheck disable=SC2016 # the stub's code, not ours
+printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' \
+	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
+	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && touch "$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log"
 : >"$STUB_LOG"
@@ -111,6 +115,11 @@ ok apply "$r"
 
 ok check "$r"
 says "ok: hidden install of $nskills skills at $sha"
+# A clone that skipped apply has no store.
+mv "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
+refuses "no ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db: run apply" "$r" check "$r"
+mv "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
+MAESTRO_TICKET_STORE=tickets.db refuses "MAESTRO_TICKET_STORE is relative" "$r" check "$r"
 # The template's ## Checks placeholder fails check: engineers would run it.
 cp "$here/../templates/project-setup.md" "$r/.maestro/project/project-setup.md"
 if run check "$r"; then fail "check passed the template's ## Checks text"; fi
@@ -221,6 +230,19 @@ grep -qxF -- "- Runs at once: up to 3." "$b" && grep -qxF "  Wrapped." "$b" || f
 grep -qF "$(sed -n 2p "$m/bot-profiles/team-rules.md")" "$b" || fail "planner block lacks the team rules"
 ! grep -q '^name: planner' "$b" || fail "planner block holds front matter"
 grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
+# A rebuild says which blocks changed, and drops a bot no longer listed.
+says "planner: new"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: same" && says "reviewer: same"
+echo "- Another." >>"$r/.maestro/project/bots/planner.memory.md"
+cp "$r/.maestro/project/install.yaml" "$tmp/choices"
+sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
+grep -qxF -- "- Another." "$b" || fail "planner block lacks the new memory"
+[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+"$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
 # A CRLF checkout of install.yaml names the same bots.
 cp "$r/.maestro/project/install.yaml" "$tmp/choices"
 sed -i 's/$/\r/' "$r/.maestro/project/install.yaml"
@@ -456,6 +478,7 @@ ok uninstall "$r5d"
 r6=$tmp/nostore
 repo "$r6" "harnesses: claude" "skills-home: hidden"
 STUB_FAIL=1 refuses "doctor failed" "$r6" apply "$r6"
+says "FAIL  stub: no store here"
 refuses "usage:" "$r6" frob "$r6"
 
 # A failed copy leaves a partial install that a second apply finishes.
@@ -540,6 +563,28 @@ touch "$r8/.maestro/src/AGENTS.md"
 ln -s "$tmp" "$tmp/via"
 if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned" >"$tmp/out" 2>&1; then fail "check passed with AGENTS.md in .maestro/src"; fi
 says "problem: .maestro/src/AGENTS.md exists"
+# A clone that skipped apply leaves Maestro's clone in sight of git add.
+sed -i '\#^/\.maestro/src/$#d' "$r8/.git/info/exclude"
+if bash "$r8/.maestro/src/scripts/install.sh" check "$r8" >"$tmp/out" 2>&1; then fail "check passed with .maestro/src/ seen by git"; fi
+says "problem: .maestro/src/ isn't hidden from git: run apply"
+echo /.maestro/src/ >>"$r8/.git/info/exclude" && rm "$r8/.maestro/src/AGENTS.md"
+bash "$r8/.maestro/src/scripts/install.sh" check "$r8" >"$tmp/out" 2>&1 || true
+! grep -qF "isn't hidden" "$tmp/out" || { cat "$tmp/out"; fail "check flagged a hidden .maestro/src/"; }
+
+# --- check warns until origin/<main> has project-setup.md as the repo has
+# it: each ticket's worktree branches from there.
+r12=$tmp/pushed
+repo "$r12" "harnesses: claude" "skills-home: hidden"
+git init -q --bare "$tmp/pushed.git" && git -C "$r12" remote add origin "$tmp/pushed.git" && git -C "$r12" push -q origin main
+ok apply "$r12"
+ok check "$r12"
+says "warn: project-setup.md isn't on origin/main"
+git -C "$r12" add .maestro/project && git -C "$r12" commit -qm setup && git -C "$r12" push -q origin main
+ok check "$r12"
+! grep -q "origin/main" "$tmp/out" || fail "check warned with project-setup.md pushed"
+echo extra >>"$r12/.maestro/project/project-setup.md"
+ok check "$r12"
+says "warn: project-setup.md differs from origin/main's copy"
 
 # --- an install by the install.sh before the record, from a commit where
 # a merge made a skill's copy: that copy is Maestro's too.

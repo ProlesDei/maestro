@@ -936,11 +936,18 @@ func (s *Store) ClaimNext(ctx context.Context, req ticket.ClaimRequest) (ticket.
 	if err := req.Validate(); err != nil {
 		return ticket.Ticket{}, err
 	}
+	// Before the lock too, so a claim under STOP fails at once rather
+	// than wait on a held lock and come back busy.
 	if err := s.checkStop(); err != nil {
 		return ticket.Ticket{}, err
 	}
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *sql.Tx, now int64) error {
+		// Under the lock: a claim that waited on it while STOP appeared
+		// must not land.
+		if err := s.checkStop(); err != nil {
+			return err
+		}
 		var err error
 		out, err = idempotent(ctx, tx, req.IdempotencyKey, "claim", req, now, func() (ticket.Ticket, error) {
 			t, err := s.pickClaimable(ctx, tx, req, now)

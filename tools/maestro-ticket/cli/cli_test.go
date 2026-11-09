@@ -108,6 +108,10 @@ func TestHelpAndUsage(t *testing.T) {
 	if code, _, _ := h.run("", "list", "--nope"); code != 2 {
 		t.Fatalf("bad flag: %d", code)
 	}
+	// The parse stops at the bad flag; the error still comes as JSON.
+	if code := h.fails(2, "list", "--nope"); code != "usage" {
+		t.Fatalf("bad flag before --json: %q", code)
+	}
 	if code, _, _ := h.run("", "list", "-h"); code != 0 {
 		t.Fatalf("-h: %d", code)
 	}
@@ -327,6 +331,11 @@ func TestGitDefaultsSharedAcrossWorktrees(t *testing.T) {
 
 	main := &harness{t: t, dir: repo, env: map[string]string{}}
 	linked := &harness{t: t, dir: wt, env: map[string]string{}}
+	// Only doctor, which install.sh apply runs, makes the store.
+	if code := main.fails(2, "list"); code != "invalid" {
+		t.Fatalf("list with no store: %q", code)
+	}
+	main.ok(nil, "doctor")
 	main.ok(nil, "create", "--title", "shared")
 
 	var l struct{ Tickets []tk }
@@ -617,7 +626,35 @@ func TestGitDefaultRefusesBareAndSubmodule(t *testing.T) {
 		t.Fatalf("list in submodule: exit %d %s", code, out)
 	}
 	top := &harness{t: t, dir: super, env: map[string]string{}}
+	top.ok(nil, "doctor")
 	top.ok(nil, "list")
+}
+
+// A separate clone has its own git common dir: from the git default it gets
+// a refusal, not a second, empty store.
+func TestGitDefaultRefusesCloneWithNoStore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	repo := t.TempDir()
+	git(t, repo, "init", "-q")
+	git(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	main := &harness{t: t, dir: repo, env: map[string]string{}}
+	main.ok(nil, "doctor")
+	main.ok(nil, "create", "--title", "shared")
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	git(t, repo, "clone", "-q", repo, clone)
+	c := &harness{t: t, dir: clone, env: map[string]string{}}
+	for _, args := range [][]string{{"list"}, {"get", "T-1"}, {"create", "--title", "stray"}, {"claim", "--next", "--holder", "a/b"}} {
+		code, out, _ := c.run("", append(args, "--json")...)
+		if code != 2 || !strings.Contains(out, "no ticket store") {
+			t.Fatalf("%v in a clone: exit %d %s", args, code, out)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(clone, ".git", "maestro", "tickets.db")); !os.IsNotExist(err) {
+		t.Fatalf("clone got a store: %v", err)
+	}
 }
 
 // A relative --store resolved against the process directory, not the

@@ -316,6 +316,39 @@ func TestStopFileRefusesClaims(t *testing.T) {
 	wantErr(t, err, ticket.ErrStopped)
 }
 
+// A claim waiting on the write lock when STOP appears must not land: the
+// check runs under the lock, not before it.
+func TestStopFileRefusesClaimWaitingOnLock(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "maestro", "tickets.db")
+	ss := openMany(t, path, 3)
+	mustCreate(t, ss[0], "x", "", 2)
+	tx, err := ss[0].w.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ss[1].ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1"})
+		done <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), StopFile), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A claim that starts under STOP fails at once, lock held or not.
+	start := time.Now()
+	_, err = ss[2].ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s2"})
+	wantErr(t, err, ticket.ErrStopped)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("claim under STOP waited %v on the lock", d)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wantErr(t, <-done, ticket.ErrStopped)
+}
+
 // A heartbeat must carry the current token: a leftover process of a session
 // that re-claimed can't keep the newer lease alive, and can't extend a lease
 // without saying which one.

@@ -44,7 +44,7 @@ Answer: <the verdict, findings, steps, plan or answer>
 Evidence: <one line each: command, exit code, excerpt or path>
 Picks: <each call you made, one line> | none
 Open: <not checked, guessed, for the planner, for the chief of staff> | none
-Next: <one command for the QA lead, such as /maestro-code-review 12 or /maestro-planner T-12> | none
+Next: <who acts next and on what, for the QA lead to report to the planner, such as reviewer: review T-12 or planner: rewrite T-12 criterion 2> | none
 ```
 
 **Reply:** the block above, filled in, first line exactly as shown so the bot can sort on it. A tested PR adds what [test-a-pr.md](references/test-a-pr.md) asks for under `Answer:`.

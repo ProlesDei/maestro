@@ -269,6 +269,15 @@ if [ "$cmd" = check ]; then
 			[ ! -e "$root/$p" ] || problem ".maestro/src/$p exists: harnesses would load Maestro's own files; check out only what INSTALL.md lists"
 		done
 	fi
+	# apply makes both in each clone; a clone that skipped it has neither.
+	store=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
+	if [[ $store != /* ]]; then
+		problem "MAESTRO_TICKET_STORE is relative, and maestro-ticket refuses it: make it absolute"
+	elif [ ! -f "$store" ]; then
+		problem "no ticket store at $store: run apply in this clone"
+	fi
+	[ "$root" != "$target/.maestro/src" ] || git -C "$target" check-ignore -q .maestro/src/ ||
+		problem ".maestro/src/ isn't hidden from git: run apply in this clone"
 	if [ ! -f "$record" ]; then
 		problem "no record at $record: run apply"
 	else
@@ -334,6 +343,17 @@ if [ "$cmd" = check ]; then
 		[ -z "$main" ] || git -C "$target" rev-parse --verify --quiet "refs/heads/$main" >/dev/null ||
 			git -C "$target" rev-parse --verify --quiet "refs/remotes/origin/$main" >/dev/null ||
 			problem "project-setup.md: main branch $main doesn't exist"
+		# Each ticket's worktree branches from origin/<main>, so that's the
+		# copy its engineer reads ## Checks from.
+		if [ -n "$main" ] && git -C "$target" rev-parse --verify --quiet "refs/remotes/origin/$main" >/dev/null; then
+			hashes "$setup"
+			pushed=$(git -C "$target" rev-parse --verify --quiet "refs/remotes/origin/$main:.maestro/project/project-setup.md") || pushed=
+			if [ -z "$pushed" ]; then
+				warn "project-setup.md isn't on origin/$main as of the last fetch: each ticket's worktree branches from there and won't see your checks until .maestro/project/ is committed and on $main"
+			elif [ "$pushed" != "${hs[0]}" ]; then
+				warn "project-setup.md differs from origin/$main's copy as of the last fetch, which each ticket's worktree reads: get .maestro/project/ onto $main"
+			fi
+		fi
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the engineers run none"
 		# Any other bullet there isn't a check an engineer can run.
@@ -567,8 +587,12 @@ fi
 
 # The store lives in the git common dir, outside the work tree; doctor
 # creates it and checks the repo can hold one, before anything is written.
+# No other maestro-ticket command makes one, so a stray clone gets none.
 command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
-(cd "$target" && maestro-ticket doctor >/dev/null) || die "maestro-ticket doctor failed in $target; nothing was written"
+out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
+	printf '%s\n' "$out" >&2
+	die "maestro-ticket doctor failed in $target; nothing was written"
+}
 
 # Hide the old and new skills before the first copy, so a run that stops
 # partway shows nothing in git status. Each file lands whole (a temp file,

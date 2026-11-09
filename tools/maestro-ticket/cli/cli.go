@@ -226,6 +226,16 @@ func (c *call) parse() error {
 			if errors.Is(err, flag.ErrHelp) {
 				return err
 			}
+			// The parse stops at the bad flag, so a --json after it
+			// was never read; a bot that asked for JSON still gets it.
+			for _, a := range c.args {
+				if a == "--" {
+					break
+				}
+				if a == "--json" || a == "-json" || a == "--json=true" || a == "-json=true" {
+					c.jsonOut = true
+				}
+			}
 			return usageError{err.Error()}
 		}
 		if c.fs.NArg() == 0 {
@@ -386,10 +396,19 @@ func (c *call) git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// open opens the store. From the git default it opens only a store that
+// exists: a separate clone of the repo has its own git common dir, so a
+// store made there would be a second, empty one. doctor, which
+// install.sh apply runs, makes it.
 func (c *call) open(ctx context.Context) (*sqlitestore.Store, error) {
-	path, _, err := c.storePath()
+	path, source, err := c.storePath()
 	if err != nil {
 		return nil, err
+	}
+	if source == "git common dir" {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and don't make one there with doctor: it would be an empty second board", ticket.ErrInvalid, path)
+		}
 	}
 	if err := envcheck.Err(c.envChecks(path)); err != nil {
 		return nil, err

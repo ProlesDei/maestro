@@ -54,7 +54,7 @@ Open a todo list with one item per phase below.
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$B` too. Never skip hooks or tests.
+1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$G` alone too, in a second detached worktree at `$G`, `$(mktemp -d)/review-<id>-$S-main` (print its path): red only on the old base `$B` proves nothing, since main may have fixed it since. Never skip hooks or tests.
 2. Read `gh pr checks <n>` for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
@@ -71,7 +71,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
 
 ## Phase G: Act
 
-1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if Phase F's QA condition no longer holds, decide again in Phase F. Run step 5's cleanup whenever you stop here.
+1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E, twice at most; on a third move, refuse as Phase A step 4 says, naming main moving faster than the gates run. The ticket stays in review, so the planner's next look sends it again. Read the PR's `headRefOid` again: if it isn't `H`, someone pushed after the handoff, so set `H` to it and stop as Phase A step 5 says. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if Phase F's QA condition no longer holds, decide again in Phase F. Run step 5's cleanup whenever you stop here.
 2. **GO.** Never squash, rebase, force-push or `--no-verify`. With no ticket, skip the transition.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
@@ -91,7 +91,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
      --note "Kickback at $H" --idempotency-key kickback-move-<id>-$H-$S
    ```
 4. **ESCALATE.** Post `Escalation: review at <H>`, then what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`, with `maestro-ticket comment <id> --body-file - --idempotency-key escalate-<id>-$H-$S`. Then `maestro-ticket transition <id> --to blocked --from in_review --note "Review escalated at $H" --idempotency-key escalate-move-<id>-$H-$S`. With no ticket, post it with `gh pr comment <n> --body-file -`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
-5. Revert any pass 6 mutation, then `git worktree remove $R` and remove its temp folder and `$C` as **maestro-working-principles** says. After a GO merge, also remove the engineer's `.maestro/worktrees/<id>`, without force, since its session ended at the handoff; if git refuses for changes, leave it and name it in the report.
+5. Revert any pass 6 mutation, then `git worktree remove $R`, and the `$G` worktree if you made one, and remove their temp folders and `$C` as **maestro-working-principles** says. After a GO merge, also remove the engineer's `.maestro/worktrees/<id>`, without force, since its session ended at the handoff; if git refuses for changes, leave it and name it in the report.
 
 ```
 # Code review: <id> <title>

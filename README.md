@@ -69,6 +69,8 @@ flowchart TD
     Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
     Sr -.->|"what the ticket can't settle"| Planner
+    QA -.->|"test report, a criterion to rewrite"| Planner
+    Rev -.->|"verdict, a block to settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets
 
     %% Test and review
@@ -149,7 +151,7 @@ What a bot loads and what the installer leaves in your repo:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Thinks and decides. Never edits their code<br/>Runs claude -p /maestro-&lt;skill&gt; for each job,<br/>or codex exec for review<br/><i>How Grok Bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Thinks and decides. Never edits their code<br/>Runs claude -p /maestro-&lt;skill&gt; for each job<br/><i>How Grok Bot is started is out of scope</i>"]
 
     subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR

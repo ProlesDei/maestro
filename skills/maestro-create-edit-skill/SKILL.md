@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Create or edit a skill
 
-A skill is a folder with a `SKILL.md`. A harness reads only `name` and `description` until a task matches, then loads the body. You hand back a skill that triggers when it should, and you never edit a `maestro-*` folder: those are the installer's copies, hidden from git, and a reinstall drops your change.
+A skill is a folder with a `SKILL.md`. A harness reads only `name` and `description` until a task matches, then loads the body. You hand back a skill that triggers when it should, and you never edit a `maestro-*` folder: those are the installer's copies, and the next install refuses a changed one or replaces your change.
 
 ## Start
 

@@ -55,9 +55,9 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 `.maestro/project/project-setup.md` tells every session how this project works. Its header explains each section. Draft each section from the repo (CI config, Makefile, `package.json` or other task runners, README, contributing docs), then ask the person about it:
 
-- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. So does a repo that turns off merge commits or asks for linear history: review merges with a merge commit, and engineers merge main into their branch. Tell the person, and settle with them how the bot's merges get through, before you go on.
+- **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every GO. So does a repo that turns off merge commits or asks for linear history: review merges with a merge commit, and engineers merge main into their branch. Signed commits and a CODEOWNERS review fail it the same way, and a required status check that is slow or flaky stalls every merge until it's green. Tell the person, and settle with them how the bot's merges get through, before you go on.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks.
-- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person.
+- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person. Start the app from a fresh worktree, twice at once, as QA sessions do: a gitignored `.env`, a fixed port or a fixed container name breaks them, so settle each with the person.
 - **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
@@ -72,7 +72,7 @@ Ask about each:
 
 For each bot in `bots:`, read its starting memories in `.maestro/src/bot-profiles/<bot>/memory.md` and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
 
-Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
+Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size and whether it's `new`, `changed` or `same`; it removes the block of a bot no longer under `bots:`. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
 
 ## 9. Prove it
 
@@ -84,6 +84,8 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 - `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
+- Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
+- Run every bot from this checkout or its worktrees. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
 - Paste each bot block into Grok.
 
 ## Update
@@ -92,12 +94,12 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
 4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
-5. Rebuild the bot blocks and tell the person which ones changed: they paste those again.
+5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those.
 6. Run `check`.
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
 
 ## Uninstall
 
