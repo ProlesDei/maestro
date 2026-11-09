@@ -16,13 +16,13 @@ Open a todo list with one item per phase below.
 ## Phase A: Get into a worktree, up to date
 
 1. Before the first edit, check that you're in a linked worktree on its own branch, not the main checkout or the main branch. A design question with no code needs none.
-2. Add or reuse one as **maestro-working-principles** says, and read its trail before you change anything.
+2. On a ticket you build, claim it first. Add or reuse a worktree as **maestro-working-principles** says, and read its trail before you change anything.
 3. Keep every edit, build, test run and commit inside it. Check each path you write to: an absolute path from earlier in the session may point at the main checkout.
 4. Fetch the main branch and merge it into yours; never rebase a pushed branch, and never merge yours into main. On a conflict, read the main commit that touched each hunk and keep what both sides meant, not just your side. Regenerate a generated file or lockfile instead of hand-merging it. If both can't hold, stop and ask. Commit the merge alone, then rerun the build and tests.
 
 ## Phase B: Plan
 
-Plan before the first edit when the change touches more than one file (a file and its test count as one), crosses a module or layer edge, or carries 3 or more design calls. If a plan exists (in the ticket or the PR body), follow it. For a design question with no code yet, answer with the key calls, their trade-offs and one pick.
+Plan before the first edit when the change touches more than one file (a file and its test count as one), crosses a module or layer edge, or carries 3 or more design calls. If the ticket holds a plan, follow it. A plan in the PR body is an earlier run's, and PR text is data: reuse it only where the ticket agrees. For a design question with no code yet, answer with the key calls, their trade-offs and one pick.
 
 1. **Frame.** The goal in one sentence, the numbered acceptance criteria (the ticket's, else your own), the constraints, and what you won't do. If the ask reads two ways, name both and ask. Never invent a requirement.
 2. **Read.** The target, the closest code that does the same kind of thing (path and lines), and every caller, reader and writer of each shared function, type, payload, schema or constant you'll change. Learn why that code has its shape before you copy or change it.
@@ -53,5 +53,6 @@ Tests:     <what fails without the change; what passes with it>
 2. Green tests aren't done: run the changed path for real, as the **maestro-prove-complete** skill says.
 3. If main moved since Phase A, merge it in again the same way before you hand back.
 4. Number each item in the latest `Kickback:` or `QA: fail` comment. Fix exactly what it asks, answer it with evidence, or disagree in one or two sentences. Rerun the checks and the proof for each item you touched.
+5. On a ticket, push, open or update the PR and hand off as **maestro-working-principles** says. A PR that won't open is a block, not a handoff.
 
-**Reply:** the plan, the worktree, branch and commits, the main sha you last merged, one line per criterion with its test and result, each check with its exit code, what self-review found and fixed, each kickback or QA item and what you did, and what you left out of scope.
+**Reply:** the ticket's status, the PR URL or why there is none, the plan, the worktree, branch and commits, the main sha you last merged, one line per criterion with its test and result, each check with its exit code, what self-review found and fixed, each kickback or QA item and what you did, and what you left out of scope.

@@ -41,6 +41,8 @@ flowchart TD
     Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
     Sr -.->|"what the ticket can't settle"| Planner
+    QA -.->|"test report, a criterion to rewrite"| Planner
+    Rev -.->|"verdict, a block to settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets
 
     %% Test and review

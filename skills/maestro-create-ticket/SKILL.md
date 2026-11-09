@@ -16,7 +16,7 @@ Follow the **maestro-working-principles** skill.
    - a body: the goal in one or two sentences, numbered acceptance criteria, the paths to start from and the closest code to copy, and what must not change.
 
    A criterion is something a command or the running app can show, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it.
-2. **Look around.** Run `maestro-ticket list --json` and compare titles and areas. If one is close, show it and ask whether to go on. Check each path you named exists.
+2. **Look around.** Run `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,areas}'` and compare titles and areas. If one is close, show it and ask whether to go on. Check each path you named exists.
 3. **Ask once.** In one message, ask only for the fields you can't infer, each with your pick so the user can say "yes":
 
    | Field | Values | Default |
@@ -25,7 +25,7 @@ Follow the **maestro-working-principles** skill.
    | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
-   | role | who builds it: `engineer`, or a role the team added that builds tickets. QA and review take only built tickets, so they are never a ticket's role | `engineer` |
+   | role | who builds it: `engineer`, the one role the store takes that builds tickets. QA and review take only built tickets, so they are never a ticket's role | `engineer` |
 
    Waiting on another ticket is a dep, never `blocked`.
 4. **Create.** Show the command, then run it:

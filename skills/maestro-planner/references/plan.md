@@ -29,7 +29,7 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 Skip this phase unless you split or rewrote a ticket.
 
-1. Find each dependent: each ticket in `maestro-ticket list --json` whose `depends_on` holds `<id>`. The store won't cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first, then cancel with your claim:
+1. Find each dependent: each ticket in `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,depends_on}'` whose `depends_on` holds `<id>`. The store won't cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first, then cancel with your claim:
 
    ```sh
    maestro-ticket update <dependent> --add-deps T-a,T-b --remove-deps <id>

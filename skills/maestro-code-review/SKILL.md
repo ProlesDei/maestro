@@ -54,7 +54,7 @@ Open a todo list with one item per phase below.
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$B` too. Never skip hooks or tests.
+1. Wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$G` alone too, in a second detached worktree: red only on the old base `$B` proves nothing, since main may have fixed it since. Never skip hooks or tests.
 2. Read `gh pr checks <n>` for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
@@ -71,7 +71,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
 
 ## Phase G: Act
 
-1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if Phase F's QA condition no longer holds, decide again in Phase F. Run step 5's cleanup whenever you stop here.
+1. Before a merge, `git fetch origin <main>`. If `origin/<main>` is no longer `G`, go back to Phase E, twice at most; on a third move, ESCALATE that main moves faster than the gates run, so the team can turn on a merge queue. Read the PR's `headRefOid` again: if it isn't `H`, someone pushed after the handoff, so set `H` to it and stop as Phase A step 5 says. On a ticket, read `maestro-ticket get <id> --json` again: a second QA run may have posted since. If it isn't `in_review` or shows a live claim, refuse as Phase A step 4 says; if its latest `QA:` comment is now at another sha, stop as Phase A step 5 says; if Phase F's QA condition no longer holds, decide again in Phase F. Run step 5's cleanup whenever you stop here.
 2. **GO.** Never squash, rebase, force-push or `--no-verify`. With no ticket, skip the transition.
    ```bash
    gh pr merge <n> --merge --match-head-commit $H
