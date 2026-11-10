@@ -433,6 +433,9 @@ grep -q $'\r$' "$r/.claude/skills/maestro-tdd/SKILL.md" || fail "the checkout sh
 grep -q $'\r$' "$r/.maestro/project/installed.list" || fail "the record's checkout should be CRLF"
 (cd "$r2" && run check "$r") || { cat "$tmp/out"; fail "check of a CRLF checkout from another repo failed"; }
 (cd "$r2" && run apply "$r") || { cat "$tmp/out"; fail "apply over a CRLF checkout clashed"; }
+# An apply that changes nothing leaves the CRLF record as git wrote it: an
+# LF copy reads as modified, and the next pull that touches it aborts.
+[ -z "$(git -C "$r" status --porcelain)" ] || { git -C "$r" status --porcelain; fail "apply over a CRLF checkout left the repo dirty"; }
 
 # --- switch committed to hidden: the tracked copies are untracked ---
 sed -i 's/^skills-home: .*/skills-home: hidden/' "$r/.maestro/project/install.yaml"
