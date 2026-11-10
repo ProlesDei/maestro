@@ -36,7 +36,7 @@
 #
 # check reports what's wrong with an install and with the machine its
 # bots run on, and changes nothing: copies that are missing or changed, a
-# store that is empty or no SQLite file, a missing claude, gh or jq, an
+# store that is empty, unreadable or no SQLite file, a missing claude, gh or jq, an
 # unset git identity. It warns while origin's main branch lacks
 # project-setup.md or the committed skills.
 # uninstall removes the files the record lists, except those changed since.
@@ -288,10 +288,10 @@ if [ "$cmd" = check ]; then
 		problem "MAESTRO_TICKET_STORE is relative, and maestro-ticket refuses it: make it absolute"
 	elif [ ! -f "$store" ]; then
 		problem "no ticket store at $store: run apply in this clone"
-	elif [ "$(head -c 15 "$store" | tr -d '\0')" != "SQLite format 3" ]; then
+	elif [ "$(head -c 15 "$store" 2>/dev/null | tr -d '\0')" != "SQLite format 3" ]; then
 		# Read the file's first bytes and no more: opening the store would
 		# migrate an older one and fill an empty one, and check changes nothing.
-		problem "the ticket store at $store is empty or isn't a SQLite file: restore a snapshot from backups/ beside it, as maestro-ticket's README says"
+		problem "the ticket store at $store is empty, unreadable or isn't a SQLite file: make it readable, or restore a snapshot from backups/ beside it, as maestro-ticket's README says"
 	fi
 	# What every bot's run needs (INSTALL.md step 1). A missing one stops
 	# the first run, not the install.
@@ -301,7 +301,7 @@ if [ "$cmd" = check ]; then
 	for k in name email; do
 		v=$(git -C "$target" config "user.$k" || true)
 		a=GIT_AUTHOR_${k^^} c=GIT_COMMITTER_${k^^}
-		[[ $v == *[![:space:]]* ]] || { [ -n "${!a-}" ] && [ -n "${!c-}" ]; } ||
+		[[ $v == *[![:space:]]* ]] || [[ ${!a-} == *[![:space:]]* && ${!c-} == *[![:space:]]* ]] ||
 			problem "git user.$k isn't set: the bots commit and merge"
 	done
 	[ "$root" != "$target/.maestro/src" ] || git -C "$target" check-ignore -q .maestro/src/ ||

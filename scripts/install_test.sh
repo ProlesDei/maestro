@@ -148,9 +148,9 @@ says "warn: no origin/main ref as of the last fetch"
 # the identity they commit with: each is a problem.
 cp "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
 : >"$r/.git/maestro/tickets.db"
-refuses "problem: the ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db is empty or isn't a SQLite file" "$r" check "$r"
+refuses "problem: the ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db is empty, unreadable or isn't a SQLite file" "$r" check "$r"
 echo garbage >"$r/.git/maestro/tickets.db"
-refuses "is empty or isn't a SQLite file" "$r" check "$r"
+refuses "unreadable or isn't a SQLite file" "$r" check "$r"
 cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
 for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
@@ -160,6 +160,7 @@ git -C "$r" config user.name '   '
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
 git -C "$r" config --unset user.name
 GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=b GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=b GIT_COMMITTER_EMAIL=b@b ok check "$r"
+GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=' ' GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=' ' GIT_COMMITTER_EMAIL=b@b refuses "problem: git user.name isn't set" "$r" check "$r"
 # Review and prune need git merge-tree --write-tree, from git 2.38.
 # uninstall doesn't, so a team on an older git can still remove Maestro.
 mkdir "$tmp/oldgit"
