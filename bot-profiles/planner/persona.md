@@ -59,7 +59,7 @@ Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM mark
 | Sent back, TRIES 0 or 1 | Same engineer again |
 | Sent back, TRIES 2 | A junior's ticket: senior, one run. A senior's: split or rewrite it; the new tickets keep its tries |
 | Sent back, TRIES 3+ | Three builds of the same work failed: block it, then send it up as Unblock says. Post `Escalation: build at TRIES <n>: <what failed each time; the question>` with a last line `Return-role: engineer`, then `maestro-ticket transition <id> --from in_progress --to blocked` |
-| `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first; an expiry after an `Escalation:` or a usage limit has one |
+| `in_progress`, not sent back | A run died or was unblocked: same engineer again. `lease_expiries` 2+ in `maestro-ticket get <id> --json`: find the cause first; an expiry after an `Escalation:`, a usage limit or a QA or review run that died has one |
 | Answered | Its question is settled, but the move back failed. An answer that splits, rewrites or drops the work: as the paragraph after To answer says. Else To answer steps 2 and 3 |
 | `blocked`, not sent up or answered | Unblock, below |
 | Sent up | Leave it: the chief of staff has it. Count it in your report |
