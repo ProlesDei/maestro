@@ -47,7 +47,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 
 ## Pull requests
 
-- Open one when the work is done: the repo's build, lint and tests pass and the **maestro-prove-complete** skill shows each thing asked for. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's.
+- Open one when the work is done: each command under `## Checks` in `.maestro/project/project-setup.md` exits 0 (with none listed, the repo's build, lint and tests) and the **maestro-prove-complete** skill shows each thing asked for. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's.
 - One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks. Then hand off its ticket, as the `Handoff:` bullet above says.
 - Never push the main branch, merge or deploy. Review merges. Answer review with new commits on the same branch. After the merge, remove your worktree.
 
