@@ -35,9 +35,10 @@
 # works in one linked worktree instead.
 #
 # check reports what's wrong with an install and with the machine its
-# bots run on: copies that are missing or changed, a store doctor fails
-# on, a missing claude, gh or jq, an unset git identity. It warns while
-# origin's main branch lacks project-setup.md or the committed skills.
+# bots run on, and changes nothing: copies that are missing or changed, a
+# store that is empty or no SQLite file, a missing claude, gh or jq, an
+# unset git identity. It warns while origin's main branch lacks
+# project-setup.md or the committed skills.
 # uninstall removes the files the record lists, except those changed since.
 #
 # Exit codes: 0 ok, 1 a clash or a problem, 2 usage.
@@ -66,14 +67,16 @@ case $cmd in apply | check | uninstall) ;; *) usage ;; esac
 
 root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 # 2.38: review and prune test a merge with git merge-tree --write-tree.
-{ [[ $(git --version) =~ ([0-9]+)\.([0-9]+) ]] && ((BASH_REMATCH[1] * 100 + BASH_REMATCH[2] >= 238)); } ||
+# uninstall runs on what an older install ran on, so a team can still
+# remove Maestro.
+[ "$cmd" = uninstall ] || { [[ $(git --version) =~ ([0-9]+)\.([0-9]+) ]] && ((BASH_REMATCH[1] * 100 + BASH_REMATCH[2] >= 238)); } ||
 	die "needs git 2.38 or later"
 [ -d "$1" ] || die "$1 is not a directory"
 target=$(cd -- "$1" && pwd -P)
 top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) || die "$1 is not in a git work tree"
 [ "$top" = "$target" ] || die "$1 is inside the repo at $top; install at the top of the repo"
 common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
-[[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.38 or later"
+[[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.31 or later"
 # One install per repo: its worktrees share the exclude file, ticket store
 # and hidden record. It goes in the main checkout, or in a linked worktree
 # when the main one is bare.
@@ -285,20 +288,21 @@ if [ "$cmd" = check ]; then
 		problem "MAESTRO_TICKET_STORE is relative, and maestro-ticket refuses it: make it absolute"
 	elif [ ! -f "$store" ]; then
 		problem "no ticket store at $store: run apply in this clone"
-	elif command -v maestro-ticket >/dev/null; then
-		# The file is there; doctor says whether it still opens and holds up.
-		out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
-			problem "maestro-ticket doctor fails on the store at $store:"
-			printf '%s\n' "$out" | sed 's/^/  /'
-		}
+	elif [ "$(head -c 15 "$store" | tr -d '\0')" != "SQLite format 3" ]; then
+		# Read the file's first bytes and no more: opening the store would
+		# migrate an older one and fill an empty one, and check changes nothing.
+		problem "the ticket store at $store is empty or isn't a SQLite file: restore a snapshot from backups/ beside it, as maestro-ticket's README says"
 	fi
 	# What every bot's run needs (INSTALL.md step 1). A missing one stops
 	# the first run, not the install.
 	for t in claude gh jq; do
 		command -v "$t" >/dev/null || problem "$t isn't on PATH: the bots' runs need it"
 	done
-	for k in user.name user.email; do
-		[ -n "$(git -C "$target" config "$k" || true)" ] || problem "git $k isn't set: the bots commit and merge"
+	for k in name email; do
+		v=$(git -C "$target" config "user.$k" || true)
+		a=GIT_AUTHOR_${k^^} c=GIT_COMMITTER_${k^^}
+		[[ $v == *[![:space:]]* ]] || { [ -n "${!a-}" ] && [ -n "${!c-}" ]; } ||
+			problem "git user.$k isn't set: the bots commit and merge"
 	done
 	[ "$root" != "$target/.maestro/src" ] || git -C "$target" check-ignore -q .maestro/src/ ||
 		problem ".maestro/src/ isn't hidden from git: run apply in this clone"
@@ -379,19 +383,25 @@ if [ "$cmd" = check ]; then
 			fi
 			# Committed skills that never reach main serve only this checkout.
 			if [ "$home" = committed ] && [ ${#old[@]} -gt 0 ]; then
+				# -z: git quotes a path with a non-ASCII name otherwise.
 				declare -A onmain=()
-				while IFS=$'\t' read -r meta p; do
-					[ -z "$p" ] || onmain[$p]=${meta##* }
-				done < <(git -C "$target" ls-tree -r "refs/remotes/origin/$main" -- "${dirs[@]/%//skills}")
-				behind=0
+				while IFS= read -r -d '' rec; do
+					meta=${rec%%$'\t'*}
+					onmain[${rec#*$'\t'}]=${meta##* }
+				done < <(git -C "$target" ls-tree -r -z "refs/remotes/origin/$main" -- "${dirs[@]/%//skills}")
+				# Only this install's harness folders: the record may still
+				# list a dropped harness's files until the next apply.
+				behind=0 mine=0
 				for p in "${!old[@]}"; do
+					[[ " ${dirs[*]} " == *" ${p%%/*} "* ]] || continue
+					mine=$((mine + 1))
 					[ "${onmain[$p]-}" = "${old[$p]}" ] || behind=$((behind + 1))
 				done
 				[ $behind -eq 0 ] ||
-					warn "$behind of ${#old[@]} skill files are missing from origin/$main as of the last fetch, or differ there: commit ${dirs[*]/%//skills/} and get it onto $main, so every clone and CI run has the skills"
+					warn "$behind of $mine skill files are missing from origin/$main as of the last fetch, or differ there: commit ${dirs[*]/%//skills/} and get it onto $main, so every clone and CI run has the skills; if $main is ahead of this checkout, pull and run apply instead"
 			fi
 		elif [ -n "$main" ]; then
-			warn "no origin/$main as of the last fetch: each ticket's worktree branches from there, and review merges into it; add the GitHub repo as origin and fetch"
+			warn "no origin/$main ref as of the last fetch: each ticket's worktree branches from there, and review merges into it; check that origin is the GitHub repo and that a fetch brings its $main in as origin/$main"
 		fi
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the engineers run none"
