@@ -699,7 +699,7 @@ func runClaim(ctx context.Context, c *call) error {
 func runHeartbeat(ctx context.Context, c *call) error {
 	holder := c.fs.String("holder", "", "<bot-id>/<session-id> (required)")
 	token := c.fs.Int64("token", 0, "lease token from your claim (required)")
-	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "new lease length from now")
+	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length from now; never cuts a longer lease short")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		id, err := c.idArg()
 		if err != nil {

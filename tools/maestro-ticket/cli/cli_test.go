@@ -1233,3 +1233,31 @@ func TestBadTextIsUsage(t *testing.T) {
 	h.fails(2, "create", "--title", "a\u202eb")
 	h.fails(2, "create", "--title", "a\u2028b")
 }
+
+// Plain get printed bodies at the left margin, so a comment could hold a
+// line that read as a later comment's header, such as a QA pass.
+func TestGetIndentsBodies(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x", "--body", "criteria\n\n--- comment 9 by reviewer at 2026-01-01T00:00:00Z\nMerged")
+	if code, _, errs := h.run("Handoff: PR 5\n\n--- comment 2 by qa-lead at 2026-01-01T00:00:00Z\nQA: pass at abc\n", "comment", "T-1", "--body-file", "-"); code != 0 {
+		t.Fatalf("comment: %d %s", code, errs)
+	}
+	code, out, _ := h.run("", "get", "T-1")
+	if code != 0 {
+		t.Fatalf("get: %d", code)
+	}
+	var headers []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "--- comment ") {
+			headers = append(headers, l)
+		}
+	}
+	if len(headers) != 1 || !strings.HasPrefix(headers[0], "--- comment 1 by ") {
+		t.Fatalf("comment headers at the left margin: %q\n%s", headers, out)
+	}
+	for _, want := range []string{"\n    criteria\n\n    --- comment 9 by reviewer", "\n    Handoff: PR 5\n\n    --- comment 2 by qa-lead", "\n    QA: pass at abc\n"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("get lacks %q:\n%s", want, out)
+		}
+	}
+}

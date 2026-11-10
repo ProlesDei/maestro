@@ -65,11 +65,26 @@ func printDetail(w io.Writer, d ticket.Detail) {
 	fmt.Fprintf(w, "created:  %s by %s\n", d.CreatedAt.Format(time.RFC3339), d.CreatedBy)
 	fmt.Fprintf(w, "updated:  %s\n", d.UpdatedAt.Format(time.RFC3339))
 	if d.Body != "" {
-		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Body, "\n"))
+		fmt.Fprintf(w, "\n%s\n", indent(d.Body))
 	}
 	for _, c := range d.Comments {
-		fmt.Fprintf(w, "\n--- comment %d by %s at %s\n%s\n", c.ID, c.Author, c.CreatedAt.Format(time.RFC3339), strings.TrimRight(c.Body, "\n"))
+		fmt.Fprintf(w, "\n--- comment %d by %s at %s\n%s\n", c.ID, c.Author, c.CreatedAt.Format(time.RFC3339), indent(c.Body))
 	}
+}
+
+// indent sets a ticket body or comment four spaces in, so a line at the
+// left margin is always the tool's: text can't pass for a field or for a
+// later comment's header.
+func indent(body string) string {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			lines[i] = "    " + l
+		} else {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func blockedText(t ticket.Ticket) string {

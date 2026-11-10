@@ -1231,7 +1231,9 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		}
 		// Guard on the token too, so the extension can only land on the
 		// lease that was checked.
-		res, err := tx.ExecContext(ctx, "UPDATE tickets SET lease_expires_at = ? WHERE id = ? AND lease_holder = ? AND lease_token = ?",
+		// MAX: a heartbeat never cuts a lease short, so one with the default
+		// TTL can't take time from a longer claim.
+		res, err := tx.ExecContext(ctx, "UPDATE tickets SET lease_expires_at = MAX(lease_expires_at, ?) WHERE id = ? AND lease_holder = ? AND lease_token = ?",
 			now+req.TTL.Milliseconds(), t.ID, req.Holder, req.Token)
 		if err != nil {
 			return err

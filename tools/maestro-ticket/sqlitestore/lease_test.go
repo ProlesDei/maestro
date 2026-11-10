@@ -155,3 +155,25 @@ func TestLeaseExpiresAtExactMillisecond(t *testing.T) {
 	_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "jse/s1", Token: c.Claim.Token})
 	wantErr(t, err, ticket.ErrLeaseLost)
 }
+
+// A heartbeat with the default TTL used to cut a longer lease short: a
+// planner that claimed for 2h and renewed with no --ttl was left 30m.
+func TestHeartbeatNeverShortensLease(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	tk := mustCreate(t, s, "x", "", 2)
+	c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "planner/p1", TTL: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := c.Claim.ExpiresAt
+	clk.Advance(time.Minute)
+	hb, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "planner/p1", Token: c.Claim.Token, TTL: 30 * time.Minute})
+	if err != nil || !hb.Claim.ExpiresAt.Equal(until) {
+		t.Fatalf("a shorter heartbeat moved the lease from %v to %v, %v", until, hb.Claim.ExpiresAt, err)
+	}
+	hb, err = s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "planner/p1", Token: c.Claim.Token, TTL: 3 * time.Hour})
+	if err != nil || !hb.Claim.ExpiresAt.Equal(clk.Now().Add(3*time.Hour)) {
+		t.Fatalf("a longer heartbeat left the lease at %v, %v", hb.Claim.ExpiresAt, err)
+	}
+}
