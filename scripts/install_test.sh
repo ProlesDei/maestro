@@ -12,7 +12,10 @@
 # skills-home takes over the copies, and a switch to hidden untracks them;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
-# reads project-setup.md; a linked worktree refuses;
+# reads project-setup.md, runs doctor on the store, and names a missing
+# tool, git identity or origin, and committed skills not yet on main; a git
+# too old for review refuses; a linked worktree refuses, and one that holds
+# a stray .maestro/src/ says to delete it;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; harnesses without claude stop apply and
@@ -55,6 +58,9 @@ printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && touch "$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
+# check wants what the bots' runs need; stand-ins, so the test passes on a
+# machine without them.
+for t in claude gh jq; do printf '#!/bin/sh\n' >"$tmp/bin/$t" && chmod +x "$tmp/bin/$t"; done
 export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log"
 : >"$STUB_LOG"
 
@@ -72,6 +78,20 @@ refuses() {
 	if run "$@"; then fail "install.sh $* exited 0"; fi
 	says "$msg"
 	[ "$before" = "$(snap "$repo")" ] || fail "install.sh $* changed $repo"
+}
+# hide <tool>: print a PATH that lacks <tool> and keeps every other
+# command: each folder that holds it gives way to one of links to the rest.
+hide() {
+	local t=$1 d f out='' IFS=:
+	for d in $PATH; do
+		if [ -e "$d/$t" ]; then
+			f=$(mktemp -d "$tmp/farm.XXXXXX")
+			ln -s "$d"/* "$f/" && rm "$f/$t"
+			d=$f
+		fi
+		out=${out:+$out:}$d
+	done
+	echo "$out"
 }
 # repo <path> <choices...>: a new repo with one commit and these choices.
 repo() {
@@ -115,6 +135,21 @@ ok apply "$r"
 
 ok check "$r"
 says "ok: hidden install of $nskills skills at $sha"
+# With no origin, no ticket's worktree has a main to branch from.
+says "warn: no origin/main as of the last fetch"
+# A store that no longer opens, a tool the bots' runs need, and the
+# identity they commit with: each is a problem.
+STUB_FAIL=1 refuses "problem: maestro-ticket doctor fails on the store" "$r" check "$r"
+says "  FAIL  stub: no store here"
+for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
+GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
+says "problem: git user.email isn't set"
+# Review and prune need git merge-tree --write-tree, from git 2.38.
+mkdir "$tmp/oldgit"
+# shellcheck disable=SC2016 # the stub's code, not ours
+printf '%s\n' '#!/usr/bin/env bash' '[ "${1-}" != --version ] || { echo "git version 2.37.1"; exit 0; }' 'exec "$REAL_GIT" "$@"' >"$tmp/oldgit/git"
+chmod +x "$tmp/oldgit/git"
+for c in apply check uninstall; do REAL_GIT=$(command -v git) PATH=$tmp/oldgit:$PATH refuses "needs git 2.38 or later" "$r" $c "$r"; done
 # A clone that skipped apply has no store.
 mv "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
 refuses "no ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db: run apply" "$r" check "$r"
@@ -522,6 +557,13 @@ git -C "$r7" worktree add -q "$tmp/wt7"
 for c in apply check uninstall; do refuses "is a linked worktree; run install.sh in the main checkout, $r7" "$r7" $c "$tmp/wt7"; done
 sed -i 's/^skills-home: .*/skills-home: committed/' "$tmp/wt7/.maestro/project/install.yaml"
 refuses "is a linked worktree" "$r7" apply "$tmp/wt7"
+# An install started in the worktree leaves a .maestro/src/ there. The
+# main checkout then says to delete it, not to run install.sh there, which
+# refuses.
+mkdir -p "$tmp/wt7/.maestro/src"
+for c in apply check uninstall; do
+	refuses "$tmp/wt7, a linked worktree, holds a .maestro/src/ that an install started there left behind; delete that folder" "$r7" $c "$r7"
+done
 git -C "$r7" worktree remove --force "$tmp/wt7"
 # With a bare main repo, a linked worktree takes the install, and a second
 # worktree then refuses.
@@ -585,6 +627,20 @@ ok check "$r12"
 echo extra >>"$r12/.maestro/project/project-setup.md"
 ok check "$r12"
 says "warn: project-setup.md differs from origin/main's copy"
+
+# --- check warns until origin/<main> has the committed skills: until
+# then only this checkout has them.
+r13=$tmp/pushed-committed
+repo "$r13" "harnesses: claude codex" "skills-home: committed"
+git init -q --bare "$tmp/pushed-committed.git" && git -C "$r13" remote add origin "$tmp/pushed-committed.git"
+ok apply "$r13"
+git -C "$r13" add .maestro/project && git -C "$r13" commit -qm setup && git -C "$r13" push -q origin main
+ok check "$r13"
+nfiles=$(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2))
+says "warn: $nfiles of $nfiles skill files are missing from origin/main as of the last fetch, or differ there: commit .claude/skills/ .agents/skills/"
+git -C "$r13" add .claude .agents && git -C "$r13" commit -qm skills && git -C "$r13" push -q origin main
+ok check "$r13"
+! grep -q "origin/main" "$tmp/out" || { cat "$tmp/out"; fail "check warned with the skills pushed"; }
 
 # --- an install by the install.sh before the record, from a commit where
 # a merge made a skill's copy: that copy is Maestro's too.
