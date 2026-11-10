@@ -689,7 +689,9 @@ tmp=$scratch/record
 	echo "# Files scripts/install.sh placed at Maestro $sha: git blob hash, tab, path."
 	for p in "${plan[@]}"; do printf '%s\t%s\n' "${new[$p]}" "$p"; done | LC_ALL=C sort -k2
 } >"$tmp"
-mv "$tmp" "$record"
+# A record that says the same stays as git wrote it: over a CRLF checkout,
+# an LF copy reads as modified, and the next pull that touches it aborts.
+{ [ -f "$record" ] && [ ! -L "$record" ] && cmp -s <(tr -d '\r' <"$record") "$tmp"; } || mv "$tmp" "$record"
 # Exclude lines don't hide a file git tracks, so a switch to hidden
 # untracks Maestro's copies and the committed record; the team commits it.
 untracked=0

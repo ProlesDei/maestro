@@ -105,6 +105,14 @@ func TestHelpAndUsage(t *testing.T) {
 	if code, _, errs := h.run("", "frobnicate"); code != 2 || !strings.Contains(errs, "unknown command") {
 		t.Fatalf("unknown: %d %q", code, errs)
 	}
+	// A flag before the command: one line, not the whole usage, and JSON
+	// on stdout when --json is anywhere on the line.
+	if code, _, errs := h.run("", "--store", "x", "list"); code != 2 || strings.Count(errs, "\n") != 1 || !strings.Contains(errs, "command comes first") {
+		t.Fatalf("flag first: %d %q", code, errs)
+	}
+	if got := h.fails(2, "--store", "x", "list"); got != "usage" {
+		t.Fatalf("flag first with --json: error code %q; want usage", got)
+	}
 	if code, _, _ := h.run("", "list", "--nope"); code != 2 {
 		t.Fatalf("bad flag: %d", code)
 	}
@@ -1113,6 +1121,8 @@ func TestListReady(t *testing.T) {
 		t.Fatalf("ready with T-1 claimed %+v; want none", l.Tickets)
 	}
 	h.fails(2, "list", "--claimed", "--ready")
+	// No claim takes a done or cancelled ticket, so --ready never lists one.
+	h.fails(2, "list", "--ready", "--status", "done,cancelled")
 }
 
 // list --latest-prefix and --not-latest-prefix match the latest comment, so

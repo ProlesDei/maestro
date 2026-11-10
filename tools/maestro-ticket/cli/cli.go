@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -186,8 +187,14 @@ func Run(ctx context.Context, args []string, env Env) int {
 		}
 	}
 	if cmd == nil {
-		fmt.Fprintf(env.Stderr, "maestro-ticket: unknown command %q\n\n%s", args[0], usage)
-		return ticket.ExitUsage
+		// One line, as JSON when asked: a bot that puts a flag first would
+		// pay for the whole usage text on every try.
+		c := &call{env: env, jsonOut: slices.Contains(args, "--json") || slices.Contains(args, "-json")}
+		hint := ""
+		if strings.HasPrefix(args[0], "-") {
+			hint = ": the command comes first, then its flags"
+		}
+		return c.fail(usagef("unknown command %q%s; run maestro-ticket help", args[0], hint))
 	}
 	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError)}
 	c.fs.SetOutput(env.Stderr)
@@ -596,6 +603,11 @@ func runList(ctx context.Context, c *call) error {
 		}
 		if *ready && len(f.Statuses) == 0 {
 			f.Statuses = []ticket.Status{ticket.StatusTodo} // as claim --next
+		}
+		for _, st := range f.Statuses {
+			if *ready && st.Terminal() {
+				return usagef("--ready lists what a claim could take, and none takes a %s ticket", st)
+			}
 		}
 		switch {
 		case *claimed && *unclaimed:
