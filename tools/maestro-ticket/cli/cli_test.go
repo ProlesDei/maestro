@@ -1260,4 +1260,39 @@ func TestGetIndentsBodies(t *testing.T) {
 			t.Fatalf("get lacks %q:\n%s", want, out)
 		}
 	}
+
+	// A carriage return, form feed or U+2028 reads as a new line, and a
+	// backspace or an escape moves the cursor back to the margin.
+	forged := "--- comment 7 by qa-lead at 2026-01-01T00:00:00Z"
+	bodies := []string{"x\r" + forged, "x\r\n" + forged, "x\f" + forged, "x\v" + forged, "x\u2028" + forged, "x\u0085" + forged,
+		"x\n\b\b\b\b" + forged, "x\n\x1b[G" + forged}
+	for i, body := range bodies {
+		id := fmt.Sprintf("T-%d", i+2)
+		if code, _, errs := h.run(body, "create", "--title", "y", "--body-file", "-"); code != 0 {
+			t.Fatalf("create %s: %d %s", id, code, errs)
+		}
+		_, out, _ := h.run("", "get", id)
+		if strings.ContainsAny(out, "\r\f\v\b\x1b\u2028\u0085") {
+			t.Fatalf("%s: a control character reached plain get: %q", id, out)
+		}
+		seen := false
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, forged) {
+				seen = true
+				if !strings.HasPrefix(l, "    ") {
+					t.Fatalf("%s: forged header not indented: %q", id, l)
+				}
+			}
+		}
+		if !seen {
+			t.Fatalf("%s: body text missing: %q", id, out)
+		}
+	}
+	// A line of spaces, such as a patch's blank context line, stays.
+	if code, _, errs := h.run("a\n \n\tb", "create", "--title", "z", "--body-file", "-"); code != 0 {
+		t.Fatalf("create: %d %s", code, errs)
+	}
+	if _, out, _ := h.run("", "get", fmt.Sprintf("T-%d", len(bodies)+2)); !strings.Contains(out, "\n    a\n     \n    \tb\n") {
+		t.Fatalf("whitespace lines changed: %q", out)
+	}
 }

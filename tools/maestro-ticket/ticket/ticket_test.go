@@ -308,14 +308,17 @@ func TestAreas(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != "skills" || got[1] != "tools/maestro-ticket" {
 		t.Fatalf("normalize %v, %v", got, err)
 	}
-	// Scoped packages and framework route folders are real repo paths.
-	for _, good := range []string{"packages/@acme/ui", "app/(marketing)/page", "src/routes/[id]", "lib/c++", "src/a~b"} {
+	// A scoped package and a route group are real repo paths. Unquoted, a
+	// shell leaves @ and + alone and stops at ( with a syntax error.
+	for _, good := range []string{"packages/@acme/ui", "app/(marketing)/page", "lib/c++"} {
 		if got, err := NormalizeAreas([]string{good}); err != nil || len(got) != 1 || got[0] != good {
 			t.Errorf("%q: %v, %v", good, got, err)
 		}
 	}
 	for _, bad := range []string{"/abs", "..", "a/../b", "a//b", ".", "a b", "a,b",
-		// A shell runs or expands these when an area lands on a command line.
+		// A shell runs these, or quietly turns them into another path, when
+		// an area lands on a command line unquoted.
+		"src/routes/[id]", "[", "~", "~root/.ssh", "~/x", "src/a~b",
 		"a$b", "a`b", "a;b", "a*b", "a?b", "a|b", "a&b", "a'b", `a"b`, `a\b`, "a<b", "a{b",
 		// Spellings of another path would slip past the overlap check.
 		"./tools/x", "tools/x/..", "tools/x/.", "tools/./x", "../x"} {

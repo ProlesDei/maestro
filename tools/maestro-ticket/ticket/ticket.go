@@ -493,11 +493,13 @@ func HasControl(s string) bool {
 	}) >= 0
 }
 
-// Beyond letters and digits, a segment may hold what real repo paths do
-// (a scoped package's @, a route folder's ( ) [ ]) but nothing a shell
-// runs or expands when the area lands on a command line: no $, backtick,
-// quote, space, glob or separator.
-var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._@+~()\[\]-]+(/[A-Za-z0-9._@+~()\[\]-]+)*$`)
+// Beyond letters and digits, a segment may hold a scoped package's @, a
+// + and a route group's ( ). Typed unquoted, the first two are plain text
+// to a shell and a ( stops the command with a syntax error. Nothing gets
+// in that a shell would quietly turn into another path: [ ] is a glob, so
+// src/routes/[id] becomes src/routes/i where that exists, and ~, $ and a
+// backtick expand.
+var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._@+()-]+(/[A-Za-z0-9._@+()-]+)*$`)
 
 // NormalizeAreas validates code areas, trims a trailing slash, and returns
 // them sorted with duplicates removed. An area is a repo-relative path such
@@ -511,7 +513,7 @@ func NormalizeAreas(areas []string) ([]string, error) {
 			continue
 		}
 		if !areaPattern.MatchString(a) || len(a) > 200 || hasDotSegment(a) {
-			return nil, fmt.Errorf("%w: area %q must be a repo-relative path like tools/maestro-ticket, of letters, digits and . _ - @ + ~ ( ) [ ]; for a path with another character, name the folder above it", ErrInvalid, a)
+			return nil, fmt.Errorf("%w: area %q must be a repo-relative path like tools/maestro-ticket, of letters, digits and . _ - @ + ( ); for a path with another character, name the folder above it", ErrInvalid, a)
 		}
 		if !seen[a] {
 			seen[a] = true

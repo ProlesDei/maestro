@@ -706,13 +706,13 @@ func runHeartbeat(ctx context.Context, c *call) error {
 			return err
 		}
 		if c.idemKey != "" {
-			return usagef("heartbeat: --idempotency-key not supported; a heartbeat must always extend from now")
+			return usagef("heartbeat: --idempotency-key not supported; a heartbeat must always act on the lease as it is now")
 		}
 		t, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "extended %s\n", oneLine(t)) })
+		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "renewed %s\n", oneLine(t)) })
 	})
 }
 

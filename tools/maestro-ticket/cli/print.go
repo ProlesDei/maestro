@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -72,17 +73,27 @@ func printDetail(w io.Writer, d ticket.Detail) {
 	}
 }
 
+// lineBreaks are what a reader or a terminal may take for a new line.
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\f", "\n", "\v", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
+
 // indent sets a ticket body or comment four spaces in, so a line at the
 // left margin is always the tool's: text can't pass for a field or for a
-// later comment's header.
+// later comment's header. Every kind of line break starts an indented
+// line, and any other control character but a tab, such as a backspace or
+// an escape that moves the cursor, prints as U+FFFD. --json has the text
+// as written.
 func indent(body string) string {
-	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(lineBreaks.Replace(body), "\n"), "\n")
 	for i, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			lines[i] = "    " + l
-		} else {
-			lines[i] = ""
+		if l == "" {
+			continue
 		}
+		lines[i] = "    " + strings.Map(func(r rune) rune {
+			if r != '\t' && unicode.Is(unicode.Cc, r) {
+				return unicode.ReplacementChar
+			}
+			return r
+		}, l)
 	}
 	return strings.Join(lines, "\n")
 }
