@@ -26,7 +26,7 @@ Also check:
 
 ## 2. Get Maestro
 
-Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these patterns: `/.gitattributes`, `/INSTALL.md`, `/bot-profiles/`, `/scripts/`, `/skills/`, `/templates/`, `/tools/`. Keep the leading `/`: without it, `skills/` also matches Maestro's own `.claude/skills/`, `.agents/skills/` and `.maestro/skills/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
+Clone `github.com/ProlesDei/maestro` into `.maestro/src/` with `gh`'s login (the repo is private), with its full history (no `--depth`), as a sparse checkout, non-cone mode, of only these patterns: `/.gitattributes`, `/INSTALL.md`, `/bot-profiles/`, `/scripts/`, `/skills/`, `/templates/`, `/tools/`. Keep the leading `/`: without it, `skills/` also matches Maestro's own `.claude/skills/`, `.agents/skills/` and `.maestro/skills/`. Nothing else: Maestro's own `.claude/`, `.agents/`, `.maestro/`, `AGENTS.md` and `CLAUDE.md` would load in the team's sessions beside their own. Cone mode always checks out top-level files, so it won't do.
 
 Ask which commit to pin; the default is the newest on `main`. Check it out and note its sha.
 
@@ -42,7 +42,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 |---|---|---|
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated; must include `claude`, which every bot runs. | `claude`, plus any other on this machine |
-| `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
+| `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. If the team's ignore rules hide `.claude/` or `.agents/`, `committed` can't track them: offer `hidden`, or a change to those rules with the person's yes. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `bots` | Which Grok bots the team will run, space-separated: `chief-of-staff planner senior-engineer junior-engineer qa-lead reviewer`. | all six names |
 
 ## 5. Apply
@@ -82,7 +82,7 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found. Then what's left for them:
 
-- `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
+- `committed`: commit `.maestro/project/` and the skills folder of each harness in `harnesses`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
 - Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
 - Start every bot's session at this checkout's root. A `hidden` install puts no skills in a worktree, so a session started inside one finds none. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
@@ -90,7 +90,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 
 ## Update
 
-1. Ask which commit to move to. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
+1. Ask which commit to move to; if `maestro-sha` already names one `.maestro/src/` isn't on, a teammate updated: take that one and don't ask. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
 4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
