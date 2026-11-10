@@ -30,7 +30,7 @@ Open a todo list with one item per phase below.
 
 ## Phase C: Move in small, named steps
 
-1. Make one named refactoring per commit, and name it in the subject: extract or inline a function or variable, rename, move a function or module, introduce a parameter object, replace a conditional with a lookup table, split a module along a seam, delete code nothing calls (proved the way **maestro-prune** proves it). Move code by copying its lines, never by retyping it.
+1. Make one named refactoring per commit, and name it in the subject: extract or inline a function or variable, rename, move a function or module, introduce a parameter object, replace a conditional with a lookup table, split a module along a seam, delete code nothing calls (proved the way **maestro-prune** ([SKILL.md](../maestro-prune/SKILL.md)) proves it). Move code by copying its lines, never by retyping it.
 2. After each step, build or typecheck the whole repo and run the pins. Commit only on green. A red pin means the step changed behaviour: fix the step, or undo it, files it added included, and take a smaller step.
 3. From here on, a pin's inputs and expected results never change. A step may change its imports, the names it calls, or how its arguments are grouped. A test of an internal you inline may go once an edge pin covers it; say so in the commit. If a pin's values must change, the work changes behaviour: stop, and list it as a follow-up.
 4. Move in-repo callers over a few per commit, and delete the old name before the branch is done. For what outside code can call (a package's exports, a public API, CLI flags), leave a shim at the old name and mark it deprecated. Where no shim can work, such as a Go struct field, the step breaks outside callers: ask before you make it.

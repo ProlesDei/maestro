@@ -493,7 +493,12 @@ func HasControl(s string) bool {
 	}) >= 0
 }
 
-var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
+// Beyond letters and digits, a segment may hold a scoped package's @ and
+// a +, which bash and zsh leave alone when typed unquoted. Nothing gets in
+// that a shell would quietly turn into another path: [ ] is a glob, so
+// src/routes/[id] becomes src/routes/i where that exists; zsh reads ( ) as
+// a glob group; and ~, $ and a backtick expand.
+var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._@+-]+(/[A-Za-z0-9._@+-]+)*$`)
 
 // NormalizeAreas validates code areas, trims a trailing slash, and returns
 // them sorted with duplicates removed. An area is a repo-relative path such
@@ -507,7 +512,7 @@ func NormalizeAreas(areas []string) ([]string, error) {
 			continue
 		}
 		if !areaPattern.MatchString(a) || len(a) > 200 || hasDotSegment(a) {
-			return nil, fmt.Errorf("%w: area %q must be a repo-relative path like tools/maestro-ticket", ErrInvalid, a)
+			return nil, fmt.Errorf("%w: area %q must be a repo-relative path like tools/maestro-ticket, of letters, digits and . _ - @ +; for a path with another character, name the folder above it", ErrInvalid, a)
 		}
 		if !seen[a] {
 			seen[a] = true
@@ -586,14 +591,17 @@ func SplitList(s string) []string {
 
 // UpdateRequest changes a ticket's dependencies or areas. Areas, when not
 // nil, replaces the whole list. Holder and Token are fenced like a
-// transition's.
+// transition's. Token stays out of the JSON, here and in a transition's
+// and a comment's request: the store hashes that JSON for an idempotency
+// key, and a session that lost its lease retries the same write under its
+// new token.
 type UpdateRequest struct {
 	ID             ID        `json:"id"`
 	AddDeps        []ID      `json:"add_deps,omitempty"`
 	RemoveDeps     []ID      `json:"remove_deps,omitempty"`
 	Areas          *[]string `json:"areas,omitempty"`
 	Holder         string    `json:"holder,omitempty"`
-	Token          int64     `json:"token,omitempty"`
+	Token          int64     `json:"-"`
 	Actor          string    `json:"actor"`
 	IdempotencyKey string    `json:"-"`
 }
@@ -720,11 +728,14 @@ func requireToken(token int64) error {
 // ReleaseRequest drops the lease Holder holds with Token. The token is
 // required, so a stale session can't drop a newer lease of the same holder.
 // Releasing a lease that is already gone (released, expired or re-claimed
-// and since freed) is a no-op, so cleanup can run twice.
+// and since freed) is a no-op, so cleanup can run twice. Died marks the
+// lease of a run that hung or died: the release counts as a lease expiry,
+// so the count of dead runs holds when someone frees the ticket early.
 type ReleaseRequest struct {
 	ID             ID     `json:"id"`
 	Holder         string `json:"holder"`
-	Token          int64  `json:"token,omitempty"`
+	Token          int64  `json:"token,omitempty"` // in the JSON, unlike the others: a release names one lease
+	Died           bool   `json:"died,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }
@@ -750,7 +761,7 @@ type TransitionRequest struct {
 	To             Status `json:"to"`
 	ExpectVersion  int64  `json:"expect_version,omitempty"`
 	Holder         string `json:"holder,omitempty"`
-	Token          int64  `json:"token,omitempty"`
+	Token          int64  `json:"-"`
 	Role           string `json:"role,omitempty"` // reassign, e.g. on escalation
 	ActorRole      string `json:"actor_role,omitempty"`
 	Note           string `json:"note,omitempty"`
@@ -794,7 +805,7 @@ type CommentRequest struct {
 	ID             ID     `json:"id"`
 	Body           string `json:"body"`
 	Holder         string `json:"holder,omitempty"`
-	Token          int64  `json:"token,omitempty"`
+	Token          int64  `json:"-"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }

@@ -41,7 +41,7 @@ If no row fits, say what you can do and stop.
 ## Phase C: Read the board
 
 1. Read the open board without the bodies: `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,status,priority,tries,areas,depends_on,claim}'`. A dep missing from it is `done` or `cancelled`; `maestro-ticket get` tells which.
-2. Count the `todo` tickets that can start now (deps `done`, no area shared with a live claim) and the longest dep chain. Then find why the rest wait: a dep that is `cancelled` (it blocks for ever), `blocked`, or high in `tries`; an area many tickets share; a ticket that holds an area and too much work.
+2. Count the `todo` tickets that can start now (deps `done`, no area shared with a live claim on a `todo` or `in_progress` ticket; a claim on one in review holds no area) and the longest dep chain. Then find why the rest wait: a dep that is `cancelled` (it blocks for ever), `blocked`, or high in `tries`; an area many tickets share; a ticket that holds an area and too much work.
 3. For each, give the ids, how many tickets wait on it, and the fix: `/maestro-planner <id>` to split it, a dep to drop, an area to narrow, or a hook ticket to add. Change nothing.
 
 ## Phase D: Answer a question

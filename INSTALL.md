@@ -11,13 +11,13 @@ Ground rules:
 - When a script exits non-zero, show the person its output and settle it with them. Never route around it.
 - Don't commit or push unless the person asks.
 
-First, look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
+First, check where you are. Install in the main checkout, not a linked worktree: `install.sh` refuses one, and a `.maestro/src/` cloned into one stops it in the main checkout too, until you delete that folder. Where the main checkout is a bare repo, install in one linked worktree.
 
-Install in the main checkout, not a linked worktree: `install.sh` refuses one. Where the main checkout is a bare repo, install in one linked worktree.
+Then look for `.maestro/project/install.yaml`. If it's there, Maestro was installed before: go to [Update](#update), or [A teammate's checkout](#a-teammates-checkout) if `.maestro/src/` is missing. If it isn't, but `maestro-*` skill folders are, an older install script put them there: install as new; `apply` takes over the copies the team didn't change.
 
 ## 1. Check the machine
 
-Maestro needs git 2.31 or later with `user.name` and `user.email` set (the bots commit and merge), Go 1.26 or later, bash 4.4 or later, `jq`, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code: the bots run each job through it. Codex is optional. Check each. If one is missing, tell the person what it is and how to get it, and wait.
+Maestro needs git 2.38 or later with `user.name` and `user.email` set (the bots commit and merge), Go 1.26 or later, bash 4.4 or later, `jq`, `gh` logged in with access to `github.com/ProlesDei/maestro` (a private repo), and Claude Code: the bots run each job through it. Codex is optional. Check each. If one is missing, tell the person what it is and how to get it, and wait.
 
 Also check:
 
@@ -43,7 +43,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `maestro-sha` | Nothing: the sha from step 2. | |
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated; must include `claude`, which every bot runs. | `claude`, plus any other on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
-| `bots` | Which Grok bots the team will run: `chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`. | all six |
+| `bots` | Which Grok bots the team will run, space-separated: `chief-of-staff planner senior-engineer junior-engineer qa-lead reviewer`. | all six names |
 
 ## 5. Apply
 
@@ -70,7 +70,7 @@ Ask about each:
 
 ## 8. Set up the bots
 
-For each bot in `bots:`, read its starting memories in `.maestro/src/bot-profiles/<bot>/memory.md` and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
+For each bot in `bots:` that has a `.maestro/src/bot-profiles/<bot>/memory.md`, read its starting memories there and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
 
 Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size and whether it's `new`, `changed` or `same`; it removes the block of a bot no longer under `bots:`. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
 
@@ -82,10 +82,10 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found. Then what's left for them:
 
-- `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`.
+- `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
 - Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
-- Run every bot from this checkout or its worktrees. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
+- Start every bot's session at this checkout's root. A `hidden` install puts no skills in a worktree, so a session started inside one finds none. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
 - Paste each bot block into Grok.
 
 ## Update

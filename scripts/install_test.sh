@@ -12,7 +12,14 @@
 # skills-home takes over the copies, and a switch to hidden untracks them;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
-# reads project-setup.md; a linked worktree refuses;
+# reads project-setup.md, changes nothing, and names a store that is no
+# SQLite file, a missing tool, git identity or origin, and committed skills
+# not yet on main; a git too old for review refuses apply and check, not
+# uninstall; a linked worktree refuses, and one that holds
+# a stray .maestro/src/ says to delete it; a repo git doesn't trust shows
+# git's reason; a bare repo works under safe.bareRepository=explicit; a
+# bot block that differs only in its Maestro line is the same; uninstall
+# runs off the pin;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; harnesses without claude stop apply and
@@ -53,8 +60,11 @@ mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
-	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && touch "$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
+	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
+# check wants what the bots' runs need; stand-ins, so the test passes on a
+# machine without them.
+for t in claude gh jq; do printf '#!/bin/sh\n' >"$tmp/bin/$t" && chmod +x "$tmp/bin/$t"; done
 export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log"
 : >"$STUB_LOG"
 
@@ -72,6 +82,21 @@ refuses() {
 	if run "$@"; then fail "install.sh $* exited 0"; fi
 	says "$msg"
 	[ "$before" = "$(snap "$repo")" ] || fail "install.sh $* changed $repo"
+}
+# hide <tool>: print a PATH that lacks <tool> and keeps every other
+# command: each folder that holds it gives way to one of links to the rest.
+hide() {
+	local t=$1 d f out='' IFS=:
+	for d in $PATH; do
+		[ -n "$d" ] || continue
+		if [ -e "$d/$t" ]; then
+			f=$(mktemp -d "$tmp/farm.XXXXXX")
+			ln -s "$d"/* "$f/" && rm "$f/$t"
+			d=$f
+		fi
+		out=${out:+$out:}$d
+	done
+	echo "$out"
 }
 # repo <path> <choices...>: a new repo with one commit and these choices.
 repo() {
@@ -113,8 +138,43 @@ before=$(snap "$r")
 ok apply "$r"
 [ "$before" = "$(snap "$r")" ] || fail "a second apply changed the repo"
 
+# check changes nothing, the store included: it never runs maestro-ticket.
+before=$(snap "$r")
+: >"$STUB_LOG"
 ok check "$r"
 says "ok: hidden install of $nskills skills at $sha"
+[ "$before" = "$(snap "$r")" ] || fail "check changed the repo"
+[ ! -s "$STUB_LOG" ] || fail "check ran maestro-ticket: $(cat "$STUB_LOG")"
+# With no origin, no ticket's worktree has a main to branch from.
+says "warn: no origin/main ref as of the last fetch"
+# A store that is empty or no SQLite file, a tool the bots' runs need, and
+# the identity they commit with: each is a problem.
+cp "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
+: >"$r/.git/maestro/tickets.db"
+refuses "problem: the ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db is empty, unreadable or isn't a SQLite file" "$r" check "$r"
+echo garbage >"$r/.git/maestro/tickets.db"
+refuses "unreadable or isn't a SQLite file" "$r" check "$r"
+cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
+for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
+GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
+says "problem: git user.email isn't set"
+# A name of spaces commits nothing; an identity from the environment does.
+git -C "$r" config user.name '   '
+GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
+git -C "$r" config --unset user.name
+GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=b GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=b GIT_COMMITTER_EMAIL=b@b ok check "$r"
+GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=' ' GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=' ' GIT_COMMITTER_EMAIL=b@b refuses "problem: git user.name isn't set" "$r" check "$r"
+# Review and prune need git merge-tree --write-tree, from git 2.38.
+# uninstall doesn't, so a team on an older git can still remove Maestro.
+mkdir "$tmp/oldgit"
+# shellcheck disable=SC2016 # the stub's code, not ours
+printf '%s\n' '#!/usr/bin/env bash' '[ "${1-}" != --version ] || { echo "git version $FAKE_GIT"; exit 0; }' 'exec "$REAL_GIT" "$@"' >"$tmp/oldgit/git"
+chmod +x "$tmp/oldgit/git"
+oldgit() { local v=$1; shift; FAKE_GIT=$v REAL_GIT=$(command -v git) PATH=$tmp/oldgit:$PATH "$@"; }
+for v in 2.37.1 "2.9.5 (Apple Git-1)" 1.99.0; do
+	for c in apply check; do oldgit "$v" refuses "needs git 2.38 or later" "$r" $c "$r"; done
+done
+for v in 2.38.0 "2.39.3 (Apple Git-146)" 2.100.0 3.0.1; do oldgit "$v" ok check "$r"; done
 # A clone that skipped apply has no store.
 mv "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
 refuses "no ticket store at $(cd "$r" && pwd -P)/.git/maestro/tickets.db: run apply" "$r" check "$r"
@@ -234,6 +294,18 @@ grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 says "planner: new"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
 says "planner: same" && says "reviewer: same"
+# An update that changes no persona changes only the block's Maestro line:
+# the block is the same, so no one pastes it again.
+sed -i 's/^- Maestro: .*/- Maestro: 0000000/' "$b"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: same" && grep -qxF -- "- Maestro: 0000000" "$b" || fail "a block that differs only in its Maestro line was rewritten"
+# Only that last line: a memory that starts the same way still counts.
+echo "- Maestro: pin updates to Mondays." >>"$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: changed"
+sed -i 's/Mondays/Fridays/' "$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: changed" && grep -qxF -- "- Maestro: pin updates to Fridays." "$b" || fail "a changed memory that starts - Maestro: didn't count"
 echo "- Another." >>"$r/.maestro/project/bots/planner.memory.md"
 cp "$r/.maestro/project/install.yaml" "$tmp/choices"
 sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
@@ -393,6 +465,19 @@ grep -qxF /.maestro/src/ "$r/.git/info/exclude" && grep -qxF /.maestro/bots/ "$r
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "uninstall changed the user's exclude line"
 [ -f "$r/.maestro/project/install.yaml" ] && [ -f "$r/.maestro/project/project-setup.md" ] || fail "uninstall removed the team's choices or setup"
 
+# uninstall runs with Maestro off the pin, as after an update stopped
+# halfway; apply and check don't.
+r14=$tmp/offpin
+repo "$r14" "harnesses: claude" "skills-home: hidden"
+ok apply "$r14"
+sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r14/.maestro/project/install.yaml"
+if run check "$r14"; then fail "check passed off the pin"; fi
+says "but install.yaml pins 0000000"
+# A bot whose profile that commit no longer has doesn't stop it either.
+echo "bots: gone-bot" >>"$r14/.maestro/project/install.yaml"
+ok uninstall "$r14"
+[ ! -e "$r14/.claude" ] || fail "uninstall off the pin left .claude/"
+
 # --- A CRLF checkout of Maestro, as core.autocrlf makes one, matches its copies ---
 r3=$tmp/crlf
 repo "$r3" "harnesses: claude" "skills-home: hidden" "tickets: maestro-ticket"
@@ -413,6 +498,17 @@ rm "$f" && git -C "$m" checkout -q -- skills/maestro-tdd/SKILL.md
 # --- refusals ---
 mkdir "$tmp/plain"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
+# A repo another user owns, as when the bots get a user of their own: git's
+# reason shows, with its fix.
+# A warning git prints on stderr is no part of the repo's path.
+git -C "$r2" config core.fsyncObjectFiles true
+run check "$r2" || true
+! grep -qF "is inside the repo at" "$tmp/out" || fail "a git warning on stderr broke the path check"
+git -C "$r2" config --unset core.fsyncObjectFiles
+if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 run check "$r2"; then fail "check passed in a repo git doesn't trust"; fi
+says "dubious ownership"
+if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 bash "$m/scripts/bot-bundle.sh" "$r2" >"$tmp/out" 2>&1; then fail "bot-bundle passed in a repo git doesn't trust"; fi
+says "dubious ownership" && says "git can't read the repo"
 export GIT_DIR="$r2/.git"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
 unset GIT_DIR
@@ -474,7 +570,8 @@ repo "$r5d" "harnesses: claude codex" "skills-home: hidden"
 ok apply "$r5d"
 sed -i 's/^harnesses: .*/harnesses: codex/' "$r5d/.maestro/project/install.yaml"
 refuses "harnesses must include claude" "$r5d" check "$r5d"
-ok uninstall "$r5d"
+# On a git too old for apply, uninstall still works.
+oldgit 2.37.1 ok uninstall "$r5d"
 r6=$tmp/nostore
 repo "$r6" "harnesses: claude" "skills-home: hidden"
 STUB_FAIL=1 refuses "doctor failed" "$r6" apply "$r6"
@@ -522,6 +619,13 @@ git -C "$r7" worktree add -q "$tmp/wt7"
 for c in apply check uninstall; do refuses "is a linked worktree; run install.sh in the main checkout, $r7" "$r7" $c "$tmp/wt7"; done
 sed -i 's/^skills-home: .*/skills-home: committed/' "$tmp/wt7/.maestro/project/install.yaml"
 refuses "is a linked worktree" "$r7" apply "$tmp/wt7"
+# An install started in the worktree leaves a .maestro/src/ there. The
+# main checkout then says to delete it, not to run install.sh there, which
+# refuses.
+mkdir -p "$tmp/wt7/.maestro/src"
+for c in apply check uninstall; do
+	refuses "$tmp/wt7, a linked worktree, holds a .maestro/src/ that an install started there left behind; delete that folder" "$r7" $c "$r7"
+done
 git -C "$r7" worktree remove --force "$tmp/wt7"
 # With a bare main repo, a linked worktree takes the install, and a second
 # worktree then refuses.
@@ -534,6 +638,18 @@ printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r
 ok apply "$r11/main"
 installed "$r11/main" .claude
 refuses "Maestro is installed in $r11/main" "$r11/feat" apply "$r11/feat"
+says "or delete its .maestro/src/"
+# safe.bareRepository=explicit keeps git from running inside a bare repo's
+# folder, unless it is named .git: the install in its worktree still works.
+r15=$tmp/bare2
+git clone -q --bare "$r2" "$r15/.bare"
+git -C "$r15/.bare" worktree add -q "$r15/main" main
+mkdir -p "$r15/main/.maestro/project"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r15/main/.maestro/project/install.yaml"
+git config --global safe.bareRepository explicit
+ok apply "$r15/main"
+installed "$r15/main" .claude
+git config --global --unset safe.bareRepository
 # A file git can't hash stops check and uninstall; uninstall keeps the record.
 if [ "$(id -u)" -ne 0 ]; then
 	chmod 000 "$r7/.claude/skills/maestro-tdd/SKILL.md"
@@ -585,6 +701,33 @@ ok check "$r12"
 echo extra >>"$r12/.maestro/project/project-setup.md"
 ok check "$r12"
 says "warn: project-setup.md differs from origin/main's copy"
+
+# --- check warns until origin/<main> has the committed skills: until
+# then only this checkout has them.
+r13=$tmp/pushed-committed
+repo "$r13" "harnesses: claude codex" "skills-home: committed"
+git init -q --bare "$tmp/pushed-committed.git" && git -C "$r13" remote add origin "$tmp/pushed-committed.git"
+ok apply "$r13"
+git -C "$r13" add .maestro/project && git -C "$r13" commit -qm setup && git -C "$r13" push -q origin main
+ok check "$r13"
+nfiles=$(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2))
+says "warn: $nfiles of $nfiles skill files are missing from origin/main as of the last fetch, or differ there: commit .claude/skills/ .agents/skills/"
+git -C "$r13" add .claude .agents && git -C "$r13" commit -qm skills && git -C "$r13" push -q origin main
+ok check "$r13"
+! grep -q "origin/main" "$tmp/out" || { cat "$tmp/out"; fail "check warned with the skills pushed"; }
+# A harness dropped from the choices, before the next apply: its files
+# are on main and still in the record, and they don't count.
+sed -i 's/^harnesses: .*/harnesses: claude/' "$r13/.maestro/project/install.yaml"
+git -C "$r13" commit -qam "drop codex" && git -C "$r13" push -q origin main
+ok check "$r13"
+! grep -q "skill files" "$tmp/out" || { cat "$tmp/out"; fail "check counted a dropped harness's files"; }
+# main moves on: a file there differs from this checkout's.
+git clone -q "$tmp/pushed-committed.git" "$tmp/ahead" && echo newer >>"$tmp/ahead/.claude/skills/maestro-tdd/SKILL.md"
+git -C "$tmp/ahead" commit -qam newer && git -C "$tmp/ahead" push -q origin main
+git -C "$r13" fetch -q origin
+ok check "$r13"
+says "warn: 1 of $((nfiles / 2)) skill files are missing from origin/main as of the last fetch, or differ there"
+says "if main is ahead of this checkout, pull and run apply instead"
 
 # --- an install by the install.sh before the record, from a commit where
 # a merge made a skill's copy: that copy is Maestro's too.

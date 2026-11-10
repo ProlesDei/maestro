@@ -20,7 +20,7 @@ Follow the **maestro-working-principles** skill. The ask comes from the QA lead;
 - A verdict covers one head sha. A finding at another sha is stale.
 - Never run a fork's code. Run code at a sha in your own detached worktree, as Phase A of [test-a-pr.md](references/test-a-pr.md) sets up, never in the main checkout. Run the app on fresh state and a free port, never against a shared or production service.
 - Verdicts, which edge cases to try and how flaky counts are your calls. Rewriting a criterion is the planner's; whether a problem outside the criteria matters is the chief of staff's. Flag those; decide neither.
-- You write only when you test a PR, and only what [test-a-pr.md](references/test-a-pr.md) names: a `QA:` comment, or an `Escalation:` and the move to `blocked`.
+- You write only when you test a PR, and only what [test-a-pr.md](references/test-a-pr.md) names: a claim while you test, a `QA:` comment, or an `Escalation:` and the move to `blocked`.
 - A person may run you too. Same rules.
 
 ## Phase A: Pick the job

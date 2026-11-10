@@ -308,7 +308,18 @@ func TestAreas(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != "skills" || got[1] != "tools/maestro-ticket" {
 		t.Fatalf("normalize %v, %v", got, err)
 	}
+	// A scoped package is a real repo path, and bash and zsh leave @ and +
+	// alone when an area is typed unquoted.
+	for _, good := range []string{"packages/@acme/ui", "lib/c++"} {
+		if got, err := NormalizeAreas([]string{good}); err != nil || len(got) != 1 || got[0] != good {
+			t.Errorf("%q: %v, %v", good, got, err)
+		}
+	}
 	for _, bad := range []string{"/abs", "..", "a/../b", "a//b", ".", "a b", "a,b",
+		// A shell runs these, or quietly turns them into another path, when
+		// an area lands on a command line unquoted.
+		"src/routes/[id]", "[", "~", "~root/.ssh", "~/x", "src/a~b", "app/(marketing)/page", "+(a)",
+		"a$b", "a`b", "a;b", "a*b", "a?b", "a|b", "a&b", "a'b", `a"b`, `a\b`, "a<b", "a{b",
 		// Spellings of another path would slip past the overlap check.
 		"./tools/x", "tools/x/..", "tools/x/.", "tools/./x", "../x"} {
 		if _, err := NormalizeAreas([]string{bad}); err == nil {

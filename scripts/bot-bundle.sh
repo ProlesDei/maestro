@@ -22,6 +22,7 @@ root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 profiles=$root/bot-profiles
 [ -d "$1" ] || die "$1 is not a directory"
 target=$(cd -- "$1" && pwd -P)
+git -C "$target" rev-parse --git-dir >/dev/null || die "git can't read the repo at $target"
 git -C "$target" check-ignore -q .maestro/bots/x || die ".maestro/bots/ isn't hidden from git: run scripts/install.sh apply first"
 choices=$target/.maestro/project/install.yaml
 [ -f "$choices" ] || die "no $choices"
@@ -84,9 +85,11 @@ for b in "${bots[@]}"; do
 		echo x
 	)
 	text=${text%x}
-	# The person pastes again only the blocks that changed.
+	# The person pastes again only the blocks that changed. The Maestro
+	# line, the block's last, changes on every update, so it doesn't count:
+	# a block that differs only there stays as it is.
 	if [ ! -f "$out" ]; then state=new
-	elif [ "$(cat "$out"; echo x)" = "${text}x" ]; then state=same
+	elif was=$(cat "$out"; echo x) && [ "${was%- Maestro: *}" = "${text%- Maestro: *}" ]; then state=same
 	else state=changed
 	fi
 	[ "$state" = same ] || printf '%s' "$text" >"$out"
