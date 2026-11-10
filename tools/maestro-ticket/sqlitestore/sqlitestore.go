@@ -9,6 +9,7 @@
 package sqlitestore
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -479,13 +480,16 @@ func (s *Store) getTicket(ctx context.Context, q querier, id ticket.ID, nowMS in
 // appendEvent logs an event in the caller's transaction, so the change and
 // its event commit together or not at all.
 func appendEvent(ctx context.Context, tx *sql.Tx, id ticket.ID, typ, actor string, data any, nowMS int64) error {
-	b, err := json.Marshal(data)
-	if err != nil {
+	// A note quotes code: keep < > & as written, not as \u003c.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(data); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx,
 		"INSERT INTO events (ticket_id, type, actor, data, created_at) VALUES (?, ?, ?, ?, ?)",
-		id, typ, actor, string(b), nowMS)
+		id, typ, actor, strings.TrimSuffix(b.String(), "\n"), nowMS)
 	return err
 }
 
@@ -1278,10 +1282,15 @@ func (s *Store) Release(ctx context.Context, req ticket.ReleaseRequest) (ticket.
 			case req.Token != t.Claim.Token:
 				return t, fmt.Errorf("%w: %s lease token is %d, not %d; it was re-claimed", ticket.ErrLeaseLost, t.ID, t.Claim.Token, req.Token)
 			}
-			if err := s.clearLease(ctx, tx, t, now); err != nil {
+			data := map[string]any{"holder": req.Holder, "token": req.Token}
+			if req.Died {
+				data["died"] = true
+				data["expiries"] = t.LeaseExpiries + 1
+			}
+			if err := s.clearLease(ctx, tx, t, req.Died, now); err != nil {
 				return t, err
 			}
-			if err := appendEvent(ctx, tx, t.ID, ticket.EventReleased, req.Actor, map[string]any{"holder": req.Holder, "token": req.Token}, now); err != nil {
+			if err := appendEvent(ctx, tx, t.ID, ticket.EventReleased, req.Actor, data, now); err != nil {
 				return t, err
 			}
 			return s.getTicket(ctx, tx, t.ID, now)
@@ -1291,10 +1300,17 @@ func (s *Store) Release(ctx context.Context, req ticket.ReleaseRequest) (ticket.
 	return out, err
 }
 
-func (s *Store) clearLease(ctx context.Context, tx *sql.Tx, t ticket.Ticket, now int64) error {
+// clearLease frees t's lease. With died set it counts the release as a
+// lease expiry: the run that held the lease hung or died.
+func (s *Store) clearLease(ctx context.Context, tx *sql.Tx, t ticket.Ticket, died bool, now int64) error {
+	expiries := 0
+	if died {
+		expiries = 1
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE tickets
-		SET lease_holder = NULL, lease_expires_at = NULL, version = version + 1, updated_at = ?
-		WHERE id = ? AND version = ?`, now, t.ID, t.Version)
+		SET lease_holder = NULL, lease_expires_at = NULL, lease_expiries = lease_expiries + ?,
+			version = version + 1, updated_at = ?
+		WHERE id = ? AND version = ?`, expiries, now, t.ID, t.Version)
 	if err != nil {
 		return err
 	}

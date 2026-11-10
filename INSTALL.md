@@ -82,7 +82,7 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found. Then what's left for them:
 
-- `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`.
+- `committed`: commit `.claude/skills/`, `.agents/skills/` and `.maestro/project/`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
 - Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
 - Start every bot's session at this checkout's root. A `hidden` install puts no skills in a worktree, so a session started inside one finds none. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.

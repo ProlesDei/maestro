@@ -48,7 +48,7 @@ Run every command at the repo's root. These cost no tokens. First, if `maestro/S
 | Sent up | `maestro-ticket list --status blocked --latest-prefix 'Sent up:'` |
 | Answered | `maestro-ticket list --status blocked --latest-prefix Answer:` |
 
-Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM marked `(expired)` counts as none.
+Then act on each row. Skip a row with a live CLAIM: a bot is on it. A CLAIM marked `(expired)` counts as none. When a bot reports a run that hung or died, read `lease_expiries` in `maestro-ticket get <id> --json` before any row hands that ticket out again: at 2+, find the cause first, since a third run would die the same way.
 
 | Row | Do |
 |---|---|

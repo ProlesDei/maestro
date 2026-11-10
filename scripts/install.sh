@@ -73,7 +73,12 @@ root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 	die "needs git 2.38 or later"
 [ -d "$1" ] || die "$1 is not a directory"
 target=$(cd -- "$1" && pwd -P)
-top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) || die "$1 is not in a git work tree"
+# git's own words go along: a repo another user owns fails here too, and
+# git says how to trust it.
+# Asked again for its error only on failure: a warning on stderr must not
+# land in the path.
+top=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null) ||
+	die "$1 is not in a git work tree: $(git -C "$target" rev-parse --show-toplevel 2>&1 || true)"
 [ "$top" = "$target" ] || die "$1 is inside the repo at $top; install at the top of the repo"
 common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
 [[ $common == /* && $common != *$'\n'* ]] || die "needs git 2.31 or later"
@@ -81,13 +86,15 @@ common=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
 # and hidden record. It goes in the main checkout, or in a linked worktree
 # when the main one is bare.
 wts=$(git -C "$target" worktree list --porcelain | sed -n 's/^worktree //p')
-bare=$(git -C "$common" config --bool core.bare 2>/dev/null || true)
+# --git-dir, not -C: with safe.bareRepository=explicit git won't run in a
+# bare repo's folder.
+bare=$(git --git-dir="$common" config --bool core.bare 2>/dev/null || true)
 if [ "$(git -C "$target" rev-parse --path-format=absolute --git-dir)" != "$common" ] && [ "$bare" != true ]; then
 	die "$1 is a linked worktree; run install.sh in the main checkout, $(head -n1 <<<"$wts")"
 fi
 while IFS= read -r w; do
 	[ -z "$w" ] || [ "$w" = "$target" ] || [ ! -d "$w/.maestro/src" ] || {
-		[ "$bare" != true ] || die "Maestro is installed in $w, a worktree of this repo; run install.sh there"
+		[ "$bare" != true ] || die "Maestro is installed in $w, a worktree of this repo; run install.sh there, or delete its .maestro/src/ if an install started there by mistake left it"
 		# Here the install is this main checkout's, and no worktree can take one.
 		die "$w, a linked worktree, holds a .maestro/src/ that an install started there left behind; delete that folder: Maestro installs only in the main checkout, $target"
 	}
@@ -121,7 +128,9 @@ done <"$choices"
 
 [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
 head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
-[[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
+# uninstall reads the record, not Maestro's skills or bot profiles, so it
+# runs from any commit: a team can back out of an update it stopped halfway.
+[ "$cmd" = uninstall ] || [[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
 # The copies must be the pinned commit's.
 [ "$cmd" != apply ] || [ -z "$(git -C "$root" status --porcelain -- skills templates)" ] ||
 	die "Maestro at $root has uncommitted changes in skills/ or templates/; commit them and pin that commit"
@@ -139,7 +148,7 @@ done
 # Every bot runs its jobs with claude -p, which reads only .claude/skills.
 [ "$cmd" = uninstall ] || [[ " ${harnesses[*]} " == *" claude "* ]] ||
 	die "install.yaml: harnesses must include claude: every bot runs its jobs through Claude Code"
-for b in ${bots[@]+"${bots[@]}"}; do
+[ "$cmd" = uninstall ] || for b in ${bots[@]+"${bots[@]}"}; do
 	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$root/bot-profiles/$b/persona.md" ]; } || die "install.yaml: no bot profile $b"
 done
 
@@ -151,12 +160,12 @@ skill() {
 	[ -z "$(find "$1" -type l -print -quit)" ] || die "$2 holds a symlink; copy real files"
 }
 declare -A from=()
-for d in "$root"/skills/*/; do
+[ "$cmd" = uninstall ] || for d in "$root"/skills/*/; do
 	name=$(basename "$d")
 	skill "$root/skills/$name" "skills/$name"
 	from[$name]=$root/skills/$name
 done
-[ ${#from[@]} -gt 0 ] || die "no skills in $root/skills"
+[ "$cmd" = uninstall ] || [ ${#from[@]} -gt 0 ] || die "no skills in $root/skills"
 for s in ${replace[@]+"${replace[@]}"}; do
 	[ -n "${from[$s]-}" ] || die "no skill $s in $root/skills"
 done
@@ -225,7 +234,11 @@ prune() {
 		d=${p%/"${p#*/skills/*/}"}
 		[ -z "${pruned[$d]-}" ] || continue
 		pruned[$d]=1
-		[ ! -d "$(full "$d")" ] || linked "$d" || find "$(full "$d")" -depth -type d -empty -delete
+		# A second apply running at once may remove a folder first: that
+		# is no failure, but an empty folder still there is.
+		[ ! -d "$(full "$d")" ] || linked "$d" || find "$(full "$d")" -depth -type d -empty -delete 2>/dev/null ||
+			[ -z "$(find "$(full "$d")" -depth -type d -empty -print -quit 2>/dev/null)" ] ||
+			die "couldn't remove the empty folders under $d: check its permissions and run again"
 	done
 	for d in .claude .agents; do rmdir -- "$target/$d/skills" "$target/$d" 2>/dev/null || true; done
 }
@@ -674,7 +687,7 @@ mkdir -p "$(dirname "$record")"
 tmp=$scratch/record
 {
 	echo "# Files scripts/install.sh placed at Maestro $sha: git blob hash, tab, path."
-	for p in "${plan[@]}"; do printf '%s\t%s\n' "${new[$p]}" "$p"; done | sort -k2
+	for p in "${plan[@]}"; do printf '%s\t%s\n' "${new[$p]}" "$p"; done | LC_ALL=C sort -k2
 } >"$tmp"
 mv "$tmp" "$record"
 # Exclude lines don't hide a file git tracks, so a switch to hidden

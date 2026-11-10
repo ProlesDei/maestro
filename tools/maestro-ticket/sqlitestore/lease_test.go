@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,5 +176,90 @@ func TestHeartbeatNeverShortensLease(t *testing.T) {
 	hb, err = s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: tk.ID, Holder: "planner/p1", Token: c.Claim.Token, TTL: 3 * time.Hour})
 	if err != nil || !hb.Claim.ExpiresAt.Equal(clk.Now().Add(3*time.Hour)) {
 		t.Fatalf("a longer heartbeat left the lease at %v, %v", hb.Claim.ExpiresAt, err)
+	}
+}
+
+// A session that lost its lease claims again and retries a keyed write
+// under the new token: the retry replays the first result. With the token
+// in the request hash it failed as a different request.
+func TestKeyedWriteReplaysUnderNewToken(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	tk := mustCreate(t, s, "x", "", 2)
+	first, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "reviewer/r1", TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := ticket.CommentRequest{ID: tk.ID, Body: "Kickback: 1 blocker", Holder: "reviewer/r1", Token: first.Claim.Token, IdempotencyKey: "kickback-1"}
+	posted, err := s.Comment(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(2 * time.Minute)
+	again, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "reviewer/r1", TTL: time.Minute})
+	if err != nil || again.Claim.Token == first.Claim.Token {
+		t.Fatalf("re-claim %+v, %v", again.Claim, err)
+	}
+	req.Token = again.Claim.Token
+	replayed, err := s.Comment(ctx, req)
+	if err != nil || replayed.ID != posted.ID {
+		t.Fatalf("retry under the new token: comment %d, want %d, %v", replayed.ID, posted.ID, err)
+	}
+	if got, _ := s.Get(ctx, tk.ID); len(got.Comments) != 1 {
+		t.Fatalf("%d comments, want 1", len(got.Comments))
+	}
+	// Another holder's write under the same key is still a different request.
+	req.Holder = "reviewer/r2"
+	_, err = s.Comment(ctx, req)
+	wantErr(t, err, ticket.ErrIdempotencyConflict)
+	// A release names one lease: its key doesn't replay for a later lease,
+	// which would report the ticket free and leave it held.
+	rel := ticket.ReleaseRequest{ID: tk.ID, Holder: "reviewer/r1", Token: again.Claim.Token, IdempotencyKey: "release-1"}
+	if _, err := s.Release(ctx, rel); err != nil {
+		t.Fatal(err)
+	}
+	third, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "reviewer/r1", TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel.Token = third.Claim.Token
+	_, err = s.Release(ctx, rel)
+	wantErr(t, err, ticket.ErrIdempotencyConflict)
+	if got, _ := s.Get(ctx, tk.ID); got.LiveClaim() == nil {
+		t.Fatal("the later lease is gone")
+	}
+}
+
+// release --died frees the lease of a run that hung or died and counts it
+// as an expiry, so the planner's count of dead runs holds when a bot frees
+// the ticket before the lease runs out. A plain release counts nothing.
+func TestReleaseDiedCountsExpiry(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	tk := mustCreate(t, s, "x", "", 2)
+	for i, died := range []bool{true, false, true} {
+		c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "qa-lead/a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := ticket.ReleaseRequest{ID: tk.ID, Holder: "qa-lead/a", Token: c.Claim.Token, Died: died}
+		got, err := s.Release(ctx, req)
+		if err != nil || got.Claim != nil {
+			t.Fatalf("release %d: %+v, %v", i, got.Claim, err)
+		}
+		// The lease is gone, so a second release is a no-op and counts nothing.
+		if got, err = s.Release(ctx, req); err != nil {
+			t.Fatal(err)
+		}
+		if want := []int{1, 1, 2}[i]; got.LeaseExpiries != want {
+			t.Fatalf("release %d (died %v): lease_expiries %d, want %d", i, died, got.LeaseExpiries, want)
+		}
+	}
+	evs, err := s.Events(ctx, ticket.EventFilter{TicketID: tk.ID, Type: ticket.EventReleased})
+	if err != nil || len(evs) != 3 {
+		t.Fatalf("%d released events, %v", len(evs), err)
+	}
+	if !strings.Contains(string(evs[0].Data), `"died":true`) || strings.Contains(string(evs[1].Data), "died") {
+		t.Fatalf("released events %s, %s", evs[0].Data, evs[1].Data)
 	}
 }

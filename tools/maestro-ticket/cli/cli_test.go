@@ -1296,3 +1296,33 @@ func TestGetIndentsBodies(t *testing.T) {
 		t.Fatalf("whitespace lines changed: %q", out)
 	}
 }
+
+// --json keeps < > & as written: bodies quote code, and sessions read the
+// raw output.
+func TestJSONKeepsHTMLCharacters(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x", "--body", "if (a < b && c > d)")
+	code, out, _ := h.run("", "get", "T-1", "--json")
+	if code != 0 || !strings.Contains(out, `"body": "if (a < b && c > d)"`) {
+		t.Fatalf("get --json: %d %s", code, out)
+	}
+	h.ok(nil, "transition", "T-1", "--to", "blocked", "--note", "x < y && z")
+	// A note in an event's data, and the whole export, the same.
+	if code, out, _ := h.run("", "events", "--ticket", "T-1", "--json"); code != 0 || !strings.Contains(out, "x < y && z") {
+		t.Fatalf("events --json: %d %s", code, out)
+	}
+	if code, out, _ := h.run("", "export"); code != 0 || !strings.Contains(out, "x < y && z") || !strings.Contains(out, "a < b && c > d") {
+		t.Fatalf("export: %d %s", code, out)
+	}
+}
+
+func TestReleaseDied(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x")
+	h.ok(nil, "claim", "T-1", "--holder", "qa-lead/a")
+	var got ticket.Ticket
+	h.ok(&got, "release", "T-1", "--holder", "qa-lead/a", "--token", "1", "--died")
+	if got.Claim != nil || got.LeaseExpiries != 1 {
+		t.Fatalf("release --died: claim %+v, lease_expiries %d", got.Claim, got.LeaseExpiries)
+	}
+}

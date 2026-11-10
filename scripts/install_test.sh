@@ -16,7 +16,10 @@
 # SQLite file, a missing tool, git identity or origin, and committed skills
 # not yet on main; a git too old for review refuses apply and check, not
 # uninstall; a linked worktree refuses, and one that holds
-# a stray .maestro/src/ says to delete it;
+# a stray .maestro/src/ says to delete it; a repo git doesn't trust shows
+# git's reason; a bare repo works under safe.bareRepository=explicit; a
+# bot block that differs only in its Maestro line is the same; uninstall
+# runs off the pin;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; harnesses without claude stop apply and
@@ -291,6 +294,18 @@ grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 says "planner: new"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
 says "planner: same" && says "reviewer: same"
+# An update that changes no persona changes only the block's Maestro line:
+# the block is the same, so no one pastes it again.
+sed -i 's/^- Maestro: .*/- Maestro: 0000000/' "$b"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: same" && grep -qxF -- "- Maestro: 0000000" "$b" || fail "a block that differs only in its Maestro line was rewritten"
+# Only that last line: a memory that starts the same way still counts.
+echo "- Maestro: pin updates to Mondays." >>"$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: changed"
+sed -i 's/Mondays/Fridays/' "$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: changed" && grep -qxF -- "- Maestro: pin updates to Fridays." "$b" || fail "a changed memory that starts - Maestro: didn't count"
 echo "- Another." >>"$r/.maestro/project/bots/planner.memory.md"
 cp "$r/.maestro/project/install.yaml" "$tmp/choices"
 sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
@@ -450,6 +465,19 @@ grep -qxF /.maestro/src/ "$r/.git/info/exclude" && grep -qxF /.maestro/bots/ "$r
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "uninstall changed the user's exclude line"
 [ -f "$r/.maestro/project/install.yaml" ] && [ -f "$r/.maestro/project/project-setup.md" ] || fail "uninstall removed the team's choices or setup"
 
+# uninstall runs with Maestro off the pin, as after an update stopped
+# halfway; apply and check don't.
+r14=$tmp/offpin
+repo "$r14" "harnesses: claude" "skills-home: hidden"
+ok apply "$r14"
+sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r14/.maestro/project/install.yaml"
+if run check "$r14"; then fail "check passed off the pin"; fi
+says "but install.yaml pins 0000000"
+# A bot whose profile that commit no longer has doesn't stop it either.
+echo "bots: gone-bot" >>"$r14/.maestro/project/install.yaml"
+ok uninstall "$r14"
+[ ! -e "$r14/.claude" ] || fail "uninstall off the pin left .claude/"
+
 # --- A CRLF checkout of Maestro, as core.autocrlf makes one, matches its copies ---
 r3=$tmp/crlf
 repo "$r3" "harnesses: claude" "skills-home: hidden" "tickets: maestro-ticket"
@@ -470,6 +498,17 @@ rm "$f" && git -C "$m" checkout -q -- skills/maestro-tdd/SKILL.md
 # --- refusals ---
 mkdir "$tmp/plain"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
+# A repo another user owns, as when the bots get a user of their own: git's
+# reason shows, with its fix.
+# A warning git prints on stderr is no part of the repo's path.
+git -C "$r2" config core.fsyncObjectFiles true
+run check "$r2" || true
+! grep -qF "is inside the repo at" "$tmp/out" || fail "a git warning on stderr broke the path check"
+git -C "$r2" config --unset core.fsyncObjectFiles
+if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 run check "$r2"; then fail "check passed in a repo git doesn't trust"; fi
+says "dubious ownership"
+if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 bash "$m/scripts/bot-bundle.sh" "$r2" >"$tmp/out" 2>&1; then fail "bot-bundle passed in a repo git doesn't trust"; fi
+says "dubious ownership" && says "git can't read the repo"
 export GIT_DIR="$r2/.git"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
 unset GIT_DIR
@@ -599,6 +638,18 @@ printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r
 ok apply "$r11/main"
 installed "$r11/main" .claude
 refuses "Maestro is installed in $r11/main" "$r11/feat" apply "$r11/feat"
+says "or delete its .maestro/src/"
+# safe.bareRepository=explicit keeps git from running inside a bare repo's
+# folder, unless it is named .git: the install in its worktree still works.
+r15=$tmp/bare2
+git clone -q --bare "$r2" "$r15/.bare"
+git -C "$r15/.bare" worktree add -q "$r15/main" main
+mkdir -p "$r15/main/.maestro/project"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r15/main/.maestro/project/install.yaml"
+git config --global safe.bareRepository explicit
+ok apply "$r15/main"
+installed "$r15/main" .claude
+git config --global --unset safe.bareRepository
 # A file git can't hash stops check and uninstall; uninstall keeps the record.
 if [ "$(id -u)" -ne 0 ]; then
 	chmod 000 "$r7/.claude/skills/maestro-tdd/SKILL.md"

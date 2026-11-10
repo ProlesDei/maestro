@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -71,7 +72,7 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  release     <id> --holder H --token N
+  release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
               [--actor-role R]
@@ -309,6 +310,8 @@ func (c *call) fail(err error) int {
 func (c *call) writeJSON(v any) error {
 	enc := json.NewEncoder(c.env.Stdout)
 	enc.SetIndent("", "  ")
+	// Bodies quote code: keep < > & as written, not as \u003c.
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 
@@ -815,12 +818,13 @@ func runKeepalive(ctx context.Context, c *call) error {
 func runRelease(ctx context.Context, c *call) error {
 	holder := c.fs.String("holder", "", "<bot-id>/<session-id> (required)")
 	token := c.fs.Int64("token", 0, "lease token from your claim (required): release only that lease")
+	died := c.fs.Bool("died", false, "the run that held the lease hung or died: count the release as a lease expiry")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		id, err := c.idArg()
 		if err != nil {
 			return err
 		}
-		t, err := s.Release(ctx, ticket.ReleaseRequest{ID: id, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey})
+		t, err := s.Release(ctx, ticket.ReleaseRequest{ID: id, Holder: *holder, Token: *token, Died: *died, Actor: c.actor, IdempotencyKey: c.idemKey})
 		if err != nil {
 			return err
 		}
@@ -1047,11 +1051,14 @@ func runExport(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		b, err := json.MarshalIndent(ex, "", "  ")
-		if err != nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(ex); err != nil {
 			return err
 		}
-		b = append(b, '\n')
+		b := buf.Bytes()
 		if *outPath == "-" {
 			_, err := c.env.Stdout.Write(b)
 			return err
