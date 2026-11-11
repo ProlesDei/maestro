@@ -26,7 +26,7 @@ func shipToDone(t *testing.T, s *Store, id ticket.ID) {
 	for _, to := range []ticket.Status{ticket.StatusInProgress, ticket.StatusInReview} {
 		move(t, s, id, to)
 	}
-	if _, err := s.Transition(context.Background(), ticket.TransitionRequest{ID: id, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+	if _, err := s.Transition(context.Background(), ticket.TransitionRequest{ID: id, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -423,7 +423,7 @@ func TestStartWaitsOnDeps(t *testing.T) {
 	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: top.ID, AddDeps: []ticket.ID{late.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: top.ID, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
 		t.Fatalf("done with a dep not done: %v", err)
 	}
 }
@@ -460,7 +460,7 @@ func TestNoOpenTicketWaitsOnCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	move(t, s, fin.ID, ticket.StatusInReview)
-	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: fin.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: fin.ID, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
 		t.Fatal(err)
 	}
 	move(t, s, other.ID, ticket.StatusCancelled)

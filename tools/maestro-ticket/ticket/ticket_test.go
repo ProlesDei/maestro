@@ -267,11 +267,11 @@ func TestCheckGate(t *testing.T) {
 		actor, role string
 		ok          bool
 	}{
-		{"reviewer sets ship done", ship, StatusDone, "rev-1", RoleReviewer, true},
+		{"qa lead sets ship done", ship, StatusDone, "qa-1", RoleQALead, true},
 		{"engineer can't", ship, StatusDone, "eng", RoleEngineer, false},
 		{"owner of a ship ticket can't", ship, StatusDone, "chief-of-staff", RoleChiefOfStaff, false},
 		{"planner sets ship done", ship, StatusDone, "plan", RolePlanner, true},
-		{"qa lead can't", ship, StatusDone, "qa", RoleQALead, false},
+		{"reviewer can't", ship, StatusDone, "rev", RoleReviewer, false},
 		{"no role can't", ship, StatusDone, "rev", "", false},
 		{"other moves ungated", ship, StatusCancelled, "jse", "", true},
 		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},

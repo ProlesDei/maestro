@@ -3,11 +3,11 @@ flowchart TD
 
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, QA and review"]
+        Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, review and QA"]
         Sr["<b>Senior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
         Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
-        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Tests the PR head in the running app"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
+        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -26,8 +26,8 @@ flowchart TD
     %% The Planner hands out each job
     Planner -->|"risky ticket"| Sr
     Planner -->|"routine ticket"| Jr
-    Planner -->|"test a PR"| QA
     Planner -->|"review a PR"| Rev
+    Planner -->|"test a reviewed PR"| QA
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -45,13 +45,15 @@ flowchart TD
     Rev -.->|"verdict, a block to settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets
 
-    %% Test and review
-    Build -->|"ticket in_review"| QA
-    QA -.->|"QA: pass or fail comment"| Rev
-    Rev -->|"GO: gh pr merge, ticket done"| Done
-    Planner -.->|"PR merged outside review: ticket done"| Done
+    %% Review, then test
+    Build -->|"ticket in_review"| Rev
+    Rev -->|"GO: Review: GO comment"| QA
+    QA -->|"pass: gh pr merge, ticket done"| Done
+    Planner -.->|"PR merged outside QA: ticket done"| Done
     Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
     Rev -.->|"NO-GO"| Jr
+    QA -.->|"fail: Kickback note,<br/>back to in_progress: +1 try"| Sr
+    QA -.->|"fail"| Jr
 
     %% Legend
     subgraph Legend ["Legend"]

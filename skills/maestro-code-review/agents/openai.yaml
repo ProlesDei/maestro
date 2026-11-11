@@ -1,6 +1,6 @@
 interface:
   display_name: "Code review"
   short_description: "Review a PR and give GO, NO-GO or ESCALATE for one head sha"
-  default_prompt: "Use $maestro-code-review to review PR <number>, branch maestro/<ticket> or ticket <id>: run the passes its risk tier calls for and the project's checks, then merge and set done on GO, or send it back with a Kickback comment on NO-GO."
+  default_prompt: "Use $maestro-code-review to review PR <number>, branch maestro/<ticket> or ticket <id>: run the passes its risk tier calls for and the project's checks, then pass it on to QA on GO, or send it back with a Kickback comment on NO-GO."
 policy:
   allow_implicit_invocation: false

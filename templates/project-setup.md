@@ -3,7 +3,7 @@
 `scripts/install.sh apply` copies this to `.maestro/project/project-setup.md` once; [INSTALL.md](https://github.com/ProlesDei/maestro/blob/main/INSTALL.md) has your agent fill it in with you. `install.sh check` reads two sections, so keep their shape:
 
 - `## Main branch`: one line, the branch PRs merge into.
-- `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers run them in order in the ticket's worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
+- `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
 
 Sessions read the rest as plain text.
 

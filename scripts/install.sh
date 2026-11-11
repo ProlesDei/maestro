@@ -414,7 +414,7 @@ if [ "$cmd" = check ]; then
 					warn "$behind of $mine skill files are missing from origin/$main as of the last fetch, or differ there: commit ${dirs[*]/%//skills/} and get it onto $main, so every clone and CI run has the skills; if $main is ahead of this checkout, pull and run apply instead"
 			fi
 		elif [ -n "$main" ]; then
-			warn "no origin/$main ref as of the last fetch: each ticket's worktree branches from there, and review merges into it; check that origin is the GitHub repo and that a fetch brings its $main in as origin/$main"
+			warn "no origin/$main ref as of the last fetch: each ticket's worktree branches from there, and QA merges into it; check that origin is the GitHub repo and that a fetch brings its $main in as origin/$main"
 		fi
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the engineers run none"

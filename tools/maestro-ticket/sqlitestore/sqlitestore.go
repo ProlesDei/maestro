@@ -154,8 +154,8 @@ CREATE TABLE IF NOT EXISTS areas (
 // the outbox, which nothing reads any more.
 //
 // Tickets in the removed statuses in_qa and ready_to_release go back to
-// in_review, the last step they had passed, where the reviewer sets them
-// done; blocked tickets that came from one return there too. Old role
+// in_review, the last step they had passed, where review and QA take them
+// on; blocked tickets that came from one return there too. Old role
 // names map onto current ones (planner and qa-lead stay as they are); any
 // other role is left for doctor to report. Each change is logged as an event by maestro-ticket, so the log
 // still explains every ticket's state. A status move bumps version, as a

@@ -41,19 +41,19 @@ Before it opens the store, the CLI refuses (exit 2) a bare repo or a submodule w
 
 ## Roles and workflow
 
-Roles: `chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`. The QA lead records results as a comment starting `QA: pass` or `QA: fail`; there is no QA status. `create --role`, `claim --role`, `transition --role` and `--actor-role` refuse any other name (exit 2).
+Roles: `chief-of-staff`, `planner`, `engineer`, `qa-lead`, `reviewer`. Review comes first and QA last, both in `in_review`: the reviewer records a pass as a comment starting `Review: GO`, and the QA lead a pass as one starting `QA: pass`; there is no QA status. `create --role`, `claim --role`, `transition --role` and `--actor-role` refuse any other name (exit 2).
 
 Statuses and moves live in `ticket/ticket.go` (`workflows`), one table per ticket type (`create --type`, default `ship`):
 
-- **ship:** `backlog → todo → in_progress → in_review → done`. Only `--actor-role reviewer` (or `$MAESTRO_TICKET_ROLE=reviewer`) sets done, or `--actor-role planner` when the PR merged outside a review.
+- **ship:** `backlog → todo → in_progress → in_review → done`. Only `--actor-role qa-lead` (or `$MAESTRO_TICKET_ROLE=qa-lead`) sets done, once QA passed and merged the PR, or `--actor-role planner` when the PR merged outside QA.
 - **scout:** `backlog → todo → in_progress → in_review → done`. Only the ticket's owner (`create --owner`, default the creator) sets done, as `--actor`.
 
 Both allow `in_review → in_progress` (send-back), `in_progress → todo` (escalation) and `todo → backlog`. Any non-terminal status can go to `blocked` or `cancelled`; `blocked` goes back only to the status it came from (`blocked_from`). `claim --next` never hands out `backlog`; claim those by id. A send-back adds one to a ship ticket's `tries`; a scout send-back doesn't. `create --split-from <id>` starts the new ticket at that ticket's `tries`, so a split or rewrite keeps the count.
 
-The reviewer needs no claim to close or send back an unclaimed ticket:
+The QA lead needs no claim to close an unclaimed ticket, nor the reviewer or QA lead to send one back:
 
 ```sh
-maestro-ticket transition T-12 --from in_review --to done --actor-role reviewer --actor reviewer --note "merged <sha>"
+maestro-ticket transition T-12 --from in_review --to done --actor-role qa-lead --actor qa-lead --note "merged <sha>"
 maestro-ticket transition T-12 --from in_review --to in_progress --actor reviewer
 maestro-ticket comment T-12 --actor reviewer --body-file - <<'END_<8 random letters>'
 Kickback: <findings>

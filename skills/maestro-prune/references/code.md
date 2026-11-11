@@ -1,6 +1,6 @@
 # Code pruning
 
-Read this only when no cleanup candidate sorts Safe or Ask first, or the user passed `--code`. Everything here is tracked, so it leaves through a PR that review merges, never straight from the main checkout. `[path]` after `--code` limits the search; it defaults to the repo root. `<main>`, `<common>` and the keep list are as in [SKILL.md](../SKILL.md).
+Read this only when no cleanup candidate sorts Safe or Ask first, or the user passed `--code`. Everything here is tracked, so it leaves through a reviewed PR that a person merges, since it has no ticket, never straight from the main checkout. `[path]` after `--code` limits the search; it defaults to the repo root. `<main>`, `<common>` and the keep list are as in [SKILL.md](../SKILL.md).
 
 ## Find (read only)
 
