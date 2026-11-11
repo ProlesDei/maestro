@@ -94,7 +94,7 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
 4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
-5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those.
+5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
 6. Run `check`.
 
 ## A teammate's checkout

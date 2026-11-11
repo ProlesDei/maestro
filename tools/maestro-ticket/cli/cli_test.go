@@ -557,6 +557,9 @@ func TestDoneGateFlags(t *testing.T) {
 	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "engineer"); code != "forbidden" {
 		t.Fatalf("engineer done code %q", code)
 	}
+	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "reviewer"); code != "forbidden" {
+		t.Fatalf("reviewer done code %q", code)
+	}
 	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "release-manager"); code != "invalid" {
 		t.Fatalf("unknown role code %q", code)
 	}

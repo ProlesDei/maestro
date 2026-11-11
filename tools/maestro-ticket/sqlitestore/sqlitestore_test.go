@@ -975,7 +975,7 @@ func TestMigrateV5(t *testing.T) {
 		t.Fatalf("doctor after fixing the role: %+v, %v", rep, err)
 	}
 	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 1, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
-		t.Fatalf("reviewer done after migration: %v", err)
+		t.Fatalf("QA lead done after migration: %v", err)
 	}
 }
 
@@ -1264,7 +1264,7 @@ func TestClaimReplayAfterLeaseLoss(t *testing.T) {
 
 // An engineer once moved an unclaimed ticket to in_progress, then straight
 // to done. Ship tickets reach done only from in_review, and only by the
-// reviewer.
+// QA lead or the planner.
 func TestQALeadOrPlannerSetsShipDone(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
@@ -1300,7 +1300,7 @@ func TestQALeadOrPlannerSetsShipDone(t *testing.T) {
 		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleQALead)
 	}
 
-	// The planner closes a ticket whose PR merged outside a review.
+	// The planner closes a ticket whose PR merged outside QA.
 	tk2 := mustCreate(t, s, "y", "engineer", 2)
 	move(t, s, tk2.ID, ticket.StatusInProgress)
 	move(t, s, tk2.ID, ticket.StatusInReview)
