@@ -488,7 +488,7 @@ func TestFullWorkflow(t *testing.T) {
 		{"sse/s1", ticket.StatusInProgress, ticket.StatusInReview, ""},
 		{"cr/s1", ticket.StatusInReview, ticket.StatusInProgress, ""}, // changes requested
 		{"sse/s2", ticket.StatusInProgress, ticket.StatusInReview, ""},
-		{"cr/s2", ticket.StatusInReview, ticket.StatusDone, ticket.RoleReviewer},
+		{"qa/s1", ticket.StatusInReview, ticket.StatusDone, ticket.RoleQALead}, // QA merged it, after review passed it
 	}
 	for _, st := range steps {
 		cur, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: st.holder, Statuses: []ticket.Status{st.from}})
@@ -974,7 +974,7 @@ func TestMigrateV5(t *testing.T) {
 	if rep, err := s.Doctor(ctx); err != nil || !rep.OK() {
 		t.Fatalf("doctor after fixing the role: %+v, %v", rep, err)
 	}
-	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 1, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer}); err != nil {
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 1, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
 		t.Fatalf("reviewer done after migration: %v", err)
 	}
 }
@@ -1011,7 +1011,7 @@ func TestBlockedReturnsOnlyToOrigin(t *testing.T) {
 	// Blocked from review goes back to review, not on to done.
 	move(t, s, tk.ID, ticket.StatusInReview)
 	move(t, s, tk.ID, ticket.StatusBlocked)
-	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
+	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: ticket.RoleQALead})
 	wantErr(t, err, ticket.ErrInvalidTransition)
 	if got := move(t, s, tk.ID, ticket.StatusInReview); got.Tries != 0 {
 		t.Fatalf("unblocking is not a send-back: tries %d", got.Tries)
@@ -1109,7 +1109,7 @@ func TestBacklogAndScoutTickets(t *testing.T) {
 	// A scout ends at in_review, and only its owner moves it on to done.
 	move(t, s, sc.ID, ticket.StatusInProgress)
 	move(t, s, sc.ID, ticket.StatusInReview)
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, ActorRole: ticket.RoleReviewer})
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, ActorRole: ticket.RoleQALead})
 	wantErr(t, err, ticket.ErrForbidden)
 	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: sc.ID, Type: ticket.EventCreated})
 	var d map[string]any
@@ -1265,19 +1265,19 @@ func TestClaimReplayAfterLeaseLoss(t *testing.T) {
 // An engineer once moved an unclaimed ticket to in_progress, then straight
 // to done. Ship tickets reach done only from in_review, and only by the
 // reviewer.
-func TestReviewerOrPlannerSetsShipDone(t *testing.T) {
+func TestQALeadOrPlannerSetsShipDone(t *testing.T) {
 	s, _ := newStore(t)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "engineer", 2)
 	move(t, s, tk.ID, ticket.StatusInProgress)
 	_, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "eng", ActorRole: "engineer"})
 	wantErr(t, err, ticket.ErrInvalidTransition)
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleReviewer})
-	wantErr(t, err, ticket.ErrInvalidTransition) // not even the reviewer skips review
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleQALead})
+	wantErr(t, err, ticket.ErrInvalidTransition) // not even the QA lead skips review
 
 	move(t, s, tk.ID, ticket.StatusInReview)
 	before, _ := s.LastSeq(ctx)
-	for _, role := range []string{"", "chief-of-staff", "engineer", "qa-lead"} {
+	for _, role := range []string{"", "chief-of-staff", "engineer", "reviewer"} {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, Actor: "x", ActorRole: role})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
@@ -1288,16 +1288,16 @@ func TestReviewerOrPlannerSetsShipDone(t *testing.T) {
 		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusDone, ActorRole: role})
 		wantErr(t, err, ticket.ErrInvalid)
 	}
-	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleReviewer})
+	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: tk.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "rev", ActorRole: ticket.RoleQALead})
 	if err != nil || done.Status != ticket.StatusDone {
-		t.Fatalf("reviewer done %+v, %v", done, err)
+		t.Fatalf("QA lead done %+v, %v", done, err)
 	}
 	// The log records the role the closer declared.
 	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: tk.ID, Type: ticket.EventTransitioned})
 	var data map[string]any
 	json.Unmarshal(evs[len(evs)-1].Data, &data)
-	if data["to"] != "done" || data["actor_role"] != ticket.RoleReviewer {
-		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleReviewer)
+	if data["to"] != "done" || data["actor_role"] != ticket.RoleQALead {
+		t.Fatalf("done event data %v; want actor_role %s", data, ticket.RoleQALead)
 	}
 
 	// The planner closes a ticket whose PR merged outside a review.
@@ -1326,11 +1326,11 @@ func TestScoutDoneByOwner(t *testing.T) {
 		}
 	}
 	// The engineer who wrote the report can't close it, even claiming reviewer.
-	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Holder: "sse/s1", Token: tok, ActorRole: ticket.RoleReviewer})
+	_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Holder: "sse/s1", Token: tok, ActorRole: ticket.RoleQALead})
 	wantErr(t, err, ticket.ErrForbidden)
 	s.Release(ctx, ticket.ReleaseRequest{ID: sc.ID, Holder: "sse/s1", Token: tok})
 	for _, actor := range []string{"ops", "cos", ""} {
-		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Actor: actor, ActorRole: ticket.RoleReviewer})
+		_, err = s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, To: ticket.StatusDone, Actor: actor, ActorRole: ticket.RoleQALead})
 		wantErr(t, err, ticket.ErrForbidden)
 	}
 	done, err := s.Transition(ctx, ticket.TransitionRequest{ID: sc.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "chief-of-staff"})

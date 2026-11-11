@@ -560,11 +560,11 @@ func TestDoneGateFlags(t *testing.T) {
 	if code := h.fails(2, "transition", "T-1", "--to", "done", "--actor-role", "release-manager"); code != "invalid" {
 		t.Fatalf("unknown role code %q", code)
 	}
-	h.env["MAESTRO_TICKET_ROLE"] = "reviewer"
+	h.env["MAESTRO_TICKET_ROLE"] = "qa-lead"
 	var d tk
 	h.ok(&d, "transition", "T-1", "--to", "done", "--from", "in_review", "--note", "merged abc123")
 	if d.Status != "done" {
-		t.Fatalf("reviewer done %+v", d)
+		t.Fatalf("QA lead done %+v", d)
 	}
 
 	h.ok(nil, "create", "--title", "scout", "--type", "scout", "--owner", "chief-of-staff")

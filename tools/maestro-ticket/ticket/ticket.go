@@ -79,7 +79,7 @@ var Statuses = []Status{
 }
 
 // workflows lists the moves each ticket type allows. Ship tickets reach done
-// only from in_review, where the reviewer sets them done; scout tickets end
+// only from in_review, where the QA lead sets them done; scout tickets end
 // at in_review, where the owner reads the report. Blocked is not listed as a source: a blocked
 // ticket returns only to the status it was blocked from, or is cancelled
 // (see Ticket.NextStatuses). Done and cancelled are terminal.
@@ -116,7 +116,7 @@ func (s Status) Terminal() bool { return s == StatusDone || s == StatusCancelled
 // review or grooming don't.
 func (s Status) WritesCode() bool { return s == StatusTodo || s == StatusInProgress }
 
-// IsSendBack reports whether from -> to sends work back from review, which
+// IsSendBack reports whether from -> to sends work back from review or QA, which
 // adds one to a ship ticket's tries. An owner sending a scout report back
 // is not a try: there is no code to fix.
 func IsSendBack(from, to Status) bool {
@@ -173,10 +173,10 @@ func ParseType(s string) (Type, error) {
 // lease_expired.
 const SystemActor = "maestro-ticket"
 
-// Roles. Only the reviewer sets ship tickets done, after it merges the PR, or
-// the planner when the PR merged outside a review.
-// The QA lead records results as a comment starting "QA: pass" or
-// "QA: fail", not as a status.
+// Roles. Review comes first and QA last: the reviewer records a pass as a
+// comment starting "Review: GO", not as a status. Only the QA lead sets
+// ship tickets done, after it merges the PR, or the planner when the PR
+// merged outside QA.
 const (
 	RoleChiefOfStaff = "chief-of-staff"
 	RolePlanner      = "planner"
@@ -275,7 +275,7 @@ type Ticket struct {
 	CreatedBy string `json:"created_by"`
 	// Owner asked for the work. On scout tickets the owner sets done.
 	Owner string `json:"owner"`
-	// Tries counts send-backs from review.
+	// Tries counts send-backs from review and QA.
 	Tries int `json:"tries"`
 	// LeaseExpiries counts the leases on this ticket that expired instead of
 	// being released: sessions that died or stalled while holding it.
@@ -317,8 +317,8 @@ func (t Ticket) CanMove(to Status) bool {
 }
 
 // CheckGate decides whether actor, acting as actorRole, may move t to
-// status to. Only the reviewer sets a ship ticket done, or the planner once
-// its PR merged outside a review; only its owner sets a scout ticket done.
+// status to. Only the QA lead sets a ship ticket done, or the planner once
+// its PR merged outside QA; only its owner sets a scout ticket done.
 // Run it after CanMove.
 func (t Ticket) CheckGate(to Status, actor, actorRole string) error {
 	if to != StatusDone {
@@ -326,9 +326,9 @@ func (t Ticket) CheckGate(to Status, actor, actorRole string) error {
 	}
 	switch t.Type {
 	case TypeShip:
-		if actorRole != RoleReviewer && actorRole != RolePlanner {
+		if actorRole != RoleQALead && actorRole != RolePlanner {
 			return fmt.Errorf("%w: only %s or %s sets ship tickets done (actor role %q; pass --actor-role)",
-				ErrForbidden, RoleReviewer, RolePlanner, actorRole)
+				ErrForbidden, RoleQALead, RolePlanner, actorRole)
 		}
 	case TypeScout:
 		if t.Owner == "" || t.Owner == "unknown" || actor != t.Owner {

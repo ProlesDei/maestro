@@ -109,10 +109,10 @@ Kill switch: while a file named STOP sits next to the store, claim refuses
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
-Ship:  backlog -> todo -> in_progress -> in_review -> done (by the reviewer,
-       or the planner when the PR merged outside a review)
+Ship:  backlog -> todo -> in_progress -> in_review -> done (by the QA lead,
+       or the planner when the PR merged outside QA)
 Scout: backlog -> todo -> in_progress -> in_review -> done (by the owner)
-Only --actor-role reviewer or planner (default $MAESTRO_TICKET_ROLE) sets a
+Only --actor-role qa-lead or planner (default $MAESTRO_TICKET_ROLE) sets a
 ship ticket done; only its owner (--actor) sets a scout ticket done.
 In todo and in_progress, claim skips (--next) or refuses (by id) tickets
 whose dependencies aren't all done, and tickets whose areas overlap (equal,
