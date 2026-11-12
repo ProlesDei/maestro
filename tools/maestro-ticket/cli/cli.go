@@ -72,6 +72,10 @@ Commands:
               [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
               (ordered by priority, then id)
   goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
+  log-run     [--ticket ID]   (reads a claude -p --output-format json reply on stdin, prints it
+              unchanged, and records the session's cost and tokens; a resume replaces its total)
+  costs       [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since DATE|DURATION]
+              (logged spend per group: runs, dollars, share, median per run and per ticket)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
@@ -142,6 +146,8 @@ var commands = []command{
 	{"get", runGet},
 	{"list", runList},
 	{"goals", runGoals},
+	{"log-run", runLogRun},
+	{"costs", runCosts},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},

@@ -85,6 +85,12 @@ Schema v6 adds `parked` and `goal`. An open backlog ticket, or one blocked from 
 
 Plain `get` sets the ticket body and each comment four spaces in, so a line at the left margin is always the tool's and text can't pass for a later comment: every kind of line break starts an indented line, and any other control character but a tab prints as U+FFFD. Read `--json` for the text as written. With `--json`, errors print `{"error":{"code":"...","message":"..."}}` on stdout.
 
+## Costs
+
+`log-run [--ticket ID]` reads a `claude -p --output-format json` reply on stdin (the last `result` message of `stream-json` too), prints it to stdout unchanged, then records the session's `total_cost_usd` and its tokens summed over `modelUsage`, which counts every model the session called, its subagents included, against the ticket and `--actor`. Bots pipe every run into it (`claude -p ... | maestro-ticket log-run --actor <bot id> --ticket <id>`), with no `--ticket` for a run that works on no one ticket. A resumed session reports its total so far, so each session is one run: logging it again keeps its first actor and its ticket (unless the new log names one), and replaces its totals, unless the new cost is lower, which marks an older reply that came late. An empty or non-JSON reply, which a run that hung or died leaves, exits 2 and records nothing; its cost is lost. A `--ticket` that names no ticket logs the run with none and says so on stderr. `--verbose` replies, a JSON array, work too. Errors go to stderr, never into the reply, and `--json` is refused.
+
+`costs [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since 2026-11-12|72h]` groups the logged runs, most spent first, then a row for all: runs, dollars, share, median per run, then tickets and the median and 90th percentile per ticket. `origin` is who created the ticket, or `split` for one made with `--split-from`; `tries` is its send-backs so far. A run with no ticket lands in `(no ticket)` under every grouping but `actor`. `--since` keeps sessions first logged (at the end of their first run) on or after a local date, or within a length of time. The dollars are Claude Code's own estimate at list price, not an invoice. Schema v7 adds the `runs` table; `export` lists it.
+
 ## Layout
 
 | Path | What |
