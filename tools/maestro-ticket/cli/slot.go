@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -65,6 +66,9 @@ func runSlot(ctx context.Context, c *call) error {
 		return err
 	}
 	lock, err := takeSlot(ctx, dir, *name, *max, *wait, c.env.Stderr)
+	if err != nil && ctx.Err() != nil {
+		return fmt.Errorf("%w: stopped while waiting for a %q slot", ticket.ErrNoSlot, *name)
+	}
 	if err != nil {
 		return err
 	}
@@ -77,10 +81,17 @@ func runSlot(ctx context.Context, c *call) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = c.env.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.env.Stdin, c.env.Stdout, c.env.Stderr
-	// On SIGINT or SIGTERM, ask the command to stop before killing it.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	// The command runs in a process group of its own, so a stop reaches
+	// everything it started (make, a test runner and its workers), not just
+	// its first process. On SIGINT, SIGTERM or SIGHUP the group gets
+	// SIGTERM, then SIGKILL once the command is gone or WaitDelay passes.
+	ownGroup(cmd)
+	cmd.Cancel = func() error { return signalGroup(cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	err = cmd.Run()
+	if ctx.Err() != nil && cmd.Process != nil {
+		signalGroup(cmd.Process.Pid, syscall.SIGKILL)
+	}
 	// Once the command ran, its own exit is the answer, even when a signal
 	// cancelled ctx and Run reports that instead.
 	if ps := cmd.ProcessState; ps != nil {
@@ -91,6 +102,10 @@ func runSlot(ctx context.Context, c *call) error {
 			return nil
 		}
 		return silentExit{ps.ExitCode()}
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		fmt.Fprintf(c.env.Stderr, "maestro-ticket: slot: %v\n", err)
+		return silentExit{127} // as a shell exits for a missing command
 	}
 	return fmt.Errorf("%w: slot: %v", ticket.ErrInvalid, err)
 }

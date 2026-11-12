@@ -1,6 +1,6 @@
 ---
 name: maestro-code-review
-description: "Review a pull request at one head sha with passes scaled to its risk, the project's checks and a fresh-session skeptic, then give one verdict: GO passes it on to QA, NO-GO kicks it back with findings, ESCALATE hands the owner a call only a person can make. `--report-only` writes the report and changes nothing. Use for /maestro-code-review, 'review PR 12', 'is T-12 ready for QA', 'pass or kick back T-12', or a ticket in `in_review`. Not for writing or fixing the code under review, testing it in the running app or merging it (maestro-qa-lead), or checking your own diff before a PR."
+description: "Review a pull request at one head sha with passes scaled to its risk, the project's checks and a fresh-session red team, then give one verdict: GO passes it on to QA, NO-GO kicks it back with findings, ESCALATE hands the owner a call only a person can make. `--report-only` writes the report and changes nothing. Use for /maestro-code-review, 'review PR 12', 'is T-12 ready for QA', 'pass or kick back T-12', or a ticket in `in_review`. Not for writing or fixing the code under review, testing it in the running app or merging it (maestro-qa-lead), or checking your own diff before a PR."
 argument-hint: "<PR number | maestro/<ticket> branch | ticket id> [--report-only] [--approved <sha>] [--drop <finding ids>: <why>]"
 disable-model-invocation: true
 ---

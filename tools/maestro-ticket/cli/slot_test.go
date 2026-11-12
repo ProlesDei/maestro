@@ -3,14 +3,17 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -156,5 +159,77 @@ func TestSlotStopsCommandOnCancel(t *testing.T) {
 			t.Fatalf("%q: slot didn't stop", tc.script)
 		}
 		r.Close()
+	}
+}
+
+// A stop reaches what the command started, not just the command, and a
+// hangup stops it as SIGTERM does; else the slot frees while the work
+// still loads the machine.
+func TestSlotStopsTheWholeCommand(t *testing.T) {
+	h := newHarness(t)
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
+		cmd := exec.Command(os.Args[0], "slot", "--", "sh", "-c", "sleep 30 & echo $!; wait")
+		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+		cmd.Dir = h.dir
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(out).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		grandchild, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Process.Signal(sig)
+		cmd.Wait()
+		if got := cmd.ProcessState.ExitCode(); got != 128+int(syscall.SIGTERM) {
+			t.Errorf("%v: exit %d; want %d", sig, got, 128+int(syscall.SIGTERM))
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for alive(grandchild) && time.Now().Before(deadline) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if alive(grandchild) {
+			syscall.Kill(grandchild, syscall.SIGKILL)
+			t.Errorf("%v: the command's own child %d outlived slot", sig, grandchild)
+		}
+	}
+}
+
+func TestSlotStoppedWhileWaitingIsNoSlot(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.dir, "slots")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "checks.0.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	var errb bytes.Buffer
+	code := Run(ctx, []string{"slot", "--max", "1", "--", "true"}, Env{
+		Stdout: &errb, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir,
+	})
+	if code != 4 || !strings.Contains(errb.String(), "stopped while waiting") {
+		t.Fatalf("exit %d: %s; want 4, stopped while waiting", code, errb.String())
+	}
+}
+
+func TestSlotMissingCommandIs127(t *testing.T) {
+	h := newHarness(t)
+	if code, _, errs := h.run("", "slot", "--", "no-such-command-k3f9"); code != 127 {
+		t.Fatalf("exit %d: %s; want 127", code, errs)
 	}
 }
