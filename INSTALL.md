@@ -74,6 +74,8 @@ For each bot in `bots:` that has a `.maestro/src/bot-profiles/<bot>/memory.md`, 
 
 Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size and whether it's `new`, `changed` or `same`; it removes the block of a bot no longer under `bots:`. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
 
+Then the webhooks. A bot starts each Claude session with `maestro-ticket launch`, ends its turn, and learns the run ended when `launch` rings its webhook. Ask the person, for each bot, for a URL that wakes it (a POST with a JSON body whose `text` says which run ended). A webhook URL often holds its secret, so the person runs `maestro-ticket notify <bot> --url-file -` at the repo's root and pastes it on stdin; it never goes in chat or on a command line. Then run `maestro-ticket notify <bot> --test` and ask the person whether the bot woke. A bot with no webhook learns a run ended only on its next turn: tell the person.
+
 ## 9. Prove it
 
 Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line with the person and show them each `warn:`. Run it again until it prints `ok`.

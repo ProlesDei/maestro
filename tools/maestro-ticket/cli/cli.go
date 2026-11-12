@@ -76,6 +76,11 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+              (starts the run in the background, prompt on stdin, and returns its id)
+  pickup      (reports once each run you launched that ended; lists yours still running)
+  runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
+  notify      [<bot-id>] [--url-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
@@ -145,6 +150,11 @@ var commands = []command{
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
+	{"launch", runLaunch},
+	{"supervise", runSupervise},
+	{"pickup", runPickup},
+	{"runs", runRuns},
+	{"notify", runNotify},
 	{"release", runRelease},
 	{"reap", runReap},
 	{"transition", runTransition},
@@ -1270,6 +1280,9 @@ func runDoctor(ctx context.Context, c *call) error {
 		return err
 	}
 	rep.Checks = append(rep.Checks, checks...)
+	if envcheck.Err(checks) == nil {
+		rep.Checks = append(rep.Checks, c.runsCheck(path))
+	}
 	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {
 		return err
