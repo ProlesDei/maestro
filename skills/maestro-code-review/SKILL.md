@@ -38,17 +38,17 @@ Open a todo list with one item per phase below.
 
 | Tier | When the diff touches | Passes ([passes.md](references/passes.md)) | Skeptic |
 |---|---|---|---|
-| 2 | A path under `## Review` in `project-setup.md`; auth, permissions, sessions, secrets or signatures; money or amounts; schemas, migrations or deletes; locks, queues, workers or retries; dependencies or lockfiles; CI, hooks, deploy or infra; text agents obey (skills, prompts, `AGENTS.md`, harness settings, `.maestro/project/project-setup.md`) | All ten; 3, 4, 7 and 8 say `not run: no <area> code` when the diff has none | Full, fresh session |
+| 2 | A path under `## Review` in `project-setup.md`; auth, permissions, sessions, secrets or signatures; money or amounts; schemas, migrations or deletes; locks, queues, workers or retries; dependencies or lockfiles; CI, hooks, deploy or infra; text agents obey (skills, prompts, `AGENTS.md`, harness settings, `.maestro/project/project-setup.md`) | All ten; 3, 4, 7 and 8 say `not run: no <area> code` when the diff has none | Full: fresh sessions above 150 changed lines, else inline |
 | 0 | Only docs or inert config (`LICENSE`, `.gitignore`, `.editorconfig`, formatter config), or one file with at most 50 changed lines (`git diff --numstat`) | 1, and 6 if it changes code; check a docs change hides no code change | Short, inline |
 | 1 | Anything else | 1, 2, 5 and 6; 7 and 8 when it touches a hot path or a public interface | Short, inline |
 
-2. **Mode.** Incremental when review's own latest verdict, a `Review:` comment or a `Kickback:` that isn't a `Kickback: QA fail`, names a sha `K` after its first `at` (use it only if it is 40 hex characters) and `git merge-base --is-ancestor K $H` passes; else full. QA reads no diff, so its kickback is never a base. With no ticket, a verdict is a PR comment whose `assoc` Phase B step 4 trusts. The delta is the files in both `git diff --name-only K $H` and `git diff --name-only $B $H`. Go full anyway if the delta raises the tier, touches a tier-2 area the last review didn't, or passes 400 changed lines or 15 files. Incremental: mark each earlier finding `fixed`, `still present` or `obsolete`, then run passes 1 and 6 on the delta, plus 2 and 9 when it is tier 2. At tier 2 the full skeptic runs every time. The gates always run in full.
+2. **Mode.** Incremental when review's own latest verdict, a `Review:` comment or a `Kickback:` that isn't a `Kickback: QA fail`, names a sha `K` after its first `at` (use it only if it is 40 hex characters) and `git merge-base --is-ancestor K $H` passes; else full. QA reads no diff, so its kickback is never a base. With no ticket, a verdict is a PR comment whose `assoc` Phase B step 4 trusts. The delta is the files in both `git diff --name-only K $H` and `git diff --name-only $B $H`. Go full anyway if the delta raises the tier, touches a tier-2 area the last review didn't, or passes 400 changed lines or 15 files. Incremental: mark each earlier finding `fixed`, `still present` or `obsolete`, then run passes 1 and 6 on the delta, plus 2 and 9 when it is tier 2. At tier 2 the full skeptic runs every time, in fresh sessions only when the delta passes 150 changed lines. The gates always run in full.
 3. Write `$C/context.md`: tier and the rule that matched, mode, `B`, `H`, `K`, the `--stat`, the criteria word for word, `areas`, and the earlier findings on a re-review. Every pass and subagent reads it and `diff.patch` and works none of it out again.
 
 ## Phase D: Run the passes
 
 1. Read [references/passes.md](references/passes.md) and run the tier's passes in order. A pass the tier skips is `not run: tier <n>`.
-2. At tier 2, run passes 9 and 10 each in a new subagent at full reasoning effort. Pass 9 gets only `$C` and its pass text. Pass 10 gets `$C`, the findings as claims (no reasoning) and its pass text. With no subagent tool, start a fresh headless session (`claude -p` or `codex exec`) the same way, with all permissions, at the repo's root, never in `$R`. Never resume an earlier review session or reuse your notes. If no fresh session can run, say so and drop Confidence one step.
+2. At tier 2 with more than 150 changed lines (`git diff --numstat`), run passes 9 and 10 each in a new subagent at full reasoning effort; at 150 or fewer, run both inline, rereading only `$C` first, and keep Confidence as it is. A small diff gains little from a fresh context, and every subagent costs a whole review's context again. Pass 9 gets only `$C` and its pass text. Pass 10 gets `$C`, the findings as claims (no reasoning) and its pass text. With no subagent tool, start a fresh headless session (`claude -p` or `codex exec`) the same way, with all permissions, at the repo's root, never in `$R`. Never resume an earlier review session or reuse your notes. If no fresh session can run, say so and drop Confidence one step.
 3. A subagent stops at about 25 tool calls, reports what it has and lists what it didn't check. Unchecked tier-2 scope is NO-GO.
 4. Rate the findings and merge them into one list, as [passes.md](references/passes.md#rate-each-finding) says.
 
@@ -97,14 +97,14 @@ PR: <url> | branch: <branch> | head: <H> | base: <main> @ <B> | gated on: <G>
 Verdict: GO | NO-GO | ESCALATE, or REPORT-ONLY GO | REPORT-ONLY NO-GO (a REPORT-ONLY GO sends nothing to QA)
 Tier: <n>, <rule that matched> | Mode: full | incremental from <K>
 Confidence: very high | high | medium | low, <one line why>
-Skeptic: short inline | fresh session
+Skeptic: short inline | full inline | fresh session
 ## Criteria       | # | code (file:line) | test | evidence | status |
 ## Gates          | command | exit | summary |   CI on <H>: <state>, read as input
 ## Findings       | id | sev | action | pass | file:line | evidence | fix |
 ## Passes         1-10: findings, "clean, checked: ...", or "not run: ..."
 ## Dropped        | id | why |
 ## Earlier feedback   <item>: fixed in <sha> | refuted: <evidence> | still present
-## Out of scope   (already on the base)
+## Out of scope   (already on the base, as passes.md rates it: one line each, grouped by module, for the planner)
 ## Outcome        the Review, Kickback or Escalation comment id and any ticket move, or "none: report only"
 ```
 
