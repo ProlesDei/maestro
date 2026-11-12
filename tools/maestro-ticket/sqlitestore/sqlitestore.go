@@ -37,7 +37,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -214,6 +214,25 @@ INSERT INTO events (ticket_id, type, actor, data, created_at)
 		json_object('parked', parked, 'note', 'schema v6: backlog tickets record why they wait'),
 		CAST(unixepoch('subsec') * 1000 AS INTEGER)
 	FROM tickets WHERE parked != '' ORDER BY id;
+`
+
+// schemaV7 adds runs: each Claude Code session's spend, logged from its
+// reply, so cost can be read by ticket, bot, goal and origin. ticket_id is
+// NULL for a session that worked on no one ticket.
+const schemaV7 = `
+CREATE TABLE IF NOT EXISTS runs (
+	session            TEXT    PRIMARY KEY,
+	ticket_id          INTEGER REFERENCES tickets(id),
+	actor              TEXT    NOT NULL,
+	cost_usd           REAL    NOT NULL,
+	input_tokens       INTEGER NOT NULL,
+	output_tokens      INTEGER NOT NULL,
+	cache_write_tokens INTEGER NOT NULL,
+	cache_read_tokens  INTEGER NOT NULL,
+	created_at         INTEGER NOT NULL,
+	updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS runs_ticket ON runs(ticket_id) WHERE ticket_id IS NOT NULL;
 `
 
 // Options tune a Store. The zero value is fine for production.
@@ -1867,7 +1886,23 @@ func (s *Store) Export(ctx context.Context) (ticket.Export, error) {
 			out.Events = append(out.Events, e)
 			out.LastSeq = e.Seq
 		}
-		return erows.Err()
+		if err := erows.Err(); err != nil {
+			return err
+		}
+		rrows, err := tx.QueryContext(ctx, "SELECT "+runCols+" FROM runs r ORDER BY r.created_at, r.session")
+		if err != nil {
+			return err
+		}
+		defer rrows.Close()
+		out.Runs = []ticket.Run{}
+		for rrows.Next() {
+			r, err := scanRun(rrows)
+			if err != nil {
+				return err
+			}
+			out.Runs = append(out.Runs, r)
+		}
+		return rrows.Err()
 	})
 	return out, err
 }

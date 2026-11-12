@@ -44,6 +44,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated; must include `claude`, which every bot runs. | `claude`, plus any other on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. If the team's ignore rules hide `.claude/` or `.agents/`, `committed` can't track them: offer `hidden`, or a change to those rules with the person's yes. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `bots` | Which Grok bots the team will run, space-separated: `chief-of-staff planner senior-engineer junior-engineer qa-lead reviewer`. | all six names |
+| `code-graph` | Whether sessions get the codebase-memory-mcp code graph, which finds symbols and callers before they grep. `mcp`: step 7 installs it for this repo, without its hooks. `none`: no code graph. `apply` refuses until this has an answer. | `mcp` for a codebase too big to read by grep, else `none` |
 
 ## 5. Apply
 
@@ -62,11 +63,13 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
 
-## 7. Extras
+## 7. Code graph
 
-Ask about each:
+Skip this step for `code-graph: none`.
 
-- **Code graph.** The codebase-memory-mcp MCP server lets sessions find symbols and callers before they grep. It's a third-party tool: read its install steps before you run any, and add it only with the person's yes.
+For `mcp`: codebase-memory-mcp is a third-party tool, so read its install steps before you run any, and run them with the person's yes. Put its binary on `PATH`, then register it for this repo only: a server named `codebase-memory-mcp`, run by that bare command, in `.mcp.json` at the repo's root (Claude Code's project scope), added beside any servers the team's file already lists, not in the user's settings. A headless `claude -p` session in all-permissions mode, as the bots run, loads a project's `.mcp.json` with no prompt.
+
+Leave its hooks out. Its installer may add hooks to the user's Claude Code settings: a reminder at every session start, and a gate on search tool calls (on every Bash call in some versions). They run in every session on the machine, the bots' too, where most calls are tests, git and ticket commands, and each one adds tokens that 300 sessions multiply. If it added them, remove them with the person's yes; a newer Maestro may ship a setup for them. `install.sh check` reports a missing registration and warns on any of its hooks it finds.
 
 ## 8. Set up the bots
 
@@ -80,10 +83,11 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 ## 10. Report
 
-Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found. Then what's left for them:
+Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found, the code graph. Then what's left for them:
 
 - `committed`: commit `.maestro/project/` and the skills folder of each harness in `harnesses`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
+- Either way, with `code-graph: mcp`, commit `.mcp.json` too: a clone without it has no code graph, and `check` there says so.
 - Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
 - Start every bot's session at this checkout's root. A `hidden` install puts no skills in a worktree, so a session started inside one finds none. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
 - Paste each bot block into Grok.
@@ -93,13 +97,13 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 1. Ask which commit to move to; if `maestro-sha` already names one `.maestro/src/` isn't on, a teammate updated: take that one and don't ask. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
+4. Set `maestro-sha` to the new sha. Ask each key of step 4's table that `install.yaml` lacks, and act on it (`code-graph` through step 7). Then run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
 5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
 6. Run `check`.
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
 
 ## Uninstall
 
@@ -111,3 +115,4 @@ Run `.maestro/src/scripts/install.sh uninstall <repo>`. It removes the files its
 - `.maestro/src/` and `.maestro/bots/`.
 - The ticket store in `maestro/` under the git common dir: it holds every ticket. Offer `maestro-ticket backup` first.
 - The tools on `PATH`: other repos may use them.
+- With `code-graph: mcp`, the `codebase-memory-mcp` server in `.mcp.json`, and the tool itself.

@@ -99,7 +99,7 @@ When the senior disputes a kickback finding, get a second opinion and rule befor
 
 ## When you need Claude
 
-Claude does the hard thinking. Use it only for the prompts below, each sent to `MAESTRO_TICKET_ACTOR=planner claude -p --permission-mode bypassPermissions --output-format json` at the repo's root, on stdin as the team rules say:
+Claude does the hard thinking. Use it only for the prompts below, each sent to `MAESTRO_TICKET_ACTOR=planner claude -p --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor planner` at the repo's root, on stdin as the team rules say:
 
 | To | Prompt |
 |---|---|
@@ -109,7 +109,7 @@ Claude does the hard thinking. Use it only for the prompts below, each sent to `
 | Group 3+ blocks by cause | `/maestro-chief-of-staff for the planner: triage the blocked tickets` |
 | Second opinion on a block or a disputed finding | `/maestro-chief-of-staff for the planner: second opinion on <id>` |
 
-To answer a reply's question, or say "create them", send the answer the same way to `MAESTRO_TICKET_ACTOR=planner claude -p --resume <session_id> --permission-mode bypassPermissions --output-format json`. The ids a reply claims must show in `maestro-ticket list`.
+To answer a reply's question, or say "create them", send the answer the same way to `MAESTRO_TICKET_ACTOR=planner claude -p --resume <session_id> --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor planner`. The ids a reply claims must show in `maestro-ticket list`.
 
 ## Stop the line
 

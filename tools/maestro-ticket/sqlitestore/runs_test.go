@@ -1,0 +1,102 @@
+package sqlitestore
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
+)
+
+func TestLogRunKeepsTheSessionsNewestTotal(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	a := mustCreate(t, s, "a", "engineer", 1)
+	log := func(req ticket.LogRunRequest) ticket.Run {
+		t.Helper()
+		r, err := s.LogRun(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	first := log(ticket.LogRunRequest{Session: "s1", Ticket: a.ID, Actor: "junior-engineer", CostUSD: 1.5, InputTokens: 10, CacheWriteTokens: 100})
+	if first.Ticket != a.ID || first.Actor != "junior-engineer" || first.CostUSD != 1.5 || first.CacheWriteTokens != 100 {
+		t.Fatalf("first log: %+v", first)
+	}
+	// A resume by another bot, naming no ticket, reports the session's
+	// running total: it replaces the totals and keeps the actor and ticket.
+	clk.Advance(time.Minute)
+	resumed := log(ticket.LogRunRequest{Session: "s1", Actor: "senior-engineer", CostUSD: 2.25, InputTokens: 30, CacheWriteTokens: 150})
+	if resumed.Ticket != a.ID || resumed.Actor != "junior-engineer" || resumed.CostUSD != 2.25 || resumed.InputTokens != 30 ||
+		!resumed.UpdatedAt.After(resumed.CreatedAt) {
+		t.Fatalf("resumed: %+v", resumed)
+	}
+	// An older reply logged late never shrinks the total.
+	if late := log(ticket.LogRunRequest{Session: "s1", Actor: "junior-engineer", CostUSD: 1.5}); late.CostUSD != 2.25 || late.InputTokens != 30 {
+		t.Fatalf("late reply changed the run: %+v", late)
+	}
+	log(ticket.LogRunRequest{Session: "s2", Actor: "planner", CostUSD: 0.5})
+	runs, err := s.Runs(ctx, ticket.RunFilter{})
+	if err != nil || len(runs) != 2 || runs[0].Session != "s1" || runs[1].Ticket != 0 || runs[1].Origin != "" {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	exp, err := s.Export(ctx)
+	if err != nil || len(exp.Runs) != 2 || exp.Runs[0].CostUSD != 2.25 {
+		t.Fatalf("export runs = %+v, %v", exp.Runs, err)
+	}
+}
+
+func TestLogRunRefuses(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	_, err := s.LogRun(ctx, ticket.LogRunRequest{Session: "s1", Ticket: 9, Actor: "qa-lead", CostUSD: 1})
+	wantErr(t, err, ticket.ErrNotFound)
+	for _, req := range []ticket.LogRunRequest{
+		{Session: "", Actor: "qa-lead"},
+		{Session: "a\nb", Actor: "qa-lead"},
+		{Session: "s1", Actor: " "},
+		{Session: "s1", Actor: "qa-lead", CostUSD: -1},
+		{Session: "s1", Actor: "qa-lead", OutputTokens: -1},
+	} {
+		_, err := s.LogRun(ctx, req)
+		wantErr(t, err, ticket.ErrInvalid)
+	}
+	if runs, _ := s.Runs(ctx, ticket.RunFilter{}); len(runs) != 0 {
+		t.Fatalf("a refused log wrote %+v", runs)
+	}
+}
+
+func TestRunsCarryTheTicketsOrigin(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	planned := mustCreate(t, s, "planned", "engineer", 1)
+	found, err := s.Create(ctx, ticket.CreateRequest{Title: "found", Role: "engineer", Actor: "reviewer", Goal: "speed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	split, err := s.Create(ctx, ticket.CreateRequest{Title: "rewrite", Role: "engineer", Actor: "planner", SplitFrom: found.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := clk.Now()
+	for i, id := range []ticket.ID{planned.ID, found.ID, split.ID} {
+		if _, err := s.LogRun(ctx, ticket.LogRunRequest{Session: string(rune('a' + i)), Ticket: id, Actor: "senior-engineer", CostUSD: 1}); err != nil {
+			t.Fatal(err)
+		}
+		clk.Advance(time.Hour)
+	}
+	runs, err := s.Runs(ctx, ticket.RunFilter{})
+	if err != nil || len(runs) != 3 {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	if runs[0].Origin != "cos" || runs[1].Origin != "reviewer" || runs[1].Goal != "speed" || runs[2].Origin != "split" || runs[2].Goal != "speed" {
+		t.Fatalf("origins and goals: %+v", runs)
+	}
+	if one, _ := s.Runs(ctx, ticket.RunFilter{Ticket: found.ID}); len(one) != 1 || one[0].Session != "b" {
+		t.Fatalf("by ticket: %+v", one)
+	}
+	if late, _ := s.Runs(ctx, ticket.RunFilter{Since: start.Add(90 * time.Minute)}); len(late) != 1 || late[0].Session != "c" {
+		t.Fatalf("since: %+v", late)
+	}
+}
