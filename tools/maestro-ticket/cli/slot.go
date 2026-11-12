@@ -54,6 +54,10 @@ func runSlot(ctx context.Context, c *call) error {
 	if *wait < 0 {
 		return usagef("slot: --wait %s: want 0 or more", *wait)
 	}
+	min, err := c.minFree()
+	if err != nil {
+		return err
+	}
 	path, _, err := c.storePath()
 	if err != nil {
 		return err
@@ -75,7 +79,7 @@ func runSlot(ctx context.Context, c *call) error {
 	}
 	defer lock.Close()
 	// Checked once the slot is free, since the wait can be long.
-	if err := c.headroom(path); err != nil {
+	if err := c.headroom(path, min); err != nil {
 		return err
 	}
 	// The command gets a temp folder of its own, removed when it ends, pass
@@ -87,7 +91,7 @@ func runSlot(ctx context.Context, c *call) error {
 		if errors.Is(err, syscall.ENOSPC) {
 			return fmt.Errorf("%w: slot: %v", ticket.ErrLowDisk, err)
 		}
-		return err
+		return fmt.Errorf("%w: slot: make the command's temp folder in %s (set TMPDIR to a writable folder): %v", ticket.ErrInvalid, c.tempDir(), err)
 	}
 	defer removeTemp(tmp, c.env.Stderr)
 
@@ -167,19 +171,24 @@ func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration
 }
 
 // removeTemp removes the command's temp folder. A tree left read-only, such
-// as a Go module cache, is made writable first. A failure is reported, not
-// returned: the command's own exit is the answer.
+// as a Go module cache, is made writable first, and a process the command
+// left behind may still be writing there, so it tries a few times. A
+// failure is reported, not returned: the command's own exit is the answer.
 func removeTemp(dir string, w io.Writer) {
-	if os.RemoveAll(dir) == nil {
-		return
-	}
-	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() {
-			os.Chmod(p, 0o700)
+	var err error
+	for try := range 3 {
+		if try > 0 {
+			time.Sleep(time.Duration(try) * 200 * time.Millisecond)
+			filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && d.IsDir() {
+					os.Chmod(p, 0o700)
+				}
+				return nil
+			})
 		}
-		return nil
-	})
-	if err := os.RemoveAll(dir); err != nil {
-		fmt.Fprintf(w, "maestro-ticket: slot: remove the command's temp folder: %v\n", err)
+		if err = os.RemoveAll(dir); err == nil {
+			return
+		}
 	}
+	fmt.Fprintf(w, "maestro-ticket: slot: remove the command's temp folder: %v\n", err)
 }

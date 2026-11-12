@@ -1432,7 +1432,7 @@ func TestClaimRefusesOnLowDisk(t *testing.T) {
 		t.Fatalf("code %q; want low_disk", code)
 	}
 	code, _, errs := h.run("", "claim", "T-1", "--holder", "reviewer/a")
-	if code != 4 || !strings.Contains(errs, h.dir+" has 2.0% of its space free, under the 10% margin") || !strings.Contains(errs, "MAESTRO_TICKET_MIN_FREE") {
+	if code != 4 || !strings.Contains(errs, h.dir+" has 2.0% of its space free (0 MiB), under the 10% margin") || !strings.HasPrefix(errs, "maestro-ticket: refused: low disk") || !strings.Contains(errs, "MAESTRO_TICKET_MIN_FREE") {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
 	var got ticket.Ticket

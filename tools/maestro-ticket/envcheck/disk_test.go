@@ -10,7 +10,12 @@ import (
 )
 
 func TestHeadroom(t *testing.T) {
-	by := map[string]Free{"/ok": {50, 50}, "/inodes": {3, 80}, "/space": {80, 3}, "/btrfs": {-1, 50}}
+	small := func(inodes, space float64) Free { return Free{inodes, space, 1000, 1 << 20} }
+	by := map[string]Free{
+		"/ok": small(50, 50), "/inodes": small(3, 80), "/space": small(80, 3), "/btrfs": small(-1, 50),
+		// Under the margin, but over the floor: a big disk with room to spare.
+		"/big": {Inodes: 5, Space: 5, InodesLeft: FloorInodes, BytesLeft: FloorBytes},
+	}
 	free := func(d string) (Free, bool, error) {
 		switch d {
 		case "/gone":
@@ -25,9 +30,9 @@ func TestHeadroom(t *testing.T) {
 		min  int
 		want string // "" for no error, else a word the message holds
 	}{
-		{[]string{"/ok", "/btrfs", "/gone", "/unknown"}, 10, ""},
-		{[]string{"/ok", "/inodes"}, 10, "/inodes has 3.0% of its inodes free, under the 10% margin"},
-		{[]string{"/space"}, 10, "/space has 3.0% of its space free"},
+		{[]string{"/ok", "/btrfs", "/gone", "/unknown", "/big"}, 10, ""},
+		{[]string{"/ok", "/inodes"}, 10, "/inodes has 3.0% of its inodes free (1000), under the 10% margin"},
+		{[]string{"/space"}, 10, "/space has 3.0% of its space free (1 MiB)"},
 		{[]string{"/inodes", "/space"}, 0, ""}, // 0 turns it off
 		{[]string{"/ok"}, 51, "inodes"},
 	} {
@@ -65,7 +70,7 @@ func TestDiskFreeReadsARealFilesystem(t *testing.T) {
 		}
 		t.Skip("not measured on " + runtime.GOOS)
 	}
-	if f.Space <= 0 || f.Space > 100 || f.Inodes > 100 || (f.Inodes < 0 && f.Inodes != -1) {
-		t.Fatalf("free %+v: want shares in (0, 100], inodes -1 when unknown", f)
+	if f.Space < 0 || f.Space > 100 || f.Inodes > 100 || (f.Inodes < 0 && f.Inodes != -1) {
+		t.Fatalf("free %+v: want shares in [0, 100], inodes -1 when unknown", f)
 	}
 }

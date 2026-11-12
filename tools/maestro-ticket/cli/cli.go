@@ -122,8 +122,9 @@ Kill switch: while a file named STOP sits next to the store, claim refuses
 (stopped, exit 4).
 Low disk: claim and slot refuse (low_disk, exit 4) while the store's, the
 temp dir's or the working directory's filesystem has under 10% of its
-inodes or space free ($MAESTRO_TICKET_MIN_FREE sets the percent; 0 is off).
-A store write that runs out of disk fails with low_disk too.
+inodes free and under 1Mi, or under 10% of its space and under 10 GiB
+($MAESTRO_TICKET_MIN_FREE sets the percent; 0 is off). A store write that
+runs out of disk fails with low_disk too.
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
@@ -183,6 +184,11 @@ type call struct {
 	actor     string
 	idemKey   string
 	args      []string // positional arguments
+	store     struct { // storePath's answer, so git runs once a call
+		done         bool
+		path, source string
+		err          error
+	}
 }
 
 // usageError marks errors caused by bad command-line input.
@@ -367,6 +373,14 @@ func (c *call) out(v any, human func(w io.Writer)) error {
 // Maestro's own copy in .maestro/src (a second, empty store); pass --store
 // there.
 func (c *call) storePath() (path, source string, err error) {
+	if !c.store.done {
+		c.store.path, c.store.source, c.store.err = c.resolveStore()
+		c.store.done = true
+	}
+	return c.store.path, c.store.source, c.store.err
+}
+
+func (c *call) resolveStore() (path, source string, err error) {
 	abs := func(p string) string {
 		if filepath.IsAbs(p) {
 			return p
@@ -427,22 +441,24 @@ func (c *call) tempDir() string {
 	return os.TempDir()
 }
 
+// minFree reads the free-disk margin. Callers read it before any wait, so
+// a bad value fails at once.
+func (c *call) minFree() (int, error) {
+	return envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
+}
+
 // headroom refuses, with ErrLowDisk, while the store's, the temp dir's or
-// the working directory's filesystem has less than the MinFreeEnv margin
-// of its inodes or space free. Work started there would die mid-run with
+// the working directory's filesystem is under the min margin, as
+// envcheck.Headroom counts it. Work started there would die mid-run with
 // "no space left on device", and the store's own writes with it.
-func (c *call) headroom(store string) error {
-	min, err := envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
-	if err != nil {
-		return err
-	}
+func (c *call) headroom(store string, min int) error {
 	free := envcheck.DiskFree
 	if c.env.DiskFree != nil {
 		free = c.env.DiskFree
 	}
-	err = envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
+	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
 	if err != nil {
-		return fmt.Errorf("%w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
+		return fmt.Errorf("refused: %w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
 	}
 	return nil
 }
@@ -838,13 +854,8 @@ func runClaim(ctx context.Context, c *call) error {
 	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length")
 	keepPID := c.fs.Int("keepalive", 0, "start a background keepalive for this claim, alive while this process id lives")
 	return c.withStore(ctx, func(s ticket.Store) error {
-		// A claim taken on a full disk is one its run can't finish, and
-		// may not be able to release.
-		path, _, err := c.storePath()
+		min, err := c.minFree()
 		if err != nil {
-			return err
-		}
-		if err := c.headroom(path); err != nil {
 			return err
 		}
 		if *keepPID != 0 {
@@ -864,6 +875,15 @@ func runClaim(ctx context.Context, c *call) error {
 			req.ID = id
 		}
 		if req.Statuses, err = ticket.ParseStatuses(*status); err != nil {
+			return err
+		}
+		// A claim taken on a full disk is one its run can't finish, and
+		// may not be able to release.
+		path, _, err := c.storePath()
+		if err != nil {
+			return err
+		}
+		if err := c.headroom(path, min); err != nil {
 			return err
 		}
 		t, err := s.ClaimNext(ctx, req)

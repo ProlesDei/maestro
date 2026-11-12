@@ -319,4 +319,19 @@ func TestSlotRefusesOnLowDisk(t *testing.T) {
 	if code := slotFails(h, 4, "--", "true"); code != "low_disk" {
 		t.Fatalf("code %q; want low_disk", code)
 	}
+	// A bad margin fails before slot waits for a slot, not after.
+	h.env[envcheck.MinFreeEnv] = "10%"
+	if code := slotFails(h, 2, "--", "true"); code != "invalid" {
+		t.Fatalf("bad margin: code %q; want invalid", code)
+	}
+}
+
+// A temp dir slot can't write in is the caller's to fix, and says so.
+func TestSlotRefusesUnwritableTempDir(t *testing.T) {
+	h := newHarness(t)
+	h.env["TMPDIR"] = filepath.Join(h.dir, "gone")
+	code, _, errs := h.run("", "slot", "--", "true")
+	if code != 2 || !strings.Contains(errs, "set TMPDIR to a writable folder") {
+		t.Fatalf("exit %d: %s; want 2, set TMPDIR", code, errs)
+	}
 }

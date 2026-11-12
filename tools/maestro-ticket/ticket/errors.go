@@ -21,7 +21,7 @@ var (
 	ErrStopped             = errors.New("refused: the kill switch is on")
 	ErrBusy                = errors.New("store busy")
 	ErrNoSlot              = errors.New("no free slot")
-	ErrLowDisk             = errors.New("refused: low disk")
+	ErrLowDisk             = errors.New("low disk")
 	ErrStoreTooNew         = errors.New("store is newer than this maestro-ticket")
 )
 

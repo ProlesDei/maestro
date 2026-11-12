@@ -9,17 +9,27 @@ import (
 
 // MinFreeEnv names the variable that sets the free-disk margin, a whole
 // percent from 0 to 99: claim and slot refuse to start while a filesystem
-// they use has less than that share of its inodes or its space free. 0
-// turns the check off.
+// they use has less than that share of its inodes or its space free, and
+// less than the floor below. 0 turns the check off.
 const MinFreeEnv = "MAESTRO_TICKET_MIN_FREE"
 
 // DefaultMinFree is the margin when MinFreeEnv is unset.
 const DefaultMinFree = 10
 
-// Free is the share of a filesystem's inodes and space still free, in
-// percent. Inodes is -1 on a filesystem with no fixed inode count, such as
-// btrfs.
-type Free struct{ Inodes, Space float64 }
+// A filesystem under the margin still passes while it has this much free:
+// on a big disk, 9% can be hundreds of gigabytes and millions of inodes.
+const (
+	FloorInodes = 1 << 20 // about 40 pytest runs' worth of files
+	FloorBytes  = 10 << 30
+)
+
+// Free is what a filesystem has free: Inodes and Space as a percent of its
+// total, InodesLeft and BytesLeft as counts. Inodes is -1 on a filesystem
+// with no fixed inode count, such as btrfs.
+type Free struct {
+	Inodes, Space         float64
+	InodesLeft, BytesLeft uint64
+}
 
 // DiskFree reads the free shares of dir's filesystem. ok is false where
 // the platform can't tell.
@@ -38,9 +48,10 @@ func ParseMinFree(s string) (int, error) {
 }
 
 // Headroom returns an ErrLowDisk error naming the first of dirs whose
-// filesystem has less than minPct of its inodes or space free. A dir it
-// can't measure is skipped: a missing or unreadable one fails later with
-// its own error, and a run is never stopped for want of a number.
+// filesystem is under minPct and under the floor, for its inodes or its
+// space. A dir it can't measure is skipped: a missing or unreadable one
+// fails later with its own error, and a run is never stopped for want of
+// a number.
 func Headroom(dirs []string, minPct int, free func(string) (Free, bool, error)) error {
 	if minPct <= 0 {
 		return nil
@@ -51,10 +62,10 @@ func Headroom(dirs []string, minPct int, free func(string) (Free, bool, error)) 
 			continue
 		}
 		switch m := float64(minPct); {
-		case f.Inodes >= 0 && f.Inodes < m:
-			return fmt.Errorf("%w: %s has %.1f%% of its inodes free, under the %d%% margin", ticket.ErrLowDisk, d, f.Inodes, minPct)
-		case f.Space < m:
-			return fmt.Errorf("%w: %s has %.1f%% of its space free, under the %d%% margin", ticket.ErrLowDisk, d, f.Space, minPct)
+		case f.Inodes >= 0 && f.Inodes < m && f.InodesLeft < FloorInodes:
+			return fmt.Errorf("%w: %s has %.1f%% of its inodes free (%d), under the %d%% margin", ticket.ErrLowDisk, d, f.Inodes, f.InodesLeft, minPct)
+		case f.Space < m && f.BytesLeft < FloorBytes:
+			return fmt.Errorf("%w: %s has %.1f%% of its space free (%d MiB), under the %d%% margin", ticket.ErrLowDisk, d, f.Space, f.BytesLeft>>20, minPct)
 		}
 	}
 	return nil
