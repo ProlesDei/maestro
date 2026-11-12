@@ -20,6 +20,7 @@ var (
 	ErrHasDependents       = errors.New("open tickets depend on it")
 	ErrStopped             = errors.New("refused: the kill switch is on")
 	ErrBusy                = errors.New("store busy")
+	ErrNoSlot              = errors.New("no free slot")
 	ErrStoreTooNew         = errors.New("store is newer than this maestro-ticket")
 )
 
@@ -53,6 +54,7 @@ var errorKinds = []struct {
 	{ErrHasDependents, "has_dependents", ExitConflict},
 	{ErrStopped, "stopped", ExitConflict},
 	{ErrBusy, "busy", ExitConflict},
+	{ErrNoSlot, "no_slot", ExitConflict},
 	{ErrStoreTooNew, "store_too_new", ExitUsage},
 }
 

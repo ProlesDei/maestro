@@ -15,14 +15,14 @@ Follow the **maestro-working-principles** skill.
    - a title: a verb and an object, under 70 characters, never "Improve X";
    - a body: the goal in one or two sentences, numbered acceptance criteria, the paths to start from and the closest code to copy, what must not change, and for each dep the code this ticket needs from it.
 
-   A criterion is something a command or the running app can show, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it.
+   A criterion is something a command or the running app can show, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it. Read the code each criterion touches on the main branch: rewrite one the code already contradicts, or that pulls against another, since the engineer would stop and ask.
 2. **Look around.** Run `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,areas}'` and compare titles and areas. If one is close, show it and ask whether to go on. Check each path you named exists.
 3. **Ask once.** In one message, ask only for the fields you can't infer, each with your pick so the user can say "yes":
 
    | Field | Values | Default |
    |---|---|---|
    | deps | ticket ids that must be `done` first; check each with `maestro-ticket get` | none |
-   | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
+   | areas | repo-relative paths the change touches, as narrow as you can, with the tests the criteria need. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
    | parked | why a `backlog` ticket waits: `hold` (someone said wait), `deferred` (cut from this slice) or `unready` (a criterion can't be checked yet) | `unready` |

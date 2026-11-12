@@ -35,7 +35,7 @@ If no row fits, say what you can do and stop.
 ## Phase B: Check a plan
 
 1. Read the plan, the code each ticket names, and the open board as Phase C step 1 reads it.
-2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order or a test fixture; a format, schema or fixture several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; a path that doesn't exist; a ticket the board already has.
+2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order or a test fixture; a format, schema or fixture several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; two criteria that pull against each other or against the code on the main branch; areas that leave out a file or test the criteria need; a path that doesn't exist; a ticket the board already has.
 3. Give each finding as ticket, problem, evidence (a path or command) and fix. With none, say "no findings".
 
 ## Phase C: Read the board
