@@ -54,18 +54,23 @@ sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 nskills=$(echo "$skills" | wc -l)
 
-# A stand-in maestro-ticket: logs where doctor ran, fails when STUB_FAIL is
-# set, and otherwise makes the store as doctor does.
+# A stand-in maestro-ticket: prints a help that lists log-run, unless
+# STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
+# is set, and otherwise makes the store as doctor does.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
-printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$STUB_LOG"' \
+printf '%s\n' '#!/usr/bin/env bash' \
+	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || printf "Commands:\n  log-run     [--ticket ID]\n"; exit 0; }' \
+	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 # check wants what the bots' runs need; stand-ins, so the test passes on a
 # machine without them.
 for t in claude gh jq; do printf '#!/bin/sh\n' >"$tmp/bin/$t" && chmod +x "$tmp/bin/$t"; done
-export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log"
+# Claude Code's settings, where check looks for code graph hooks: not the
+# user's own.
+export PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/doctor.log" CLAUDE_CONFIG_DIR=$tmp/claude-config
 : >"$STUB_LOG"
 
 run() { bash "$m/scripts/install.sh" "$@" >"$tmp/out" 2>&1; }
@@ -98,7 +103,8 @@ hide() {
 	done
 	echo "$out"
 }
-# repo <path> <choices...>: a new repo with one commit and these choices.
+# repo <path> <choices...>: a new repo with one commit and these choices,
+# and code-graph: none unless they give one.
 repo() {
 	local r=$1
 	shift
@@ -106,6 +112,7 @@ repo() {
 	git -C "$r" commit -q --allow-empty -m init
 	mkdir -p "$r/.maestro/project"
 	printf '%s\n' "maestro-sha: $sha" "$@" >"$r/.maestro/project/install.yaml"
+	[[ " $* " == *" code-graph: "* ]] || echo "code-graph: none" >>"$r/.maestro/project/install.yaml"
 }
 # installed <repo> <harness dir>...: every skill is there, as Maestro has it.
 installed() {
@@ -138,7 +145,8 @@ before=$(snap "$r")
 ok apply "$r"
 [ "$before" = "$(snap "$r")" ] || fail "a second apply changed the repo"
 
-# check changes nothing, the store included: it never runs maestro-ticket.
+# check changes nothing, the store included: it runs no maestro-ticket
+# command but help.
 before=$(snap "$r")
 : >"$STUB_LOG"
 ok check "$r"
@@ -156,6 +164,8 @@ echo garbage >"$r/.git/maestro/tickets.db"
 refuses "unreadable or isn't a SQLite file" "$r" check "$r"
 cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
 for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
+# A maestro-ticket built before log-run would eat every bot's reply.
+STUB_OLD=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no log-run" "$r" check "$r"
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
 says "problem: git user.email isn't set"
 # A name of spaces commits nothing; an identity from the environment does.
@@ -164,6 +174,24 @@ GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" chec
 git -C "$r" config --unset user.name
 GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=b GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=b GIT_COMMITTER_EMAIL=b@b ok check "$r"
 GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=' ' GIT_AUTHOR_EMAIL=b@b GIT_COMMITTER_NAME=' ' GIT_COMMITTER_EMAIL=b@b refuses "problem: git user.name isn't set" "$r" check "$r"
+# The code graph: mcp wants the server in .mcp.json and its binary on PATH;
+# none warns on a server left there; its hooks warn either way.
+sed -i 's/^code-graph: .*/code-graph: mcp/' "$r/.maestro/project/install.yaml"
+refuses "problem: code-graph is mcp, but .mcp.json registers no codebase-memory-mcp server" "$r" check "$r"
+PATH=$(hide codebase-memory-mcp) refuses "problem: codebase-memory-mcp isn't on PATH" "$r" check "$r"
+printf '{\n  "mcpServers": {\n    "codebase-memory-mcp": {"command": "codebase-memory-mcp", "args": []}\n  }\n}\n' >"$r/.mcp.json"
+printf '#!/bin/sh\n' >"$tmp/bin/codebase-memory-mcp" && chmod +x "$tmp/bin/codebase-memory-mcp"
+ok check "$r"
+grep -q codebase-memory "$tmp/out" && fail "check named the code graph when all was well"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+printf '{"hooks": {"PreToolUse": [{"matcher": "Grep|Glob", "hooks": [{"type": "command", "command": "~/.claude/hooks/cbm-code-discovery-gate"}]}]}}\n' >"$CLAUDE_CONFIG_DIR/settings.json"
+ok check "$r"
+says "warn: $CLAUDE_CONFIG_DIR/settings.json runs codebase-memory-mcp hooks"
+rm "$CLAUDE_CONFIG_DIR/settings.json"
+sed -i 's/^code-graph: .*/code-graph: none/' "$r/.maestro/project/install.yaml"
+ok check "$r"
+says "warn: code-graph is none, but .mcp.json registers codebase-memory-mcp"
+rm "$r/.mcp.json" "$tmp/bin/codebase-memory-mcp"
 # Review and prune need git merge-tree --write-tree, from git 2.38.
 # uninstall doesn't, so a team on an older git can still remove Maestro.
 mkdir "$tmp/oldgit"
@@ -525,18 +553,21 @@ while IFS='|' read -r bad msg; do
 	echo "$bad" >>"$r4/.maestro/project/install.yaml"
 	refuses "$msg" "$r4" apply "$r4"
 done <<'EOF'
-colour: blue|install.yaml:4: unknown key colour
-nonsense|install.yaml:4: want key: value
-skills-home: hidden|install.yaml:4: skills-home twice
-skip: maestro-recall|install.yaml:4: skip: is gone: every skill installs
+colour: blue|install.yaml:5: unknown key colour
+nonsense|install.yaml:5: want key: value
+skills-home: hidden|install.yaml:5: skills-home twice
+code-graph: mcp|install.yaml:5: code-graph twice
+skip: maestro-recall|install.yaml:5: skip: is gone: every skill installs
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
-tickets: our-tickets|install.yaml:4: tickets: Maestro's bots run only on maestro-ticket
+tickets: our-tickets|install.yaml:5: tickets: Maestro's bots run only on maestro-ticket
 EOF
-for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden"; do
+for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden" "code-graph: yes|code-graph wants mcp or none"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
+grep -v '^code-graph:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
+for c in apply check; do refuses "code-graph wants mcp or none; INSTALL.md step 4" "$r4" $c "$r4"; done
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
 refuses "no skill maestro-nope in" "$r4" apply --replace maestro-nope "$r4"
 sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r4/.maestro/project/install.yaml"
@@ -637,7 +668,7 @@ git clone -q --bare "$r2" "$r11/.git"
 git -C "$r11/.git" worktree add -q "$r11/main" main
 git -C "$r11/.git" worktree add -q -b feat "$r11/feat"
 mkdir -p "$r11/main/.maestro/project" "$r11/main/.maestro/src"
-printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r11/main/.maestro/project/install.yaml"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" >"$r11/main/.maestro/project/install.yaml"
 ok apply "$r11/main"
 installed "$r11/main" .claude
 refuses "Maestro is installed in $r11/main" "$r11/feat" apply "$r11/feat"
@@ -648,7 +679,7 @@ r15=$tmp/bare2
 git clone -q --bare "$r2" "$r15/.bare"
 git -C "$r15/.bare" worktree add -q "$r15/main" main
 mkdir -p "$r15/main/.maestro/project"
-printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" >"$r15/main/.maestro/project/install.yaml"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" >"$r15/main/.maestro/project/install.yaml"
 git config --global safe.bareRepository explicit
 ok apply "$r15/main"
 installed "$r15/main" .claude
