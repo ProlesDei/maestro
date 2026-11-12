@@ -42,7 +42,12 @@ Open a todo list with one item per phase below.
 | 0 | Only docs or inert config (`LICENSE`, `.gitignore`, `.editorconfig`, formatter config), or one file with at most 50 changed lines (`git diff --numstat`) | 1, and 6 if it changes code; check a docs change hides no code change | Short, inline |
 | 1 | Anything else | 1, 2, 5 and 6; 7 and 8 when it touches a hot path or a public interface | Short, inline |
 
-2. **Mode.** Incremental when review's own latest verdict, a `Review:` comment or a `Kickback:` that isn't a `Kickback: QA fail`, names a sha `K` after its first `at` (use it only if it is 40 hex characters) and `git merge-base --is-ancestor K $H` passes; else full. QA reads no diff, so its kickback is never a base. With no ticket, a verdict is a PR comment whose `assoc` Phase B step 4 trusts. The delta is the author's own change since `K`, with main's merges taken out: `T=$(git merge-tree --write-tree K $B)` (print it), then `git diff $T $H > $C/delta.patch`; if that merge conflicts, the delta is the files in both `git diff --name-only K $H` and `git diff --name-only $B $H`. Go full only if the delta passes 400 changed lines or 15 files: the work was redone, not fixed. Incremental reviews the delta and nothing else, since the last review already read the rest: mark each earlier finding `fixed`, `still present` or `obsolete`; run passes 1 and 6 on the delta, plus 2 and 9 when the PR is tier 2, plus any of 3, 4, 7 and 8 the delta's own code calls for that the last review didn't run, each reading the whole files the delta touches; never run a pass again on lines unchanged since `K`. Carry each criterion on the last verdict's `Verified:` line whose code and test the delta doesn't touch, citing that comment; verify the rest. At tier 2 the skeptic checks the delta's findings, in a fresh session only when the delta passes 150 changed lines. The gates always run in full: the tree changed.
+2. **Mode.** Incremental when review's own latest verdict, a `Review:` comment or a `Kickback:` that isn't a `Kickback: QA fail`, names a sha `K` after its first `at` (use it only if it is 40 hex characters) and `git merge-base --is-ancestor K $H` passes; else full. QA reads no diff, so its kickback is never a base. With no ticket, a verdict is a PR comment whose `assoc` Phase B step 4 trusts. An incremental review reads only what changed since `K`, since the last review read the rest:
+   - **Delta.** The author's own change since `K`, with main's merges taken out: `T=$(git merge-tree --write-tree K $B)` (print it), then `git diff $T $H > $C/delta.patch`. If that merge conflicts (exit 1), use `git diff $B $H -- <each file in both git diff --name-only K $H and git diff --name-only $B $H>` instead.
+   - **Full instead** when the delta passes 400 changed lines or 15 files: the work was redone, not fixed.
+   - **Passes.** Mark each earlier finding `fixed`, `still present` or `obsolete`. Run the tier's passes on the delta, each reading the whole files it touches; never run a pass again on lines unchanged since `K`. When the delta raises the tier or reaches a tier-2 area the last review didn't, run each pass the last review didn't run on the whole diff too: it never read those lines, so that repeats nothing. At tier 2 the skeptic checks the delta's findings, in a fresh session only when the delta passes 150 changed lines.
+   - **Criteria.** Carry a criterion from the last verdict's `Verified:` line only when the delta touches neither its code and test nor anything they call (from Phase B step 3), citing that comment; verify the rest.
+   - The gates always run in full: the tree changed.
 3. Write `$C/context.md`: tier and the rule that matched, mode, `B`, `H`, `K`, `T`, the `--stat`, the criteria word for word, `areas`, and on a re-review the earlier findings and the criteria carried. Every pass and subagent reads it and `diff.patch` (on an incremental review, `delta.patch`) and works none of it out again.
 
 ## Phase D: Run the passes
@@ -59,7 +64,7 @@ Open a todo list with one item per phase below.
 
 ## Phase F: Decide
 
-**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence, or waived as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved, bar the QA items Phase B leaves to QA; you would ship it to production yourself.
+**GO** only if all hold: no surviving blocker or major; every criterion (or claimed behaviour) verified with code, test and evidence, carried as Phase C step 2 says, or waived as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved, bar the QA items Phase B leaves to QA; you would ship it to production yourself.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs the owner's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
@@ -76,7 +81,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    ```bash
    maestro-ticket comment <id> --body-file - --holder <holder> --token <token> --idempotency-key review-go-<id>-$H-$S <<'END_<8 random letters>'
    Review: GO at <H> (PR <url>), tier <n>, gated on <G>
-   Verified: criteria <numbers, each with its code and test checked at H> | none
+   Verified: criteria <numbers checked at H>; carried <numbers> from <comment id> | none
    For QA: <what the diff puts most at risk in the running app, one line each> | none
    END_<the same 8 letters>
    ```
@@ -84,7 +89,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    ```bash
    maestro-ticket comment <id> --body-file - --holder <holder> --token <token> --idempotency-key kickback-<id>-$H-$S <<'END_<8 random letters>'
    Kickback: <n> blockers, <n> majors at <H>
-   Verified: criteria <numbers checked and passing at H> | none
+   Verified: criteria <numbers checked and passing at H>; carried <numbers> from <comment id> | none
    - F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...
    END_<the same 8 letters>
    maestro-ticket transition <id> --to in_progress --from in_review --holder <holder> --token <token> --release \
