@@ -72,6 +72,10 @@ Schema v6 adds `parked` and `goal`. An open backlog ticket, or one blocked from 
 
 **Listing.** `list` and `claim --next` order tickets by priority (0 first), then by id as a number (`T-2` before `T-10`), so the first match is the most urgent and the oldest. `list --latest-prefix P` keeps only tickets whose latest comment starts with `P` (for example `Kickback:`); `--not-latest-prefix P` keeps tickets with no comments or whose latest comment doesn't start with `P`. Both match case-sensitively, combine with each other and the other filters, and `--limit` counts after them. `list --ready` keeps only the tickets `claim --next` could take now: no live claim and, in `todo` or `in_progress`, every dep `done` and no area overlapping a live claim's; with no `--status`, only `todo`, as `claim --next`. A planner hands these out by id without starting a run the claim would refuse.
 
+## Slots
+
+`slot [--name checks] [--max 4] [--wait D] -- <command> [args]` runs the command once one of `--max` slots named `--name` is free, so one machine runs at most that many at once, whichever session or worktree starts them. Hundreds of sessions running a heavy check side by side make it slow and flaky under load; wrap that check in `slot` under `## Checks` in `project-setup.md`, such as `maestro-ticket slot --max 4 -- make test`. A slot is a file lock in `slots/` next to the store; the kernel frees it when `slot` exits, however it exits, so a killed run never holds one (a command that outlives a killed `slot` no longer counts). While every slot is busy it prints one line to stderr and waits, with no limit unless `--wait` gives one; past it, exit 4 `no_slot`. Otherwise it exits with the command's code (128 plus the signal for one a signal ended), and passes SIGINT and SIGTERM on as SIGTERM. Every flag goes before `--`; after it, each word is the command's. Unix only.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -80,7 +84,7 @@ Schema v6 adds `parked` and `goal`. An open backlog ticket, or one blocked from 
 | 1 | internal error, or `doctor` found a problem |
 | 2 | usage or invalid request, including a disallowed transition (`invalid_transition`), a gate (`forbidden`) or a store made by a newer `maestro-ticket` (`store_too_new`) |
 | 3 | not found |
-| 4 | conflict: version, `--from`, claimed by another holder, lease lost, idempotency key reuse, `waiting_on_deps`, `area_busy`, `has_dependents`, `stopped` (the kill switch), `busy` (the store stayed locked; try again later) |
+| 4 | conflict: version, `--from`, claimed by another holder, lease lost, idempotency key reuse, `waiting_on_deps`, `area_busy`, `has_dependents`, `stopped` (the kill switch), `busy` (the store stayed locked; try again later), `no_slot` (`slot --wait` ran out) |
 | 5 | `claim --next` found no work |
 
 Plain `get` sets the ticket body and each comment four spaces in, so a line at the left margin is always the tool's and text can't pass for a later comment: every kind of line break starts an indented line, and any other control character but a tab prints as U+FFFD. Read `--json` for the text as written. With `--json`, errors print `{"error":{"code":"...","message":"..."}}` on stdout.

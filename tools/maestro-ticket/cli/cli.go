@@ -86,6 +86,9 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
+              (runs the command once one of --max slots is free, so a machine runs at
+              most that many at once; exits with the command's code)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -154,6 +157,7 @@ var commands = []command{
 	{"export", runExport},
 	{"render", runRender},
 	{"doctor", runDoctor},
+	{"slot", runSlot},
 }
 
 // call is one parsed invocation.
