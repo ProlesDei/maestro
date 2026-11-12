@@ -19,6 +19,7 @@ func sample() []ticket.Ticket {
 			Claim: &ticket.Claim{Holder: "sse/s1", ExpiresAt: exp}},
 		{ID: 3, Title: "Stale", Status: ticket.StatusInProgress, Priority: 2, Version: 2,
 			Claim: &ticket.Claim{Holder: "jse/s9", ExpiresAt: exp, Expired: true}},
+		{ID: 4, Title: "Later", Status: ticket.StatusBacklog, Parked: ticket.ParkedHold, Priority: 2, Version: 1},
 	}
 }
 
@@ -33,6 +34,8 @@ func TestBacklog(t *testing.T) {
 		"| T-1 | P1 | Pipe \\| and newline | engineer |  | 1 |",
 		"sse/s1 until 2026-10-28 10:00Z",
 		"jse/s9 (expired)",
+		"| ID | P | Title | Parked | Role | Claim | Version |",
+		"| T-4 | P2 | Later | hold |  |  | 1 |",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

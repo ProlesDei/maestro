@@ -148,6 +148,94 @@ func ParseStatuses(s string) ([]Status, error) {
 	return out, nil
 }
 
+// Parked says why a backlog ticket waits. Every backlog ticket has one, so
+// no one reads a ticket that waits on a plan or a later slice as one held
+// on purpose. A ticket that waits on another ticket is not parked: it goes
+// in todo with a dep, and the store holds it there until the dep is done.
+type Parked string
+
+const (
+	// ParkedHold: someone said wait. A Hold: comment names who, why and
+	// what lifts it.
+	ParkedHold Parked = "hold"
+	// ParkedDeferred: ready, but cut from the current slice of the goal.
+	ParkedDeferred Parked = "deferred"
+	// ParkedUnready: a criterion no command or app can check yet; split or
+	// rewrite it before it goes to todo.
+	ParkedUnready Parked = "unready"
+	// ParkedPlanning: a planner session took it off the queue to split it.
+	ParkedPlanning Parked = "planning"
+)
+
+// ParkedReasons lists every reason a ticket may be parked.
+var ParkedReasons = []Parked{ParkedHold, ParkedDeferred, ParkedUnready, ParkedPlanning}
+
+// Valid reports whether p is a known reason.
+func (p Parked) Valid() bool {
+	for _, x := range ParkedReasons {
+		if p == x {
+			return true
+		}
+	}
+	return false
+}
+
+func parkedNames() string {
+	names := make([]string, len(ParkedReasons))
+	for i, p := range ParkedReasons {
+		names[i] = string(p)
+	}
+	return strings.Join(names, ", ")
+}
+
+// ErrParkedMissing refuses a move into backlog with no reason. It names the
+// mistake that left work idle: parking a ticket that only waits on another.
+func ErrParkedMissing() error {
+	return fmt.Errorf("%w: a backlog ticket needs --parked (%s); one that waits on another ticket goes in todo with --deps",
+		ErrInvalid, parkedNames())
+}
+
+// ParseParked validates a reason, empty allowed.
+func ParseParked(s string) (Parked, error) {
+	p := Parked(strings.TrimSpace(s))
+	if p != "" && !p.Valid() {
+		return "", fmt.Errorf("%w: unknown parked reason %q (want %s)", ErrInvalid, s, parkedNames())
+	}
+	return p, nil
+}
+
+// ParseParkedList parses a comma-separated reason list.
+func ParseParkedList(s string) ([]Parked, error) {
+	var out []Parked
+	for _, part := range SplitList(s) {
+		p, err := ParseParked(part)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// ParkedSlot reports whether a ticket in status, blocked from blockedFrom,
+// keeps a parked reason: it is in backlog, or blocked from there and goes
+// back to it.
+func ParkedSlot(status, blockedFrom Status) bool {
+	return status == StatusBacklog || (status == StatusBlocked && blockedFrom == StatusBacklog)
+}
+
+// goalPattern is a goal's slug: what tickets for one goal share, so the
+// store can count progress per goal.
+var goalPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidateGoal checks a goal slug, empty allowed.
+func ValidateGoal(g string) error {
+	if g != "" && (!goalPattern.MatchString(g) || len(g) > 60) {
+		return fmt.Errorf("%w: goal %q must be a slug of lowercase letters, digits and hyphens, up to 60", ErrInvalid, g)
+	}
+	return nil
+}
+
 // Type is a ticket's shape. Ship tickets deliver changes and go through
 // review. Scout tickets end at an evidenced report.
 type Type string
@@ -287,11 +375,16 @@ type Ticket struct {
 	// overlap are never claimed at the same time.
 	Areas []string `json:"areas"`
 	// BlockedFrom is the status a blocked ticket returns to.
-	BlockedFrom Status    `json:"blocked_from,omitempty"`
-	Version     int64     `json:"version"`
-	Claim       *Claim    `json:"claim"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	BlockedFrom Status `json:"blocked_from,omitempty"`
+	// Parked says why a backlog ticket waits; set only while ParkedSlot
+	// holds.
+	Parked Parked `json:"parked,omitempty"`
+	// Goal is the slug of the goal the ticket serves.
+	Goal      string    `json:"goal,omitempty"`
+	Version   int64     `json:"version"`
+	Claim     *Claim    `json:"claim"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // NextStatuses returns the statuses t may move to.
@@ -425,7 +518,11 @@ type CreateRequest struct {
 	// SplitFrom names the ticket this one splits or rewrites. The new
 	// ticket starts with its tries, so a rewrite can't reset the count
 	// that sends repeated send-backs up.
-	SplitFrom      ID     `json:"split_from,omitempty"`
+	SplitFrom ID `json:"split_from,omitempty"`
+	// Parked is required for a backlog ticket and refused for any other.
+	Parked Parked `json:"parked,omitempty"`
+	// Goal defaults to SplitFrom's goal.
+	Goal           string `json:"goal,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }
@@ -471,6 +568,12 @@ func (r *CreateRequest) Validate() error {
 	if r.Status != StatusBacklog && r.Status != StatusTodo && r.Status != StatusBlocked {
 		return fmt.Errorf("%w: new tickets start as backlog, todo or blocked, not %q", ErrInvalid, r.Status)
 	}
+	if err := checkParked(r.Parked, r.Status == StatusBacklog); err != nil {
+		return err
+	}
+	if err := ValidateGoal(r.Goal); err != nil {
+		return err
+	}
 	r.Actor = actorFor(r.Actor, "")
 	r.Owner = actorFor(r.Owner, r.Actor)
 	if HasControl(r.Owner) {
@@ -478,6 +581,20 @@ func (r *CreateRequest) Validate() error {
 	}
 	if r.Type == TypeScout && r.Owner == "unknown" {
 		return fmt.Errorf("%w: scout tickets need an owner to close them (--owner or --actor)", ErrInvalid)
+	}
+	return nil
+}
+
+// checkParked checks a reason given for a ticket that goes to backlog
+// (backlog) or to any other status.
+func checkParked(p Parked, backlog bool) error {
+	switch {
+	case p != "" && !p.Valid():
+		return fmt.Errorf("%w: unknown parked reason %q (want %s)", ErrInvalid, p, parkedNames())
+	case p != "" && !backlog:
+		return fmt.Errorf("%w: --parked is only for a ticket going to backlog", ErrInvalid)
+	case p == "" && backlog:
+		return ErrParkedMissing()
 	}
 	return nil
 }
@@ -600,6 +717,8 @@ type UpdateRequest struct {
 	AddDeps        []ID      `json:"add_deps,omitempty"`
 	RemoveDeps     []ID      `json:"remove_deps,omitempty"`
 	Areas          *[]string `json:"areas,omitempty"`
+	Parked         Parked    `json:"parked,omitempty"` // a new reason for a parked ticket
+	Goal           *string   `json:"goal,omitempty"`   // when not nil, replaces the goal; "" clears it
 	Holder         string    `json:"holder,omitempty"`
 	Token          int64     `json:"-"`
 	Actor          string    `json:"actor"`
@@ -608,8 +727,16 @@ type UpdateRequest struct {
 
 // Validate checks the request and fills defaults.
 func (r *UpdateRequest) Validate() error {
-	if len(r.AddDeps) == 0 && len(r.RemoveDeps) == 0 && r.Areas == nil {
-		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps or --areas)", ErrInvalid)
+	if len(r.AddDeps) == 0 && len(r.RemoveDeps) == 0 && r.Areas == nil && r.Parked == "" && r.Goal == nil {
+		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked or --goal)", ErrInvalid)
+	}
+	if r.Parked != "" && !r.Parked.Valid() {
+		return fmt.Errorf("%w: unknown parked reason %q (want %s)", ErrInvalid, r.Parked, parkedNames())
+	}
+	if r.Goal != nil {
+		if err := ValidateGoal(*r.Goal); err != nil {
+			return err
+		}
 	}
 	if err := validateIDs(r.AddDeps); err != nil {
 		return err
@@ -651,6 +778,10 @@ type ListFilter struct {
 	// them: no live claim, and in todo or in_progress every dep done and no
 	// area overlapping a live claim's.
 	Ready bool
+	// Parked keeps only tickets parked for one of these reasons.
+	Parked []Parked
+	// Goal keeps only the tickets of this goal.
+	Goal  string
 	Limit int
 }
 
@@ -765,6 +896,7 @@ type TransitionRequest struct {
 	Role           string `json:"role,omitempty"` // reassign, e.g. on escalation
 	ActorRole      string `json:"actor_role,omitempty"`
 	Note           string `json:"note,omitempty"`
+	Parked         Parked `json:"parked,omitempty"` // required to enter backlog, except back from blocked
 	Release        bool   `json:"release,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
@@ -794,6 +926,11 @@ func (r *TransitionRequest) Validate() error {
 	}
 	if err := ValidateRole(r.ActorRole); err != nil {
 		return err
+	}
+	if r.Parked != "" {
+		if err := checkParked(r.Parked, r.To == StatusBacklog); err != nil {
+			return err
+		}
 	}
 	r.Actor = actorFor(r.Actor, r.Holder)
 	return nil

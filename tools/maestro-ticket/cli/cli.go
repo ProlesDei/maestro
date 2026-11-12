@@ -64,11 +64,14 @@ Usage: maestro-ticket <command> [flags]
 Commands:
   create      --title T [--body B | --body-file F|-] [--type ship|scout] [--role R] [--priority 0-3]
               [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
-              [--areas path,path] [--split-from T-1]
-  update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--holder H --token N]
+              [--areas path,path] [--split-from T-1] [--goal G] [--parked R (required for backlog)]
+  update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
+              [--holder H --token N]
   get         <id>
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
-              [--latest-prefix P] [--not-latest-prefix P]   (ordered by priority, then id)
+              [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
+              (ordered by priority, then id)
+  goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
@@ -76,7 +79,7 @@ Commands:
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
-              [--actor-role R]
+              [--actor-role R] [--parked R (required to enter backlog, except back from blocked)]
   comment     <id> (--body B | --body-file F|-) [--holder H --token N]
   events      [--since SEQ] [--limit N] [--ticket ID] [--type T]
   backup      [--dir D] [--keep N]   (default dir: backups/ next to the store)
@@ -120,6 +123,11 @@ or one inside the other) an area of another todo or in_progress ticket under
 a live claim.
 Blocked returns only to the status it was blocked from. Send-backs from
 in_review to in_progress add one to a ship ticket's tries.
+Parked: every backlog ticket says why it waits: hold (someone said wait),
+deferred (cut from the current slice), unready (a criterion can't be
+checked yet) or planning (a planner session is splitting it). A ticket
+that waits on another goes in todo with --deps, never in backlog.
+Goals: --goal tags a ticket with its goal's slug; a split keeps its goal.
 Exit codes: 0 ok, 1 internal, 2 usage/invalid, 3 not found, 4 conflict or busy, 5 no work
 `
 
@@ -133,6 +141,7 @@ var commands = []command{
 	{"update", runUpdate},
 	{"get", runGet},
 	{"list", runList},
+	{"goals", runGoals},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
@@ -490,7 +499,9 @@ func runCreate(ctx context.Context, c *call) error {
 	owner := c.fs.String("owner", "", "who asked for the work (default --actor); closes scout tickets")
 	deps := c.fs.String("deps", "", "comma-separated tickets that must be done first")
 	areas := c.fs.String("areas", "", "comma-separated code areas the ticket touches (repo-relative paths)")
-	splitFrom := c.fs.String("split-from", "", "the ticket this splits or rewrites; the new one keeps its tries")
+	splitFrom := c.fs.String("split-from", "", "the ticket this splits or rewrites; the new one keeps its tries and goal")
+	parked := c.fs.String("parked", "", "why a backlog ticket waits: hold, deferred, unready or planning (required for backlog)")
+	goal := c.fs.String("goal", "", "slug of the goal the ticket serves")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -518,9 +529,14 @@ func runCreate(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
+		pk, err := ticket.ParseParked(*parked)
+		if err != nil {
+			return err
+		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
 			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
-			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from, Actor: c.actor, IdempotencyKey: c.idemKey,
+			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from,
+			Parked: pk, Goal: strings.TrimSpace(*goal), Actor: c.actor, IdempotencyKey: c.idemKey,
 		})
 		if err != nil {
 			return err
@@ -533,6 +549,8 @@ func runUpdate(ctx context.Context, c *call) error {
 	add := c.fs.String("add-deps", "", "comma-separated tickets this one now depends on")
 	remove := c.fs.String("remove-deps", "", "comma-separated dependencies to drop")
 	areas := c.fs.String("areas", "", "replace the code areas (comma-separated; \"\" clears them)")
+	parked := c.fs.String("parked", "", "a new reason for a backlog ticket: hold, deferred, unready or planning")
+	goal := c.fs.String("goal", "", "replace the goal slug (\"\" clears it)")
 	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, required if the ticket is claimed")
 	token := c.fs.Int64("token", 0, "lease token from your claim, required if the ticket is claimed")
 	return c.withStore(ctx, func(s ticket.Store) error {
@@ -541,6 +559,9 @@ func runUpdate(ctx context.Context, c *call) error {
 			return err
 		}
 		req := ticket.UpdateRequest{ID: id, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey}
+		if req.Parked, err = ticket.ParseParked(*parked); err != nil {
+			return err
+		}
 		if req.AddDeps, err = ticket.ParseIDs(*add); err != nil {
 			return err
 		}
@@ -551,6 +572,10 @@ func runUpdate(ctx context.Context, c *call) error {
 			if f.Name == "areas" {
 				a := ticket.SplitList(*areas)
 				req.Areas = &a
+			}
+			if f.Name == "goal" {
+				g := strings.TrimSpace(*goal)
+				req.Goal = &g
 			}
 		})
 		t, err := s.Update(ctx, req)
@@ -585,6 +610,8 @@ func runList(ctx context.Context, c *call) error {
 	limit := c.fs.Int("limit", 0, "max results (0 = all)")
 	latest := c.fs.String("latest-prefix", "", "only tickets whose latest comment starts with this")
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
+	parked := c.fs.String("parked", "", "only tickets parked for one of these comma-separated reasons: in backlog, or blocked from it")
+	goal := c.fs.String("goal", "", "only tickets of this goal")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -592,12 +619,18 @@ func runList(ctx context.Context, c *call) error {
 		if err := ticket.ValidateRole(*role); err != nil {
 			return err
 		}
-		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit}
+		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit, Goal: strings.TrimSpace(*goal)}
+		if err := ticket.ValidateGoal(f.Goal); err != nil {
+			return err
+		}
+		var err error
+		if f.Parked, err = ticket.ParseParkedList(*parked); err != nil {
+			return err
+		}
 		byComment := *latest != "" || *notLatest != ""
 		if byComment {
 			f.Limit = 0 // the limit applies after the comment filter
 		}
-		var err error
 		if f.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
 		}
@@ -661,6 +694,94 @@ func filterLatest(ctx context.Context, s ticket.Store, list []ticket.Ticket, pre
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// goalRow counts one goal's tickets by status. Total leaves out cancelled
+// tickets, so PercentDone is done over the work still in the goal.
+type goalRow struct {
+	Goal        string                `json:"goal"`
+	Done        int                   `json:"done"`
+	InReview    int                   `json:"in_review"`
+	InProgress  int                   `json:"in_progress"`
+	Todo        int                   `json:"todo"`
+	Blocked     int                   `json:"blocked"`
+	Backlog     int                   `json:"backlog"`
+	Parked      map[ticket.Parked]int `json:"parked"`
+	Cancelled   int                   `json:"cancelled"`
+	Total       int                   `json:"total"`
+	PercentDone int                   `json:"percent_done"`
+}
+
+func runGoals(ctx context.Context, c *call) error {
+	goal := c.fs.String("goal", "", "only this goal")
+	all := c.fs.Bool("all", false, "also list goals with no open ticket")
+	return c.withStore(ctx, func(s ticket.Store) error {
+		if err := c.noArgs(); err != nil {
+			return err
+		}
+		g := strings.TrimSpace(*goal)
+		if err := ticket.ValidateGoal(g); err != nil {
+			return err
+		}
+		list, err := s.List(ctx, ticket.ListFilter{Goal: g})
+		if err != nil {
+			return err
+		}
+		rows := goalRows(list, *all || g != "")
+		return c.out(map[string]any{"goals": rows}, func(w io.Writer) { printGoals(w, rows, g) })
+	})
+}
+
+// goalRows groups tickets by goal, sorted by slug with no goal last. Unless
+// all is set, a goal with no open ticket is left out: it is finished.
+func goalRows(list []ticket.Ticket, all bool) []goalRow {
+	by := map[string]*goalRow{}
+	for _, t := range list {
+		r := by[t.Goal]
+		if r == nil {
+			r = &goalRow{Goal: t.Goal, Parked: map[ticket.Parked]int{}}
+			by[t.Goal] = r
+		}
+		switch t.Status {
+		case ticket.StatusDone:
+			r.Done++
+		case ticket.StatusInReview:
+			r.InReview++
+		case ticket.StatusInProgress:
+			r.InProgress++
+		case ticket.StatusTodo:
+			r.Todo++
+		case ticket.StatusBlocked:
+			r.Blocked++
+		case ticket.StatusBacklog:
+			r.Backlog++
+			r.Parked[t.Parked]++
+		case ticket.StatusCancelled:
+			r.Cancelled++
+		}
+	}
+	rows := []goalRow{}
+	for _, r := range by {
+		r.Total = r.Done + r.InReview + r.InProgress + r.Todo + r.Blocked + r.Backlog
+		if r.Total > 0 {
+			r.PercentDone = r.Done * 100 / r.Total
+		}
+		if all || r.Total > r.Done {
+			rows = append(rows, *r)
+		}
+	}
+	slices.SortFunc(rows, func(a, b goalRow) int {
+		switch {
+		case a.Goal == b.Goal:
+			return 0
+		case a.Goal == "":
+			return 1
+		case b.Goal == "":
+			return -1
+		}
+		return strings.Compare(a.Goal, b.Goal)
+	})
+	return rows
 }
 
 func runClaim(ctx context.Context, c *call) error {
@@ -876,6 +997,7 @@ func runTransition(ctx context.Context, c *call) error {
 	note := c.fs.String("note", "", "why, recorded on the event")
 	release := c.fs.Bool("release", false, "drop the claim in the same write")
 	actorRole := c.fs.String("actor-role", c.env.Getenv("MAESTRO_TICKET_ROLE"), "the role acting")
+	parked := c.fs.String("parked", "", "why it waits, to enter backlog: hold, deferred, unready or planning")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		id, err := c.idArg()
 		if err != nil {
@@ -884,10 +1006,14 @@ func runTransition(ctx context.Context, c *call) error {
 		if *to == "" {
 			return usagef("transition: --to is required")
 		}
+		pk, err := ticket.ParseParked(*parked)
+		if err != nil {
+			return err
+		}
 		req := ticket.TransitionRequest{
 			ID: id, To: ticket.Status(*to), From: ticket.Status(*from), ExpectVersion: *expect,
 			Holder: *holder, Token: *token, Role: *role, ActorRole: *actorRole, Note: *note, Release: *release,
-			Actor: c.actor, IdempotencyKey: c.idemKey,
+			Parked: pk, Actor: c.actor, IdempotencyKey: c.idemKey,
 		}
 		t, err := s.Transition(ctx, req)
 		if err != nil {

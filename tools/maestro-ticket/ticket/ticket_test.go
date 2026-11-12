@@ -162,7 +162,7 @@ func TestCreateValidate(t *testing.T) {
 		r.Type != TypeShip || r.Owner != "unknown" {
 		t.Errorf("defaults not applied: %+v", r)
 	}
-	r = CreateRequest{Title: "x", Type: TypeScout, Status: StatusBacklog, Actor: "cos"}
+	r = CreateRequest{Title: "x", Type: TypeScout, Status: StatusBacklog, Parked: ParkedUnready, Actor: "cos"}
 	if err := r.Validate(); err != nil || r.Owner != "cos" {
 		t.Errorf("scout owner should default to the actor: %+v, %v", r, err)
 	}

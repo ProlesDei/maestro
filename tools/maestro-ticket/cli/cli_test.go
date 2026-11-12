@@ -493,7 +493,7 @@ func TestCreateTypeOwnerBacklog(t *testing.T) {
 		ID, Type, Status, Owner string
 		CreatedBy               string `json:"created_by"`
 	}
-	h.ok(&sc, "create", "--title", "investigate", "--type", "scout", "--status", "backlog", "--owner", "chief-of-staff", "--actor", "cos")
+	h.ok(&sc, "create", "--title", "investigate", "--type", "scout", "--status", "backlog", "--parked", "unready", "--owner", "chief-of-staff", "--actor", "cos")
 	if sc.Type != "scout" || sc.Status != "backlog" || sc.Owner != "chief-of-staff" || sc.CreatedBy != "cos" {
 		t.Fatalf("create scout %+v", sc)
 	}
@@ -1225,7 +1225,7 @@ func TestStopFileExitCode(t *testing.T) {
 func TestListReadyDefaultsToTodo(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "one")
-	h.ok(nil, "create", "--title", "two", "--status", "backlog")
+	h.ok(nil, "create", "--title", "two", "--status", "backlog", "--parked", "deferred")
 	var got struct{ Tickets []tk }
 	h.ok(&got, "list", "--ready")
 	if len(got.Tickets) != 1 || got.Tickets[0].ID != "T-1" {
@@ -1338,4 +1338,66 @@ func TestReleaseDied(t *testing.T) {
 	if got.Claim != nil || got.LeaseExpiries != 1 {
 		t.Fatalf("release --died: claim %+v, lease_expiries %d", got.Claim, got.LeaseExpiries)
 	}
+}
+
+// The owner's "what's the %" took a hand count of the board. goals counts
+// each goal's tickets by status, and a backlog ticket shows why it waits.
+func TestGoalsAndParked(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "a", "--goal", "swaps")
+	h.ok(nil, "create", "--title", "b", "--goal", "swaps")
+	h.ok(nil, "create", "--title", "c", "--goal", "swaps", "--status", "backlog", "--parked", "hold")
+	h.ok(nil, "create", "--title", "d", "--goal", "swaps")
+	h.ok(nil, "create", "--title", "e", "--goal", "toolbox")
+	h.ok(nil, "create", "--title", "f")
+	h.ok(nil, "create", "--title", "a1", "--split-from", "T-1")
+	h.ok(nil, "transition", "T-2", "--to", "in_progress")
+	h.ok(nil, "transition", "T-4", "--to", "cancelled")
+	for _, to := range []string{"in_progress", "in_review"} {
+		h.ok(nil, "transition", "T-5", "--to", to)
+	}
+	h.ok(nil, "transition", "T-5", "--to", "done", "--actor-role", "qa-lead")
+
+	var got struct {
+		Goals []struct {
+			Goal                                  string
+			Done, Todo, Backlog, Cancelled, Total int
+			Parked                                map[string]int
+			PercentDone                           int `json:"percent_done"`
+		}
+	}
+	h.ok(&got, "goals")
+	if len(got.Goals) != 2 || got.Goals[0].Goal != "swaps" || got.Goals[1].Goal != "" {
+		t.Fatalf("goals: %+v; want swaps, then no goal, and not the finished toolbox", got.Goals)
+	}
+	sw := got.Goals[0]
+	if sw.Total != 4 || sw.Todo != 2 || sw.Backlog != 1 || sw.Parked["hold"] != 1 || sw.Cancelled != 1 {
+		t.Fatalf("swaps: %+v", sw)
+	}
+	h.ok(&got, "goals", "--all")
+	if len(got.Goals) != 3 || got.Goals[1].Goal != "toolbox" || got.Goals[1].PercentDone != 100 {
+		t.Fatalf("goals --all: %+v", got.Goals)
+	}
+	if code, out, _ := h.run("", "goals"); code != 0 || !strings.Contains(out, "DONE%") || !strings.Contains(out, "swaps") {
+		t.Fatalf("goals text: %d\n%s", code, out)
+	}
+
+	if code, out, _ := h.run("", "goals", "--goal", "nope"); code != 0 || !strings.Contains(out, "no ticket has goal nope") {
+		t.Fatalf("goals --goal typo: %d\n%s", code, out)
+	}
+	if code, out, _ := h.run("", "list", "--status", "backlog"); code != 0 || !strings.Contains(out, "backlog:hold") {
+		t.Fatalf("list text: %d\n%s", code, out)
+	}
+	if code, out, _ := h.run("", "get", "T-3"); code != 0 || !strings.Contains(out, "parked:   hold") || !strings.Contains(out, "goal:     swaps") {
+		t.Fatalf("get text: %d\n%s", code, out)
+	}
+	var l struct{ Tickets []tk }
+	h.ok(&l, "list", "--goal", "swaps", "--parked", "hold")
+	if len(l.Tickets) != 1 || l.Tickets[0].ID != "T-3" {
+		t.Fatalf("list --goal --parked: %+v", l.Tickets)
+	}
+	if msg := h.fails(2, "transition", "T-1", "--to", "backlog"); msg != "invalid" {
+		t.Fatalf("backlog with no reason: %q", msg)
+	}
+	h.fails(2, "create", "--title", "g", "--status", "backlog", "--parked", "deps")
 }

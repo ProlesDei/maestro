@@ -66,7 +66,7 @@ func TestClaimWaitsOnDeps(t *testing.T) {
 	}
 
 	// Backlog tickets are claimed by id to groom, whatever they wait on.
-	bl := create(t, s, ticket.CreateRequest{Title: "later", Status: ticket.StatusBacklog, DependsOn: []ticket.ID{top.ID}})
+	bl := create(t, s, ticket.CreateRequest{Title: "later", Status: ticket.StatusBacklog, Parked: ticket.ParkedDeferred, DependsOn: []ticket.ID{top.ID}})
 	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: bl.ID, Holder: "cos/s1"}); err != nil {
 		t.Fatalf("grooming claim: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestClaimSkipsBusyAreas(t *testing.T) {
 	_, err = s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/4"})
 	wantErr(t, err, ticket.ErrNoWork)
 	// A grooming claim on a backlog ticket doesn't hold its areas.
-	groom := create(t, s, ticket.CreateRequest{Title: "groom", Status: ticket.StatusBacklog, Areas: []string{"docs"}})
+	groom := create(t, s, ticket.CreateRequest{Title: "groom", Status: ticket.StatusBacklog, Parked: ticket.ParkedUnready, Areas: []string{"docs"}})
 	docs := create(t, s, ticket.CreateRequest{Title: "docs work", Areas: []string{"docs/guide"}})
 	if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: groom.ID, Holder: "cos/s1"}); err != nil {
 		t.Fatal(err)
@@ -289,9 +289,9 @@ func TestBacklogClaimCantStartPastChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	dep := mustCreate(t, s, "dep", "", 2)
-	overlap := create(t, s, ticket.CreateRequest{Title: "overlap", Status: ticket.StatusBacklog, Areas: []string{"src/x"}})
-	waits := create(t, s, ticket.CreateRequest{Title: "waits", Status: ticket.StatusBacklog, DependsOn: []ticket.ID{dep.ID}})
-	free := create(t, s, ticket.CreateRequest{Title: "free", Status: ticket.StatusBacklog, Areas: []string{"docs"}})
+	overlap := create(t, s, ticket.CreateRequest{Title: "overlap", Status: ticket.StatusBacklog, Parked: ticket.ParkedUnready, Areas: []string{"src/x"}})
+	waits := create(t, s, ticket.CreateRequest{Title: "waits", Status: ticket.StatusBacklog, Parked: ticket.ParkedUnready, DependsOn: []ticket.ID{dep.ID}})
+	free := create(t, s, ticket.CreateRequest{Title: "free", Status: ticket.StatusBacklog, Parked: ticket.ParkedUnready, Areas: []string{"docs"}})
 	claim := func(id ticket.ID, holder string) ticket.Ticket {
 		t.Helper()
 		c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: id, Holder: holder})
