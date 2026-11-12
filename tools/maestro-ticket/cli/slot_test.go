@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 )
 
 // slotFails is h.fails with --json before the --: after it, the flag is
@@ -141,7 +144,7 @@ func TestSlotStopsCommandOnCancel(t *testing.T) {
 		var errb bytes.Buffer
 		go func() {
 			done <- Run(ctx, []string{"slot", "--", "sh", "-c", tc.script}, Env{
-				Stdout: w, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir,
+				Stdout: w, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
 			})
 			w.Close()
 		}()
@@ -169,7 +172,7 @@ func TestSlotStopsTheWholeCommand(t *testing.T) {
 	h := newHarness(t)
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
 		cmd := exec.Command(os.Args[0], "slot", "--", "sh", "-c", "sleep 30 & echo $!; wait")
-		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+		cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
 		cmd.Dir = h.dir
 		out, err := cmd.StdoutPipe()
 		if err != nil {
@@ -220,7 +223,7 @@ func TestSlotStoppedWhileWaitingIsNoSlot(t *testing.T) {
 	defer cancel()
 	var errb bytes.Buffer
 	code := Run(ctx, []string{"slot", "--max", "1", "--", "true"}, Env{
-		Stdout: &errb, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir,
+		Stdout: &errb, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
 	})
 	if code != 4 || !strings.Contains(errb.String(), "stopped while waiting") {
 		t.Fatalf("exit %d: %s; want 4, stopped while waiting", code, errb.String())
@@ -231,5 +234,89 @@ func TestSlotMissingCommandIs127(t *testing.T) {
 	h := newHarness(t)
 	if code, _, errs := h.run("", "slot", "--", "no-such-command-k3f9"); code != 127 {
 		t.Fatalf("exit %d: %s; want 127", code, errs)
+	}
+}
+
+// Each run gets a temp folder of its own and removes it when it ends, pass
+// or fail: what pytest leaves under $TMPDIR/pytest-of-<user> goes with it,
+// so 20 checks at once leave the shared temp dir as they found it.
+func TestSlotGivesEachRunItsOwnTempFolder(t *testing.T) {
+	h := newHarness(t)
+	shared := filepath.Join(h.dir, "tmp")
+	if err := os.Mkdir(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.env["TMPDIR"] = shared
+	// As pytest does, then fail on odd runs; a read-only folder, as Go's
+	// module cache leaves, must not stop the removal.
+	script := `d=$TMPDIR/pytest-of-u/pytest-0; mkdir -p $d/ro && touch $d/f $d/ro/g && chmod 555 $d/ro && echo $TMPDIR; exit $(($1 % 2))`
+	var wg sync.WaitGroup
+	dirs := make([]string, 20)
+	for i := range dirs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			code, out, errs := h.run("", "slot", "--max", "20", "--", "sh", "-c", script, "sh", strconv.Itoa(i))
+			if code != i%2 || errs != "" {
+				t.Errorf("run %d: exit %d, stderr %q; want %d, none", i, code, errs, i%2)
+			}
+			dirs[i] = strings.TrimSpace(out)
+		}()
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for i, d := range dirs {
+		if filepath.Dir(d) != shared || seen[d] {
+			t.Errorf("run %d: TMPDIR %q; want a folder of its own in %s", i, d, shared)
+		}
+		seen[d] = true
+	}
+	if left, _ := os.ReadDir(shared); len(left) != 0 {
+		t.Fatalf("%d entries left in the shared temp dir, such as %s", len(left), left[0].Name())
+	}
+}
+
+// A run stopped by a signal removes its folder too.
+func TestSlotRemovesTempFolderOnSignal(t *testing.T) {
+	h := newHarness(t)
+	shared := filepath.Join(h.dir, "tmp")
+	if err := os.Mkdir(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.env["TMPDIR"] = shared
+	ctx, cancel := context.WithCancel(context.Background())
+	r, w, _ := os.Pipe()
+	done := make(chan int, 1)
+	go func() {
+		done <- Run(ctx, []string{"slot", "--", "sh", "-c", "touch $TMPDIR/f; echo up; sleep 30"}, Env{
+			Stdout: w, Stderr: io.Discard, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
+		})
+		w.Close()
+	}()
+	if _, err := r.Read(make([]byte, 3)); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-done
+	if left, _ := os.ReadDir(shared); len(left) != 0 {
+		t.Fatalf("left %s after a stop", left[0].Name())
+	}
+}
+
+// Under the margin, slot refuses before the command runs, and says how
+// to recover.
+func TestSlotRefusesOnLowDisk(t *testing.T) {
+	h := newHarness(t)
+	h.disk = func(string) (envcheck.Free, bool, error) { return envcheck.Free{Inodes: 4, Space: 60}, true, nil }
+	mark := filepath.Join(h.dir, "ran")
+	code, out, errs := h.run("", "slot", "--", "touch", mark)
+	if code != 4 || !strings.Contains(errs, "refused: low disk") || !strings.Contains(errs, "4.0% of its inodes free") || !strings.Contains(errs, "infra block") {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want 4, refused: low disk", code, out, errs)
+	}
+	if _, err := os.Stat(mark); err == nil {
+		t.Fatal("the command ran on a full disk")
+	}
+	if code := slotFails(h, 4, "--", "true"); code != "low_disk" {
+		t.Fatalf("code %q; want low_disk", code)
 	}
 }

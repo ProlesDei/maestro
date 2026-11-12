@@ -40,6 +40,9 @@ type Env struct {
 	// StoreChecks checks the store's directory before opening it; nil
 	// means envcheck.Store. Tests use it to fake an unsafe filesystem.
 	StoreChecks func(dir string, allow bool) []ticket.Check
+	// DiskFree measures a directory's filesystem for claim and slot; nil
+	// means envcheck.DiskFree. Tests use it to fake a full disk.
+	DiskFree func(dir string) (envcheck.Free, bool, error)
 }
 
 // OSEnv returns an Env wired to the real process.
@@ -92,7 +95,8 @@ Commands:
   doctor
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
-              one ticket store run at most that many at once; exits with its code)
+              one ticket store run at most that many at once, with a TMPDIR of its
+              own that is removed when it ends; exits with its code)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -116,6 +120,10 @@ WAL; any write to the ticket frees its expired lease too. Until then, the
 holder's heartbeat revives it (lease_revived), as after a machine sleeps.
 Kill switch: while a file named STOP sits next to the store, claim refuses
 (stopped, exit 4).
+Low disk: claim and slot refuse (low_disk, exit 4) while the store's, the
+temp dir's or the working directory's filesystem has under 10% of its
+inodes or space free ($MAESTRO_TICKET_MIN_FREE sets the percent; 0 is off).
+A store write that runs out of disk fails with low_disk too.
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
@@ -409,6 +417,34 @@ func (c *call) envChecks(path string) []ticket.Check {
 		checks = c.env.StoreChecks
 	}
 	return checks(dir, c.env.Getenv(envcheck.AllowEnv) == "1")
+}
+
+// tempDir is where a command's temp files go: $TMPDIR, else the OS default.
+func (c *call) tempDir() string {
+	if d := c.env.Getenv("TMPDIR"); d != "" {
+		return d
+	}
+	return os.TempDir()
+}
+
+// headroom refuses, with ErrLowDisk, while the store's, the temp dir's or
+// the working directory's filesystem has less than the MinFreeEnv margin
+// of its inodes or space free. Work started there would die mid-run with
+// "no space left on device", and the store's own writes with it.
+func (c *call) headroom(store string) error {
+	min, err := envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
+	if err != nil {
+		return err
+	}
+	free := envcheck.DiskFree
+	if c.env.DiskFree != nil {
+		free = c.env.DiskFree
+	}
+	err = envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
+	if err != nil {
+		return fmt.Errorf("%w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
+	}
+	return nil
 }
 
 func (c *call) git(args ...string) (string, error) {
@@ -802,6 +838,15 @@ func runClaim(ctx context.Context, c *call) error {
 	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length")
 	keepPID := c.fs.Int("keepalive", 0, "start a background keepalive for this claim, alive while this process id lives")
 	return c.withStore(ctx, func(s ticket.Store) error {
+		// A claim taken on a full disk is one its run can't finish, and
+		// may not be able to release.
+		path, _, err := c.storePath()
+		if err != nil {
+			return err
+		}
+		if err := c.headroom(path); err != nil {
+			return err
+		}
 		if *keepPID != 0 {
 			if why := unwatchable(*keepPID); why != "" {
 				return usagef("claim: --keepalive %d: %s", *keepPID, why)
@@ -818,7 +863,6 @@ func runClaim(ctx context.Context, c *call) error {
 			}
 			req.ID = id
 		}
-		var err error
 		if req.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
 		}
