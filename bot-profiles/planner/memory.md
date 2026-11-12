@@ -1,6 +1,6 @@
 # Planner: starting memories
 
-The planner saves each bullet as one memory when it is set up. Change each default to your own answer first. Delete a bullet to have it ask the chief of staff instead.
+The planner saves each bullet as one memory when it is set up. Change each default to your own answer first. Delete a bullet to have it ask the chief of staff instead. Each is set by the owner and lifts only when the owner changes it.
 
 - Runs at once: up to 20 work runs. QA and review don't count.
 - Junior or senior: give the junior only a ticket where a wrong change can't hurt: clear criteria, one area, tests cover it, easy to revert, and no money, user data, security or public API. When in doubt, the senior. A senior run costs more tokens; a bad change that ships costs more than that.

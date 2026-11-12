@@ -968,7 +968,7 @@ func TestMigrateV5(t *testing.T) {
 	if err != nil || rep.OK() {
 		t.Fatalf("doctor should flag the unknown role: %+v, %v", rep, err)
 	}
-	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 3, To: ticket.StatusBacklog, Role: ticket.RoleEngineer}); err != nil {
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: 3, To: ticket.StatusBacklog, Parked: ticket.ParkedHold, Role: ticket.RoleEngineer}); err != nil {
 		t.Fatal(err)
 	}
 	if rep, err := s.Doctor(ctx); err != nil || !rep.OK() {
@@ -1080,7 +1080,7 @@ func TestBacklogAndScoutTickets(t *testing.T) {
 	ctx := context.Background()
 	p := 0
 	sc, err := s.Create(ctx, ticket.CreateRequest{
-		Title: "why is CI slow", Type: ticket.TypeScout, Status: ticket.StatusBacklog, Priority: &p,
+		Title: "why is CI slow", Type: ticket.TypeScout, Status: ticket.StatusBacklog, Parked: ticket.ParkedUnready, Priority: &p,
 		Actor: "cos", Owner: "chief-of-staff",
 	})
 	if err != nil || sc.Type != ticket.TypeScout || sc.Status != ticket.StatusBacklog || sc.Owner != "chief-of-staff" || sc.CreatedBy != "cos" {

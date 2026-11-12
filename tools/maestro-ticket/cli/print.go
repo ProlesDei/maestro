@@ -12,7 +12,16 @@ import (
 )
 
 func oneLine(t ticket.Ticket) string {
-	return fmt.Sprintf("%s [%s] P%d v%d %s%s", t.ID, t.Status, t.Priority, t.Version, t.Title, claimSuffix(t.Claim))
+	return fmt.Sprintf("%s [%s] P%d v%d %s%s", t.ID, statusText(t), t.Priority, t.Version, t.Title, claimSuffix(t.Claim))
+}
+
+// statusText adds a backlog ticket's reason, as backlog:hold, so no reader
+// takes a ticket parked for a plan or a later slice for one held on purpose.
+func statusText(t ticket.Ticket) string {
+	if t.Status == ticket.StatusBacklog && t.Parked != "" {
+		return string(t.Status) + ":" + string(t.Parked)
+	}
+	return string(t.Status)
 }
 
 func claimSuffix(c *ticket.Claim) string {
@@ -47,6 +56,12 @@ func printDetail(w io.Writer, d ticket.Detail) {
 	fmt.Fprintf(w, "%s  %s\n", d.ID, d.Title)
 	fmt.Fprintf(w, "type:     %s\n", d.Type)
 	fmt.Fprintf(w, "status:   %s%s\n", d.Status, blockedText(d.Ticket))
+	if d.Parked != "" {
+		fmt.Fprintf(w, "parked:   %s\n", d.Parked)
+	}
+	if d.Goal != "" {
+		fmt.Fprintf(w, "goal:     %s\n", d.Goal)
+	}
 	fmt.Fprintf(w, "role:     %s\n", dash(d.Role))
 	fmt.Fprintf(w, "owner:    %s\n", dash(d.Owner))
 	fmt.Fprintf(w, "tries:    %d\n", d.Tries)
@@ -121,7 +136,25 @@ func printList(w io.Writer, list []ticket.Ticket) {
 	fmt.Fprintln(tw, "ID\tTYPE\tSTATUS\tP\tROLE\tCLAIM\tTRIES\tV\tTITLE")
 	for _, t := range list {
 		fmt.Fprintf(tw, "%s\t%s\t%s\tP%d\t%s\t%s\t%d\t%d\t%s\n",
-			t.ID, t.Type, t.Status, t.Priority, dash(t.Role), claimText(t.Claim), t.Tries, t.Version, t.Title)
+			t.ID, t.Type, statusText(t), t.Priority, dash(t.Role), claimText(t.Claim), t.Tries, t.Version, t.Title)
+	}
+	tw.Flush()
+}
+
+func printGoals(w io.Writer, rows []goalRow, goal string) {
+	switch {
+	case len(rows) == 0 && goal != "":
+		fmt.Fprintf(w, "no ticket has goal %s\n", goal)
+		return
+	case len(rows) == 0:
+		fmt.Fprintln(w, "no goals with open tickets")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "GOAL\tDONE\tREVIEW\tBUILD\tTODO\tBLOCKED\tPARKED\tTOTAL\tDONE%")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d%%\n",
+			dash(r.Goal), r.Done, r.InReview, r.InProgress, r.Todo, r.Blocked, r.Backlog, r.Total, r.PercentDone)
 	}
 	tw.Flush()
 }

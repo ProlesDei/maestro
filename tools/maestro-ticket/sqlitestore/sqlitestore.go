@@ -37,7 +37,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -192,6 +192,28 @@ UPDATE tickets SET role = (SELECT new FROM v5_roles WHERE old = tickets.role),
 DROP TABLE v5_roles;
 
 DROP TABLE IF EXISTS outbox;
+`
+
+// schemaV6 adds why a backlog ticket waits (parked) and the goal a ticket
+// serves. An open ticket in backlog, or blocked from there, whose latest
+// comment starts "Parked:" was parked by a planner session, the one way a
+// reason was written before; every other one becomes unready, which sends
+// it through the planner's read before it goes to todo, as backlog did.
+// Each change is logged as an event by maestro-ticket.
+const schemaV6 = `
+ALTER TABLE tickets ADD COLUMN parked TEXT NOT NULL DEFAULT '';
+ALTER TABLE tickets ADD COLUMN goal TEXT NOT NULL DEFAULT '';
+
+UPDATE tickets SET parked = CASE
+		WHEN substr((SELECT body FROM comments WHERE comments.ticket_id = tickets.id ORDER BY id DESC LIMIT 1), 1, 7) = 'Parked:'
+		THEN 'planning' ELSE 'unready' END,
+	updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	WHERE status = 'backlog' OR (status = 'blocked' AND blocked_from = 'backlog');
+INSERT INTO events (ticket_id, type, actor, data, created_at)
+	SELECT id, 'updated', 'maestro-ticket',
+		json_object('parked', parked, 'note', 'schema v6: backlog tickets record why they wait'),
+		CAST(unixepoch('subsec') * 1000 AS INTEGER)
+	FROM tickets WHERE parked != '' ORDER BY id;
 `
 
 // Options tune a Store. The zero value is fine for production.
@@ -420,7 +442,7 @@ func (s *Store) clock(ctx context.Context, q querier) (int64, error) {
 func msTime(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 
 const ticketCols = `id, title, body, type, status, role, priority, created_by, owner, tries, lease_expiries,
-	blocked_from, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at,
+	blocked_from, parked, goal, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at,
 	(SELECT group_concat(depends_on, ',' ORDER BY depends_on) FROM deps WHERE deps.ticket_id = tickets.id),
 	(SELECT group_concat(area, char(10) ORDER BY area) FROM areas WHERE areas.ticket_id = tickets.id)`
 
@@ -430,6 +452,7 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 	var (
 		t                ticket.Ticket
 		typ, status      string
+		parked           string
 		blockedFrom      sql.NullString
 		holder           sql.NullString
 		token            int64
@@ -438,7 +461,7 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 		deps, areas      sql.NullString
 	)
 	err := row.Scan(&t.ID, &t.Title, &t.Body, &typ, &status, &t.Role, &t.Priority, &t.CreatedBy, &t.Owner,
-		&t.Tries, &t.LeaseExpiries, &blockedFrom, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas)
+		&t.Tries, &t.LeaseExpiries, &blockedFrom, &parked, &t.Goal, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas)
 	if err != nil {
 		return t, err
 	}
@@ -452,6 +475,7 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 		t.Areas = strings.Split(areas.String, "\n")
 	}
 	t.Type, t.Status, t.BlockedFrom = ticket.Type(typ), ticket.Status(status), ticket.Status(blockedFrom.String)
+	t.Parked = ticket.Parked(parked)
 	t.CreatedAt, t.UpdatedAt = msTime(created), msTime(updated)
 	if holder.Valid {
 		t.Claim = &ticket.Claim{
@@ -665,20 +689,25 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 					return ticket.Ticket{}, err
 				}
 			}
-			tries := 0
+			tries, goal := 0, req.Goal
 			if req.SplitFrom != 0 {
-				err := tx.QueryRowContext(ctx, "SELECT tries FROM tickets WHERE id = ?", req.SplitFrom).Scan(&tries)
+				var fromGoal string
+				err := tx.QueryRowContext(ctx, "SELECT tries, goal FROM tickets WHERE id = ?", req.SplitFrom).Scan(&tries, &fromGoal)
 				if errors.Is(err, sql.ErrNoRows) {
 					return ticket.Ticket{}, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, req.SplitFrom)
 				}
 				if err != nil {
 					return ticket.Ticket{}, err
 				}
+				if goal == "" {
+					goal = fromGoal // a split serves the goal its ticket served
+				}
 			}
 			res, err := tx.ExecContext(ctx, `INSERT INTO tickets
-				(title, body, type, status, role, priority, created_by, owner, blocked_from, tries, version, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-				req.Title, req.Body, req.Type, req.Status, req.Role, *req.Priority, req.Actor, req.Owner, blockedFrom, tries, now, now)
+				(title, body, type, status, role, priority, created_by, owner, blocked_from, parked, goal, tries, version, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+				req.Title, req.Body, req.Type, req.Status, req.Role, *req.Priority, req.Actor, req.Owner, blockedFrom,
+				req.Parked, goal, tries, now, now)
 			if err != nil {
 				return ticket.Ticket{}, err
 			}
@@ -706,6 +735,12 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 			if req.SplitFrom != 0 {
 				data["split_from"] = req.SplitFrom
 				data["tries"] = tries
+			}
+			if req.Parked != "" {
+				data["parked"] = req.Parked
+			}
+			if goal != "" {
+				data["goal"] = goal
 			}
 			err = appendEvent(ctx, tx, id, ticket.EventCreated, req.Actor, data, now)
 			if err != nil {
@@ -822,7 +857,20 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 				}
 				data["areas"] = *req.Areas
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET updated_at = ? WHERE id = ?", now, t.ID); err != nil {
+			parked, goal := t.Parked, t.Goal
+			if req.Parked != "" {
+				if !ticket.ParkedSlot(t.Status, t.BlockedFrom) {
+					return t, fmt.Errorf("%w: %s is %s; only a backlog ticket is parked", ticket.ErrInvalid, t.ID, t.Status)
+				}
+				parked = req.Parked
+				data["parked"] = parked
+			}
+			if req.Goal != nil {
+				goal = *req.Goal
+				data["goal"] = goal
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET parked = ?, goal = ?, updated_at = ? WHERE id = ?",
+				parked, goal, now, t.ID); err != nil {
 				return t, err
 			}
 			if err := appendEvent(ctx, tx, t.ID, ticket.EventUpdated, req.Actor, data, now); err != nil {
@@ -878,6 +926,16 @@ func (s *Store) List(ctx context.Context, f ticket.ListFilter) ([]ticket.Ticket,
 		if f.Role != "" {
 			where = append(where, "role = ?")
 			args = append(args, f.Role)
+		}
+		if len(f.Parked) > 0 {
+			where = append(where, "parked IN ("+placeholders(len(f.Parked))+")")
+			for _, p := range f.Parked {
+				args = append(args, string(p))
+			}
+		}
+		if f.Goal != "" {
+			where = append(where, "goal = ?")
+			args = append(args, f.Goal)
 		}
 		if f.Holder != "" {
 			where = append(where, "lease_holder = ? AND lease_expires_at > ?")
@@ -1394,16 +1452,31 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 	if req.To == ticket.StatusBlocked {
 		blockedFrom = t.Status
 	}
+	// Kept while the ticket is parked or blocked from there; a move into
+	// backlog names its reason, except back from blocked, which keeps the
+	// old one unless given another.
+	var parked ticket.Parked
+	switch {
+	case req.To == ticket.StatusBacklog:
+		if parked = req.Parked; parked == "" {
+			parked = t.Parked
+		}
+		if parked == "" {
+			return t, ticket.ErrParkedMissing()
+		}
+	case req.To == ticket.StatusBlocked && t.Status == ticket.StatusBacklog:
+		parked = t.Parked
+	}
 	tries := t.Tries
 	if t.Type == ticket.TypeShip && ticket.IsSendBack(t.Status, req.To) {
 		tries++
 	}
 	release := t.Claim != nil && (req.Release || req.To.Terminal())
-	q := "UPDATE tickets SET status = ?, role = ?, blocked_from = ?, tries = ?, version = version + 1, updated_at = ?"
+	q := "UPDATE tickets SET status = ?, role = ?, blocked_from = ?, parked = ?, tries = ?, version = version + 1, updated_at = ?"
 	if release {
 		q += ", lease_holder = NULL, lease_expires_at = NULL"
 	}
-	res, err := tx.ExecContext(ctx, q+" WHERE id = ? AND version = ?", req.To, role, blockedFrom, tries, now, t.ID, t.Version)
+	res, err := tx.ExecContext(ctx, q+" WHERE id = ? AND version = ?", req.To, role, blockedFrom, parked, tries, now, t.ID, t.Version)
 	if err != nil {
 		return t, err
 	}
@@ -1413,6 +1486,9 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 	data := map[string]any{"from": t.Status, "to": req.To}
 	if req.Note != "" {
 		data["note"] = req.Note
+	}
+	if parked != "" && parked != t.Parked {
+		data["parked"] = parked
 	}
 	if role != t.Role {
 		data["role"] = role
@@ -1599,15 +1675,16 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 
 	// Statuses and roles are checked in Go, not by the schema: list the
 	// open tickets whose values this build doesn't know.
-	var badStatus, badRole []string
-	vrows, err := conn.QueryContext(ctx, "SELECT id, status, role FROM tickets WHERE status NOT IN ('done', 'cancelled') ORDER BY id")
+	var badStatus, badRole, badParked []string
+	vrows, err := conn.QueryContext(ctx, `SELECT id, status, role, COALESCE(blocked_from, ''), parked
+		FROM tickets WHERE status NOT IN ('done', 'cancelled') ORDER BY id`)
 	if err != nil {
 		return rep, err
 	}
 	for vrows.Next() {
 		var id ticket.ID
-		var status, role string
-		if err := vrows.Scan(&id, &status, &role); err != nil {
+		var status, role, blockedFrom, parked string
+		if err := vrows.Scan(&id, &status, &role, &blockedFrom, &parked); err != nil {
 			vrows.Close()
 			return rep, err
 		}
@@ -1616,6 +1693,10 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		}
 		if role != "" && !ticket.ValidRole(role) {
 			badRole = append(badRole, fmt.Sprintf("%s (%s)", id, role))
+		}
+		slot := ticket.ParkedSlot(ticket.Status(status), ticket.Status(blockedFrom))
+		if p := ticket.Parked(parked); (slot && !p.Valid()) || (!slot && p != "") {
+			badParked = append(badParked, fmt.Sprintf("%s (%s, parked %q)", id, status, parked))
 		}
 	}
 	vrows.Close()
@@ -1632,6 +1713,11 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	} else {
 		add("roles", false, "unknown role on %s (want %s; fix: transition it to another status with --role, then back)",
 			strings.Join(badRole, ", "), strings.Join(ticket.Roles, ", "))
+	}
+	if len(badParked) == 0 {
+		add("parked", true, "every backlog ticket says why it waits, and no other does")
+	} else {
+		add("parked", false, "bad parked reason on %s (fix: update <id> --parked <reason> in backlog)", strings.Join(badParked, ", "))
 	}
 
 	var lastSeq int64

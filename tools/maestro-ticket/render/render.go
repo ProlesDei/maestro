@@ -42,6 +42,15 @@ func Backlog(tickets []ticket.Ticket, lastSeq int64) []byte {
 		}
 		fmt.Fprintln(&b)
 		fmt.Fprintf(&b, "## %s\n\n", st)
+		if st == ticket.StatusBacklog {
+			fmt.Fprintln(&b, "| ID | P | Title | Parked | Role | Claim | Version |")
+			fmt.Fprintln(&b, "|---|---|---|---|---|---|---|")
+			for _, t := range list {
+				fmt.Fprintf(&b, "| %s | P%d | %s | %s | %s | %s | %d |\n",
+					t.ID, t.Priority, cell(t.Title), t.Parked, cell(t.Role), claimCell(t.Claim), t.Version)
+			}
+			continue
+		}
 		fmt.Fprintln(&b, "| ID | P | Title | Role | Claim | Version |")
 		fmt.Fprintln(&b, "|---|---|---|---|---|---|")
 		for _, t := range list {
