@@ -17,7 +17,7 @@ Open a todo list with one item per phase below.
 
 1. Before the first edit, check that you're in a linked worktree on its own branch, not the main checkout or the main branch. A design question with no code needs none.
 2. On a ticket you build, claim it first. Add or reuse a worktree as **maestro-working-principles** says, and read its trail before you change anything.
-3. Keep every edit, build, test run and commit inside it. Check each path you write to: an absolute path from earlier in the session may point at the main checkout.
+3. Keep every edit, build, test run and commit inside it. Check each path you write to: an absolute path from earlier in the session may point at the main checkout. On a ticket, a file you must change outside its `areas`, tests included: add it under your claim with `maestro-ticket update --areas`, and say why in the PR. Escalate only if the store refuses because another live claim holds it, naming that ticket.
 4. Fetch the main branch and merge it into yours; never rebase a pushed branch, and never merge yours into main. On a conflict, read the main commit that touched each hunk and keep what both sides meant, not just your side. Regenerate a generated file or lockfile instead of hand-merging it. If both can't hold, stop and ask. Commit the merge alone, then rerun the build and tests.
 
 ## Phase B: Plan
@@ -40,7 +40,7 @@ Tests:     <what fails without the change; what passes with it>
 ## Phase C: Build
 
 1. **Write the least code.** No feature, flag, option or layer nobody asked for; every changed line traces to the ask. Pull out shared code on its second copy, not its first.
-2. **Match the codebase.** Use its pattern, even when you'd pick another. Replace one only on purpose, naming its cost and each place that must change too.
+2. **Match the codebase.** Use its pattern, even when you'd pick another, and every shared helper `## Conventions` in `.maestro/project/project-setup.md` names (safe paths, errors that print no secret), never a guard of your own. Replace one only on purpose, naming its cost and each place that must change too.
 3. **Survive the worst failure:** a race, a replay, a partial write, lost precision, unbounded growth, a dependency slow or down. Guard data two processes can write at once: compare-and-swap, a lock, a transaction or an idempotency key. Retries, workers and scheduled jobs get a bound, a backoff and a way to stop.
 4. **Fail closed.** A check that denies (auth, permissions, signatures) denies on a timeout, bad input or a tool that can't answer. Allowlist when the good inputs can be listed. Every refusal says how to recover.
 5. **Read the API; don't recall it.** Check the installed version and signature (lockfile, vendored source, type stubs) before you call it.
@@ -49,7 +49,7 @@ Tests:     <what fails without the change; what passes with it>
 
 ## Phase D: Review your diff
 
-1. Read your whole diff against the main branch, top to bottom, as a stranger in review would. Fix what you find; rerun the build, lint and tests.
+1. Read your whole diff against the main branch, top to bottom, as a stranger in review would. Hold it to review's bar: passes 1 (spec), 2 (security) and 6 (test potency) of [passes.md](../maestro-code-review/references/passes.md). For each changed behaviour, break it by hand, see a test go red, and restore it; see each new test fail on the main branch. A test that stays green either way is the most common kickback. Fix what you find; rerun the build, lint and tests.
 2. Green tests aren't done: run the changed path for real, as the **maestro-prove-complete** skill says.
 3. If main moved since Phase A, merge it in again the same way before you hand back.
 4. Number each item in the latest `Kickback:` comment, review's or QA's. Fix exactly what it asks, answer it with evidence, or disagree in one or two sentences. Rerun the checks and the proof for each item you touched. Review can take your answer to its own finding, but an item in a `Kickback: QA fail` clears only on a new QA run: one you dispute and won't fix is a block, never a handoff, so escalate it as **maestro-working-principles** says and ask the planner for a retest.

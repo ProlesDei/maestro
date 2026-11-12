@@ -34,9 +34,9 @@ Open a todo list with one item per phase your path in Phase A names.
 
 1. For a bug, find the `file:line` where it starts, not where it shows, and make the smallest change there. For a feature, write the least code that passes.
 2. `git grep` for the same pattern. Fix each place the task covers; list the rest in your reply.
-3. Run the test, then each command under `## Checks` in `.maestro/project/project-setup.md`.
+3. Run the test and the tests beside it. The full `## Checks` in `.maestro/project/project-setup.md` run once, before the PR, as **maestro-working-principles** says: on a busy machine they cost minutes per run.
 4. Commit, naming the cause and the test.
-5. For a bug, undo the fix and see the test fail: `git revert --no-commit HEAD`, run the test, then `git revert --abort`. A test that passes without the fix tests nothing.
+5. Prove the test catches the change. For a bug, undo the fix: `git revert --no-commit HEAD`, run the test, then `git revert --abort`. For a feature, break the new code by hand where it matters most (drop a guard, flip a comparator), run the test, then restore it with `git checkout -- <path>`. A test that passes without the change tests nothing.
 
 ## Phase D: Pin, then change shape
 

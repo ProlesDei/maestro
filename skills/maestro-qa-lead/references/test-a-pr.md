@@ -16,7 +16,7 @@ You are the last check before production. Review read the diff and passed it; yo
 ## Phase B: Plan by risk
 
 1. Pick the tier from the changed files with the table in Phase C of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)). When unsure, go up.
-2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it.
+2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it. Prove each criterion in the running app, not by rerunning the tests review read: what QA adds is what reading and unit tests can't show.
 
 | Tier | Angles |
 |---|---|
@@ -37,7 +37,7 @@ You are the last check before production. Review read the diff and passed it; yo
 2. Run each angle in the plan. Then explore: use the change as a new user, a careless one and a hostile one, until two rounds in a row find nothing new.
 3. When something looks wrong, run the same steps on the main branch. Wrong there too means it was already there: a new ticket, unless `H` makes it worse.
 4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
-5. Run each command under `## Checks` in the worktree, hooks and tests included: review ran them on an older main. A red one fails the PR, unless it is red the same way on `G` alone, in a second detached worktree.
+5. Run each command under `## Checks` in the worktree, hooks and tests included: review ran them on an older main. If the `Review: GO at <H>` says `gated on` this same `G`, review ran them on this same tree: skip them and cite that comment, and spend the time on what only the running app shows. A red one fails the PR, unless it is red the same way on `G` alone, in a second detached worktree.
 6. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
 7. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, never a pass: escalate it as step 8 says, asking "rewrite <criterion> as <your rewrite>, or waive it at <H>?". Only the planner rewrites a criterion.
 8. Missing a tool or account the plan needs, such as a browser: test the rest, then escalate, so no one sends QA again until it's there. Post `Escalation: QA at <H>`, what's missing, what you tested, the one question "add <what's missing>, or waive <these checks> at <H>?", and a last line `Return-role: <the ticket's role>`, keyed `<run>-escalation`. Then move the ticket from `in_review` to `blocked`, keyed `<run>-blocked`. With no ticket, comment on the PR. An escalation ends the job with no verdict: do Phase E step 2 and Phase F step 5, then reply `test: blocked: <id | PR url> at <H>`, with what's missing under `Answer:`.
@@ -55,7 +55,7 @@ You are the last check before production. Review read the diff and passed it; yo
    - 1 pass: <proof>: <excerpt or screenshot path>
    - 2 fail: steps <exact, from a fresh start>; expected <...>; actual <quoted>; on main: <same | works>; rate <n/3>; evidence <path>
    - 3 not checked: <why> | not checkable: <question> | waived: <answer comment id>
-   Checks: <each command: exit code>
+   Checks: <each command: exit code> | review's, gated on <G>
    Flows: <each critical flow: pass | fail>
    Angles: <each one tried: what you did, what happened>
    Rerun: <evidence folder>
