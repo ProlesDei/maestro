@@ -17,7 +17,7 @@ Open a todo list with one item per phase below.
 
 1. Before the first edit, check that you're in a linked worktree on its own branch, not the main checkout or the main branch. A design question with no code needs none.
 2. On a ticket you build, claim it first. Add or reuse a worktree as **maestro-working-principles** says, and read its trail before you change anything.
-3. Keep every edit, build, test run and commit inside it. Check each path you write to: an absolute path from earlier in the session may point at the main checkout. On a ticket, a file you must change outside its `areas`, tests included: add it under your claim with `maestro-ticket update --areas`, and say why in the PR. Escalate only if the store refuses because another live claim holds it, naming that ticket.
+3. Keep every edit, build, test run and commit inside it. Check each path you write to: an absolute path from earlier in the session may point at the main checkout. On a ticket, a file you must change outside its `areas`, tests included: add it under your claim with `maestro-ticket update --areas`, listing the ticket's current areas too, since it replaces the whole list, and say why in the PR. Escalate only if the store refuses because another live claim holds it, naming that ticket.
 4. Fetch the main branch and merge it into yours; never rebase a pushed branch, and never merge yours into main. On a conflict, read the main commit that touched each hunk and keep what both sides meant, not just your side. Regenerate a generated file or lockfile instead of hand-merging it. If both can't hold, stop and ask. Commit the merge alone, then rerun the build and tests.
 
 ## Phase B: Plan

@@ -3,6 +3,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -111,5 +114,47 @@ func TestSlotCapsConcurrentRuns(t *testing.T) {
 		if p < 1 || p > max {
 			t.Errorf("run %d saw %d running; want 1 to %d", i, p, max)
 		}
+	}
+}
+
+// A command that handles the stop signal and exits keeps its exit code,
+// and a slow one still stops.
+func TestSlotStopsCommandOnCancel(t *testing.T) {
+	h := newHarness(t)
+	for _, tc := range []struct {
+		script string
+		want   int
+	}{
+		{`trap 'kill $!; exit 0' TERM; sleep 30 & echo up; wait`, 0},
+		{`trap 'kill $!; exit 7' TERM; sleep 30 & echo up; wait`, 7},
+		{`echo up; exec sleep 30`, 128 + 15},
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan int, 1)
+		var errb bytes.Buffer
+		go func() {
+			done <- Run(ctx, []string{"slot", "--", "sh", "-c", tc.script}, Env{
+				Stdout: w, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir,
+			})
+			w.Close()
+		}()
+		buf := make([]byte, 3)
+		if _, err := r.Read(buf); err != nil { // the command is up and trapping
+			t.Fatal(err)
+		}
+		cancel()
+		select {
+		case got := <-done:
+			if got != tc.want {
+				t.Errorf("%q: exit %d; want %d (%s)", tc.script, got, tc.want, errb.String())
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatalf("%q: slot didn't stop", tc.script)
+		}
+		r.Close()
 	}
 }

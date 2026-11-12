@@ -2,12 +2,12 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -21,11 +21,11 @@ import (
 var slotName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // runSlot runs a command once one of --max slots named --name is free, so
-// hundreds of sessions on one machine don't run a heavy check at once and
-// fail it under load. A slot is a file lock in slots/ next to the store,
-// which every worktree shares; the kernel frees it when this process
-// exits, however it exits, so a killed run never holds one. It exits with
-// the command's own code.
+// hundreds of sessions sharing one ticket store don't run a heavy check at
+// once and fail it under load. A slot is a file lock in slots/ next to the
+// store, which every worktree shares; the kernel frees it when this
+// process exits, however it exits, so a killed run never holds one. It
+// exits with the command's own code.
 func runSlot(ctx context.Context, c *call) error {
 	var command []string
 	if i := slices.Index(c.args, "--"); i >= 0 {
@@ -70,6 +70,10 @@ func runSlot(ctx context.Context, c *call) error {
 	}
 	defer lock.Close()
 
+	// A hangup would end this process with the command still running and
+	// its slot free; stop the command first, as on SIGINT and SIGTERM.
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP)
+	defer stop()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = c.env.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.env.Stdin, c.env.Stdout, c.env.Stderr
@@ -77,18 +81,18 @@ func runSlot(ctx context.Context, c *call) error {
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 10 * time.Second
 	err = cmd.Run()
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-		return nil
-	case errors.As(err, &ee):
-		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+	// Once the command ran, its own exit is the answer, even when a signal
+	// cancelled ctx and Run reports that instead.
+	if ps := cmd.ProcessState; ps != nil {
+		if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 			return silentExit{128 + int(ws.Signal())}
 		}
-		return silentExit{ee.ExitCode()}
-	default:
-		return fmt.Errorf("%w: slot: %v", ticket.ErrInvalid, err)
+		if ps.ExitCode() == 0 {
+			return nil
+		}
+		return silentExit{ps.ExitCode()}
 	}
+	return fmt.Errorf("%w: slot: %v", ticket.ErrInvalid, err)
 }
 
 // takeSlot locks the first free file of name.0.lock to name.<max-1>.lock
