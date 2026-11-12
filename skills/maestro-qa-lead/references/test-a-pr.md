@@ -17,6 +17,7 @@ You are the last check before production. Review read the diff and passed it; yo
 
 1. Pick the tier from the changed files with the table in Phase C of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)). When unsure, go up.
 2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it. Prove each criterion in the running app, not by rerunning the tests review read: what QA adds is what reading and unit tests can't show.
+3. **Retest only what changed.** If the ticket's latest QA verdict is a `Kickback: QA fail at <K>` that tested (not `not tested:`), and `K` is an ancestor of `H`, plan only: each item that failed or was `not checked` there; each criterion, flow and angle that the author's change since `K` touches, with the delta worked out as Phase C step 2 of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)) does; and the checks, the production build's start and one pass through each critical flow, since main moved. Every other item that passed at `K` is `carried: <K>, <comment id>`. Plan in full instead if the delta passes 400 changed lines or 15 files, raises the tier, or changes how the app builds, starts or migrates.
 
 | Tier | Angles |
 |---|---|
@@ -44,7 +45,7 @@ You are the last check before production. Review read the diff and passed it; yo
 
 ## Phase E: Judge and post
 
-1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` check fails nothing. List every other problem as a possible new ticket, worst first.
+1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` or `carried` check fails nothing. List every other problem as a possible new ticket, worst first.
 2. Stop every process you started and close each browser.
 3. If the PR's head has moved past `H`, post at `H` anyway and merge nothing: the new head needs review first, so on a pass post the `Rereview:` of Phase A step 3 after your verdict, naming the new head.
 4. Post this comment on the ticket with `maestro-ticket comment`, sent as **maestro-working-principles** says for quoted text, keyed `<run>-verdict`. With no ticket, comment on the PR.
@@ -54,7 +55,7 @@ You are the last check before production. Review read the diff and passed it; yo
    Setup: <build, data and services used; each way it differs from production>
    - 1 pass: <proof>: <excerpt or screenshot path>
    - 2 fail: steps <exact, from a fresh start>; expected <...>; actual <quoted>; on main: <same | works>; rate <n/3>; evidence <path>
-   - 3 not checked: <why> | not checkable: <question> | waived: <answer comment id>
+   - 3 not checked: <why> | not checkable: <question> | waived: <answer comment id> | carried: <K>, <comment id>
    Checks: <each command: exit code>
    Flows: <each critical flow: pass | fail>
    Angles: <each one tried: what you did, what happened>

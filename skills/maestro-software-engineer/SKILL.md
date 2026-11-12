@@ -49,7 +49,7 @@ Tests:     <what fails without the change; what passes with it>
 
 ## Phase D: Review your diff
 
-1. Read your whole diff against the main branch, top to bottom, as a stranger in review would. Hold it to review's bar: passes 1 (spec), 2 (security) and 6 (test potency) of [passes.md](../maestro-code-review/references/passes.md). For each changed behaviour, break it by hand, see a test go red, and restore it; see each new test fail on the main branch. A test that stays green either way is the most common kickback. Fix what you find; rerun the build, lint and tests.
+1. Read your whole diff against the main branch, top to bottom, as a stranger in review would. Hold it to review's bar: passes 1 (spec), 2 (security) and 6 (test potency) of [passes.md](../maestro-code-review/references/passes.md). For each changed behaviour (on a rerun, each one changed since the latest `Handoff:`), break it by hand, see a test go red, and restore it; see each new test fail on the main branch. A test that stays green either way is the most common kickback. Fix what you find; rerun the build, lint and tests.
 2. Green tests aren't done: run the changed path for real, as the **maestro-prove-complete** skill says.
 3. If main moved since Phase A, merge it in again the same way before you hand back.
 4. Number each item in the latest `Kickback:` comment, review's or QA's. Fix exactly what it asks, answer it with evidence, or disagree in one or two sentences. Rerun the checks and the proof for each item you touched. Review can take your answer to its own finding, but an item in a `Kickback: QA fail` clears only on a new QA run: one you dispute and won't fix is a block, never a handoff, so escalate it as **maestro-working-principles** says and ask the planner for a retest.
