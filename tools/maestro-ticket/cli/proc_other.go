@@ -18,3 +18,9 @@ func alive(pid int) bool {
 func endsWithCommand(int) bool { return false }
 
 func detach(*exec.Cmd) {}
+
+// procStamp can't tell a pid's process from a later one here.
+func procStamp(int) string { return "" }
+
+// zombie can't tell here; alive covers a process that exited.
+func zombie(int) bool { return false }

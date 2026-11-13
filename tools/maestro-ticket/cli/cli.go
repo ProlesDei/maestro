@@ -76,6 +76,11 @@ Commands:
               unchanged, and records the session's cost and tokens; a resume replaces its total)
   costs       [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since DATE|DURATION]
               (logged spend per group: runs, dollars, share, median per run and per ticket)
+  alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
+              that died with no result, leases that ran out, missed ETAs, revived leases and
+              in_review tickets with no one on them past --stall)
+  eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
+              times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
@@ -151,6 +156,8 @@ var commands = []command{
 	{"goals", runGoals},
 	{"log-run", runLogRun},
 	{"costs", runCosts},
+	{"alerts", runAlerts},
+	{"eta", runETA},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
