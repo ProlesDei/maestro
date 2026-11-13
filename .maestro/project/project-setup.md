@@ -22,6 +22,7 @@ main
 - ticket-vet: `cd tools/maestro-ticket && go vet ./...`
 - ticket-test: `cd tools/maestro-ticket && go test -race ./...`
 - install: `bash scripts/install_test.sh`
+- review-prep: `bash scripts/review_prep_test.sh`
 
 ## Run
 

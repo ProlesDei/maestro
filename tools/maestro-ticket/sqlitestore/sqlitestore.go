@@ -1015,6 +1015,17 @@ func (s *Store) List(ctx context.Context, f ticket.ListFilter) ([]ticket.Ticket,
 			}
 			args = append(args, now)
 		}
+		// The latest comment's start, compared in SQL, so a list reads no
+		// comment trail: the planner runs eight of these each look.
+		const latest = "(SELECT c.body FROM comments c WHERE c.ticket_id = tickets.id ORDER BY c.id DESC LIMIT 1)"
+		if f.LatestPrefix != "" {
+			where = append(where, "substr("+latest+", 1, length(?)) = ?")
+			args = append(args, f.LatestPrefix, f.LatestPrefix)
+		}
+		if f.NotLatestPrefix != "" {
+			where = append(where, "coalesce(substr("+latest+", 1, length(?)) != ?, 1)")
+			args = append(args, f.NotLatestPrefix, f.NotLatestPrefix)
+		}
 		var busy areaSet
 		if f.Ready {
 			where = append(where, unclaimedWhere, depsDoneWhere)

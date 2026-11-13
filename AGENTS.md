@@ -73,7 +73,7 @@ From `tools/maestro-ticket/`:
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 
-Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`.
+Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review prep: `bash scripts/review_prep_test.sh`, after changing `skills/maestro-code-review/scripts/`.
 
 ## Changing shipped skills
 
