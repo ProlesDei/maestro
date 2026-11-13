@@ -26,7 +26,9 @@
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; harnesses without claude stop apply and
-# check; bad choices and bad repos refuse and change nothing.
+# check; Maestro's own AGENTS.md, CLAUDE.md or harness folders in
+# .maestro/src/, at any depth, stop apply and check, and none ships;
+# bad choices and bad repos refuse and change nothing.
 # Run from anywhere: bash scripts/install_test.sh
 set -euo pipefail
 
@@ -835,16 +837,31 @@ ok apply "$r9"
 if run check "$r9"; then fail "check passed with committed skills git ignores"; fi
 says ".claude/skills/maestro-tdd is hidden from git, but skills-home is committed"
 
-# check, through a symlinked path, still checks Maestro's clone in
-# .maestro/src/ for files the harnesses would load.
+# Maestro's own rules, skills and workflow never ship: no file a harness
+# loads sits in a path INSTALL.md step 2 checks out.
+if git -C "$here/.." ls-files -- .gitattributes INSTALL.md bot-profiles scripts skills templates tools |
+	grep -iE '(^|/)((agents|agents\.override|claude|claude\.local|gemini)\.md|\.mcp\.json|\.(claude|agents|codex|grok|cursor|gemini|maestro)/)' >"$tmp/out"; then
+	fail "Maestro ships a file the team's harnesses would load as Maestro's own rules"
+fi
+
+# apply and check, through a symlinked path, check Maestro's clone in
+# .maestro/src/ for files the harnesses would load, at any depth.
 r8=$tmp/cloned
 repo "$r8" "harnesses: claude" "skills-home: hidden"
 git clone -q "$m" "$r8/.maestro/src"
 bash "$r8/.maestro/src/scripts/install.sh" apply "$r8" >"$tmp/out" 2>&1 || { cat "$tmp/out"; fail "apply from .maestro/src failed"; }
 touch "$r8/.maestro/src/AGENTS.md"
+mkdir -p "$r8/.maestro/src/.claude/skills/x" "$r8/.maestro/src/tools/t" && touch "$r8/.maestro/src/tools/t/claude.md"
 ln -s "$tmp" "$tmp/via"
+before=$(snap "$r8")
+if bash "$r8/.maestro/src/scripts/install.sh" apply "$r8" >"$tmp/out" 2>&1; then fail "apply passed with AGENTS.md in .maestro/src"; fi
+says "Maestro's own files are in .maestro/src/, where the team's harnesses would load them: .claude AGENTS.md tools/t/claude.md;"
+[ "$(snap "$r8")" = "$before" ] || fail "apply refused but changed the repo"
 if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned" >"$tmp/out" 2>&1; then fail "check passed with AGENTS.md in .maestro/src"; fi
 says "problem: .maestro/src/AGENTS.md exists"
+says "problem: .maestro/src/.claude exists"
+says "problem: .maestro/src/tools/t/claude.md exists"
+rm -r "$r8/.maestro/src/.claude" "$r8/.maestro/src/tools"
 # A clone that skipped apply leaves Maestro's clone in sight of git add.
 sed -i '\#^/\.maestro/src/$#d' "$r8/.git/info/exclude"
 if bash "$r8/.maestro/src/scripts/install.sh" check "$r8" >"$tmp/out" 2>&1; then fail "check passed with .maestro/src/ seen by git"; fi

@@ -44,7 +44,9 @@
 # bots run on, and changes nothing: copies that are missing or changed, a
 # store that is empty, unreadable or no SQLite file, a missing claude, gh or jq, an
 # unset git identity, a code graph install.yaml asks for that .mcp.json
-# lacks, a browser install.yaml asks for that can't open a headless page.
+# lacks, a browser install.yaml asks for that can't open a headless page,
+# Maestro's own AGENTS.md, CLAUDE.md or harness folders in .maestro/src/
+# (apply refuses those too).
 # It warns while origin's main branch lacks project-setup.md or the
 # committed skills, on codebase-memory-mcp hooks in Claude Code's
 # settings, and on Playwright CLI's own skill in the repo.
@@ -292,6 +294,24 @@ write_exclude() {
 	mv "$tmp" "$exclude"
 }
 
+# leaks: Maestro's own files in its clone in .maestro/src/ that a harness
+# in the team's repo would load as its rules, skills or servers, at any
+# depth: Maestro's AGENTS.md and CLAUDE.md, its .claude/ and .agents/
+# skills, its .maestro/ setup. INSTALL.md's sparse checkout leaves them
+# out; a full clone, or an update that lost the sparse setting, brings
+# them back. One path per line, from .maestro/src/.
+leaks() {
+	[ "$root" = "$target/.maestro/src" ] || return 0
+	(cd -- "$root" && find . -path ./.git -prune -o \( -iname AGENTS.md -o -iname AGENTS.override.md \
+		-o -iname CLAUDE.md -o -iname CLAUDE.local.md -o -iname GEMINI.md -o -name .mcp.json \
+		-o -name .claude -o -name .agents -o -name .codex -o -name .grok -o -name .cursor -o -name .gemini \
+		-o -name .maestro \) -print -prune) | sed 's#^\./##' | LC_ALL=C sort
+}
+if [ "$cmd" = apply ]; then
+	l=$(leaks)
+	[ -z "$l" ] || die "Maestro's own files are in .maestro/src/, where the team's harnesses would load them: ${l//$'\n'/ }; check out only what INSTALL.md step 2 lists, then run again; nothing was changed"
+fi
+
 # Temp files go in one folder in the git dir, out of the work tree, and
 # it goes when the script ends, however it ends.
 if [ "$cmd" != check ]; then
@@ -306,11 +326,9 @@ if [ "$cmd" = check ]; then
 	problems=0
 	problem() { echo "problem: $*"; problems=$((problems + 1)); }
 	warn() { echo "warn: $*"; }
-	if [ "$root" = "$target/.maestro/src" ]; then
-		for p in .claude .agents .maestro AGENTS.md CLAUDE.md; do
-			[ ! -e "$root/$p" ] || problem ".maestro/src/$p exists: harnesses would load Maestro's own files; check out only what INSTALL.md lists"
-		done
-	fi
+	while IFS= read -r p; do
+		problem ".maestro/src/$p exists: harnesses would load Maestro's own files; check out only what INSTALL.md lists"
+	done < <(leaks)
 	# apply makes both in each clone; a clone that skipped it has neither.
 	store=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
 	if [[ $store != /* ]]; then
