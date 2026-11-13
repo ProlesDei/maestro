@@ -21,6 +21,7 @@ var (
 	ErrStopped             = errors.New("refused: the kill switch is on")
 	ErrBusy                = errors.New("store busy")
 	ErrNoSlot              = errors.New("no free slot")
+	ErrLowDisk             = errors.New("low disk")
 	ErrStoreTooNew         = errors.New("store is newer than this maestro-ticket")
 )
 
@@ -55,6 +56,7 @@ var errorKinds = []struct {
 	{ErrStopped, "stopped", ExitConflict},
 	{ErrBusy, "busy", ExitConflict},
 	{ErrNoSlot, "no_slot", ExitConflict},
+	{ErrLowDisk, "low_disk", ExitConflict},
 	{ErrStoreTooNew, "store_too_new", ExitUsage},
 }
 
