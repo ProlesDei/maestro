@@ -115,23 +115,28 @@ func runLogRun(ctx context.Context, c *call) error {
 		c.freeClaim(ctx, launch, id)
 		return err
 	}
-	req := ticket.LogRunRequest{Session: r.SessionID, Ticket: id, Actor: logActor(c.actor), CostUSD: *r.TotalCostUSD}
-	for _, u := range r.ModelUsage {
-		req.InputTokens += u.InputTokens
-		req.OutputTokens += u.OutputTokens
-		req.CacheWriteTokens += u.CacheCreationInputTokens
-		req.CacheReadTokens += u.CacheReadInputTokens
-	}
 	s, err := c.open(ctx)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 	c.endLaunch(ctx, s, launch, ticket.LaunchResult, r.SessionID)
-	_, err = s.LogRun(ctx, req)
-	// A wrong id must not lose the cost: log it with no ticket.
+	return logRun(ctx, s, r, id, c.actor, c.env.Stderr)
+}
+
+// logRun records a reply's spend. A wrong ticket id must not lose the
+// cost: it logs the run with no ticket and says so on warn.
+func logRun(ctx context.Context, s ticket.Store, r claudeReply, id ticket.ID, actor string, warn io.Writer) error {
+	req := ticket.LogRunRequest{Session: r.SessionID, Ticket: id, Actor: logActor(actor), CostUSD: *r.TotalCostUSD}
+	for _, u := range r.ModelUsage {
+		req.InputTokens += u.InputTokens
+		req.OutputTokens += u.OutputTokens
+		req.CacheWriteTokens += u.CacheCreationInputTokens
+		req.CacheReadTokens += u.CacheReadInputTokens
+	}
+	_, err := s.LogRun(ctx, req)
 	if errors.Is(err, ticket.ErrNotFound) && req.Ticket != 0 {
-		fmt.Fprintf(c.env.Stderr, "maestro-ticket: no ticket %s; logged the run with no ticket\n", req.Ticket)
+		fmt.Fprintf(warn, "maestro-ticket: no ticket %s; logged the run with no ticket\n", req.Ticket)
 		req.Ticket = 0
 		_, err = s.LogRun(ctx, req)
 	}

@@ -7,7 +7,7 @@ A team installs it into its own repo and gets:
 - `maestro-ticket`, a ticket store and CLI.
 - 18 `maestro-*` skills, and six bot profiles.
 
-Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook. A person or Grok Bot starts every job ([decisions](docs/decisions.md)).
+Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts every job; the one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md)).
 
 ## Who drives it
 
