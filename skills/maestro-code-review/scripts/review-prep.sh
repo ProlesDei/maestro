@@ -41,11 +41,22 @@ git --attr-source="$empty" rev-parse --git-dir >/dev/null 2>&1 && attrs=(--attr-
 gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff "$@"; }
 
 # The main branch, from the main checkout's project-setup.md, never the
-# PR's tree.
-mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+# PR's tree. Where the main repo is bare, the install sits in the linked
+# worktree that holds .maestro/src/ (install.sh allows only one).
+wts=$(git worktree list --porcelain)
+mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
+if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
+	while IFS= read -r w; do
+		[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+	done < <(sed -n 's/^worktree //p' <<<"$wts")
+fi
 setup=$mainwt/.maestro/project/project-setup.md
+# Read as install.sh check reads it: \r, spaces, the heading's case, a
+# leading bullet and backticks don't count.
 main=
-[ -f "$setup" ] && main=$(awk '/^## /{on=($0=="## Main branch"); next} on && NF {print $1; exit}' "$setup")
+[ -f "$setup" ] && main=$(awk '{sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")}
+	/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); on=(tolower(h)=="main branch"); next}
+	on && $0 != "" && !/^#/ {sub(/^[-* ]+/, ""); gsub(/^[`* ]+|[`* ]+$/, ""); print; exit}' "$setup")
 
 # The root files agents read as rules, as main has them since the last
 # fetch; the main checkout's copy only where main has none.

@@ -162,12 +162,13 @@ func (s *Store) ClearETA(ctx context.Context, goal string) error {
 	})
 }
 
-// MarkETAMet implements ticket.Store. The due time names the ETA a look
-// judged, so a replacement set meanwhile is left alone.
-func (s *Store) MarkETAMet(ctx context.Context, goal string, due time.Time) error {
+// MarkETAMet implements ticket.Store. The due and set times name the ETA a
+// look judged, so a replacement set meanwhile, even one due at the same
+// time, is left alone.
+func (s *Store) MarkETAMet(ctx context.Context, goal string, due, setAt time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx, now int64) error {
-		_, err := tx.ExecContext(ctx, "UPDATE etas SET met_at = ? WHERE goal = ? AND due_at = ? AND met_at IS NULL",
-			now, goal, due.UnixMilli())
+		_, err := tx.ExecContext(ctx, "UPDATE etas SET met_at = ? WHERE goal = ? AND due_at = ? AND set_at = ? AND met_at IS NULL",
+			now, goal, due.UnixMilli(), setAt.UnixMilli())
 		return err
 	})
 }

@@ -245,7 +245,7 @@ func etaReport(ctx context.Context, s ticket.Store, now time.Time, rep *alertRep
 			// Once met, an ETA stays met: a ticket tagged into its goal
 			// later is new work, not a slip.
 			if e.MetAt.IsZero() {
-				if err := s.MarkETAMet(ctx, e.Goal, e.Due); err != nil {
+				if err := s.MarkETAMet(ctx, e.Goal, e.Due, e.SetAt); err != nil {
 					errs = append(errs, err)
 				}
 			}

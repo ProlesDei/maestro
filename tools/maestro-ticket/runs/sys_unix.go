@@ -49,6 +49,9 @@ func holdLock(f *os.File) (bool, error) {
 // killGroup sends sig to every process in the group pid leads.
 func killGroup(pid int, sig syscall.Signal) { syscall.Kill(-pid, sig) }
 
+// groupAlive reports whether any process is left in the group pid led.
+func groupAlive(pid int) bool { return !errors.Is(syscall.Kill(-pid, 0), syscall.ESRCH) }
+
 // Detach makes a process outlive the command that started it: its own
 // session, no terminal.
 func Detach() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }

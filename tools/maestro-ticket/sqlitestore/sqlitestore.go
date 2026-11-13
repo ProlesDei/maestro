@@ -365,7 +365,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 			return err
 		}
-		if v >= schemaVersion {
+		if v > schemaVersion {
+			return fmt.Errorf("%w: schema %d, this binary knows %d; rebuild maestro-ticket from the newest Maestro this machine uses", ticket.ErrStoreTooNew, v, schemaVersion)
+		}
+		if v == schemaVersion {
 			return nil
 		}
 		// Snapshot a store with tickets in it before changing its schema,

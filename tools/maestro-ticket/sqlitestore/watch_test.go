@@ -119,6 +119,23 @@ func TestETAs(t *testing.T) {
 	if len(list) != 2 || list[0].Goal != "alpha" || list[1].Goal != "demo" {
 		t.Fatalf("etas = %+v", list)
 	}
+	// A look marks met only the ETA it judged: not a replacement set
+	// meanwhile, even one due at the same time.
+	judged := list[0]
+	clk.Advance(time.Second)
+	mustSetETA(t, s, "alpha", due)
+	if err := s.MarkETAMet(ctx, judged.Goal, judged.Due, judged.SetAt); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = s.ETAs(ctx); !list[0].MetAt.IsZero() {
+		t.Fatalf("a replaced ETA was marked met: %+v", list[0])
+	}
+	if err := s.MarkETAMet(ctx, list[0].Goal, list[0].Due, list[0].SetAt); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = s.ETAs(ctx); list[0].MetAt.IsZero() {
+		t.Fatalf("the judged ETA wasn't marked met: %+v", list[0])
+	}
 	if err := s.ClearETA(ctx, "alpha"); err != nil {
 		t.Fatal(err)
 	}

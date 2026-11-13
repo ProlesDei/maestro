@@ -301,14 +301,15 @@ func TestLaunchRingsUntilAckedOnce(t *testing.T) {
 	}
 }
 
-// The time limit stops the whole process group and records timed_out.
-// The run's claim on its ticket goes, counted as a lease expiry.
+// The time limit stops the whole process group, a child that ignores
+// SIGTERM too, and records timed_out. The run's claim on its ticket goes,
+// counted as a lease expiry.
 func TestLaunchTimeLimit(t *testing.T) {
 	l := newLauncher(t, "qa-lead")
 	l.h.ok(nil, "create", "--title", "a", "--role", "qa-lead")
 	l.h.ok(nil, "claim", "T-1", "--holder", "qa-lead/s1", "--ttl", "1h")
-	r := l.launch("", "--ticket", "T-1", "--limit", "1s", "--", "sh", "-c", "sleep 300 & echo $! > child; wait")
-	e := l.waitEnded(r.ID, 15*time.Second)
+	r := l.launch("", "--ticket", "T-1", "--limit", "1s", "--", "sh", "-c", `(trap "" TERM; exec sleep 300) & echo $! > child; wait`)
+	e := l.waitEnded(r.ID, 20*time.Second)
 	if e.State != runs.TimedOut || *e.Exit != 128+int(syscall.SIGTERM) || !strings.Contains(e.Error, "1s time limit") {
 		t.Fatalf("timed out run: %+v", e)
 	}
@@ -556,6 +557,10 @@ func TestNotifyCommand(t *testing.T) {
 	if code, _, errs := h.run("k-123\n", "notify", "planner", "--key-file", "-"); code != 0 {
 		t.Fatal(errs)
 	}
+	// An empty URL file is refused, and leaves the webhook and its key.
+	if code, _, _ := h.run("\n", "notify", "planner", "--url-file", "-"); code != 2 {
+		t.Fatalf("empty URL: exit %d", code)
+	}
 	info, err = os.Stat(filepath.Join(h.dir, "notify", "planner.key"))
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("key file: %v %v", info, err)
@@ -647,6 +652,35 @@ func TestStoppedSupervisorRingsOnNextLook(t *testing.T) {
 	l.h.ok(nil, "doctor")
 	if k.count() != 1 {
 		t.Fatalf("rang %d times; want 1", k.count())
+	}
+	l.ackAll()
+}
+
+// With no webhook to ring, a look marks an ended run once and leaves its
+// record alone after that, however many looks follow.
+func TestLookWithoutWebhookWritesOnce(t *testing.T) {
+	l := newLauncher(t, "planner")
+	r := l.launch("", "--", "true")
+	l.waitEnded(r.ID, 10*time.Second)
+	l.waitSupervisors()
+	l.pickup()
+	rec := filepath.Join(l.h.dir, "runs", r.ID+".json")
+	before, err := os.Stat(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	l.pickup()
+	l.h.ok(nil, "doctor")
+	after, err := os.Stat(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("a look rewrote %s with nothing to ring", rec)
+	}
+	if e := l.get(r.ID); e.OrphanTries != 1 || e.Rang {
+		t.Fatalf("record: %+v", e)
 	}
 	l.ackAll()
 }

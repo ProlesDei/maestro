@@ -415,12 +415,16 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 			}
 			h, err := runs.Webhook(notify, r.Launcher)
 			if err != nil || h.URL == "" {
-				r.RingError = ""
+				msg := ""
 				if err != nil {
-					r.RingError = err.Error()
+					msg = err.Error()
 				}
-				r.OrphanTries = max(r.OrphanTries, 1)
-				runs.Save(dir, r)
+				// Nothing to ring: write the record only when this
+				// changes it, not on every look.
+				if r.OrphanTries < 1 || r.RingError != msg {
+					r.RingError, r.OrphanTries = msg, max(r.OrphanTries, 1)
+					runs.Save(dir, r)
+				}
 				return
 			}
 			r.OrphanTries++
@@ -783,7 +787,12 @@ func runNotify(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		if err := runs.SetWebhook(dir, bot, strings.TrimSpace(u)); err != nil {
+		// An empty file is a mistake, not a clear: SetWebhook would drop
+		// the webhook and its key.
+		if u = strings.TrimSpace(u); u == "" {
+			return usagef("notify: the URL file is empty; --clear removes a webhook")
+		}
+		if err := runs.SetWebhook(dir, bot, u); err != nil {
 			return usagef("notify: %v", err)
 		}
 	}

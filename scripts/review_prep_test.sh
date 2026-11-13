@@ -136,6 +136,29 @@ grep -qxF "$(printf '1\t0\tREADME.md\tdocs')" "$C/files.txt" || fail "files.txt 
 cmp -s "$tmp/out" "$C/prep.txt" || fail "prep.txt differs from the output"
 bash "$prep" maestro/T-7 >"$tmp/out" || fail "prep maestro/T-7 exited $?"
 has ticket=T-7
+# The main branch reads as install.sh check reads it: a bullet,
+# backticks, CRLF and the heading's case don't count.
+cp .maestro/project/project-setup.md "$tmp/setup"
+# shellcheck disable=SC2016 # literal backticks
+printf '# Project setup\r\n\r\n## Main Branch \r\n\r\n- `main`\r\n\r\n## Checks\r\n' >.maestro/project/project-setup.md
+bash "$prep" T-7 >"$tmp/out" || fail "prep with a bulleted main exited $?"
+has main=main
+has stop=none
+mv "$tmp/setup" .maestro/project/project-setup.md
+# A bare main repo: the setup comes from the linked worktree that holds
+# the install.
+git clone -q --bare "$tmp/origin.git" "$tmp/bare.git"
+git -C "$tmp/bare.git" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git -C "$tmp/bare.git" fetch -q origin
+git -C "$tmp/bare.git" worktree add -q "$tmp/bare-other" -b other origin/main
+git -C "$tmp/bare.git" worktree add -q "$tmp/bare-wt" main
+mkdir -p "$tmp/bare-wt/.maestro/src"
+printf '## Main branch\n\nnope\n' >"$tmp/bare-other/.maestro/project/project-setup.md"
+(cd "$tmp/bare-other" && bash "$prep" --route 8) >"$tmp/out" || fail "route from a bare repo exited $?"
+has route=light
+(cd "$tmp/bare-other" && bash "$prep" T-7) >"$tmp/out" || fail "prep from a bare repo exited $?"
+has main=main
+has stop=none
 # A -diff attribute in the main checkout hides no line from the counts
 # or the patch.
 echo '*.go -diff' >.gitattributes
