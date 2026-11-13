@@ -7,7 +7,7 @@ A team installs it into its own repo and gets:
 - `maestro-ticket`, a ticket store and CLI.
 - 18 `maestro-*` skills, and six bot profiles.
 
-Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook. A person or Grok Bot starts every job ([decisions](docs/decisions.md)).
+Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts every job; the one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md)).
 
 ## Who drives it
 
@@ -131,6 +131,8 @@ What you get:
 The same guide updates Maestro to a newer commit and uninstalls it.
 
 Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as an MCP server, sessions find symbols and callers before they grep, which costs fewer reads. INSTALL.md offers it.
+
+For an app with screens: [Playwright CLI](https://playwright.dev/agent-cli/introduction), the browser QA sessions open pages with. Each QA run gets its own headless browser, so many runs test at once without sharing cookies, storage or files. On Linux its system libraries need root once: INSTALL.md never has an agent wait on a sudo password, so a person installs them, unless sudo needs none.
 
 ## Use
 

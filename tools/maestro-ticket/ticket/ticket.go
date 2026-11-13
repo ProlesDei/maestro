@@ -1003,6 +1003,8 @@ type Check struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
 	Detail string `json:"detail"`
+	// Warn marks a passing check that found something a person should see.
+	Warn bool `json:"warn,omitempty"`
 }
 
 // DoctorReport is the result of Store.Doctor.

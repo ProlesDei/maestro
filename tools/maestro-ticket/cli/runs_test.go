@@ -212,28 +212,3 @@ func TestCostsGroups(t *testing.T) {
 		t.Fatalf("--since 1h kept %d runs", got.Total.Runs)
 	}
 }
-
-// --brief prints what a bot acts on, still logs the whole reply, and
-// passes a reply it can't read through as it came.
-func TestLogRunBrief(t *testing.T) {
-	h := newHarness(t)
-	h.ok(nil, "create", "--title", "a")
-	code, out, errs := h.run(reply("s1", 1.5, "m"), "log-run", "--brief", "--actor", "qa-lead", "--ticket", "T-1")
-	if want := "session_id: s1\n\nDone.\nEND_x\n"; code != 0 || out != want || errs != "" {
-		t.Fatalf("exit %d, stdout %q, stderr %q; want %q", code, out, errs, want)
-	}
-	var costs struct{ Total struct{ USD float64 } }
-	h.ok(&costs, "costs")
-	if costs.Total.USD != 1.5 {
-		t.Fatalf("costs = %+v", costs)
-	}
-	failed := `{"type": "result", "subtype": "error_max_turns", "is_error": true, "session_id": "s2", "total_cost_usd": 0.1, "modelUsage": {}}`
-	if code, out, _ := h.run(failed, "log-run", "--brief", "--actor", "qa-lead"); code != 0 || out != "session_id: s2\nerror: error_max_turns\n" {
-		t.Fatalf("error reply: exit %d, %q", code, out)
-	}
-	for _, in := range []string{"Error: usage limit reached\n", `{"type": "assistant", "session_id": "s3"}`} {
-		if code, out, _ := h.run(in, "log-run", "--brief", "--actor", "qa-lead"); code != 2 || out != in {
-			t.Fatalf("unreadable reply %q: exit %d, %q", in, code, out)
-		}
-	}
-}

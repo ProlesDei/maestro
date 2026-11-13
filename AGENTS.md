@@ -8,7 +8,7 @@ Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hun
 
 ## What we're building
 
-The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher, watcher or webhook (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
+The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher; the one webhook rings a bot when a run it launched ends (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
 
 That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the six profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 

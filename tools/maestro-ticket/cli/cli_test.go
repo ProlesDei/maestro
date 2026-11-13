@@ -27,6 +27,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(childEnv) == "1" {
 		os.Exit(Main(os.Args[1:]))
 	}
+	// A process an in-process command starts from os.Executable, such as
+	// launch's supervisor, acts as the CLI too, not as another test run.
+	os.Setenv(childEnv, "1")
 	os.Exit(m.Run())
 }
 
