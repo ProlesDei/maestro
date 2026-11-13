@@ -52,7 +52,7 @@ Then act on each row. Skip a row with a live CLAIM; one marked `(expired)` count
 | Back to review | Reviewer or QA lead, as To answer says |
 | QA not finished | QA lead, to finish the merge without a new test |
 | Waiting for review, in neither row above | Reviewer, with the `--approved` and `--drop` that an `Answer:` after the latest `Kickback:` calls for, as To answer says |
-| Waiting for QA | QA lead, under its limit |
+| Waiting for QA | QA lead |
 | Sent back, TRIES 0 or 1 | Same engineer again; if the senior disputed the findings, rule first, as Disputes says |
 | Sent back, TRIES 2 | A junior's ticket: senior, one run. A senior's: split or rewrite it; the new tickets keep its tries |
 | Sent back, TRIES 3+ | Post `Escalation: build at TRIES <n>: <what failed each time; the question>` with a last line `Return-role: engineer`, run `maestro-ticket transition <id> --from in_progress --to blocked`, and send it up as Unblock says |
@@ -72,7 +72,7 @@ To hold a ticket, as a standing rule says, send `/maestro-planner rule <id>: hol
 
 "Same engineer" is the bot before the `/` in the holder of the ticket's latest `claimed` event that starts `junior-engineer/` or `senior-engineer/` (`maestro-ticket events --ticket <id> --type claimed`).
 
-Work runs going = `in_progress` rows with a live CLAIM; QA runs = `in_review` rows with a live `qa-lead/` CLAIM; both limits are in your memories. An `in_progress` row not in Ready to go on, or a build that reports `waiting_on_deps` or `area_busy`, waits on a dep or a busy area: start no build or split on it this look.
+Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. An `in_progress` row not in Ready to go on, or a build that reports `waiting_on_deps` or `area_busy`, waits on a dep or a busy area: start no build or split on it this look.
 
 ## Unblock
 
