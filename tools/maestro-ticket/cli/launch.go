@@ -361,11 +361,10 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	if id == 0 || r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
-	// A later run of the same bot on the same ticket may hold the claim
-	// now: leave it.
+	// Another run on the same ticket may hold the claim now: leave it.
 	if list, err := runs.List(dir, time.Now(), false); err == nil {
 		for _, o := range list {
-			if o.ID != r.ID && !o.Ended() && o.Ticket == r.Ticket && o.Launcher == r.Launcher {
+			if o.ID != r.ID && !o.Ended() && o.Ticket == r.Ticket {
 				return
 			}
 		}
@@ -388,50 +387,58 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	warn(err)
 }
 
-// ringOrphans rings, once, for each run whose supervisor went away before
-// it could (the machine restarted, or it was killed), saves it as died if
-// it had no result, and frees its ticket as the supervisor would have.
-// pickup and doctor call it, whoever runs them, so the first look after a
-// restart wakes every bot that lost a run.
+// ringOrphans rings for each run whose supervisor went away before a
+// ring reached its launcher (the machine restarted, or it was killed):
+// it saves a run that had no result as died, kills what is left of it,
+// frees its ticket as the supervisor would have, and rings. pickup and
+// doctor call it, whoever runs them, so the first look after a restart
+// wakes every bot that lost a run. A ring that fails is tried again on a
+// later look, a few times.
 func (c *call) ringOrphans(ctx context.Context, dir string) {
-	orphans, err := runs.Orphans(dir, time.Now().UTC().Round(time.Millisecond))
-	if err != nil || len(orphans) == 0 {
+	ids, err := runs.Orphans(dir, time.Now())
+	if err != nil || len(ids) == 0 {
 		return
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	var wg sync.WaitGroup
-	for _, r := range orphans {
-		if r.State == runs.Died {
-			r.Error = joinLines(r.Error, "its supervisor went away with no result: the machine restarted, or it was killed")
-			runs.Save(dir, r)
-			c.endRun(ctx, dir, r)
-		}
-		h, err := runs.Webhook(notify, r.Launcher)
-		if err != nil || h.URL == "" {
-			if err != nil {
-				r.RingError = err.Error()
-				runs.Save(dir, r)
-			}
-			continue
-		}
+	sem := make(chan struct{}, 8)
+	for _, id := range ids {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func() {
-			defer wg.Done()
+			defer func() { <-sem; wg.Done() }()
+			r, release, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
+			if !ok {
+				return
+			}
+			defer release()
+			if r.State == runs.Died && r.OrphanTries == 0 {
+				runs.KillRun(r.ID)
+				runs.Save(dir, r)
+				c.endRun(ctx, dir, r)
+			}
+			h, err := runs.Webhook(notify, r.Launcher)
+			if err != nil || h.URL == "" {
+				r.RingError = ""
+				if err != nil {
+					r.RingError = err.Error()
+				}
+				r.OrphanTries = max(r.OrphanTries, 1)
+				runs.Save(dir, r)
+				return
+			}
+			r.OrphanTries++
 			r.Rings++
+			r.RingError = ""
 			if err := runs.Ring(ctx, h, runs.Notice(r)); err != nil {
 				r.RingError = err.Error()
+			} else {
+				r.Rang = true
 			}
 			runs.Save(dir, r)
 		}()
 	}
 	wg.Wait()
-}
-
-func joinLines(a, b string) string {
-	if a == "" {
-		return b
-	}
-	return a + "\n" + b
 }
 
 // runPickup shows each run the actor launched that ended and that it
@@ -530,6 +537,9 @@ func runAck(ctx context.Context, c *call) error {
 		}
 		if !r.Ended() {
 			return fmt.Errorf("%w: ack: run %s is %s: ack it once pickup shows it ended", ticket.ErrStatusConflict, id, r.State)
+		}
+		if r.Launcher != c.actor {
+			return fmt.Errorf("%w: ack: run %s is %s's: only the bot that launched it acks it", ticket.ErrForbidden, id, dash(r.Launcher))
 		}
 		ok, err := runs.Ack(dir, id, c.actor, now)
 		if err != nil {

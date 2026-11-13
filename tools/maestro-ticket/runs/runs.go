@@ -6,11 +6,10 @@
 // A run is a few files in one directory, which every worktree shares (runs/
 // next to the ticket store): <id>.json, the record; <id>.in, .out and .err,
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
-// holds while it lives; <id>.acked, made once when the launcher says it
-// acted on the result; and <id>.orphan, made once by the reader that rings
-// for a run whose supervisor went away. Only one process writes a record
-// at a time: launch until the supervisor starts, then the supervisor, then,
-// if the supervisor went away first, the one reader that made .orphan.
+// holds while it lives; and <id>.acked, made once when the launcher says it
+// acted on the result. Only one process writes a record at a time: launch
+// until the supervisor starts, then whoever holds <id>.lock: the
+// supervisor, or, once it went away, a reader that Adopt let in.
 package runs
 
 import (
@@ -34,7 +33,7 @@ import (
 
 // States. Starting and running are live; the rest are ended. A reader
 // finds died when a record's supervisor is gone before it saved a result;
-// the reader that rings for it writes it.
+// the reader that adopts it writes it.
 const (
 	Starting = "starting"
 	Running  = "running"
@@ -70,6 +69,10 @@ type Record struct {
 	Error     string     `json:"error,omitempty"`
 	Rings     int        `json:"rings,omitempty"`
 	RingError string     `json:"ring_error,omitempty"`
+	// Rang is true once a ring reached the webhook; OrphanTries counts the
+	// rings readers tried for a run whose supervisor went away first.
+	Rang        bool `json:"rang,omitempty"`
+	OrphanTries int  `json:"orphan_tries,omitempty"`
 	// Host is the machine the supervisor runs on: only there can a reader
 	// tell whether it still lives.
 	Host string `json:"host,omitempty"`
@@ -276,31 +279,56 @@ func once(name string, body []byte) (bool, error) {
 	return true, err
 }
 
-// Orphans finds the unacked runs whose supervisor went away before it
-// rang (the machine restarted, or it was killed) and claims each for the
-// caller, which then rings for it and saves it. Each goes to one caller
-// only, however many look at once. A died record comes back with its end
-// set; one that ended but never rang comes back as it is.
-func Orphans(dir string, now time.Time) ([]Record, error) {
+// orphanTries caps how often readers ring for one orphan whose rings
+// fail, so a webhook that is down can't slow every pickup for good.
+const orphanTries = 5
+
+// Orphans lists the unacked runs whose supervisor may have gone away
+// before a ring reached the launcher: a died run, or an ended one that
+// never rang. Adopt takes each for one caller.
+func Orphans(dir string, now time.Time) ([]string, error) {
 	list, err := List(dir, now, false)
 	if err != nil {
 		return nil, err
 	}
-	var out []Record
+	var out []string
 	for _, r := range list {
-		switch {
-		case r.State == Died:
-			r.EndedAt = &now
-		case r.State != Unreadable && r.Ended() && r.Rings == 0 && r.RingError == "" && r.PID != 0 && supervisorGone(dir, r, now):
-		default:
-			continue
+		if r.State != Unreadable && r.Ended() && !r.Rang && r.OrphanTries < orphanTries {
+			out = append(out, r.ID)
 		}
-		if ok, err := once(path(dir, r.ID, ".orphan"), nil); err != nil || !ok {
-			continue
-		}
-		out = append(out, r)
 	}
 	return out, nil
+}
+
+// Adopt takes the run's lock in place of its supervisor, if no one holds
+// it, and returns the record as stored, with a live one written as died:
+// a supervisor holds that lock from before it writes running until it
+// exits, so a free lock means it is gone, and while the caller holds it no
+// late supervisor, nor any other reader, can write the record. The caller
+// rings, saves, then calls release. A caller killed halfway lets go of
+// the lock, and the next one takes the run over.
+func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
+	f, err := os.OpenFile(path(dir, id, ".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return r, nil, false
+	}
+	if got, err := holdLock(f); err != nil || !got {
+		f.Close()
+		return r, nil, false
+	}
+	release = func() { f.Close() }
+	r, err = Load(dir, id)
+	switch {
+	case err != nil, Acked(dir, id), r.Rang, r.OrphanTries >= orphanTries,
+		r.Host != "" && r.Host != hostname(), // its lock is on another machine
+		r.State == Starting && now.Sub(r.StartedAt) < startGrace:
+		release()
+		return r, nil, false
+	case !r.Ended():
+		r.State, r.EndedAt = Died, &now
+		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
+	}
+	return r, release, true
 }
 
 var host = sync.OnceValue(func() string {
@@ -328,7 +356,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		}
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".orphan", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}

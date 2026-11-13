@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // CanScan reports whether Untracked works on this system.
@@ -46,6 +47,28 @@ func Untracked(roots []string) ([]Session, error) {
 		out = append(out, Session{PID: pid, Dir: cwd})
 	}
 	return out, nil
+}
+
+// KillRun kills every process launch started for run id, and every one
+// they started, found by RunIDEnv in its environment: what is left of a
+// run whose supervisor went away, even outside its process group.
+func KillRun(id string) {
+	ents, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		for _, kv := range procList(pid, "environ") {
+			if kv == RunIDEnv+"="+id {
+				syscall.Kill(pid, syscall.SIGKILL)
+				break
+			}
+		}
+	}
 }
 
 func procList(pid int, name string) []string {

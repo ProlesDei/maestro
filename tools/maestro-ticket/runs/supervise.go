@@ -75,7 +75,11 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 	if o.OnEnd != nil {
 		o.OnEnd(r)
 	}
-	ring(ctx, dir, r, o)
+	// Stopped, as at a shutdown: leave the ring to the first reader after,
+	// which Adopt lets in once this exits.
+	if ctx.Err() == nil {
+		ring(ctx, dir, r, o)
+	}
 	return nil
 }
 
@@ -219,9 +223,13 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 		if Acked(dir, r.ID) {
 			return
 		}
+		err := Ring(ctx, h, Notice(r))
+		if ctx.Err() != nil {
+			return // a ring cut short isn't one: a reader rings after
+		}
 		r.Rings++
-		r.RingError = ""
-		if err := Ring(ctx, h, Notice(r)); err != nil {
+		r.Rang, r.RingError = r.Rang || err == nil, ""
+		if err != nil {
 			r.RingError = err.Error()
 		}
 		Save(dir, r)

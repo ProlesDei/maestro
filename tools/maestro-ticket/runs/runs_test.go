@@ -118,21 +118,49 @@ func TestPruneKeepsUnpicked(t *testing.T) {
 	}
 }
 
-// Orphans hands each run whose supervisor went away to one caller only,
-// and skips a run on another machine, whose supervisor it can't test.
-func TestOrphansOnce(t *testing.T) {
+// Adopt lets one caller at a time in, and only once the supervisor is
+// gone: it writes a live record as died, and holds off a late supervisor
+// and every other reader until it lets go. A run on another machine,
+// whose supervisor it can't test, never reads as died.
+func TestAdoptOnce(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	r, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
+	if _, _, ok := Adopt(dir, r.ID, now); ok {
+		t.Fatal("adopted a run still inside its start grace")
+	}
+	later := now.Add(time.Minute)
+	if ids, _ := Orphans(dir, later); len(ids) != 1 || ids[0] != r.ID {
+		t.Fatalf("orphans: %v", ids)
+	}
+	got, release, ok := Adopt(dir, r.ID, later)
+	if !ok || got.State != Died || got.EndedAt == nil {
+		t.Fatalf("adopt: %+v %v", got, ok)
+	}
+	if _, _, ok := Adopt(dir, r.ID, later); ok {
+		t.Fatal("two callers adopted one run")
+	}
+	if g, _ := Get(dir, r.ID, later); g.State == Died {
+		t.Fatal("a reader saw died while the run was adopted")
+	}
+	got.Rang = true
+	Save(dir, got)
+	release()
+	if _, _, ok := Adopt(dir, r.ID, later); ok {
+		t.Fatal("adopted a run that already rang")
+	}
+	if ids, _ := Orphans(dir, later); len(ids) != 0 {
+		t.Fatalf("orphans after the ring: %v", ids)
+	}
+
 	far, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
 	far.Host = "another-machine"
+	far.State = Running
 	Save(dir, far)
-	later := now.Add(time.Minute)
-	got, err := Orphans(dir, later)
-	if err != nil || len(got) != 1 || got[0].ID != r.ID || got[0].State != Died || got[0].EndedAt == nil {
-		t.Fatalf("orphans: %+v %v", got, err)
+	if g, _ := Get(dir, far.ID, later); g.State != Running {
+		t.Fatalf("a run on another machine read as %s", g.State)
 	}
-	if again, _ := Orphans(dir, later); len(again) != 0 {
-		t.Fatalf("second look: %+v", again)
+	if _, _, ok := Adopt(dir, far.ID, later); ok {
+		t.Fatal("adopted a run on another machine")
 	}
 }

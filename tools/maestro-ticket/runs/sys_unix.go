@@ -36,6 +36,16 @@ func tryLock(f *os.File) (ok bool, err error) {
 	return true, unix.Flock(int(f.Fd()), unix.LOCK_UN)
 }
 
+// holdLock takes f's exclusive lock without waiting and keeps it until f
+// closes. A lock held elsewhere is false with no error.
+func holdLock(f *os.File) (bool, error) {
+	err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	if errors.Is(err, unix.EWOULDBLOCK) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // killGroup sends sig to every process in the group pid leads.
 func killGroup(pid int, sig syscall.Signal) { syscall.Kill(-pid, sig) }
 

@@ -384,6 +384,7 @@ func TestLaunchCrashAndDeath(t *testing.T) {
 		t.Fatalf("ticket of a died run: %+v", tk)
 	}
 
+	l.h.fails(2, "ack", gone.ID) // only its launcher acks it
 	l.h.env["MAESTRO_TICKET_ACTOR"] = "junior-engineer"
 	p := jr.pickup()
 	if len(p.Ended) != 1 || p.Ended[0].State != runs.Died || !strings.Contains(p.Ended[0].Error, "machine restarted") {
@@ -580,5 +581,41 @@ func TestLaunchTimeoutPrefixRingsAndOpenStdin(t *testing.T) {
 	var o runs.Record
 	json.Unmarshal(out, &o)
 	l.waitEnded(o.ID, 10*time.Second)
+	l.ackAll()
+}
+
+// A supervisor stopped as at a shutdown records the run failed and leaves
+// the ring to the next look; a ring that fails there is tried again on a
+// later look, and once one gets through, no look rings again.
+func TestStoppedSupervisorRingsOnNextLook(t *testing.T) {
+	l := newLauncher(t, "planner")
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL + "/hook"
+	dead.Close()
+	l.h.run(deadURL, "notify", "planner", "--url-file", "-")
+	r := l.launch("", "--", "sleep", "300")
+	if err := exec.Command("pkill", "-TERM", "-f", "supervise "+r.ID).Run(); err != nil {
+		t.Fatalf("stop supervisor: %v", err)
+	}
+	e := l.waitEnded(r.ID, 15*time.Second)
+	l.waitSupervisors()
+	if e.State != runs.Failed || e.Rings != 0 || !strings.Contains(e.Error, "launcher was stopped") {
+		t.Fatalf("stopped run: %+v", e)
+	}
+	l.pickup() // the look rings, and the dead webhook fails it
+	if e = l.get(r.ID); e.Rang || e.OrphanTries != 1 || e.RingError == "" {
+		t.Fatalf("after a failed ring: %+v", e)
+	}
+	k, url := newHook(t)
+	l.h.run(url, "notify", "planner", "--url-file", "-")
+	l.pickup()
+	if n := k.wait(t, 5*time.Second); n.Run != r.ID || n.State != runs.Failed {
+		t.Fatalf("ring: %+v", n)
+	}
+	l.pickup()
+	l.h.ok(nil, "doctor")
+	if k.count() != 1 {
+		t.Fatalf("rang %d times; want 1", k.count())
+	}
 	l.ackAll()
 }
