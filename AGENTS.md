@@ -26,6 +26,7 @@ What we hold to:
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch and checks from their `.maestro/project/project-setup.md`.
+- Feedback from one team is a case, not a rule. Maestro is live, and a team's feedback may fit only its own stack or habits. Change the shared files only where a fix helps most teams; point the rest to that team's own setup ([decisions](docs/decisions.md), 17).
 - Build for a swarm. Hundreds of sessions may share one repo, one ticket store and one owner at the same moment. For every feature or edit, ask what breaks when 300 sessions run it at once:
   - Nothing collides by name. Each session gets its own worktree, branch, temp dir and port; no shared stash or global file a second session would overwrite.
   - What the owner, the chief of staff and the planner read stays readable at that scale: short output they can group and count, and no step that asks the owner once per session.

@@ -112,6 +112,7 @@ flowchart TD
 - **Proof over claims.** A review or QA verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
 - **Read your setup, don't assume it.** Your main branch and checks come from `.maestro/project/project-setup.md`.
+- **Built for many teams.** We read all feedback, and change Maestro where a fix helps most teams. A need only your team has belongs in your `project-setup.md` or your own skills ([decisions](docs/decisions.md), 17).
 - **Small and plain.** Cut what only exists to look impressive.
 
 ## Install
