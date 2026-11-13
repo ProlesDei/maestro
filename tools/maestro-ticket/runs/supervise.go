@@ -151,16 +151,27 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 		why = "stopped"
 	}
 	if why != "" {
+		// Anything the command left in its group goes with it on a stop,
+		// even when the command exits on SIGTERM and a child ignores it;
+		// on a normal exit its children are its own business.
 		killGroup(r.PID, syscall.SIGTERM)
+		grace := time.After(killGrace)
 		select {
 		case <-done:
-		case <-time.After(killGrace):
+		case <-grace:
 			killGroup(r.PID, syscall.SIGKILL)
 			<-done
+			grace = nil
+		}
+		for grace != nil && groupAlive(r.PID) {
+			select {
+			case <-grace:
+				killGroup(r.PID, syscall.SIGKILL)
+				grace = nil
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}
-	// Anything the command left in its group goes with it on a stop; on a
-	// normal exit its children are its own business.
 	now := o.Now()
 	r.EndedAt = &now
 	code := cmd.ProcessState.ExitCode()

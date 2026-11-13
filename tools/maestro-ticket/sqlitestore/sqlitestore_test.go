@@ -755,6 +755,50 @@ func TestNewerSchemaRefused(t *testing.T) {
 	}
 }
 
+// A store a newer binary migrates while Open waits on the write lock is
+// refused too, not opened.
+func TestNewerSchemaRefusedUnderLock(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "t.db")
+	s, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	db, err := sql.Open("sqlite", path+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	exec := func(q string) {
+		t.Helper()
+		if _, err := conn.ExecContext(ctx, q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion-1))
+	exec("BEGIN IMMEDIATE") // a newer binary, migrating
+	done := make(chan error, 1)
+	go func() {
+		s, err := Open(ctx, path, Options{})
+		if err == nil {
+			s.Close()
+		}
+		done <- err
+	}()
+	time.Sleep(500 * time.Millisecond) // Open read the old version and waits on the lock
+	exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1))
+	exec("COMMIT")
+	if err := <-done; !errors.Is(err, ticket.ErrStoreTooNew) {
+		t.Fatalf("Open of a store migrated past it meanwhile: %v; want store_too_new", err)
+	}
+}
+
 // busyErr looks like SQLITE_BUSY to isBusy.
 type busyErr struct{}
 
