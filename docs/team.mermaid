@@ -27,7 +27,7 @@ flowchart TD
     Planner -->|"risky ticket"| Sr
     Planner -->|"routine ticket"| Jr
     Planner -->|"review a PR"| Rev
-    Planner -->|"test a reviewed PR"| QA
+    Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -40,7 +40,8 @@ flowchart TD
     Build -.->|"a question it can't settle"| Sr
     Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle"| Planner
+    Sr -.->|"handoff: PR in review,<br/>what the ticket can't settle"| Planner
+    Jr -.->|"handoff: PR in review"| Planner
     QA -.->|"test report, a criterion to rewrite"| Planner
     Rev -.->|"verdict, a block to settle"| Planner
     Planner -.->|"Answer note, unblock"| Tickets

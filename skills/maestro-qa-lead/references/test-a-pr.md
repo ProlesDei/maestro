@@ -31,6 +31,7 @@ You are the last check before production. Review read the diff and passed it; yo
 2. Keep state private: a new data dir or database, a free port, a browser profile of your own, and test accounts you create. Use a shared test account read-only. Never touch a shared or production service.
 3. At tier 2, start the main branch first on that state, make the data the change touches, stop it, then start `H` on the same data.
 4. If it won't build or start, that is a fail: keep the command and the error line.
+5. If the diff changes how the README or `## Run` says to set up or start the app, also follow those steps word for word in a fresh clone of `H` merged with `G`, with fresh environments, as Phase B of [live-run.md](live-run.md) says. A step that fails, or works only with something it doesn't say, is a fail.
 
 ## Phase D: Test
 

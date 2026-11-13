@@ -15,6 +15,7 @@ Send `/maestro-qa-lead <ask>` to `MAESTRO_TICKET_ACTOR=qa-lead claude -p --permi
 |---|---|
 | Count PRs waiting for QA, for a status report | No session: run `maestro-ticket list --status in_review --latest-prefix Review: --json` yourself. Test only what the planner hands you: a PR you pick up yourself gets tested twice |
 | Test a PR that `/maestro-code-review` passed, and merge it on a pass | `<id>`, the ticket's id, never a PR link from its notes |
+| Run a goal's live run, a ticket titled `Live run:` | `live <id>` |
 | Get a second look at a verdict or finding | `second look: <finding>` |
 | Reproduce a bug or failure | `reproduce: <what happened>` |
 | Check a ticket can be tested, before it's built | `can <id> be tested as written?` |
