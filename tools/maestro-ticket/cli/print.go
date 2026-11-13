@@ -40,6 +40,8 @@ func claimText(c *ticket.Claim) string {
 		return "-"
 	case c.Expired:
 		return c.Holder + " (expired)"
+	case c.Revivals > 0:
+		return fmt.Sprintf("%s (revived %dx)", c.Holder, c.Revivals)
 	default:
 		return c.Holder
 	}
@@ -52,7 +54,9 @@ func dash(s string) string {
 	return s
 }
 
-func printDetail(w io.Writer, d ticket.Detail) {
+// printDetail prints a ticket and its comments. keep marks the comments to
+// print in full; nil prints them all. Any other gets its first line.
+func printDetail(w io.Writer, d ticket.Detail, keep []bool) {
 	fmt.Fprintf(w, "%s  %s\n", d.ID, d.Title)
 	fmt.Fprintf(w, "type:     %s\n", d.Type)
 	fmt.Fprintf(w, "status:   %s%s\n", d.Status, blockedText(d.Ticket))
@@ -83,7 +87,11 @@ func printDetail(w io.Writer, d ticket.Detail) {
 	if d.Body != "" {
 		fmt.Fprintf(w, "\n%s\n", indent(d.Body))
 	}
-	for _, c := range d.Comments {
+	for i, c := range d.Comments {
+		if keep != nil && !keep[i] {
+			fmt.Fprintf(w, "\n--- comment %d by %s at %s, trimmed (get --full prints it)\n%s\n", c.ID, c.Author, c.CreatedAt.Format(time.RFC3339), indent(firstLine(c.Body)))
+			continue
+		}
 		fmt.Fprintf(w, "\n--- comment %d by %s at %s\n%s\n", c.ID, c.Author, c.CreatedAt.Format(time.RFC3339), indent(c.Body))
 	}
 }

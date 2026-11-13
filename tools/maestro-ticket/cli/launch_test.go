@@ -110,6 +110,24 @@ func (l *launcher) ackAll() {
 	}
 }
 
+// launches reads the store's launch records, as export lists them.
+func (l *launcher) launches() []struct {
+	Actor, Outcome, Session string
+	Ticket                  string
+	PID                     int
+} {
+	l.t.Helper()
+	var ex struct {
+		Launches []struct {
+			Actor, Outcome, Session string
+			Ticket                  string
+			PID                     int
+		}
+	}
+	l.h.ok(&ex, "export")
+	return ex.Launches
+}
+
 // waitSupervisors waits for every supervisor on this store to exit, so the
 // temp dir can go.
 func (l *launcher) waitSupervisors() {
@@ -269,6 +287,9 @@ func TestLaunchRingsUntilAckedOnce(t *testing.T) {
 	if len(costs.Rows) != 1 || costs.Rows[0].Key != "T-1" || costs.Rows[0].USD != 0.25 {
 		t.Fatalf("costs: %+v", costs)
 	}
+	if ls := l.launches(); len(ls) != 1 || ls[0].Actor != "planner" || ls[0].Ticket != "T-1" || ls[0].Outcome != "result" || ls[0].Session != "sess-1" {
+		t.Fatalf("launches: %+v", ls)
+	}
 
 	code, out, _ = l.h.run("", "pickup")
 	if code != 0 || !strings.Contains(out, "no run of yours ended or running") {
@@ -314,6 +335,9 @@ func TestLaunchTimeLimit(t *testing.T) {
 	l.h.ok(&tk, "get", "T-1")
 	if tk.Claim != nil || tk.LeaseExpiries != 1 {
 		t.Fatalf("ticket after a timed-out run: %+v", tk)
+	}
+	if ls := l.launches(); len(ls) != 1 || ls[0].Outcome != "no_result" {
+		t.Fatalf("launches: %+v", ls)
 	}
 }
 
@@ -382,6 +406,13 @@ func TestLaunchCrashAndDeath(t *testing.T) {
 	l.h.ok(&tk, "get", "T-1")
 	if tk.Claim != nil || tk.LeaseExpiries != 1 {
 		t.Fatalf("ticket of a died run: %+v", tk)
+	}
+	outcomes := map[string]int{}
+	for _, x := range l.launches() {
+		outcomes[x.Outcome]++
+	}
+	if outcomes["died"] != 1 || outcomes["no_result"] != 1 {
+		t.Fatalf("launch outcomes: %v", outcomes)
 	}
 
 	l.h.fails(2, "ack", gone.ID) // only its launcher acks it

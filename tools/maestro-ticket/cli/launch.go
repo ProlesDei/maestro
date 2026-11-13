@@ -325,24 +325,27 @@ func runSupervise(ctx context.Context, c *call) error {
 		Env:   os.Environ(),
 		Rings: rings,
 		Hook:  func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
+		// The supervisor stands in for log-run: it lives as long as the
+		// run, so alerts reads its pid as the run's.
+		OnStart: func(r runs.Record) int64 {
+			c.actor = r.Launcher
+			return c.startLaunch(ctx, runTicket(r))
+		},
 		OnEnd: func(r runs.Record) { c.endRun(context.WithoutCancel(ctx), dir, r) },
 	})
 }
 
-// endRun does what a bot did by hand once a run ended: log its cost, and,
-// for a run that gave no result, free the ticket claim it left. Neither
-// may hold up the ring, so it reports failures on stderr, which the
-// supervisor keeps in nothing: the record and the board show the rest.
+// endRun does what log-run did once a run ended: record its end and its
+// cost, and, for a run that gave no result, free the claim its bot held
+// on its ticket, unless another run of that bot on that ticket still
+// goes. Neither may hold up the ring, so failures only warn on stderr.
 func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	warn := func(err error) {
 		if err != nil {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: %v\n", r.ID, err)
 		}
 	}
-	var id ticket.ID
-	if r.Ticket != "" {
-		id, _ = ticket.ParseID(r.Ticket)
-	}
+	id := runTicket(r)
 	s, err := c.open(ctx)
 	if err != nil {
 		warn(err)
@@ -355,36 +358,29 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 			out = out[i+1:] // a cut first line isn't JSON
 		}
 	}
-	if reply, err := lastResult(out); err == nil {
+	reply, err := lastResult(out)
+	outcome := ticket.LaunchResult
+	switch {
+	case r.State == runs.Died:
+		outcome = ticket.LaunchDied
+	case err != nil:
+		outcome = ticket.LaunchNoResult
+	}
+	c.endLaunch(ctx, s, r.LaunchID, outcome, reply.SessionID)
+	if err == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
-	if id == 0 || r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
+	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
-	// Another run on the same ticket may hold the claim now: leave it.
-	if list, err := runs.List(dir, time.Now(), false); err == nil {
-		for _, o := range list {
-			if o.ID != r.ID && !o.Ended() && o.Ticket == r.Ticket {
-				return
-			}
-		}
-	}
-	t, err := s.Get(ctx, id)
-	if err != nil {
-		warn(err)
-		return
-	}
-	cl := t.LiveClaim()
-	if cl == nil {
-		return
-	}
-	bot := ticket.HolderBot(cl.Holder)
-	resumed := slices.Contains(r.Command, "--resume") || slices.Contains(r.Command, "-r")
-	if bot != r.Launcher && (bot != "junior-engineer" || !resumed) {
-		return
-	}
-	_, err = s.Release(ctx, ticket.ReleaseRequest{ID: id, Holder: cl.Holder, Token: cl.Token, Died: true, Actor: r.Launcher})
+	_, err = freeRunClaim(ctx, s, logActor(r.Launcher), id, logActor(r.Launcher))
 	warn(err)
+}
+
+// runTicket is the ticket a run worked on, or 0.
+func runTicket(r runs.Record) ticket.ID {
+	id, _ := ticket.ParseID(r.Ticket)
+	return id
 }
 
 // ringOrphans rings for each run whose supervisor went away before a

@@ -349,6 +349,10 @@ type Claim struct {
 	// anyone. The reaper, or the next write to the ticket, clears it and
 	// logs lease_expired.
 	Expired bool `json:"expired"`
+	// Revivals counts how often this lease ran out and its holder's
+	// heartbeat brought it back (lease_revived). One is a warning: the
+	// session slept, hung or lost its keepalive.
+	Revivals int `json:"revivals"`
 }
 
 // Ticket is one unit of work.
@@ -985,6 +989,8 @@ type Export struct {
 	Tickets       []Detail `json:"tickets"`
 	Events        []Event  `json:"events"`
 	Runs          []Run    `json:"runs"`
+	Launches      []Launch `json:"launches"`
+	ETAs          []ETA    `json:"etas"`
 }
 
 // Check is one doctor result.
@@ -1047,6 +1053,21 @@ type Store interface {
 	LogRun(ctx context.Context, req LogRunRequest) (Run, error)
 	// Runs lists runs, oldest session first.
 	Runs(ctx context.Context, f RunFilter) ([]RunRow, error)
+	// StartLaunch records a run as log-run starts reading it.
+	StartLaunch(ctx context.Context, req StartLaunchRequest) (Launch, error)
+	// EndLaunch records how a run ended. It reports false, and changes
+	// nothing, when the run had already ended.
+	EndLaunch(ctx context.Context, req EndLaunchRequest) (bool, error)
+	// OpenLaunches lists the runs with no end recorded, oldest first.
+	OpenLaunches(ctx context.Context) ([]Launch, error)
+	// SetETA sets or replaces a goal's ETA; ClearETA drops it.
+	SetETA(ctx context.Context, req SetETARequest) (ETA, error)
+	ClearETA(ctx context.Context, goal string) error
+	// MarkETAMet records that a look found the goal's ETA, due at due,
+	// met. It changes nothing once set, or if the ETA was replaced.
+	MarkETAMet(ctx context.Context, goal string, due time.Time) error
+	// ETAs lists every ETA, soonest first.
+	ETAs(ctx context.Context) ([]ETA, error)
 	// LastSeq returns the newest event seq, or 0 for an empty log.
 	LastSeq(ctx context.Context) (int64, error)
 	Doctor(ctx context.Context) (DoctorReport, error)

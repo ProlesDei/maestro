@@ -33,6 +33,9 @@ type Options struct {
 	Rings []time.Duration // DefaultRings if nil
 	// Hook returns the launcher's webhook; a zero Hook for none.
 	Hook func(launcher string) (Hook, error)
+	// OnStart, if set, runs once the command started, before the record
+	// says running: it returns the run's launch id in the store.
+	OnStart func(Record) int64
 	// OnEnd, if set, runs once the result is saved, before the first ring:
 	// to log the run's cost and free a ticket it left claimed.
 	OnEnd func(Record)
@@ -125,6 +128,9 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 		return fail(err)
 	}
 	r.State, r.PID = Running, cmd.Process.Pid
+	if o.OnStart != nil {
+		r.LaunchID = o.OnStart(r)
+	}
 	if err := Save(dir, r); err != nil {
 		killGroup(r.PID, syscall.SIGKILL)
 		cmd.Wait()

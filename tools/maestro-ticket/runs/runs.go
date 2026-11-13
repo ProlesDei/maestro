@@ -73,6 +73,9 @@ type Record struct {
 	// rings readers tried for a run whose supervisor went away first.
 	Rang        bool `json:"rang,omitempty"`
 	OrphanTries int  `json:"orphan_tries,omitempty"`
+	// LaunchID is the run's row in the store's launches, which alerts
+	// and export read; 0 for none.
+	LaunchID int64 `json:"launch_id,omitempty"`
 	// Host is the machine the supervisor runs on: only there can a reader
 	// tell whether it still lives.
 	Host string `json:"host,omitempty"`
