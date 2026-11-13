@@ -843,7 +843,7 @@ says ".claude/skills/maestro-tdd is hidden from git, but skills-home is committe
 real=$tmp/real
 mkdir "$real"
 (cd "$here/.." && git ls-files -z | tar --null -T - -cf -) | tar -xf - -C "$real"
-git -C "$real" init -q && git -C "$real" add -A && git -C "$real" commit -q -m real
+git -C "$real" init -q && git -C "$real" add -A -f && git -C "$real" commit -q -m real
 mapfile -t sparse < <(sed -n '/^Clone `github.com/p' "$here/../INSTALL.md" | grep -o '`/[^`]\+`' | tr -d '`')
 [[ " ${sparse[*]} " == *" /scripts/ "* && " ${sparse[*]} " == *" /skills/ "* ]] || fail "no sparse patterns in INSTALL.md step 2: ${sparse[*]}"
 for how in full sparse; do
