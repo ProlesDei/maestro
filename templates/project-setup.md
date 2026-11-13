@@ -18,7 +18,7 @@ main
 
 ## Checks
 
-<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`. Wrap a check that takes minutes or strains the machine in `maestro-ticket slot`, such as - test: `maestro-ticket slot --max 4 -- make test`, so many sessions at once don't make it slow or flaky>
+<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`. Wrap a check that takes minutes, strains the machine or writes temp files, such as a test run, in `maestro-ticket slot`, such as - test: `maestro-ticket slot --max 4 -- make test`, so many sessions at once don't make it slow or flaky, and each run's temp files go when it ends>
 
 ## Run
 
