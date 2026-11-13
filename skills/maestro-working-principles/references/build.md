@@ -1,6 +1,6 @@
 # Building: worktrees, commits and PRs
 
-Read this before you change a tracked file, add a worktree, commit or open a PR, as [SKILL.md](../SKILL.md) says. Its session rules and claims still bind.
+Read this before you build, as [SKILL.md](../SKILL.md) says. Its session rules and claims still bind.
 
 ## Tickets and worktrees
 

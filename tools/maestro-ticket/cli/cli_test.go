@@ -1561,3 +1561,29 @@ func TestWritesOmitBody(t *testing.T) {
 		t.Fatalf("get lost the body: %s", out)
 	}
 }
+
+// A trimmed comment's first line skips leading blank lines, and plain get
+// prints its control characters as U+FFFD, as it does a whole body.
+func TestGetBriefFirstLineEdges(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x")
+	for _, b := range []string{"\n\n  Kickback: 1 blockers at a\x1b[2J\nold finding", "Kickback: 1 blockers at b\nnew finding", "Handoff: PR 1 at c"} {
+		if code, _, errs := h.run(b, "comment", "T-1", "--body-file", "-"); code != 0 {
+			t.Fatalf("comment: %d %s", code, errs)
+		}
+	}
+	var got struct {
+		Comments []struct {
+			Trimmed   bool
+			FirstLine string `json:"first_line"`
+		}
+	}
+	h.ok(&got, "get", "T-1")
+	if !got.Comments[0].Trimmed || got.Comments[0].FirstLine != "Kickback: 1 blockers at a\x1b[2J" || got.Comments[1].Trimmed {
+		t.Fatalf("get: %+v", got)
+	}
+	_, out, _ := h.run("", "get", "T-1")
+	if strings.Contains(out, "\x1b") || !strings.Contains(out, "\n    Kickback: 1 blockers at a�[2J\n") || strings.Contains(out, "old finding") {
+		t.Fatalf("plain get:\n%q", out)
+	}
+}

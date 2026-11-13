@@ -33,7 +33,7 @@ How you change files day to day: in your own worktree, in small checked commits,
 
 ## Build
 
-Before you change a tracked file, add a worktree, commit or open a PR, read [references/build.md](references/build.md): worktrees, a ticket's status through its build, `Handoff:` and `Escalation:` notes, commits and pull requests. Reading, answering and reviewing need none of it.
+Before you build, which means change a tracked file on a branch you'll push, add a worktree under `.maestro/worktrees/` or open a PR, read [references/build.md](references/build.md): worktrees, a ticket's status through its build, `Handoff:` and `Escalation:` notes, commits and pull requests. Reading and answering need none of it, and nor do review and QA, whose worktrees sit detached in a temp folder and whose merges of main are never pushed.
 
 ## Ask, prove, get unstuck
 
