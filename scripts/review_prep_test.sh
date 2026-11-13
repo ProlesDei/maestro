@@ -61,6 +61,8 @@ git clone -q "$tmp/origin.git" "$tmp/work" 2>/dev/null
 cd "$tmp/work"
 mkdir -p .maestro/project src
 printf '# Project setup\n\n## Main branch\n\nmain\n\n## Checks\n' >.maestro/project/project-setup.md
+# shellcheck disable=SC2016 # literal backticks
+printf 'Rules: `bot-profiles/` and INSTALL.md; see docs/rules.md.\n' >AGENTS.md
 echo one >src/a.go
 git add -A && git commit -qm base && git push -q origin main
 git switch -qc maestro/T-7
@@ -93,10 +95,13 @@ pr 7 maestro/T-7 "$H" false README.md src/a.go
 comments T-7 "Handoff: PR 7 at $H"
 
 # --route reads the file list only.
-pr 8 docs-only "$H" false README.md docs/guide.md .gitignore LICENSE
+pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md .gitignore LICENSE
 bash "$prep" --route 8 >"$tmp/out" || fail "route light exited $?"
 has route=light
-for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migrations/1.sql src/a.go tests/a.md .maestro/project/project-setup.md; do
+# Agents obey what the root rules name, and code hides in docs-like names.
+for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migrations/1.sql src/a.go tests/a.md \
+	.maestro/project/project-setup.md bot-profiles/qa/persona.md INSTALL.md docs/rules.md Claude.md \
+	CLAUDE.local.md .kiro/steering/a.md CMakeLists.txt docs/page.mdx .prettierrc.cjs .gitattributes; do
 	pr 9 mixed "$H" false README.md "$f"
 	bash "$prep" --route 9 >"$tmp/out" || fail "route $f exited $?"
 	has route=full
@@ -116,6 +121,12 @@ grep -qxF "$(printf '1\t0\tREADME.md\tdocs')" "$C/files.txt" || fail "files.txt 
 cmp -s "$tmp/out" "$C/prep.txt" || fail "prep.txt differs from the output"
 bash "$prep" maestro/T-7 >"$tmp/out" || fail "prep maestro/T-7 exited $?"
 has ticket=T-7
+# A -diff attribute in the main checkout hides no line from the counts.
+echo '*.go -diff' >.gitattributes
+bash "$prep" T-7 >"$tmp/out" || fail "prep with -diff exited $?"
+has lines=3
+has binary=1
+rm .gitattributes
 
 # Review's kickback at K, then a QA kickback: incremental from K.
 comments T-7 "Review: GO at 1111111111111111111111111111111111111111" "Kickback: 1 blockers, 0 majors at $K" \

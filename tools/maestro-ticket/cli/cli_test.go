@@ -1223,6 +1223,11 @@ func TestListLatestPrefixExact(t *testing.T) {
 		{[]string{"--latest-prefix", "5_%"}, "[]"},
 		{[]string{"--not-latest-prefix", "Kick", "--limit", "1"}, "[T-3]"},
 	}
+	var l struct{ Tickets []map[string]any }
+	h.ok(&l, "list", "--bodies", "--limit", "1")
+	if len(l.Tickets) != 1 || l.Tickets[0]["body"] != "secret body" {
+		t.Fatalf("list --bodies: %v", l.Tickets)
+	}
 	for _, c := range cases {
 		if got := ids(c.args...); got != c.want {
 			t.Errorf("list %v = %s; want %s", c.args, got, c.want)

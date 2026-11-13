@@ -27,21 +27,68 @@ if [ "${1-}" = --route ]; then route=1; shift; fi
 [ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route] <PR number | maestro/T-<n> | T-<n>>"
 target=$1
 
+# 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
+((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
+# Paths as written, not quoted: a quoted one would class as code and
+# match no pathspec.
+gd() { git -c core.quotePath=false diff "$@"; }
+# numstat <from> <to> [-- <path>...]: added, removed and path per file. A
+# file git shows as binary, as a -diff in any .gitattributes makes code,
+# gets its lines counted from the text patch, so no attribute hides code
+# from the tier or the delta's size.
+numstat() {
+	local x=$1 y=$2 a d f
+	shift 2
+	gd --numstat --no-renames "$x" "$y" "$@" | while IFS=$'\t' read -r a d f; do
+		[ "$a" = - ] && read -r a d < <(gd --text "$x" "$y" -- "$f" |
+			awk '/^@@/ {h = 1; next} h && /^\+/ {a++} h && /^-/ {d++} END {print a + 0, d + 0}')
+		printf '%s\t%s\t%s\n' "$a" "$d" "$f"
+	done
+}
+
+# The main checkout, and the root files agents there read as rules.
+mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+rules=
+for f in AGENTS.md CLAUDE.md GEMINI.md .maestro/project/project-setup.md; do
+	[ -f "$mainwt/$f" ] && rules+=$(cat "$mainwt/$f")$'\n'
+done
+# named: those rules name the file, or name on its own a folder it sits
+# in (`bot-profiles/`, not docs/ inside `docs/decisions.md`), so agents
+# may obey it.
+named() {
+	local d=$1
+	[[ $rules == *"$1"* ]] && return 0
+	while [[ $d == */* ]]; do
+		d=${d%/*}
+		# The quoted part of a bash regex matches as written.
+		[[ $rules =~ (^|[^[:alnum:]_./-])"$d"/([^[:alnum:]_.-]|$) ]] && return 0
+	done
+	return 1
+}
+
 # File classes, first match wins. agent-text, ci, deps and schema are the
-# paths the tier-2 row names; docs and config are what tier 0 allows.
+# paths the tier-2 row names; docs and config are what tier 0 allows, and
+# the light route takes. Instruction files match in any case: a
+# case-insensitive disk loads claude.md as CLAUDE.md.
 class() {
-	local p=$1
-	case /$p in
-	*/AGENTS.md | */CLAUDE.md | */GEMINI.md | */.cursorrules | */.windsurfrules | */.mcp.json | \
+	local p=$1 l=${1,,}
+	case /$l in
+	*/agents.md | */agents.override.md | */claude.md | */claude.local.md | */gemini.md | \
+		*/.cursorrules | */.windsurfrules | */.clinerules | */.clinerules/* | */.mcp.json | \
 		*/skills/* | */prompts/* | */prompt/* | */agents/* | /.claude/* | /.agents/* | /.codex/* | \
-		/.cursor/* | /.grok/* | /.gemini/* | /.maestro/* | /.github/copilot-instructions.md | \
-		/.github/instructions/* | *.prompt | *.prompt.md | *.mdc)
-		echo agent-text ;;
+		/.cursor/* | /.grok/* | /.gemini/* | /.maestro/* | /.windsurf/* | /.kiro/* | /.junie/* | \
+		/.roo/* | /.continue/* | /.aider* | /.github/copilot-instructions.md | \
+		/.github/instructions/* | /.github/chatmodes/* | *.prompt | *.prompt.md | *.mdc)
+		echo agent-text
+		return
+		;;
+	esac
+	case /$p in
 	/.github/* | /.gitlab-ci.yml | /.circleci/* | /.buildkite/* | */Jenkinsfile | /.husky/* | \
 		/.githooks/* | */lefthook.yml | */.pre-commit-config.yaml | */Dockerfile* | *.dockerfile | \
 		*/docker-compose* | */compose.yml | */compose.yaml | *.tf | *.tfvars | */deploy/* | \
 		*/infra/* | */k8s/* | */helm/* | */terraform/* | /.devcontainer/* | */Procfile | \
-		*/CODEOWNERS | */fly.toml | */vercel.json | */netlify.toml)
+		*/CODEOWNERS | */fly.toml | */vercel.json | */netlify.toml | */.gitattributes)
 		echo ci ;;
 	*/package.json | *-lock.json | */yarn.lock | */pnpm-lock.yaml | */bun.lock | */bun.lockb | \
 		*/go.mod | */go.sum | */go.work | */go.work.sum | */Cargo.toml | */requirements*.txt | \
@@ -56,11 +103,13 @@ class() {
 		echo schema ;;
 	*/test/* | */tests/* | */__tests__/* | */spec/* | *_test.* | *.test.* | *.spec.* | */test_*.py)
 		echo test ;;
-	*.md | *.mdx | *.markdown | *.rst | *.txt | *.adoc | */LICENSE* | */COPYING* | */NOTICE* | \
-		*/AUTHORS* | */CHANGELOG*)
-		echo docs ;;
-	*/.gitignore | */.gitattributes | */.editorconfig | */.mailmap | */.prettierrc* | \
-		*/.prettierignore | */.markdownlint* | */.clang-format | */rustfmt.toml | */.rustfmt.toml)
+	*.md | *.markdown | *.rst | *.adoc | */LICENSE | */LICENSE.* | */COPYING | */COPYING.* | \
+		*/NOTICE | */NOTICE.* | */AUTHORS | */AUTHORS.* | */CHANGELOG | */CHANGELOG.*)
+		if named "$p"; then echo agent-text; else echo docs; fi ;;
+	*/.gitignore | */.editorconfig | */.prettierignore | */.prettierrc | */.prettierrc.json | \
+		*/.prettierrc.json5 | */.prettierrc.yaml | */.prettierrc.yml | */.prettierrc.toml | \
+		*/.markdownlint.json | */.markdownlint.jsonc | */.markdownlint.yaml | */.markdownlint.yml | \
+		*/.markdownlintignore | */.clang-format | */rustfmt.toml | */.rustfmt.toml)
 		echo config ;;
 	*) echo code ;;
 	esac
@@ -124,7 +173,6 @@ else
 fi
 
 # Main from the main checkout's project-setup.md, never the PR's tree.
-mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 setup=$mainwt/.maestro/project/project-setup.md
 [ -f "$setup" ] || die 3 "no $setup to read the main branch from"
 main=$(awk '/^## /{on=($0=="## Main branch"); next} on && NF {print $1; exit}' "$setup")
@@ -158,7 +206,9 @@ if [ -n "$stop" ]; then
 	exit 0
 fi
 
-git fetch -q origin || die 1 "git fetch origin failed"
+# Once more after a pause: many sessions fetching in one checkout can
+# collide on a ref lock.
+git fetch -q origin || { sleep 3 && git fetch -q origin; } || die 1 "git fetch origin failed"
 git cat-file -e "$H^{commit}" 2>/dev/null || git fetch -q origin "pull/$pr/head" ||
 	die 1 "can't fetch PR $pr's head $H"
 git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die 3 "no origin/$main after the fetch"
@@ -178,8 +228,8 @@ git worktree add -q --detach "$R" "$H" || die 1 "git worktree add $R failed"
 
 B=$(git merge-base "origin/$main" "$H")
 jq . <<<"$view" >"$C/pr.json"
-git diff "$B" "$H" >"$C/diff.patch"
-git diff --stat "$B" "$H" >"$C/stat.txt"
+gd "$B" "$H" >"$C/diff.patch"
+gd --stat "$B" "$H" >"$C/stat.txt"
 git log --oneline "$B..$H" >"$C/log.txt"
 merges=yes
 git merge-tree --write-tree "origin/$main" "$H" >/dev/null 2>&1 || {
@@ -187,17 +237,17 @@ git merge-tree --write-tree "origin/$main" "$H" >/dev/null 2>&1 || {
 	merges=conflict
 }
 
-# files.txt: added, removed, path, class. Binary files count no lines.
+# files.txt: added, removed, path, class. binary= counts the files the
+# patch shows as binary; numstat counts their lines anyway.
 lines=0 nfiles=0 tier2=0 light=1
+binary=$(gd --numstat --no-renames "$B" "$H" | grep -c '^-	-	' || true)
 while IFS=$'\t' read -r a d f; do
-	[ "$a" = - ] && a=0
-	[ "$d" = - ] && d=0
 	c=$(class "$f")
 	printf '%s\t%s\t%s\t%s\n' "$a" "$d" "$f" "$c" >>"$C/files.txt"
 	lines=$((lines + a + d)) nfiles=$((nfiles + 1))
 	case $c in agent-text | ci | deps | schema) tier2=$((tier2 + 1)) ;; esac
 	case $c in docs | config) ;; *) light= ;; esac
-done < <(git diff --numstat --no-renames "$B" "$H")
+done < <(numstat "$B" "$H")
 touch "$C/files.txt"
 
 # K: the sha after the first "at" in review's latest verdict, a Review:
@@ -224,21 +274,21 @@ if [ -n "$K" ]; then
 		why="$K is not in $H's history"
 	else
 		# The author's change since K, with main's merges taken out.
-		if T=$(git merge-tree --write-tree "$K" "$B" | head -n 1) && git diff "$T" "$H" >"$C/delta.patch"; then
-			delta=$(git diff --numstat --no-renames "$T" "$H")
+		if T=$(git merge-tree --write-tree "$K" "$B" | head -n 1) && gd "$T" "$H" >"$C/delta.patch"; then
+			delta=$(numstat "$T" "$H")
 		else
 			T=
 			# A conflict: the files both the author and this PR changed.
-			mapfile -t both < <(comm -12 <(git diff --name-only "$K" "$H" | sort) <(git diff --name-only "$B" "$H" | sort))
+			mapfile -t both < <(comm -12 <(gd --name-only "$K" "$H" | sort) <(gd --name-only "$B" "$H" | sort))
 			: >"$C/delta.patch"
 			delta=
 			if [ ${#both[@]} -gt 0 ]; then
-				git diff "$B" "$H" -- "${both[@]}" >"$C/delta.patch"
-				delta=$(git diff --numstat --no-renames "$B" "$H" -- "${both[@]}")
+				gd "$B" "$H" -- "${both[@]}" >"$C/delta.patch"
+				delta=$(numstat "$B" "$H" -- "${both[@]}")
 			fi
 		fi
 		dfiles=$(grep -c . <<<"$delta" || true)
-		dlines=$(awk -F'\t' '{a = $1 == "-" ? 0 : $1; d = $2 == "-" ? 0 : $2; n += a + d} END {print n + 0}' <<<"$delta")
+		dlines=$(awk -F'\t' '{n += $1 + $2} END {print n + 0}' <<<"$delta")
 		if [ "$dlines" -gt 400 ] || [ "$dfiles" -gt 15 ]; then
 			why="delta of $dlines lines in $dfiles files: redone, not fixed"
 		else
@@ -257,6 +307,7 @@ fi
 	echo "merges=$merges"
 	echo "files=$nfiles"
 	echo "lines=$lines"
+	echo "binary=$binary"
 	echo "tier2_paths=$tier2"
 	echo "docs_only=$([ -n "$light" ] && [ "$nfiles" -gt 0 ] && echo yes || echo no)"
 	echo "K=${K:-none}"
