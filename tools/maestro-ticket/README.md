@@ -88,6 +88,8 @@ Schema v6 adds `parked` and `goal`. An open backlog ticket, or one blocked from 
 | 4 | conflict: version, `--from`, claimed by another holder, lease lost, idempotency key reuse, `waiting_on_deps`, `area_busy`, `has_dependents`, `stopped` (the kill switch), `busy` (the store stayed locked; try again later), `no_slot` (`slot --wait` ran out), `low_disk` (a filesystem under the free-disk margin, or full) |
 | 5 | `claim --next` found no work |
 
+`get` prints every field and the body, but not the whole comment trail: it keeps in full the newest comment of each kind (the first word of its first line, and the second too when that is all letters, so `Kickback: QA` and `Kickback: 2` differ), every `Answer:`, and the newest `Handoff:` and each comment after it, all of them on a ticket with no `Handoff:`. Each other comment prints as its first line, marked trimmed (in `--json`, `"trimmed": true` and `first_line`, with no `body`). `get --full` prints every comment whole. Why: a long trail ran to 60k characters, and sessions read it on every pass. Writes (`create`, `update`, `claim`, `heartbeat`, `release`, `transition`) print the ticket without its body, which the caller wrote or reads with `get`.
+
 Plain `get` sets the ticket body and each comment four spaces in, so a line at the left margin is always the tool's and text can't pass for a later comment: every kind of line break starts an indented line, and any other control character but a tab prints as U+FFFD. Read `--json` for the text as written. With `--json`, errors print `{"error":{"code":"...","message":"..."}}` on stdout.
 
 ## Costs

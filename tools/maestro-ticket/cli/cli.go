@@ -70,7 +70,8 @@ Commands:
               [--areas path,path] [--split-from T-1] [--goal G] [--parked R (required for backlog)]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
               [--holder H --token N]
-  get         <id>
+  get         <id> [--full]   (default: the newest comment of each kind, every Answer:, and the
+              newest Handoff: and all after it in full; the rest as first lines)
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
               [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
               (ordered by priority, then id)
@@ -603,7 +604,7 @@ func runCreate(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "created %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "created %s\n", oneLine(t)) })
 	})
 }
 
@@ -644,11 +645,12 @@ func runUpdate(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "updated %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "updated %s\n", oneLine(t)) })
 	})
 }
 
 func runGet(ctx context.Context, c *call) error {
+	full := c.fs.Bool("full", false, "print every comment in full, not just the ones brief keeps")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		id, err := c.idArg()
 		if err != nil {
@@ -658,7 +660,10 @@ func runGet(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(d, func(w io.Writer) { printDetail(w, d) })
+		if *full {
+			return c.out(d, func(w io.Writer) { printDetail(w, d, nil) })
+		}
+		return c.out(brief(d), func(w io.Writer) { printDetail(w, d, keptComments(d.Comments)) })
 	})
 }
 
@@ -902,7 +907,7 @@ func runClaim(ctx context.Context, c *call) error {
 				return fmt.Errorf("claim: start keepalive (claim released): %w", err)
 			}
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "claimed %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "claimed %s\n", oneLine(t)) })
 	})
 }
 
@@ -922,7 +927,7 @@ func runHeartbeat(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "renewed %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "renewed %s\n", oneLine(t)) })
 	})
 }
 
@@ -1035,7 +1040,7 @@ func runRelease(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "released %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "released %s\n", oneLine(t)) })
 	})
 }
 
@@ -1093,7 +1098,7 @@ func runTransition(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		return c.out(t, func(w io.Writer) { fmt.Fprintf(w, "moved %s\n", oneLine(t)) })
+		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "moved %s\n", oneLine(t)) })
 	})
 }
 
