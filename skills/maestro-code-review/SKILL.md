@@ -70,7 +70,7 @@ Open a todo list with one item per phase below.
 - it would be GO but needs the owner's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
 - the ticket already has `Kickback:` comments of review's, not QA's, at two different shas and every surviving blocker and major was raised before, and `--drop` names none of them. List each with the author's answer and your evidence.
 
-Never escalate twice at one `H`. If the latest comment is an `Answer:` to your `Escalation: review at <H>`, give GO or NO-GO. An answer that says no, or leaves a finding standing, is a blocker, and so is a change that needs the owner's yes without `--approved <H>`.
+Never escalate twice at one `H`. An `Escalation: review at <H>: ran past <limit>` is the reviewer bot's note that a run timed out, not a review's escalation: it uses up nothing, and its `Answer:` binds nothing but this rerun. If the latest comment is an `Answer:` to your `Escalation: review at <H>`, give GO or NO-GO. An answer that says no, or leaves a finding standing, is a blocker, and so is a change that needs the owner's yes without `--approved <H>`.
 
 Otherwise **NO-GO**. In report-only mode, stop here.
 

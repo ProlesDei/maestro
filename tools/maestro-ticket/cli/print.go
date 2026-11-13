@@ -40,6 +40,8 @@ func claimText(c *ticket.Claim) string {
 		return "-"
 	case c.Expired:
 		return c.Holder + " (expired)"
+	case c.Revivals > 0:
+		return fmt.Sprintf("%s (revived %dx)", c.Holder, c.Revivals)
 	default:
 		return c.Holder
 	}

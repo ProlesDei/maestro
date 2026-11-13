@@ -1,6 +1,6 @@
 ---
 name: maestro-qa-lead
-description: "Works in the repo for the QA lead bot: tests a PR that review passed the way it will ship, in the running app and a browser, as the last check before production: a pass merges it and sets the ticket done, a fail kicks it back; takes a second look at a verdict, reproduces a bug, checks a ticket can be tested before it's built, plans tests, or finds out how the app behaves by running it. Use for /maestro-qa-lead, 'QA PR 12', 'second look at this QA fail', 'can T-12 be tested as written', 'reproduce this bug'. Not for reviewing code (maestro-code-review), which comes first, proving your own work before a PR (maestro-prove-complete), or fixing what fails."
+description: "Works in the repo for the QA lead bot: tests a PR that review passed the way it will ship, in the running app and a browser, as the last check before production: a pass merges it and sets the ticket done, a fail kicks it back; runs a goal's live run of the user's path from a fresh clone against the real outside API; takes a second look at a verdict, reproduces a bug, checks a ticket can be tested before it's built, plans tests, or finds out how the app behaves by running it. Use for /maestro-qa-lead, 'QA PR 12', 'live run T-40', 'second look at this QA fail', 'can T-12 be tested as written', 'reproduce this bug'. Not for reviewing code (maestro-code-review), which comes first, proving your own work before a PR (maestro-prove-complete), or fixing what fails."
 argument-hint: "<PR | ticket id | what the QA lead wants>"
 disable-model-invocation: true
 ---
@@ -20,7 +20,7 @@ Follow the **maestro-working-principles** skill. The ask comes from the QA lead;
 - A verdict covers one head sha. A finding at another sha is stale.
 - Never run a fork's code. Run code at a sha in your own detached worktree, as Phase A of [test-a-pr.md](references/test-a-pr.md) sets up, never in the main checkout. Run the app on fresh state and a free port, never against a shared or production service.
 - Verdicts, which edge cases to try and how flaky counts are your calls. Rewriting a criterion is the planner's; whether a problem outside the criteria matters is the chief of staff's. Flag those; decide neither.
-- You write only when you test a PR, and only what [test-a-pr.md](references/test-a-pr.md) names: a claim while you test, your verdict comment, the merge and the move to `done` on a pass, the move back to `in_progress` on a fail, a `Rereview:` comment, or an `Escalation:` and the move to `blocked`.
+- You write only when you test a PR or run a live run, and only what [test-a-pr.md](references/test-a-pr.md) or [live-run.md](references/live-run.md) names. For a PR: a claim while you test, your verdict comment, the merge and the move to `done` on a pass, the move back to `in_progress` on a fail, a `Rereview:` comment, or an `Escalation:` and the move to `blocked`.
 - A person may run you too. Same rules.
 
 ## Phase A: Pick the job
@@ -29,6 +29,7 @@ Pick the row that fits the ask. For several, do them in table order. If none fit
 
 | The ask | Job | You do |
 |---|---|---|
+| `live` and a ticket titled `Live run:` | **live** | Follow [references/live-run.md](references/live-run.md). |
 | A PR number, branch or ticket id, or "test" | **test** | Follow [references/test-a-pr.md](references/test-a-pr.md). |
 | A verdict or finding to check, or "second look" | **second-look** | Rerun the steps it cites at the same sha and judge from your own output, not its conclusion. Agree or disagree item by item. |
 | A bug or failure to reproduce | **repro** | Find the shortest steps from a fresh start that show it. Run them 3 times; give the rate, the first wrong output, the sha and whether the main branch has it too. |
