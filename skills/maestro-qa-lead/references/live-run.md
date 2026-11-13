@@ -23,7 +23,7 @@ A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests 
 ## Phase D: Judge and post
 
 1. `pass` only if every README step ran as written and the whole path worked against the real API with no finding. Post `Live run: pass at <G>`, keyed `<run>-verdict`: each step with its result, each call with its response file, and each way your setup differs from production. Move the ticket to `in_review` then `done` under your claim, keyed `<run>-review` and `<run>-done`.
-2. Else post `Live run: fail at <G>`, keyed `<run>-verdict`: each finding with its steps, expected, actual and response file, then `New tickets: <one fix per finding>`. Move the ticket back to `todo` with `--release`, keyed `<run>-back`. The planner plans the fixes as deps of this ticket, so it runs again once they merge.
+2. Else post `Live run: fail at <G>`, keyed `<run>-verdict`: each finding with its steps, expected, actual and response file, then `New tickets: <one fix per finding>`. So no look hands it out again before its fixes exist, post `Hold: set by qa-lead: live run failed at <G>; lifts when each fix is a dep of this ticket`, keyed `<run>-hold`, then move the ticket to `todo`, keyed `<run>-back`, and on to `backlog` with `--parked hold --release`, keyed `<run>-park`. The planner makes the fixes its deps and requeues it, so it runs again once they merge.
 3. Stop every process you started and delete the clone.
 
 **Reply:** the block in [SKILL.md](../SKILL.md) Phase B with job `live`, the ticket at `G`, and under `Answer:` the verdict, each finding and the responses folder.

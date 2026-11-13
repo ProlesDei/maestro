@@ -3,8 +3,11 @@ package cli
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,37 +119,49 @@ func TestAlertsShowRevivedAndExpiredLeases(t *testing.T) {
 // The box rebooted at 6:17 PM; finding which tickets the dead runs
 // touched took a manual look. The first look after names each one and
 // frees its claim.
-func TestAlertsEndDeadRunsAndFreeTheirClaims(t *testing.T) {
+func TestAlertsAfterARestartNameDeadRunsAndFreeTheirClaims(t *testing.T) {
+	self := procStamp(os.Getpid())
+	if self == "" {
+		t.Skip("no process stamps on this system")
+	}
 	h := newHarness(t)
-	h.ok(nil, "create", "--title", "dead run's")
-	h.ok(nil, "create", "--title", "live run's")
-	h.ok(nil, "create", "--title", "other bot's")
+	for _, title := range []string{"dead run's", "still going", "other bot's"} {
+		h.ok(nil, "create", "--title", title)
+	}
 	h.ok(nil, "claim", "T-1", "--holder", "senior-engineer/a")
 	h.ok(nil, "claim", "T-2", "--holder", "senior-engineer/b")
 	h.ok(nil, "claim", "T-3", "--holder", "qa-lead/c")
 	s := h.store()
-	ctx := context.Background()
-	dead, live := startSleeper(t), startSleeper(t)
-	start := func(actor string, id ticket.ID, pid int) {
+	parts := strings.SplitN(self, "|", 3)
+	// This very process, with its stamp from before a restart: by pid
+	// alone it would look alive.
+	before := "another-boot|" + parts[1] + "|" + parts[2]
+	start := func(actor string, id ticket.ID, pid int, stamp string) {
 		t.Helper()
-		if _, err := s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: actor, Ticket: id, PID: pid, Stamp: procStamp(pid)}); err != nil {
+		if _, err := s.StartLaunch(context.Background(), ticket.StartLaunchRequest{Actor: actor, Ticket: id, PID: pid, Stamp: stamp}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	start("senior-engineer", 1, dead.Process.Pid)
-	start("senior-engineer", 2, live.Process.Pid)
-	start("senior-engineer", 3, dead.Process.Pid) // T-3's claim isn't this bot's
-	dead.Process.Kill()
-	dead.Wait()
+	start("senior-engineer", 1, os.Getpid(), before)
+	start("senior-engineer", 2, os.Getpid(), before)
+	start("senior-engineer", 2, os.Getpid(), self) // a run since the restart
+	start("senior-engineer", 3, os.Getpid(), before)
+	// A run seen from another pid namespace (a container) can't be judged.
+	start("planner", 0, 999999, parts[0]+"|pid:[1]|"+parts[2])
 	var r alertsJSON
 	h.ok(&r, "alerts")
-	if len(r.Died) != 2 || r.Died[0].Ticket != "T-1" || r.Died[0].Freed != "senior-engineer/a" ||
-		r.Died[1].Ticket != "T-3" || r.Died[1].Freed != "" || r.Died[0].Outcome != "died" || r.Restarted {
-		t.Fatalf("died = %+v, restarted %v", r.Died, r.Restarted)
+	if !r.Restarted || len(r.Died) != 3 {
+		t.Fatalf("alerts = %+v", r)
+	}
+	freed := map[string]string{}
+	for _, d := range r.Died {
+		freed[d.Ticket] = d.Freed
+	}
+	if freed["T-1"] != "senior-engineer/a" || freed["T-2"] != "" || freed["T-3"] != "" {
+		t.Fatalf("freed = %v; want only T-1: T-2 has a run going, T-3's claim is another bot's", freed)
 	}
 	var got tk
-	h.ok(&got, "get", "T-1")
-	if got.Claim != nil {
+	if h.ok(&got, "get", "T-1"); got.Claim != nil {
 		t.Fatalf("T-1 still claimed: %+v", got.Claim)
 	}
 	for _, id := range []string{"T-2", "T-3"} {
@@ -169,34 +184,30 @@ func TestAlertsEndDeadRunsAndFreeTheirClaims(t *testing.T) {
 	}
 }
 
-func TestAlertsSeeARestart(t *testing.T) {
-	if procStamp(os.Getpid()) == "" {
-		t.Skip("no process stamps on this system")
-	}
+// On the same boot, a gone log-run may have died alone while claude runs
+// on: report it, and leave its claim to the lease.
+func TestAlertsReportADeadRunOnTheSameBootAndKeepItsClaim(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "x")
+	h.ok(nil, "claim", "T-1", "--holder", "senior-engineer/a")
 	s := h.store()
-	parts := strings.SplitN(procStamp(os.Getpid()), "|", 3)
-	// Same pid, same namespace, another boot: this very process, before a
-	// restart, would look alive by pid alone.
-	stamp := "another-boot|" + parts[1] + "|" + parts[2]
-	if _, err := s.StartLaunch(context.Background(), ticket.StartLaunchRequest{Actor: "planner", PID: os.Getpid(), Stamp: stamp}); err != nil {
+	dead := startSleeper(t)
+	if _, err := s.StartLaunch(context.Background(), ticket.StartLaunchRequest{Actor: "senior-engineer", Ticket: 1, PID: dead.Process.Pid, Stamp: procStamp(dead.Process.Pid)}); err != nil {
 		t.Fatal(err)
 	}
 	var r alertsJSON
+	if h.ok(&r, "alerts"); len(r.Died) != 0 {
+		t.Fatalf("a run still going died: %+v", r.Died)
+	}
+	dead.Process.Kill()
+	dead.Wait()
 	h.ok(&r, "alerts")
-	if !r.Restarted || len(r.Died) != 1 {
+	if len(r.Died) != 1 || r.Died[0].Freed != "" || r.Restarted {
 		t.Fatalf("alerts = %+v", r)
 	}
-	// A run seen from another pid namespace (a container) can't be judged
-	// here: it stays open.
-	other := parts[0] + "|pid:[1]|" + parts[2]
-	if _, err := s.StartLaunch(context.Background(), ticket.StartLaunchRequest{Actor: "planner", PID: 999999, Stamp: other}); err != nil {
-		t.Fatal(err)
-	}
-	h.ok(&r, "alerts")
-	if len(r.Died) != 0 {
-		t.Fatalf("another namespace's run died: %+v", r.Died)
+	var got tk
+	if h.ok(&got, "get", "T-1"); got.Claim == nil {
+		t.Fatal("the claim was freed on the same boot")
 	}
 }
 
@@ -312,5 +323,88 @@ func TestLogRunFreesTheClaimOfARunWithNoResult(t *testing.T) {
 	}
 	if h.ok(&a, "get", "T-1"); a.Claim == nil {
 		t.Fatal("a run with a reply lost its claim")
+	}
+}
+
+// A SIGTERM while log-run waits must not lose the run's end: the next
+// look would call a run that ended with no reply dead.
+func TestLogRunRecordsItsEndAfterSIGTERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGTERM")
+	}
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.ok(nil, "claim", "T-1", "--holder", "junior-engineer/x")
+	cmd := exec.Command(os.Args[0], "log-run", "--actor", "junior-engineer", "--ticket", "T-1")
+	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	s := h.store()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		open, _ := s.OpenLaunches(context.Background())
+		if len(open) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("log-run never recorded its start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cmd.Process.Signal(syscall.SIGTERM)
+	time.Sleep(100 * time.Millisecond)
+	in.Close()
+	cmd.Wait()
+	var exp struct {
+		Launches []struct{ Outcome string }
+	}
+	h.ok(&exp, "export")
+	if len(exp.Launches) != 1 || exp.Launches[0].Outcome != "no_result" {
+		t.Fatalf("launches = %+v", exp.Launches)
+	}
+	var got tk
+	if h.ok(&got, "get", "T-1"); got.Claim != nil {
+		t.Fatalf("the claim wasn't freed: %+v", got.Claim)
+	}
+}
+
+// What an ETA promised is fixed when it falls due: a ticket added to the
+// goal later is new work, and a promised ticket that was split stands for
+// the tickets it was split into.
+func TestETAJudgesWhatWasPromised(t *testing.T) {
+	h := newHarness(t)
+	advance := clockAt(h, time.Date(2026, 11, 12, 20, 0, 0, 0, time.Local))
+	h.ok(nil, "create", "--title", "a", "--goal", "g")
+	h.ok(nil, "eta", "--goal", "g", "--by", "30m")
+	h.ok(nil, "transition", "T-1", "--to", "cancelled")
+	advance(time.Hour)
+	h.ok(nil, "create", "--title", "later work", "--goal", "g")
+	var r alertsJSON
+	if h.ok(&r, "alerts"); len(r.ETAMissed) != 0 {
+		t.Fatalf("work added after the due time read as a slip: %+v", r.ETAMissed)
+	}
+	h.ok(nil, "create", "--title", "promised", "--goal", "g")
+	h.ok(nil, "create", "--title", "half one", "--goal", "g")
+	h.ok(nil, "create", "--title", "half two", "--goal", "g")
+	h.ok(nil, "eta", "--goal", "g", "--by", "30m", "--tickets", "T-3")
+	h.run("Split into T-4, T-5\n", "comment", "T-3", "--body-file", "-")
+	h.ok(nil, "transition", "T-3", "--to", "cancelled")
+	h.ok(nil, "transition", "T-4", "--to", "cancelled", "--actor-role", "qa-lead")
+	advance(time.Hour)
+	h.ok(&r, "alerts")
+	if len(r.ETAMissed) != 1 || strings.Join(r.ETAMissed[0].Open, ",") != "T-4,T-5" {
+		t.Fatalf("eta missed = %+v; want the split's tickets", r.ETAMissed)
+	}
+	for _, s := range []string{"in_progress", "in_review", "done"} {
+		h.ok(nil, "transition", "T-5", "--to", s, "--actor-role", "qa-lead")
+	}
+	h.run("Split into T-5\n", "comment", "T-4", "--body-file", "-")
+	if h.ok(&r, "alerts"); len(r.ETAMissed) != 0 {
+		t.Fatalf("a split delivered in full read as missed: %+v", r.ETAMissed)
 	}
 }

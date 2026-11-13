@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -50,6 +51,8 @@ func (c *call) endLaunch(ctx context.Context, s ticket.Store, id int64, outcome,
 	if id == 0 {
 		return
 	}
+	// A cancelled context (SIGTERM) must not lose the end: the run is over.
+	ctx = context.WithoutCancel(ctx)
 	if s == nil {
 		st, err := c.open(ctx)
 		if err != nil {
@@ -59,8 +62,6 @@ func (c *call) endLaunch(ctx context.Context, s ticket.Store, id int64, outcome,
 		defer st.Close()
 		s = st
 	}
-	// A cancelled context (SIGTERM) must not lose the end: the run is over.
-	ctx = context.WithoutCancel(ctx)
 	if _, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: id, Outcome: outcome, Session: session}); err != nil {
 		fmt.Fprintf(c.env.Stderr, "maestro-ticket log-run: can't record the run's end: %v\n", err)
 	}
@@ -101,7 +102,7 @@ func logActor(a string) string {
 func launchGone(l ticket.Launch) bool {
 	self := procStamp(os.Getpid())
 	if l.Stamp == "" || self == "" {
-		return !alive(l.PID)
+		return !exists(l.PID)
 	}
 	was, cur := strings.SplitN(l.Stamp, "|", 3), strings.SplitN(self, "|", 3)
 	switch {
@@ -113,12 +114,14 @@ func launchGone(l ticket.Launch) bool {
 	return procStamp(l.PID) != l.Stamp || zombie(l.PID)
 }
 
-func sameBootStamp(stamp string) bool {
+// fromAnotherBoot reports whether stamp was taken before this machine
+// last started. False when either stamp is unknown.
+func fromAnotherBoot(stamp string) bool {
 	self := procStamp(os.Getpid())
 	if stamp == "" || self == "" {
-		return true
+		return false
 	}
-	return strings.SplitN(stamp, "|", 2)[0] == strings.SplitN(self, "|", 2)[0]
+	return strings.SplitN(stamp, "|", 2)[0] != strings.SplitN(self, "|", 2)[0]
 }
 
 type diedRun struct {
@@ -160,6 +163,8 @@ type alertReport struct {
 	ETAMissed []etaState      `json:"eta_missed"`
 	Revived   []revivedClaim  `json:"revived"`
 	Stalled   []stalledTicket `json:"stalled"`
+	// Errors lists steps that failed; the rest of the report still holds.
+	Errors []string `json:"errors"`
 }
 
 func (r alertReport) empty() bool {
@@ -179,48 +184,65 @@ func runAlerts(ctx context.Context, c *call) error {
 		if *stall <= 0 {
 			return usagef("alerts: --stall must be more than 0")
 		}
-		rep := alertReport{Died: []diedRun{}, Expired: []expiredLease{}, ETAMissed: []etaState{}, Revived: []revivedClaim{}, Stalled: []stalledTicket{}}
-		if err := reapReport(ctx, s, &rep); err != nil {
-			return err
-		}
-		if err := diedReport(ctx, s, c.actor, &rep); err != nil {
-			return err
-		}
-		now := c.now()
-		etas, err := s.ETAs(ctx)
-		if err != nil {
-			return err
-		}
-		for _, e := range etas {
-			st, err := etaCheck(ctx, s, e, now)
+		rep := alertReport{Died: []diedRun{}, Expired: []expiredLease{}, ETAMissed: []etaState{}, Revived: []revivedClaim{}, Stalled: []stalledTicket{}, Errors: []string{}}
+		// Each step goes on past another's error: what an earlier step
+		// freed or ended is printed once, here, and must not be lost.
+		var errs []error
+		keep := func(err error) {
 			if err != nil {
-				return err
-			}
-			if st.State == "missed" {
-				rep.ETAMissed = append(rep.ETAMissed, st)
+				errs = append(errs, err)
+				rep.Errors = append(rep.Errors, err.Error())
 			}
 		}
+		keep(reapReport(ctx, s, &rep))
+		keep(diedReport(ctx, s, c.actor, &rep))
+		now := c.now()
+		keep(etaReport(ctx, s, now, &rep))
 		yes, no := true, false
 		held, err := s.List(ctx, ticket.ListFilter{Claimed: &yes})
-		if err != nil {
-			return err
-		}
+		keep(err)
 		for _, t := range held {
 			if cl := t.LiveClaim(); cl != nil && cl.Revivals > 0 {
 				rep.Revived = append(rep.Revived, revivedClaim{t.ID, cl.Holder, cl.Revivals})
 			}
 		}
 		idle, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusInReview}, Claimed: &no})
-		if err != nil {
-			return err
-		}
+		keep(err)
 		for _, t := range idle {
 			if d := now.Sub(t.UpdatedAt); d >= *stall {
 				rep.Stalled = append(rep.Stalled, stalledTicket{t.ID, t.Status, t.UpdatedAt, roundMin(d)})
 			}
 		}
-		return c.out(rep, func(w io.Writer) { printAlerts(w, rep, now) })
+		if err := c.out(rep, func(w io.Writer) { printAlerts(w, rep, now) }); err != nil {
+			return err
+		}
+		switch {
+		case len(errs) == 0:
+			return nil
+		case c.jsonOut:
+			return silentExit{ticket.ExitInternal} // the errors are in the report
+		}
+		return errors.Join(errs...)
 	})
+}
+
+func etaReport(ctx context.Context, s ticket.Store, now time.Time, rep *alertReport) error {
+	etas, err := s.ETAs(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range etas {
+		st, err := etaCheck(ctx, s, e, now)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if st.State == "missed" {
+			rep.ETAMissed = append(rep.ETAMissed, st)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // reapReport frees every expired lease, as reap does, and lists whose,
@@ -251,35 +273,41 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 	return nil
 }
 
-// diedReport ends each open run whose log-run is gone as died, and frees
-// the claim it left on its ticket, as freeRunClaim says.
+// diedReport ends each open run whose log-run is gone as died. After a
+// restart it also frees the claim the run left on its ticket, as
+// freeRunClaim says.
 func diedReport(ctx context.Context, s ticket.Store, actor string, rep *alertReport) error {
 	open, err := s.OpenLaunches(ctx)
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, l := range open {
 		if !launchGone(l) {
 			continue
 		}
 		ended, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: l.ID, Outcome: ticket.LaunchDied})
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		if !ended {
 			continue // another look got there first
 		}
 		d := diedRun{Launch: l}
 		d.Outcome = ticket.LaunchDied
-		if !sameBootStamp(l.Stamp) {
+		// Only a restart proves the run itself is gone: on the same boot
+		// log-run may have died alone while claude runs on, so its lease
+		// and keepalive decide.
+		if fromAnotherBoot(l.Stamp) {
 			rep.Restarted = true
-		}
-		if d.Freed, err = freeRunClaim(ctx, s, l.Actor, l.Ticket, actor); err != nil {
-			return err
+			if d.Freed, err = freeRunClaim(ctx, s, l.Actor, l.Ticket, actor); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		rep.Died = append(rep.Died, d)
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // freeRunClaim frees the claim a run that ended with no result left on its
@@ -321,31 +349,62 @@ func freeRunClaim(ctx context.Context, s ticket.Store, bot string, id ticket.ID,
 	return "", err
 }
 
-// etaCheck says whether e was met: every ticket it names done, or, naming
-// none, no open ticket left in its goal. Past due and not met is missed.
+// etaCheck says whether e was met. What it promised is the tickets it
+// names, or else its goal's tickets that existed by the due time: work
+// added later is a new promise, not a slip. A promised ticket split after
+// the promise stands for the tickets its latest "Split into" names. A
+// cancelled ticket with no split counts as not delivered when the ETA
+// named it, and drops out of a goal, as the goal's percent drops it.
+// Past due and not met is missed.
 func etaCheck(ctx context.Context, s ticket.Store, e ticket.ETA, now time.Time) (etaState, error) {
 	st := etaState{ETA: e, Open: []ticket.Ticket{}, IDs: []ticket.ID{}}
-	var list []ticket.Ticket
-	if len(e.Tickets) > 0 {
+	named := len(e.Tickets) > 0
+	var queue []ticket.Ticket
+	if named {
 		for _, id := range e.Tickets {
 			d, err := s.Get(ctx, id)
 			if err != nil {
 				return st, err
 			}
-			list = append(list, d.Ticket)
+			queue = append(queue, d.Ticket)
 		}
 	} else {
-		var err error
-		if list, err = s.List(ctx, ticket.ListFilter{Goal: e.Goal}); err != nil {
+		list, err := s.List(ctx, ticket.ListFilter{Goal: e.Goal})
+		if err != nil {
 			return st, err
 		}
-	}
-	for _, t := range list {
-		// A promised ticket that was cancelled wasn't delivered.
-		if t.Status != ticket.StatusDone && (len(e.Tickets) > 0 || !t.Status.Terminal()) {
-			st.Open = append(st.Open, t)
-			st.IDs = append(st.IDs, t.ID)
+		for _, t := range list {
+			if !t.CreatedAt.After(e.Due) {
+				queue = append(queue, t)
+			}
 		}
+	}
+	seen := map[ticket.ID]bool{}
+	for len(queue) > 0 {
+		t := queue[0]
+		queue = queue[1:]
+		if seen[t.ID] {
+			continue
+		}
+		seen[t.ID] = true
+		switch t.Status {
+		case ticket.StatusDone:
+			continue
+		case ticket.StatusCancelled:
+			kids, err := splitInto(ctx, s, t.ID)
+			if err != nil {
+				return st, err
+			}
+			if len(kids) > 0 {
+				queue = append(queue, kids...)
+				continue
+			}
+			if !named {
+				continue
+			}
+		}
+		st.Open = append(st.Open, t)
+		st.IDs = append(st.IDs, t.ID)
 	}
 	switch {
 	case len(st.Open) == 0:
@@ -358,6 +417,41 @@ func etaCheck(ctx context.Context, s ticket.Store, e ticket.ETA, now time.Time) 
 	return st, nil
 }
 
+var ticketRef = regexp.MustCompile(`\bT-[0-9]+\b`)
+
+// splitInto returns the tickets a cancelled ticket's latest "Split into"
+// comment names, or none.
+func splitInto(ctx context.Context, s ticket.Store, id ticket.ID) ([]ticket.Ticket, error) {
+	d, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(d.Comments) - 1; i >= 0; i-- {
+		body := d.Comments[i].Body
+		if !strings.HasPrefix(body, "Split into") {
+			continue
+		}
+		line, _, _ := strings.Cut(body, "\n")
+		var out []ticket.Ticket
+		for _, ref := range ticketRef.FindAllString(line, -1) {
+			kid, err := ticket.ParseID(ref)
+			if err != nil {
+				continue
+			}
+			k, err := s.Get(ctx, kid)
+			if errors.Is(err, ticket.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, k.Ticket)
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
 func roundMin(d time.Duration) string {
 	s := d.Round(time.Minute).String()
 	s = strings.TrimSuffix(s, "0s")
@@ -368,7 +462,7 @@ func roundMin(d time.Duration) string {
 }
 
 func printAlerts(w io.Writer, r alertReport, now time.Time) {
-	if r.empty() {
+	if r.empty() && len(r.Errors) == 0 {
 		fmt.Fprintln(w, "alerts: none")
 		return
 	}
@@ -390,7 +484,7 @@ func printAlerts(w io.Writer, r alertReport, now time.Time) {
 		fmt.Fprintf(w, "expired: %s lease of %s ran out; freed\n", e.Ticket, dash(e.Holder))
 	}
 	for _, e := range r.ETAMissed {
-		fmt.Fprintf(w, "eta missed: %s due %s, %s ago; open: %s\n", e.Goal, e.Due.Local().Format("Jan 2 15:04"),
+		fmt.Fprintf(w, "eta missed: %s due %s, %s ago; open: %s; send the slip up and record a new eta\n", e.Goal, e.Due.Local().Format("Jan 2 15:04"),
 			roundMin(now.Sub(e.Due)), openText(e.Open))
 	}
 	for _, v := range r.Revived {

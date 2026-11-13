@@ -19,9 +19,9 @@ type Launch struct {
 	// Ticket is the ticket the run works on; 0 for none.
 	Ticket ID  `json:"ticket,omitempty"`
 	PID    int `json:"pid"`
-	// Stamp tells this process from a later one with the same pid: on
-	// Linux, the boot id and the process's start time. Empty where the OS
-	// gives neither.
+	// Stamp tells this process from a later one with the same pid, as
+	// boot|pid namespace|start time (on macOS, boot|darwin|start time).
+	// Empty where the OS gives none.
 	Stamp     string    `json:"stamp,omitempty"`
 	StartedAt time.Time `json:"started_at"`
 	// EndedAt is zero while the run goes.

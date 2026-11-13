@@ -31,7 +31,7 @@ func zombieStat(b []byte) bool {
 // procStamp tells process pid from a later process that reuses its pid,
 // as boot|pid namespace|start time. "" if any part can't be read. A
 // process seen from another pid namespace (a container) has another pid,
-// so a stamp from there can't be judged here: see sameBoot.
+// so a stamp from there can't be judged here: see launchGone.
 func procStamp(pid int) string {
 	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 	if err != nil {

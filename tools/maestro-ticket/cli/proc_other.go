@@ -24,3 +24,5 @@ func procStamp(int) string { return "" }
 
 // zombie can't tell here; alive covers a process that exited.
 func zombie(int) bool { return false }
+
+func exists(pid int) bool { return alive(pid) }

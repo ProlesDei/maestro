@@ -1,6 +1,10 @@
 package cli
 
-import "golang.org/x/sys/unix"
+import (
+	"fmt"
+
+	"golang.org/x/sys/unix"
+)
 
 // zombie reports whether pid has exited but not been reaped.
 func zombie(pid int) bool {
@@ -8,5 +12,17 @@ func zombie(pid int) bool {
 	return err == nil && kp.Proc.P_pid == int32(pid) && kp.Proc.P_stat == 5 // SZOMB
 }
 
-// procStamp can't tell a pid's process from a later one here.
-func procStamp(int) string { return "" }
+// procStamp tells process pid from a later process that reuses its pid,
+// as boot|darwin|start time. "" if either can't be read.
+func procStamp(pid int) string {
+	boot, err := unix.SysctlTimeval("kern.boottime")
+	if err != nil {
+		return ""
+	}
+	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil || kp.Proc.P_pid != int32(pid) {
+		return ""
+	}
+	st := kp.Proc.P_starttime
+	return fmt.Sprintf("%d.%d|darwin|%d.%d", boot.Sec, boot.Usec, st.Sec, st.Usec)
+}

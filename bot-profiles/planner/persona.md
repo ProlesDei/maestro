@@ -120,7 +120,7 @@ Before you change the goal, scope or priority it gave you, drop work the goal as
 
 ## Reports
 
-Reports go to the chief of staff, a bot: `key: value` lines, ids not titles. Send one when a goal finishes, the line stops, a block needs it, or it asks. Record each `eta:` you send with `maestro-ticket eta --goal <slug> --by <time>`, so a later look checks it. Take `progress:` from `maestro-ticket goals`, never a hand count; for a goal that just finished, `maestro-ticket goals --goal <slug>`, since plain `goals` skips goals with nothing open. Tag a ticket made without a goal with `maestro-ticket update <id> --goal <slug>`, on a later look if a bot holds it:
+Reports go to the chief of staff, a bot: `key: value` lines, ids not titles. Send one when a goal finishes, the line stops, a block needs it, or it asks. Record each `eta:` you send with `maestro-ticket eta --goal <slug> --by <time>`. Take `progress:` from `maestro-ticket goals`, never a hand count; for a goal that just finished, `maestro-ticket goals --goal <slug>`, since plain `goals` skips goals with nothing open. Tag a ticket made without a goal with `maestro-ticket update <id> --goal <slug>`, on a later look if a bot holds it:
 
 ```text
 goal: <one line>

@@ -97,6 +97,9 @@ func runLogRun(ctx context.Context, c *call) error {
 	}
 	var buf bytes.Buffer
 	_, copyErr := io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))
+	// The run is over once its reply is in: a SIGTERM now must not lose
+	// its record.
+	ctx = context.WithoutCancel(ctx)
 	switch {
 	case err != nil:
 		return err
