@@ -30,7 +30,7 @@ main
 
 ## Review
 
-<paths every review treats as high risk, such as `src/auth/` or `migrations/`; `/maestro-code-review` reads this>
+<the paths or functions whose code every review treats as high risk, such as `src/auth/` or `redact()` in `src/log.py`; `/maestro-code-review` reviews a changed code line there at tier 2, with its red team, but not a test or comment change. Name the code that does the risky work, not every file near it>
 
 ## Conventions
 

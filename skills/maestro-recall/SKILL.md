@@ -25,7 +25,7 @@ Open a todo list with one item per phase below.
    - Claude Code: `~/.claude/projects/<cwd with each character but a letter or digit as ->/*.jsonl`, plus that project's `memory/` folder.
    - Codex: `~/.codex/sessions/`.
    - Other harnesses: their own session store, if you know where it is. If you don't, skip it and say so.
-2. **Tickets.** `maestro-ticket list --json`, then `maestro-ticket get <id> --json` and `maestro-ticket events --ticket <id> --json` for each match.
+2. **Tickets.** `maestro-ticket list --json`, then `maestro-ticket get <id> --full --json` (the whole comment trail) and `maestro-ticket events --ticket <id> --json` for each match.
 3. **Git.** `git log --since="<n> days ago" --all --oneline -- <paths>`, `git branch -a`, `git worktree list`.
 4. **PRs.** `gh pr list --search <topic>`.
 5. **Decisions.** The repo's decision log or ADR folder, if it has one.
