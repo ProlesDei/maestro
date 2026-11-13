@@ -167,7 +167,7 @@ if [ -n "$route" ]; then
 	[ "$n" -gt 0 ] && [ "$n" -lt 100 ] || full "$n files"
 	while IFS=$'\t' read -r t f; do
 		# A rename lists only its new path, so what it moved stays unseen.
-		case $t in ADDED | MODIFIED | DELETED | CHANGED) ;; *) full "$f is ${t,,}" ;; esac
+		case $t in ADDED | MODIFIED | DELETED) ;; *) full "$f is ${t,,}" ;; esac
 		c=$(class "$f")
 		case $c in docs | config) ;; *) full "$f is $c" ;; esac
 	done <<<"$files"
@@ -221,11 +221,11 @@ if [ -n "$stop" ]; then
 	exit 0
 fi
 
-# Once more after a pause: many sessions fetching in one checkout can
-# collide on a ref lock.
-git fetch -q origin || { sleep 3 && git fetch -q origin; } || die 1 "git fetch origin failed"
+# Once more after a pause of 1 to 5 seconds: many sessions fetching in
+# one checkout can collide on a ref lock, and must not retry together.
+git fetch -q origin || { sleep $((RANDOM % 5 + 1)) && git fetch -q origin; } || die 1 "git fetch origin failed"
 git cat-file -e "$H^{commit}" 2>/dev/null || git fetch -q origin "pull/$pr/head" ||
-	{ sleep 3 && git fetch -q origin "pull/$pr/head"; } ||
+	{ sleep $((RANDOM % 5 + 1)) && git fetch -q origin "pull/$pr/head"; } ||
 	die 1 "can't fetch PR $pr's head $H"
 git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die 3 "no origin/$main after the fetch"
 load_rules

@@ -104,7 +104,8 @@ for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migratio
 	.maestro/project/project-setup.md bot-profiles/qa/persona.md INSTALL.md docs/rules.md Claude.md \
 	CLAUDE.local.md .kiro/steering/a.md CMakeLists.txt docs/page.mdx .prettierrc.cjs .gitattributes \
 	e.md src/notes.md scripts/CHANGELOG.sh .changeset/x.md AGENT.md LICENSE-MIT LICENSE.go NOTICE.sh \
-	LICENSE-gen.ts .prettierrc.json docs/policies/deploy.md docs/.cursor/rules/x.md RENAMED:docs/moved.md; do
+	LICENSE-gen.ts .prettierrc.json docs/policies/deploy.md docs/.cursor/rules/x.md RENAMED:docs/moved.md \
+	CHANGED:docs/link.md; do
 	pr 9 mixed "$H" false README.md "$f"
 	bash "$prep" --route 9 >"$tmp/out" || fail "route $f exited $?"
 	has route=full
