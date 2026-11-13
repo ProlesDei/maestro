@@ -39,3 +39,13 @@ func endsWithCommand(pid int) bool {
 
 // detach makes cmd outlive the caller: its own session, no terminal.
 func detach(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
+
+// exists reports whether pid runs, ours or another user's: EPERM means it
+// does. Use it where wrongly calling a live process dead does harm.
+func exists(pid int) bool {
+	if pid <= 1 || zombie(pid) {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}

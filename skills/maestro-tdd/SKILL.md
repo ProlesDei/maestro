@@ -53,8 +53,8 @@ Open a todo list with one item per phase your path in Phase A names.
 ## Never
 
 - Edit, weaken or skip a test, or mark it flaky, to make it pass.
-- Mock the code under test. Mock only what crosses the process edge: network, clock, and the filesystem when you must.
-- Sleep or use real time. Use a fake clock and fixed seeds.
-- Put the change and unrelated edits in one commit.
+- Mock the code under test. Mock only what crosses the process edge: network, clock, and the filesystem when you must. Build an outside API's fake from a real response, recorded and redacted, never by hand, and name its source (with none to record, say so, so QA's live run checks that shape).
+- Use a fake secret shorter than a real one. Make it full length, and check no part of it, not even a prefix, survives redaction.
+- Sleep or use real time (use a fake clock and fixed seeds), or put the change and unrelated edits in one commit.
 
 **Reply:** each test (path and name) with its failure before and pass after; for a bug, its failure with the fix undone, the cause `file:line` and each other place with it; for a refactor or perf, each pin and the break it caught, and the before and after numbers; the commits. With no cheap path: the reason and both repro outputs.

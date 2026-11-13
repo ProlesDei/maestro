@@ -1453,3 +1453,137 @@ func TestClaimRefusesOnLowDisk(t *testing.T) {
 	h.disk = func(string) (envcheck.Free, bool, error) { return envcheck.Free{Inodes: 0, Space: 0}, true, nil }
 	h.ok(nil, "release", "T-1", "--holder", "reviewer/a", "--token", "1", "--died")
 }
+
+// get keeps in full what a rerun, review, QA and the planner act on, and
+// trims the rest of the trail to first lines; --full prints it all.
+func TestGetBriefTrimsTheTrail(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x", "--body", "criteria")
+	trail := []string{
+		"Handoff: PR 1 at aaa\nproof one",                    // 1 trimmed: an older Handoff
+		"Kickback: 2 blockers, 0 majors at aaa\n- F1 old",    // 2 trimmed: review's older kickback
+		"Answer: second\nolder why",                          // 3 kept: every Answer, though 7 is newer
+		"Handoff: PR 1 at bbb\nproof two",                    // 4 trimmed: an older Handoff
+		"Kickback: QA fail at bbb\n- step 3 fails",           // 5 kept: newest QA kickback
+		"Kickback: 1 blockers, 0 majors at bbb\n- F2 newest", // 6 kept: newest review kickback
+		"Answer: second\nwhy",                                // 7 kept: every Answer
+		"Review: GO at ccc\nVerified: 1",                     // 8 kept: newest Review GO
+		"Handoff: PR 1 at ddd\nproof three",                  // 9 kept: newest Handoff
+		"note from the planner\nmore",                        // 10 kept: after the newest Handoff
+		"note from the planner\nagain",                       // 11 kept: after the newest Handoff
+	}
+	for _, b := range trail {
+		if code, _, errs := h.run(b, "comment", "T-1", "--body-file", "-"); code != 0 {
+			t.Fatalf("comment: %d %s", code, errs)
+		}
+	}
+	var got struct {
+		Body     string
+		Comments []struct {
+			ID        int64
+			Body      *string
+			Trimmed   bool
+			FirstLine string `json:"first_line"`
+		}
+	}
+	h.ok(&got, "get", "T-1")
+	if got.Body != "criteria" || len(got.Comments) != len(trail) {
+		t.Fatalf("get: %+v", got)
+	}
+	trimmed := map[int64]bool{1: true, 2: true, 4: true}
+	for i, c := range got.Comments {
+		first, _, _ := strings.Cut(trail[i], "\n")
+		switch {
+		case trimmed[c.ID] && (!c.Trimmed || c.Body != nil || c.FirstLine != first):
+			t.Fatalf("comment %d: want trimmed to %q, got %+v", c.ID, first, c)
+		case !trimmed[c.ID] && (c.Trimmed || c.Body == nil || *c.Body != trail[i] || c.FirstLine != ""):
+			t.Fatalf("comment %d: want in full, got %+v", c.ID, c)
+		}
+	}
+	var full tk
+	h.ok(&full, "get", "T-1", "--full")
+	if len(full.Comments) != len(trail) || full.Comments[0].Body != trail[0] {
+		t.Fatalf("get --full: %+v", full)
+	}
+	_, out, _ := h.run("", "get", "T-1")
+	if !strings.Contains(out, "--- comment 2 by ") || !strings.Contains(out, "trimmed (get --full prints it)\n    Kickback: 2 blockers, 0 majors at aaa\n") || strings.Contains(out, "F1 old") {
+		t.Fatalf("plain get doesn't trim comment 2:\n%s", out)
+	}
+	if !strings.Contains(out, "- F2 newest") {
+		t.Fatalf("plain get trimmed a kept comment:\n%s", out)
+	}
+	if _, out, _ := h.run("", "get", "T-1", "--full"); !strings.Contains(out, "F1 old") || strings.Contains(out, "trimmed") {
+		t.Fatalf("plain get --full trimmed:\n%s", out)
+	}
+
+	// With no Handoff:, nothing marks where the trail starts: all of it stays.
+	h.ok(nil, "create", "--title", "y")
+	for _, b := range []string{"Kickback: QA fail at a\nx", "Kickback: QA fail at b\ny"} {
+		h.run(b, "comment", "T-2", "--body-file", "-")
+	}
+	var two tk
+	h.ok(&two, "get", "T-2")
+	if len(two.Comments) != 2 || two.Comments[0].Body == "" {
+		t.Fatalf("a ticket with no Handoff: lost its trail: %+v", two)
+	}
+}
+
+// Writes print the ticket without its body: the caller has it, and these
+// run hundreds of times a day.
+func TestWritesOmitBody(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{
+		{"create", "--title", "x", "--body", "long criteria"},
+		{"update", "T-1", "--areas", "docs"},
+		{"claim", "T-1", "--holder", "jse/s1"},
+		{"heartbeat", "T-1", "--holder", "jse/s1", "--token", "1"},
+		{"transition", "T-1", "--to", "in_progress", "--holder", "jse/s1", "--token", "1"},
+		{"release", "T-1", "--holder", "jse/s1", "--token", "1"},
+	} {
+		code, out, errs := h.run("", append(args, "--json")...)
+		if code != 0 {
+			t.Fatalf("%v: %d %s", args, code, errs)
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(out), &m); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if _, has := m["body"]; has || m["id"] != "T-1" || m["version"] == nil {
+			t.Fatalf("%v printed %s", args, out)
+		}
+	}
+	var c tk
+	h.ok(&c, "claim", "T-1", "--holder", "jse/s2")
+	if c.Claim == nil || c.Claim.Token != 2 {
+		t.Fatalf("claim lost its token: %+v", c)
+	}
+	if code, out, _ := h.run("", "get", "T-1", "--json"); code != 0 || !strings.Contains(out, `"body": "long criteria"`) {
+		t.Fatalf("get lost the body: %s", out)
+	}
+}
+
+// A trimmed comment's first line skips leading blank lines, and plain get
+// prints its control characters as U+FFFD, as it does a whole body.
+func TestGetBriefFirstLineEdges(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x")
+	for _, b := range []string{"\n\n  Kickback: 1 blockers at a\x1b[2J\nold finding", "Kickback: 1 blockers at b\nnew finding", "Handoff: PR 1 at c"} {
+		if code, _, errs := h.run(b, "comment", "T-1", "--body-file", "-"); code != 0 {
+			t.Fatalf("comment: %d %s", code, errs)
+		}
+	}
+	var got struct {
+		Comments []struct {
+			Trimmed   bool
+			FirstLine string `json:"first_line"`
+		}
+	}
+	h.ok(&got, "get", "T-1")
+	if !got.Comments[0].Trimmed || got.Comments[0].FirstLine != "Kickback: 1 blockers at a\x1b[2J" || got.Comments[1].Trimmed {
+		t.Fatalf("get: %+v", got)
+	}
+	_, out, _ := h.run("", "get", "T-1")
+	if strings.Contains(out, "\x1b") || !strings.Contains(out, "\n    Kickback: 1 blockers at a�[2J\n") || strings.Contains(out, "old finding") {
+		t.Fatalf("plain get:\n%q", out)
+	}
+}
