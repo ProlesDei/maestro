@@ -382,11 +382,11 @@ if [ "$cmd" = check ]; then
 	# shellcheck disable=SC2043 # one tool today; the loop takes more
 	for b in maestro-ticket; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
-		# Every bot run pipes its reply through log-run (team-rules.md); a
-		# build without it prints only an error, and the bot loses the reply.
+		# Every bot starts its runs with launch (team-rules.md); a build
+		# without it starts nothing, and the bot's job stops.
 		help=$("$bin" help 2>/dev/null || true)
-		[[ $help == *$'\n  log-run '* ]] ||
-			problem "$b at $bin has no log-run, which every bot run pipes its reply into: rebuild it from $root/tools/$b"
+		[[ $help == *$'\n  launch '* ]] ||
+			problem "$b at $bin has no launch, which every bot starts its runs with: rebuild it from $root/tools/$b"
 		command -v go >/dev/null || continue
 		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
 		if [ -z "$rev" ]; then
