@@ -238,8 +238,17 @@ func etaReport(ctx context.Context, s ticket.Store, now time.Time, rep *alertRep
 			errs = append(errs, err)
 			continue
 		}
-		if st.State == "missed" {
+		switch st.State {
+		case "missed":
 			rep.ETAMissed = append(rep.ETAMissed, st)
+		case "met":
+			// Once met, an ETA stays met: a ticket tagged into its goal
+			// later is new work, not a slip.
+			if e.MetAt.IsZero() {
+				if err := s.MarkETAMet(ctx, e.Goal, e.Due); err != nil {
+					errs = append(errs, err)
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -256,10 +265,8 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 	if err != nil || len(res.Reaped) == 0 {
 		return err
 	}
-	evs, err := s.Events(ctx, ticket.EventFilter{Since: before, Type: ticket.EventLeaseExpired})
-	if err != nil {
-		return err
-	}
+	// What the reap freed is printed even if the holders can't be read.
+	evs, evErr := s.Events(ctx, ticket.EventFilter{Since: before, Type: ticket.EventLeaseExpired})
 	holder := map[ticket.ID]string{}
 	for _, e := range evs {
 		var d struct{ Holder string }
@@ -270,7 +277,7 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 	for _, id := range res.Reaped {
 		rep.Expired = append(rep.Expired, expiredLease{id, holder[id]})
 	}
-	return nil
+	return evErr
 }
 
 // diedReport ends each open run whose log-run is gone as died. After a
@@ -358,6 +365,10 @@ func freeRunClaim(ctx context.Context, s ticket.Store, bot string, id ticket.ID,
 // Past due and not met is missed.
 func etaCheck(ctx context.Context, s ticket.Store, e ticket.ETA, now time.Time) (etaState, error) {
 	st := etaState{ETA: e, Open: []ticket.Ticket{}, IDs: []ticket.ID{}}
+	if !e.MetAt.IsZero() {
+		st.State = "met"
+		return st, nil
+	}
 	named := len(e.Tickets) > 0
 	var queue []ticket.Ticket
 	if named {
@@ -420,7 +431,8 @@ func etaCheck(ctx context.Context, s ticket.Store, e ticket.ETA, now time.Time) 
 var ticketRef = regexp.MustCompile(`\bT-[0-9]+\b`)
 
 // splitInto returns the tickets a cancelled ticket's latest "Split into"
-// comment names, or none.
+// comment names, or none. A split makes new tickets, so only ids above the
+// ticket's own count: no loop can read as delivered.
 func splitInto(ctx context.Context, s ticket.Store, id ticket.ID) ([]ticket.Ticket, error) {
 	d, err := s.Get(ctx, id)
 	if err != nil {
@@ -435,7 +447,7 @@ func splitInto(ctx context.Context, s ticket.Store, id ticket.ID) ([]ticket.Tick
 		var out []ticket.Ticket
 		for _, ref := range ticketRef.FindAllString(line, -1) {
 			kid, err := ticket.ParseID(ref)
-			if err != nil {
+			if err != nil || kid <= id {
 				continue
 			}
 			k, err := s.Get(ctx, kid)

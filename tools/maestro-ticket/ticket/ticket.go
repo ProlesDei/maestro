@@ -1061,6 +1061,9 @@ type Store interface {
 	// SetETA sets or replaces a goal's ETA; ClearETA drops it.
 	SetETA(ctx context.Context, req SetETARequest) (ETA, error)
 	ClearETA(ctx context.Context, goal string) error
+	// MarkETAMet records that a look found the goal's ETA, due at due,
+	// met. It changes nothing once set, or if the ETA was replaced.
+	MarkETAMet(ctx context.Context, goal string, due time.Time) error
 	// ETAs lists every ETA, soonest first.
 	ETAs(ctx context.Context) ([]ETA, error)
 	// LastSeq returns the newest event seq, or 0 for an empty log.

@@ -258,7 +258,8 @@ CREATE TABLE IF NOT EXISTS etas (
 	due_at  INTEGER NOT NULL,
 	tickets TEXT    NOT NULL DEFAULT '',
 	set_by  TEXT    NOT NULL,
-	set_at  INTEGER NOT NULL
+	set_at  INTEGER NOT NULL,
+	met_at  INTEGER
 );
 `
 

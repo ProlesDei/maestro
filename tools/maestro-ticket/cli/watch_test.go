@@ -408,3 +408,34 @@ func TestETAJudgesWhatWasPromised(t *testing.T) {
 		t.Fatalf("a split delivered in full read as missed: %+v", r.ETAMissed)
 	}
 }
+
+// Once a look finds an ETA met it stays met: the planner tags tickets
+// made without a goal on a later look, and that is no slip. A split that
+// names itself or an older ticket never reads as delivered.
+func TestETAStaysMetAndSplitsCantLoop(t *testing.T) {
+	h := newHarness(t)
+	advance := clockAt(h, time.Date(2026, 11, 12, 20, 0, 0, 0, time.Local))
+	h.ok(nil, "create", "--title", "a", "--goal", "g")
+	h.ok(nil, "create", "--title", "made without a goal")
+	h.ok(nil, "eta", "--goal", "g", "--by", "30m")
+	h.ok(nil, "transition", "T-1", "--to", "cancelled")
+	var r alertsJSON
+	h.ok(&r, "alerts") // finds it met
+	advance(time.Hour)
+	h.ok(nil, "update", "T-2", "--goal", "g")
+	if h.ok(&r, "alerts"); len(r.ETAMissed) != 0 {
+		t.Fatalf("a ticket tagged after the due time read as a slip: %+v", r.ETAMissed)
+	}
+	h.ok(nil, "create", "--title", "self", "--goal", "g")
+	h.ok(nil, "create", "--title", "pair", "--goal", "g")
+	h.run("Split into T-3 (rewrite pending)\n", "comment", "T-3", "--body-file", "-")
+	h.run("Split into T-3\n", "comment", "T-4", "--body-file", "-")
+	h.ok(nil, "transition", "T-3", "--to", "cancelled")
+	h.ok(nil, "transition", "T-4", "--to", "cancelled")
+	h.ok(nil, "eta", "--goal", "g", "--by", "30m", "--tickets", "T-3,T-4")
+	advance(time.Hour)
+	h.ok(&r, "alerts")
+	if len(r.ETAMissed) != 1 || strings.Join(r.ETAMissed[0].Open, ",") != "T-3,T-4" {
+		t.Fatalf("eta missed = %+v; want both, undelivered", r.ETAMissed)
+	}
+}

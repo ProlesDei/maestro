@@ -99,6 +99,8 @@ type ETA struct {
 	Tickets []ID      `json:"tickets"`
 	SetBy   string    `json:"set_by"`
 	SetAt   time.Time `json:"set_at"`
+	// MetAt is when a look first found it met; it then stays met.
+	MetAt time.Time `json:"met_at,omitzero"`
 }
 
 // SetETARequest sets or replaces a goal's ETA.

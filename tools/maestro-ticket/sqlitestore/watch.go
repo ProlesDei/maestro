@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -135,12 +136,12 @@ func (s *Store) SetETA(ctx context.Context, req ticket.SetETARequest) (ticket.ET
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO etas (goal, due_at, tickets, set_by, set_at) VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(goal) DO UPDATE SET due_at = excluded.due_at, tickets = excluded.tickets,
-				set_by = excluded.set_by, set_at = excluded.set_at`,
+				set_by = excluded.set_by, set_at = excluded.set_at, met_at = NULL`,
 			req.Goal, req.Due.UnixMilli(), strings.Join(ids, ","), req.Actor, now)
 		if err != nil {
 			return err
 		}
-		out, err = scanETA(tx.QueryRowContext(ctx, "SELECT goal, due_at, tickets, set_by, set_at FROM etas WHERE goal = ?", req.Goal))
+		out, err = scanETA(tx.QueryRowContext(ctx, "SELECT goal, due_at, tickets, set_by, set_at, met_at FROM etas WHERE goal = ?", req.Goal))
 		return err
 	})
 	return out, err
@@ -161,6 +162,16 @@ func (s *Store) ClearETA(ctx context.Context, goal string) error {
 	})
 }
 
+// MarkETAMet implements ticket.Store. The due time names the ETA a look
+// judged, so a replacement set meanwhile is left alone.
+func (s *Store) MarkETAMet(ctx context.Context, goal string, due time.Time) error {
+	return s.write(ctx, func(tx *sql.Tx, now int64) error {
+		_, err := tx.ExecContext(ctx, "UPDATE etas SET met_at = ? WHERE goal = ? AND due_at = ? AND met_at IS NULL",
+			now, goal, due.UnixMilli())
+		return err
+	})
+}
+
 // ETAs implements ticket.Store.
 func (s *Store) ETAs(ctx context.Context) ([]ticket.ETA, error) {
 	out := []ticket.ETA{}
@@ -174,7 +185,7 @@ func (s *Store) ETAs(ctx context.Context) ([]ticket.ETA, error) {
 }
 
 func queryETAs(ctx context.Context, q querier, out []ticket.ETA) ([]ticket.ETA, error) {
-	rows, err := q.QueryContext(ctx, "SELECT goal, due_at, tickets, set_by, set_at FROM etas ORDER BY due_at, goal")
+	rows, err := q.QueryContext(ctx, "SELECT goal, due_at, tickets, set_by, set_at, met_at FROM etas ORDER BY due_at, goal")
 	if err != nil {
 		return out, err
 	}
@@ -192,11 +203,15 @@ func queryETAs(ctx context.Context, q querier, out []ticket.ETA) ([]ticket.ETA, 
 func scanETA(row scanner) (ticket.ETA, error) {
 	var e ticket.ETA
 	var due, set int64
+	var met sql.NullInt64
 	var ids string
-	if err := row.Scan(&e.Goal, &due, &ids, &e.SetBy, &set); err != nil {
+	if err := row.Scan(&e.Goal, &due, &ids, &e.SetBy, &set, &met); err != nil {
 		return ticket.ETA{}, err
 	}
 	e.Due, e.SetAt = msTime(due), msTime(set)
+	if met.Valid {
+		e.MetAt = msTime(met.Int64)
+	}
 	e.Tickets = []ticket.ID{}
 	if ids != "" {
 		var err error

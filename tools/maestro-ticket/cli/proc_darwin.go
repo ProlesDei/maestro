@@ -13,10 +13,11 @@ func zombie(pid int) bool {
 }
 
 // procStamp tells process pid from a later process that reuses its pid,
-// as boot|darwin|start time. "" if either can't be read.
+// as boot session|darwin|start time. "" if either can't be read. The boot
+// part is the boot's own id: kern.boottime moves when the clock is set.
 func procStamp(pid int) string {
-	boot, err := unix.SysctlTimeval("kern.boottime")
-	if err != nil {
+	boot, err := unix.Sysctl("kern.bootsessionuuid")
+	if err != nil || boot == "" {
 		return ""
 	}
 	kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
@@ -24,5 +25,5 @@ func procStamp(pid int) string {
 		return ""
 	}
 	st := kp.Proc.P_starttime
-	return fmt.Sprintf("%d.%d|darwin|%d.%d", boot.Sec, boot.Usec, st.Sec, st.Usec)
+	return fmt.Sprintf("%s|darwin|%d.%d", boot, st.Sec, st.Usec)
 }
