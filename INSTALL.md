@@ -45,6 +45,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. If the team's ignore rules hide `.claude/` or `.agents/`, `committed` can't track them: offer `hidden`, or a change to those rules with the person's yes. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `bots` | Which Grok bots the team will run, space-separated: `chief-of-staff planner senior-engineer junior-engineer qa-lead reviewer`. | all six names |
 | `code-graph` | Whether sessions get the codebase-memory-mcp code graph, which finds symbols and callers before they grep. `mcp`: step 7 installs it for this repo, without its hooks. `none`: no code graph. `apply` refuses until this has an answer. | `mcp` for a codebase too big to read by grep, else `none` |
+| `browser` | How QA sessions see the app's screens. `playwright-cli`: step 7 installs Playwright CLI and its Chromium, and `check` opens a page with it. `none`: the app has no screens, or `## QA` names a browser tool the team set up itself, which `check` doesn't test. `apply` refuses until this has an answer. | `playwright-cli` for an app with screens, else `none` |
 
 ## 5. Apply
 
@@ -58,18 +59,30 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 
 - **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every merge. So does a repo that turns off merge commits or asks for linear history: QA merges with a merge commit, and engineers merge main into their branch. Signed commits and a CODEOWNERS review fail it the same way, and a required status check that is slow or flaky stalls every merge until it's green. Tell the person, and settle with them how the bot's merges get through, before you go on.
 - **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks. Time each one, and run the slowest twice at once: one that takes minutes, fails under load or writes temp files (a test run), wrap in `maestro-ticket slot`, with a `--max` the person picks for this machine, since every engineer, review and QA session runs it; `slot` also gives each run its own temp folder and removes it after, so a test runner's files don't fill the disk.
-- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person. Start the app from a fresh worktree, twice at once, as QA sessions do: a gitignored `.env`, a fixed port or a fixed container name breaks them, so settle each with the person.
+- **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, QA sessions open them with Playwright CLI (step 7); name another browser tool in `## QA` only if the team has one set up, and check that a headless `claude -p` session in this repo can open a page with it. With no browser, every ticket that changes a screen blocks at QA: tell the person. Start the app from a fresh worktree, twice at once, as QA sessions do: a gitignored `.env`, a fixed port or a fixed container name breaks them, so settle each with the person.
 - **Review** and **Conventions**: the high-risk paths or functions (the code that does auth, secrets or money, not every file near it), commit style, files never to touch, and any shared helper new code must use (safe paths, errors that print no secret).
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
 
-## 7. Code graph
+## 7. Code graph and browser
 
-Skip this step for `code-graph: none`.
+### Code graph
+
+Skip this for `code-graph: none`.
 
 For `mcp`: codebase-memory-mcp is a third-party tool, so read its install steps before you run any, and run them with the person's yes. Put its binary on `PATH`, then register it for this repo only: a server named `codebase-memory-mcp`, run by that bare command, in `.mcp.json` at the repo's root (Claude Code's project scope), added beside any servers the team's file already lists, not in the user's settings. A headless `claude -p` session in all-permissions mode, as the bots run, loads a project's `.mcp.json` with no prompt.
 
 Leave its hooks out. Its installer may add hooks to the user's Claude Code settings: a reminder at every session start, and a gate on search tool calls (on every Bash call in some versions). They run in every session on the machine, the bots' too, where most calls are tests, git and ticket commands, and each one adds tokens that 300 sessions multiply. If it added them, remove them with the person's yes; a newer Maestro may ship a setup for them. `install.sh check` reports a missing registration and warns on any of its hooks it finds.
+
+### Browser
+
+Skip this for `browser: none`.
+
+For `playwright-cli`: Playwright CLI is Microsoft's browser tool for agents, the npm package `@playwright/cli`, on Node.js 20 or later. It is a third-party tool, so read its install steps before you run any, and run them with the person's yes. As the user the bots run as, put `playwright-cli` on `PATH` and install its Chromium, without system packages. If npm's global folder belongs to root, install it under a folder that user owns; never with sudo. Skip its workspace and skills setup: its skill would load in every session, and it tells a session to close every browser, other runs' too. Every QA session opens its own browser, headless, in that Chromium.
+
+On Linux the browser also needs system libraries, and only root can install them. Never ask for a password, and never run a command that waits for one: whoever runs this guide, a bot included, can't type it into a session. Find what's missing without root (Playwright's dependency install has a dry run that lists it), then try sudo only in a mode that fails instead of asking. Where sudo needs no password, as on a Grok Bot computer, install them with the person's yes. Else give the person the one command that installs them, to run in their own terminal, and wait. A container gets them in its image.
+
+`install.sh check` opens a headless page the way QA sessions do, and names what stopped it, such as a missing library.
 
 ## 8. Set up the bots
 
@@ -85,7 +98,7 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 ## 10. Report
 
-Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found, the code graph. Then what's left for them:
+Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found, the code graph, the browser. Then what's left for them:
 
 - `committed`: commit `.maestro/project/` and the skills folder of each harness in `harnesses`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
@@ -99,13 +112,13 @@ Tell the person, short: the mode, the harnesses, how many skills, the pinned sha
 1. Ask which commit to move to; if `maestro-sha` already names one `.maestro/src/` isn't on, a teammate updated: take that one and don't ask. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha. Ask each key of step 4's table that `install.yaml` lacks, and act on it (`code-graph` through step 7). Then run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
-5. Rebuild the bot blocks and tell the person which files it marks `new` or `changed`: they paste those blocks, and send those memories files as messages, before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
+4. Set `maestro-sha` to the new sha. Ask each key of step 4's table that `install.yaml` lacks, and act on it (`code-graph` and `browser` through step 7). For `browser`, read `## QA` first: if it names a browser tool the team set up, offer Playwright CLI in its place, or `none` to keep theirs. If they take Playwright CLI, remove the old tool from `## QA`, with their yes, and get that onto the main branch: QA reads main's copy, and uses a tool `## QA` names over Playwright CLI. Then run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
+5. If the team keeps its own copy of a bot's starting memories in `.maestro/project/bots/`, compare it with the new `memory.md` and ask the person about each bullet that is new or changed there: the copy replaces the defaults whole, so a new limit never reaches the bot otherwise. Rebuild the bot blocks and tell the person which files it marks `new` or `changed`: they paste those blocks, and send those memories files as messages, before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
 6. Run `check`.
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp` and its browser for `browser: playwright-cli`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
 
 ## Uninstall
 
@@ -118,3 +131,4 @@ Run `.maestro/src/scripts/install.sh uninstall <repo>`. It removes the files its
 - The ticket store in `maestro/` under the git common dir: it holds every ticket. Offer `maestro-ticket backup` first.
 - The tools on `PATH`: other repos may use them.
 - With `code-graph: mcp`, the `codebase-memory-mcp` server in `.mcp.json`, and the tool itself.
+- With `browser: playwright-cli`, Playwright CLI, its browsers and the system libraries step 7 added: other repos may use them.

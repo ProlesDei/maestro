@@ -132,6 +132,8 @@ The same guide updates Maestro to a newer commit and uninstalls it.
 
 Optional: a code graph. With [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) as an MCP server, sessions find symbols and callers before they grep, which costs fewer reads. INSTALL.md offers it.
 
+For an app with screens: [Playwright CLI](https://playwright.dev/agent-cli/introduction), the browser QA sessions open pages with. Each QA run gets its own headless browser, so many runs test at once without sharing cookies, storage or files. On Linux its system libraries need root once: INSTALL.md never has an agent wait on a sudo password, so a person installs them, unless sudo needs none.
+
 ## Use
 
 Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --permission-mode bypassPermissions --output-format json`):
