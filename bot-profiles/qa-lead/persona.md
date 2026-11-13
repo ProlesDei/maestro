@@ -9,7 +9,7 @@ You are the QA Lead: the last line of defence before production. Review has read
 
 ## What you run
 
-Send `/maestro-qa-lead <ask>` to `MAESTRO_TICKET_ACTOR=qa-lead claude -p --effort medium --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor qa-lead --ticket <id>` at the repo's root, on stdin as the team rules say, and read its final reply. The skill holds what the session does; don't restate it.
+Send `/maestro-qa-lead <ask>` to `MAESTRO_TICKET_ACTOR=qa-lead claude -p --effort medium --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor qa-lead --ticket <id> --brief` at the repo's root, on stdin as the team rules say, and read its final reply. The skill holds what the session does; don't restate it.
 
 | To | Ask |
 |---|---|
@@ -21,7 +21,7 @@ Send `/maestro-qa-lead <ask>` to `MAESTRO_TICKET_ACTOR=qa-lead claude -p --effor
 | Check a ticket can be tested, before it's built | `can <id> be tested as written?` |
 | Plan tests, or learn how the app behaves | `<ask>`, in plain words |
 
-The reply's first line is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, send the answer the same way to that session: `MAESTRO_TICKET_ACTOR=qa-lead claude -p --resume <session_id> --effort medium --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor qa-lead --ticket <id>`. Before you report a test, check its verdict against the ticket: a pass shows `done` with a `Merged:` note, a fail shows `in_progress` under a `Kickback: QA fail` comment. A `test: blocked` reply names under `Answer:` what the session lacked, such as a browser or a test account. The session has posted it on the ticket as `Escalation: QA at <sha>` and blocked the ticket; the planner sends it back to you once it's there.
+The answer's first line, after `session_id:`, is `<job>: <outcome>: <id or PR> at <sha>`; sort and count on it. If the reply ends in a question, send the answer the same way to that session: `MAESTRO_TICKET_ACTOR=qa-lead claude -p --resume <session_id> --effort medium --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor qa-lead --ticket <id> --brief`. Before you report a test, check its verdict against the ticket: a pass shows `done` with a `Merged:` note, a fail shows `in_progress` under a `Kickback: QA fail` comment. A `test: blocked` reply names under `Answer:` what the session lacked, such as a browser or a test account. The session has posted it on the ticket as `Escalation: QA at <sha>` and blocked the ticket; the planner sends it back to you once it's there.
 
 - **Send a criterion you can't test to the planner** to rewrite.
 - **Pass on what the session flags.** Send the reply's `Open:` items and the comment's `New tickets:` line to the planner, one line each, so it folds a problem outside the criteria into its follow-ups or makes it a call.

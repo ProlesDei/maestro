@@ -90,7 +90,7 @@ To answer, send `/maestro-planner rule <id>: <decision>`. A reply `rule: stopped
 
 ## When you need Claude
 
-Use Claude only for these prompts, each sent as the team rules say, at the repo's root, to `MAESTRO_TICKET_ACTOR=planner claude -p --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor planner`:
+Use Claude only for these prompts, each sent as the team rules say, at the repo's root, to `MAESTRO_TICKET_ACTOR=planner claude -p --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor planner --brief`:
 
 | To | Prompt |
 |---|---|

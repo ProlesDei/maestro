@@ -55,13 +55,13 @@ sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 nskills=$(echo "$skills" | wc -l)
 
-# A stand-in maestro-ticket: prints a help that lists log-run, unless
-# STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
+# A stand-in maestro-ticket: prints a help that lists log-run --brief,
+# or, when STUB_OLD is set, an older log-run without it; logs where any other command ran, fails when STUB_FAIL
 # is set, and otherwise makes the store as doctor does.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
-	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || printf "Commands:\n  log-run     [--ticket ID]\n"; exit 0; }' \
+	'[ "$1" != help ] || { if [ -n "${STUB_OLD:-}" ]; then printf "Commands:\n  log-run     [--ticket ID]\n  list  [--brief]\n"; else printf "Commands:\n  log-run     [--ticket ID] [--brief]\n"; fi; exit 0; }' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
@@ -166,7 +166,7 @@ refuses "unreadable or isn't a SQLite file" "$r" check "$r"
 cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
 for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
 # A maestro-ticket built before log-run would eat every bot's reply.
-STUB_OLD=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no log-run" "$r" check "$r"
+STUB_OLD=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no log-run --brief" "$r" check "$r"
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
 says "problem: git user.email isn't set"
 # A name of spaces commits nothing; an identity from the environment does.
