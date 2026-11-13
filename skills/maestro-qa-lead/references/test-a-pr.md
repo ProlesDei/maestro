@@ -46,7 +46,7 @@ You are the last check before production. Review read the diff and passed it; yo
 ## Phase E: Judge and post
 
 1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` or `carried` check fails nothing. List every other problem as a possible new ticket, worst first.
-2. Stop every process you started and close each browser.
+2. Stop every process you started, and close your browser session as [browser.md](browser.md) says.
 3. If the PR's head has moved past `H`, post at `H` anyway and merge nothing: the new head needs review first, so on a pass post the `Rereview:` of Phase A step 3 after your verdict, naming the new head.
 4. Post this comment on the ticket with `maestro-ticket comment`, sent as **maestro-working-principles** says for quoted text, keyed `<run>-verdict`. With no ticket, comment on the PR.
 

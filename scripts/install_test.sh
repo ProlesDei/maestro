@@ -20,7 +20,9 @@
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
 # bot block that differs only in its Maestro line is the same, one over
 # Grok's limit refuses, and memories go in a message apart; uninstall
-# runs off the pin;
+# runs off the pin; check opens a headless page with playwright-cli and
+# closes only its own session, names why one won't open, and warns on
+# Playwright CLI's own skill;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
 # stops check and uninstall; harnesses without claude stop apply and
@@ -105,7 +107,7 @@ hide() {
 	echo "$out"
 }
 # repo <path> <choices...>: a new repo with one commit and these choices,
-# and code-graph: none unless they give one.
+# and code-graph: none and browser: none unless they give them.
 repo() {
 	local r=$1
 	shift
@@ -114,6 +116,7 @@ repo() {
 	mkdir -p "$r/.maestro/project"
 	printf '%s\n' "maestro-sha: $sha" "$@" >"$r/.maestro/project/install.yaml"
 	[[ " $* " == *" code-graph: "* ]] || echo "code-graph: none" >>"$r/.maestro/project/install.yaml"
+	[[ " $* " == *" browser: "* ]] || echo "browser: none" >>"$r/.maestro/project/install.yaml"
 }
 # installed <repo> <harness dir>...: every skill is there, as Maestro has it.
 installed() {
@@ -193,6 +196,50 @@ sed -i 's/^code-graph: .*/code-graph: none/' "$r/.maestro/project/install.yaml"
 ok check "$r"
 says "warn: code-graph is none, but .mcp.json registers codebase-memory-mcp"
 rm "$r/.mcp.json" "$tmp/bin/codebase-memory-mcp"
+# The browser: playwright-cli wants the binary and a headless page that
+# opens; check opens it outside the repo, under its own session name, and
+# closes only that session.
+sed -i 's/^browser: .*/browser: playwright-cli/' "$r/.maestro/project/install.yaml"
+PATH=$(hide playwright-cli) refuses "problem: playwright-cli isn't on PATH" "$r" check "$r"
+# shellcheck disable=SC2016 # the stub's code, not ours
+printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$PW_LOG"' \
+	'[[ " $* " != *" open "* || -z "${PW_FAIL:-}" ]] || { printf "Error: Daemon pid=1: Daemon process exited with code 1\n%s\n" "$PW_FAIL"; exit 1; }' >"$tmp/bin/playwright-cli"
+chmod +x "$tmp/bin/playwright-cli"
+export PW_LOG=$tmp/pw.log
+before=$(snap "$r")
+: >"$PW_LOG"
+ok check "$r"
+grep -q playwright "$tmp/out" && fail "check named the browser when all was well"
+[ "$before" = "$(snap "$r")" ] || fail "check's browser changed the repo"
+[ "$(wc -l <"$PW_LOG")" -eq 2 ] || fail "check should open one page and close it: $(cat "$PW_LOG")"
+read -r d1 s1 c1 _ < <(sed -n 1p "$PW_LOG")
+read -r d2 s2 c2 _ < <(sed -n 2p "$PW_LOG")
+[[ $c1 == open && $c2 == close && $s1 == "$s2" && $s1 == -s=maestro-check-* && $d1 == "$d2" ]] ||
+	fail "check should close the session it opened, by name: $(cat "$PW_LOG")"
+# The browser QA sessions open: Playwright's Chromium, headless.
+grep -q -- ' open --browser=chromium ' "$PW_LOG" && ! grep -q -- --headed "$PW_LOG" ||
+	fail "check should open Playwright's Chromium, headless, as QA does: $(cat "$PW_LOG")"
+[[ $d1 != "$(cd "$r" && pwd -P)"* ]] || fail "check opened the browser inside the repo: $d1"
+[ ! -e "$d1" ] || fail "check left its browser folder: $d1"
+PW_FAIL="/x/chrome: error while loading shared libraries: libasound.so.2: cannot open shared object file" refuses \
+	"problem: playwright-cli can't open a headless page (error while loading shared libraries: libasound.so.2): INSTALL.md step 7" "$r" check "$r"
+[ "$(sed -n '$s/^[^ ]* \([^ ]*\) \([^ ]*\).*/\2/p' "$PW_LOG")" = close ] || fail "check left a failed browser open: $(cat "$PW_LOG")"
+# On a Linux Playwright knows, it checks the libraries itself and boxes its
+# own message.
+PW_FAIL=$'Error: browserType.launch:\n╔══════╗\n║ Host system is missing dependencies to run browsers. ║\n║     sudo apt-get install libasound2t64 ║' refuses \
+	"problem: playwright-cli can't open a headless page (Host system is missing dependencies to run browsers): INSTALL.md step 7" "$r" check "$r"
+PW_FAIL="Error: browserType.launch: Timeout 180000ms exceeded." refuses "problem: playwright-cli can't open a headless page (Error: browserType.launch: Timeout 180000ms exceeded.)" "$r" check "$r"
+PW_FAIL="no error line" refuses "problem: playwright-cli can't open a headless page: INSTALL.md step 7" "$r" check "$r"
+sed -i 's/^browser: .*/browser: none/' "$r/.maestro/project/install.yaml"
+: >"$PW_LOG"
+ok check "$r"
+[ ! -s "$PW_LOG" ] || fail "browser: none ran playwright-cli: $(cat "$PW_LOG")"
+# Its own skill, from its installer, loads in every session.
+mkdir -p "$r/.claude/skills/playwright-cli"
+ok check "$r"
+says "warn: .claude/skills/playwright-cli is Playwright CLI's own skill"
+rm -r "$r/.claude/skills/playwright-cli"
+rm "$tmp/bin/playwright-cli"
 # Review and prune need git merge-tree --write-tree, from git 2.38.
 # uninstall doesn't, so a team on an older git can still remove Maestro.
 mkdir "$tmp/oldgit"
@@ -614,21 +661,25 @@ while IFS='|' read -r bad msg; do
 	echo "$bad" >>"$r4/.maestro/project/install.yaml"
 	refuses "$msg" "$r4" apply "$r4"
 done <<'EOF'
-colour: blue|install.yaml:5: unknown key colour
-nonsense|install.yaml:5: want key: value
-skills-home: hidden|install.yaml:5: skills-home twice
-code-graph: mcp|install.yaml:5: code-graph twice
-skip: maestro-recall|install.yaml:5: skip: is gone: every skill installs
+colour: blue|install.yaml:6: unknown key colour
+nonsense|install.yaml:6: want key: value
+skills-home: hidden|install.yaml:6: skills-home twice
+code-graph: mcp|install.yaml:6: code-graph twice
+browser: none|install.yaml:6: browser twice
+skip: maestro-recall|install.yaml:6: skip: is gone: every skill installs
 bots: designer|no bot profile designer
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
-tickets: our-tickets|install.yaml:5: tickets: Maestro's bots run only on maestro-ticket
+tickets: our-tickets|install.yaml:6: tickets: Maestro's bots run only on maestro-ticket
 EOF
-for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden" "code-graph: yes|code-graph wants mcp or none"; do
+for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden" "code-graph: yes|code-graph wants mcp or none" "browser: chrome|browser wants playwright-cli or none"; do
 	sed "s/^${bad%%:*}: .*/${bad%%|*}/" "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
 grep -v '^code-graph:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 for c in apply check; do refuses "code-graph wants mcp or none; INSTALL.md step 4" "$r4" $c "$r4"; done
+# An install from before the browser choice: apply and check ask for it.
+grep -v '^browser:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
+for c in apply check; do refuses "browser wants playwright-cli or none; INSTALL.md step 4" "$r4" $c "$r4"; done
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
 refuses "no skill maestro-nope in" "$r4" apply --replace maestro-nope "$r4"
 sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r4/.maestro/project/install.yaml"
@@ -729,7 +780,7 @@ git clone -q --bare "$r2" "$r11/.git"
 git -C "$r11/.git" worktree add -q "$r11/main" main
 git -C "$r11/.git" worktree add -q -b feat "$r11/feat"
 mkdir -p "$r11/main/.maestro/project" "$r11/main/.maestro/src"
-printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" >"$r11/main/.maestro/project/install.yaml"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" "browser: none" >"$r11/main/.maestro/project/install.yaml"
 ok apply "$r11/main"
 installed "$r11/main" .claude
 refuses "Maestro is installed in $r11/main" "$r11/feat" apply "$r11/feat"
@@ -740,7 +791,7 @@ r15=$tmp/bare2
 git clone -q --bare "$r2" "$r15/.bare"
 git -C "$r15/.bare" worktree add -q "$r15/main" main
 mkdir -p "$r15/main/.maestro/project"
-printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" >"$r15/main/.maestro/project/install.yaml"
+printf '%s\n' "maestro-sha: $sha" "harnesses: claude" "skills-home: hidden" "code-graph: none" "browser: none" >"$r15/main/.maestro/project/install.yaml"
 git config --global safe.bareRepository explicit
 ok apply "$r15/main"
 installed "$r15/main" .claude

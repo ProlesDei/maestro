@@ -17,6 +17,9 @@
 #   code-graph: mcp|none            codebase-memory-mcp in the repo's .mcp.json,
 #                                   without its hooks, or none (required:
 #                                   INSTALL.md step 7)
+#   browser: playwright-cli|none    the browser QA sessions open pages with,
+#                                   or none for an app with no screens
+#                                   (required: INSTALL.md step 7)
 #
 # apply copies each skill in skills/ beside this script into every harness
 # folder, writes project-setup.md once, creates the ticket store and lists
@@ -41,9 +44,10 @@
 # bots run on, and changes nothing: copies that are missing or changed, a
 # store that is empty, unreadable or no SQLite file, a missing claude, gh or jq, an
 # unset git identity, a code graph install.yaml asks for that .mcp.json
-# lacks. It warns while origin's main branch lacks project-setup.md or the
-# committed skills, and on codebase-memory-mcp hooks in Claude Code's
-# settings.
+# lacks, a browser install.yaml asks for that can't open a headless page.
+# It warns while origin's main branch lacks project-setup.md or the
+# committed skills, on codebase-memory-mcp hooks in Claude Code's
+# settings, and on Playwright CLI's own skill in the repo.
 # uninstall removes the files the record lists, except those changed since.
 #
 # Exit codes: 0 ok, 1 a clash or a problem, 2 usage.
@@ -109,7 +113,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha='' harnesses=() home='' bots=() graph=''
+sha='' harnesses=() home='' bots=() graph='' browser=''
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -128,6 +132,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	tickets) [ "$val" = maestro-ticket ] || die "install.yaml:$n: tickets: Maestro's bots run only on maestro-ticket; remove the line" ;;
 	bots) read -ra bots <<<"$val" ;;
 	code-graph) graph=$val ;;
+	browser) browser=$val ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
 	esac
 done <"$choices"
@@ -144,6 +149,8 @@ head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git chec
 # An install with no answer here never ran step 7, by mistake or not.
 [ "$cmd" = uninstall ] || [[ $graph == mcp || $graph == none ]] ||
 	die "install.yaml: code-graph wants mcp or none; INSTALL.md step 4 says how to pick"
+[ "$cmd" = uninstall ] || [[ $browser == playwright-cli || $browser == none ]] ||
+	die "install.yaml: browser wants playwright-cli or none; INSTALL.md step 4 says how to pick"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
 for h in "${harnesses[@]}"; do
@@ -330,6 +337,33 @@ if [ "$cmd" = check ]; then
 	elif $graphed; then
 		warn "code-graph is none, but .mcp.json registers codebase-memory-mcp: set code-graph to mcp, or remove the server"
 	fi
+	# The browser (INSTALL.md step 7): QA opens pages with playwright-cli,
+	# headless, in Playwright's Chromium. Open one the same way, from a temp
+	# folder so its files land there, under a session name no run uses, and
+	# close only that session: other runs' browsers may share the machine.
+	# A short idle timeout ends it even if the close never runs.
+	if [ "$browser" = playwright-cli ]; then
+		if ! command -v playwright-cli >/dev/null; then
+			problem "playwright-cli isn't on PATH: QA sessions can't open a page; INSTALL.md step 7"
+		else
+			probe=$(mktemp -d)
+			if ! out=$(cd "$probe" && playwright-cli -s="maestro-check-$$" open --browser=chromium --idle-timeout=60000 'data:text/html,<title>ok</title>' 2>&1); then
+				# The cause, else the first error line but the daemon's,
+				# which only says it exited.
+				why=$(grep -m1 -oE 'Host system is missing dependencies to run browsers|error while loading shared libraries: [^:]+|Browser "[^"]+" is not installed|Chromium distribution [^ ]+ is not found' <<<"$out" ||
+					grep -v 'Daemon pid=' <<<"$out" | grep -m1 -oE 'Error: .*[^[:space:]]' || true)
+				problem "playwright-cli can't open a headless page${why:+ ($why)}: INSTALL.md step 7"
+			fi
+			(cd "$probe" && playwright-cli -s="maestro-check-$$" close) >/dev/null 2>&1 || true
+			rm -rf -- "$probe"
+		fi
+	fi
+	# Its own skill loads in every session and tells it to close every
+	# browser session, other runs' too.
+	for d in .claude .agents; do
+		[ ! -e "$target/$d/skills/playwright-cli" ] ||
+			warn "$d/skills/playwright-cli is Playwright CLI's own skill: it loads in every session and tells it to close every browser session, other runs' too; INSTALL.md step 7 leaves it out"
+	done
 	for f in "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/settings.json" "$target/.claude/settings.json" "$target/.claude/settings.local.json"; do
 		[ -f "$f" ] && grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*(cbm-|codebase-memory)' "$f" &&
 			warn "$f runs codebase-memory-mcp hooks, which fire on every bot session's tool calls: INSTALL.md step 7 leaves them out"
