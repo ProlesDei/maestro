@@ -62,7 +62,7 @@ cd "$tmp/work"
 mkdir -p .maestro/project src
 printf '# Project setup\n\n## Main branch\n\nmain\n\n## Checks\n' >.maestro/project/project-setup.md
 # shellcheck disable=SC2016 # literal backticks
-printf 'Rules: `bot-profiles/` and INSTALL.md; see docs/rules.md.\n' >AGENTS.md
+printf 'Rules: `bot-profiles/` and INSTALL.md; see docs/rules.md.\nFollow every file in `docs/policies/`.\n' >AGENTS.md
 echo one >src/a.go
 git add -A && git commit -qm base && git push -q origin main
 git switch -qc maestro/T-7
@@ -75,13 +75,14 @@ H=$(git rev-parse HEAD)
 git push -q origin maestro/T-7
 git switch -q main
 
-pr() { # pr <n> <branch> <head> <fork> <files...>
+pr() { # pr <n> <branch> <head> <fork> <[CHANGETYPE:]file...>
 	local n=$1 b=$2 h=$3 fork=$4
 	shift 4
 	jq -n --argjson n "$n" --arg b "$b" --arg h "$h" --argjson fork "$fork" --args \
 		'{number: $n, url: "https://github.com/o/r/pull/\($n)", title: "PR \($n)", body: "", state: "OPEN", isDraft: false,
 		  headRefName: $b, headRefOid: $h, baseRefName: "main", isCrossRepository: $fork,
-		  files: [$ARGS.positional[] | {path: .}]}' "$@" >"$FX/pr-$n.json"
+		  files: [$ARGS.positional[] | if test("^[A-Z]+:") then {changeType: sub(":.*"; ""), path: sub("^[A-Z]+:"; "")}
+		           else {changeType: "MODIFIED", path: .} end]}' "$@" >"$FX/pr-$n.json"
 }
 comments() { # comments <id> <body...>: a ticket's get --json, trimmed as get trims
 	local id=$1
@@ -95,18 +96,19 @@ pr 7 maestro/T-7 "$H" false README.md src/a.go
 comments T-7 "Handoff: PR 7 at $H"
 
 # --route reads the file list only.
-pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md docs/sub/a.rst .gitignore LICENSE LICENSE-MIT .mailmap
+pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md docs/sub/a.rst .gitignore LICENSE .mailmap DELETED:docs/old.md
 bash "$prep" --route 8 >"$tmp/out" || fail "route light exited $?"
 has route=light
 # Agents obey what the root rules name, and code hides in docs-like names.
 for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migrations/1.sql src/a.go tests/a.md \
 	.maestro/project/project-setup.md bot-profiles/qa/persona.md INSTALL.md docs/rules.md Claude.md \
 	CLAUDE.local.md .kiro/steering/a.md CMakeLists.txt docs/page.mdx .prettierrc.cjs .gitattributes \
-	e.md src/notes.md scripts/CHANGELOG.sh .changeset/x.md AGENT.md; do
+	e.md src/notes.md scripts/CHANGELOG.sh .changeset/x.md AGENT.md LICENSE-MIT LICENSE.go NOTICE.sh \
+	LICENSE-gen.ts .prettierrc.json docs/policies/deploy.md docs/.cursor/rules/x.md RENAMED:docs/moved.md; do
 	pr 9 mixed "$H" false README.md "$f"
 	bash "$prep" --route 9 >"$tmp/out" || fail "route $f exited $?"
 	has route=full
-	grep -q "^why=$f is " "$tmp/out" || fail "route $f: no why"
+	grep -q "^why=${f#*:} is " "$tmp/out" || fail "route $f: no why"
 done
 [ -z "$(ls "$TMPDIR")" ] || fail "--route wrote to the temp dir"
 # The rules as main has them, not as a stale main checkout does.
@@ -115,6 +117,11 @@ pr 9 mixed "$H" false docs/rules.md
 bash "$prep" --route 9 >"$tmp/out" || fail "route stale exited $?"
 has route=full
 git checkout -q AGENTS.md
+# With no main branch to read, no rules say what agents obey: full.
+mv .maestro/project/project-setup.md "$tmp/setup"
+bash "$prep" --route 8 >"$tmp/out" || fail "route without setup exited $?"
+has route=full
+mv "$tmp/setup" .maestro/project/project-setup.md
 
 # A ticket with no verdict: full mode, and every file it names is there.
 bash "$prep" T-7 >"$tmp/out" || fail "prep T-7 exited $?"
@@ -131,7 +138,8 @@ has ticket=T-7
 # A -diff attribute in the main checkout hides no line from the counts
 # or the patch.
 echo '*.go -diff' >.gitattributes
-bash "$prep" T-7 >"$tmp/out" || fail "prep with -diff exited $?"
+mkdir -p "$tmp/xdg/git" && echo '*.go -diff' >"$tmp/xdg/git/attributes"
+XDG_CONFIG_HOME=$tmp/xdg bash "$prep" T-7 >"$tmp/out" || fail "prep with -diff exited $?"
 has lines=3
 has binary=0
 grep -q '^+three' "$(val C)/diff.patch" || fail "-diff hid the patch"

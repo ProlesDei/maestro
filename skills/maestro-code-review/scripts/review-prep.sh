@@ -29,13 +29,16 @@ target=$1
 
 # 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
-# Paths as written, not quoted, and attributes from an empty tree, so a
-# -diff in the PR's or the checkout's .gitattributes hides no code from
-# the counts or the patch (git 2.40+; older git reads them as it finds).
+# Paths as written, not quoted. Attributes from an empty tree and no
+# global attributes file, so a -diff in the PR's or the checkout's
+# .gitattributes, or the user's, hides no code from the counts or the
+# patch (the tree part needs git 2.40+). Only .git/info/attributes, the
+# repo's own, still applies: binary= reports what it, or a real binary,
+# leaves uncounted.
 attrs=()
 empty=$(git hash-object -t tree /dev/null)
 git --attr-source="$empty" rev-parse --git-dir >/dev/null 2>&1 && attrs=(--attr-source="$empty")
-gd() { git -c core.quotePath=false "${attrs[@]}" diff "$@"; }
+gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff "$@"; }
 
 # The main branch, from the main checkout's project-setup.md, never the
 # PR's tree.
@@ -50,7 +53,8 @@ rules=
 load_rules() {
 	local f
 	rules=
-	for f in AGENTS.md CLAUDE.md GEMINI.md .maestro/project/project-setup.md; do
+	for f in AGENTS.md AGENTS.override.md CLAUDE.md CLAUDE.local.md .claude/CLAUDE.md GEMINI.md \
+		.github/copilot-instructions.md .maestro/project/project-setup.md; do
 		if [ -n "$main" ] && git cat-file -e "refs/remotes/origin/$main:$f" 2>/dev/null; then
 			rules+=$(git show "refs/remotes/origin/$main:$f")$'\n'
 		elif [ -f "$mainwt/$f" ]; then
@@ -58,15 +62,25 @@ load_rules() {
 		fi
 	done
 }
-# named: the rules name this path, as a word of its own, so agents may
-# obey it. The quoted part of a bash regex matches as written.
-named() { [[ $rules =~ (^|[^[:alnum:]_.-])"$1"([^[:alnum:]_/-]|$) ]]; }
+# named: the rules name this path, or a folder it sits in (`docs/x/`,
+# ./docs/x/ or `docs/x`), as words of their own, so agents may obey it.
+# The quoted part of a bash regex matches as written.
+named() {
+	local d=$1
+	[[ $rules =~ (^|[^[:alnum:]_.-])"$d"([^[:alnum:]_/-]|$) ]] && return 0
+	while [[ $d == */* ]]; do
+		d=${d%/*}
+		[[ $rules =~ (^|[^[:alnum:]_-])"$d"/([^[:alnum:]_.-]|$) || $rules == *"\`$d\`"* ]] && return 0
+	done
+	return 1
+}
 
 # File classes, first match wins. agent-text, ci, deps and schema are the
 # paths the tier-2 row names. docs and config are the only ones tier 0
-# and the light route take, so they are a short list: a doc at the root
-# or in a root docs/ folder that the rules don't name. Other prose is
-# text, for the session to judge. Instruction files match in any case:
+# and the light route take, so they are a short list of exact names: a
+# doc at the root, or a .md, .rst or .adoc in a root docs/ folder and no
+# dot folder, that the rules don't name, nor a folder it sits in. Other
+# prose is text, for the session to judge. Instruction files match in any case:
 # a case-insensitive disk loads claude.md as CLAUDE.md.
 class() {
 	local p=$1 l=${1,,}
@@ -103,17 +117,21 @@ class() {
 	*/test/* | */tests/* | */__tests__/* | */spec/* | *_test.* | *.test.* | *.spec.* | */test_*.py)
 		echo test ;;
 	/README | /README.md | /README.rst | /README.txt | /CHANGELOG | /CHANGELOG.md | /CHANGES.md | \
-		/HISTORY.md | /LICENSE | /LICENSE.* | /LICENSE-* | /LICENCE | /LICENCE.* | /COPYING | \
-		/COPYING.* | /NOTICE | /NOTICE.* | /AUTHORS | /AUTHORS.* | /CONTRIBUTING.md | \
-		/CODE_OF_CONDUCT.md | /SECURITY.md | /docs/*.md | /docs/*.rst | /docs/*.adoc | \
-		/doc/*.md | /doc/*.rst | /doc/*.adoc)
-		if named "$p"; then echo agent-text; else echo docs; fi ;;
+		/HISTORY.md | /LICENSE | /LICENSE.md | /LICENSE.txt | /LICENCE | /LICENCE.md | /COPYING | \
+		/COPYING.md | /NOTICE | /NOTICE.md | /NOTICE.txt | /AUTHORS | /AUTHORS.md | \
+		/CONTRIBUTING.md | /CODE_OF_CONDUCT.md | /SECURITY.md | /docs/*.md | /docs/*.rst | \
+		/docs/*.adoc | /doc/*.md | /doc/*.rst | /doc/*.adoc)
+		if named "$p"; then
+			echo agent-text
+		elif [[ /$p == */.* ]]; then
+			echo text # in a dot folder, where a harness may look
+		else
+			echo docs
+		fi
+		;;
 	*.md | *.markdown | *.rst | *.adoc | *.txt | *.MD)
 		echo text ;;
-	*/.gitignore | */.editorconfig | */.prettierignore | */.prettierrc | */.prettierrc.json | \
-		*/.prettierrc.json5 | */.prettierrc.yaml | */.prettierrc.yml | */.prettierrc.toml | \
-		*/.markdownlint.json | */.markdownlint.jsonc | */.markdownlint.yaml | */.markdownlint.yml | \
-		*/.markdownlintignore | */.clang-format | */rustfmt.toml | */.rustfmt.toml | */.mailmap)
+	*/.gitignore | */.editorconfig | */.prettierignore | */.markdownlintignore | */.mailmap)
 		echo config ;;
 	*) echo code ;;
 	esac
@@ -138,25 +156,20 @@ T-[0-9]* | maestro/T-[0-9]*)
 esac
 
 if [ -n "$route" ]; then
+	full() { echo route=full; echo "why=$1"; exit 0; }
+	# With no main or no rules to read, nothing says which docs agents obey.
+	[ -n "$main" ] || full "no ## Main branch in the main checkout's project-setup.md"
 	load_rules
-	files=$(gh pr view "$pr" --json files --jq '.files[].path') || die 3 "gh found no PR $pr"
+	[ -n "$rules" ] || full "no AGENTS.md, CLAUDE.md or project-setup.md to read"
+	files=$(gh pr view "$pr" --json files --jq '.files[] | "\(.changeType)\t\(.path)"') || die 3 "gh found no PR $pr"
 	n=$(printf '%s\n' "$files" | grep -c . || true)
 	# gh lists at most 100 files; a PR that big is no light review anyway.
-	if [ "$n" -eq 0 ] || [ "$n" -ge 100 ]; then
-		echo route=full
-		echo "why=$n files"
-		exit 0
-	fi
-	while IFS= read -r f; do
+	[ "$n" -gt 0 ] && [ "$n" -lt 100 ] || full "$n files"
+	while IFS=$'\t' read -r t f; do
+		# A rename lists only its new path, so what it moved stays unseen.
+		case $t in ADDED | MODIFIED | DELETED | CHANGED) ;; *) full "$f is ${t,,}" ;; esac
 		c=$(class "$f")
-		case $c in
-		docs | config) ;;
-		*)
-			echo route=full
-			echo "why=$f is $c"
-			exit 0
-			;;
-		esac
+		case $c in docs | config) ;; *) full "$f is $c" ;; esac
 	done <<<"$files"
 	echo route=light
 	echo "why=$n files, all docs or inert config"
