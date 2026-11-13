@@ -202,7 +202,7 @@ rm "$r/.mcp.json" "$tmp/bin/codebase-memory-mcp"
 sed -i 's/^browser: .*/browser: playwright-cli/' "$r/.maestro/project/install.yaml"
 PATH=$(hide playwright-cli) refuses "problem: playwright-cli isn't on PATH" "$r" check "$r"
 # shellcheck disable=SC2016 # the stub's code, not ours
-printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $*" >>"$PW_LOG"' \
+printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $* nu=${NO_UPDATE_NOTIFIER-}" >>"$PW_LOG"' \
 	'[[ " $* " != *" open "* || -z "${PW_FAIL:-}" ]] || { printf "Error: Daemon pid=1: Daemon process exited with code 1\n%s\n" "$PW_FAIL"; exit 1; }' >"$tmp/bin/playwright-cli"
 chmod +x "$tmp/bin/playwright-cli"
 export PW_LOG=$tmp/pw.log
@@ -216,9 +216,16 @@ read -r d1 s1 c1 _ < <(sed -n 1p "$PW_LOG")
 read -r d2 s2 c2 _ < <(sed -n 2p "$PW_LOG")
 [[ $c1 == open && $c2 == close && $s1 == "$s2" && $s1 == -s=maestro-check-* && $d1 == "$d2" ]] ||
 	fail "check should close the session it opened, by name: $(cat "$PW_LOG")"
-# The browser QA sessions open: Playwright's Chromium, headless.
-grep -q -- ' open --browser=chromium ' "$PW_LOG" && ! grep -q -- --headed "$PW_LOG" ||
-	fail "check should open Playwright's Chromium, headless, as QA does: $(cat "$PW_LOG")"
+# The browser QA sessions open: Playwright's Chromium, headless, in memory,
+# ended by an idle timeout if the close never runs; no update check.
+grep -q -- ' open --browser=chromium --idle-timeout=60000 ' "$PW_LOG" && ! grep -qE -- '--headed|--persistent|--profile' "$PW_LOG" ||
+	fail "check should open Playwright's Chromium, headless, in memory, with an idle timeout: $(cat "$PW_LOG")"
+[ "$(grep -c ' nu=1$' "$PW_LOG")" -eq 2 ] || fail "check let playwright-cli check for updates: $(cat "$PW_LOG")"
+# Two checks at once never share a session.
+: >"$PW_LOG"
+ok check "$r"
+read -r _ s3 _ < <(sed -n 1p "$PW_LOG")
+[ "$s3" != "$s1" ] || fail "two checks used one session name: $s1"
 [[ $d1 != "$(cd "$r" && pwd -P)"* ]] || fail "check opened the browser inside the repo: $d1"
 [ ! -e "$d1" ] || fail "check left its browser folder: $d1"
 PW_FAIL="/x/chrome: error while loading shared libraries: libasound.so.2: cannot open shared object file" refuses \
@@ -228,17 +235,24 @@ PW_FAIL="/x/chrome: error while loading shared libraries: libasound.so.2: cannot
 # own message.
 PW_FAIL=$'Error: browserType.launch:\n╔══════╗\n║ Host system is missing dependencies to run browsers. ║\n║     sudo apt-get install libasound2t64 ║' refuses \
 	"problem: playwright-cli can't open a headless page (Host system is missing dependencies to run browsers): INSTALL.md step 7" "$r" check "$r"
+PW_FAIL='Error: Browser "chrome-for-testing" is not installed; expected executable at /x/chrome.' refuses \
+	"problem: playwright-cli can't open a headless page (Browser \"chrome-for-testing\" is not installed): INSTALL.md step 7" "$r" check "$r"
+PW_FAIL=$'You are running Node.js 18.20.0.\nPlaywright requires Node.js 20 or higher. \nPlease update your version of Node.js.' refuses \
+	"problem: playwright-cli can't open a headless page (Playwright requires Node.js 20 or higher): INSTALL.md step 7" "$r" check "$r"
 PW_FAIL="Error: browserType.launch: Timeout 180000ms exceeded." refuses "problem: playwright-cli can't open a headless page (Error: browserType.launch: Timeout 180000ms exceeded.)" "$r" check "$r"
 PW_FAIL="no error line" refuses "problem: playwright-cli can't open a headless page: INSTALL.md step 7" "$r" check "$r"
 sed -i 's/^browser: .*/browser: none/' "$r/.maestro/project/install.yaml"
 : >"$PW_LOG"
 ok check "$r"
 [ ! -s "$PW_LOG" ] || fail "browser: none ran playwright-cli: $(cat "$PW_LOG")"
-# Its own skill, from its installer, loads in every session.
-mkdir -p "$r/.claude/skills/playwright-cli"
-ok check "$r"
-says "warn: .claude/skills/playwright-cli is Playwright CLI's own skill"
-rm -r "$r/.claude/skills/playwright-cli"
+# Its own skill, from its installer, loads in every session, from the
+# repo or the user's home.
+for d in "$(cd "$r" && pwd -P)/.claude" "$(cd "$r" && pwd -P)/.agents" "$CLAUDE_CONFIG_DIR"; do
+	mkdir -p "$d/skills/playwright-cli"
+	ok check "$r"
+	says "warn: $d/skills/playwright-cli is Playwright CLI's own skill"
+	rm -r "$d/skills/playwright-cli"
+done
 rm "$tmp/bin/playwright-cli"
 # Review and prune need git merge-tree --write-tree, from git 2.38.
 # uninstall doesn't, so a team on an older git can still remove Maestro.
@@ -680,6 +694,9 @@ for c in apply check; do refuses "code-graph wants mcp or none; INSTALL.md step 
 # An install from before the browser choice: apply and check ask for it.
 grep -v '^browser:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
 for c in apply check; do refuses "browser wants playwright-cli or none; INSTALL.md step 4" "$r4" $c "$r4"; done
+# uninstall never asks: a team can still remove an install from before it.
+run uninstall "$r4" || true
+grep -q "browser wants" "$tmp/out" && fail "uninstall asked for the browser choice"
 cp "$tmp/keep" "$r4/.maestro/project/install.yaml"
 refuses "no skill maestro-nope in" "$r4" apply --replace maestro-nope "$r4"
 sed -i 's/^maestro-sha: .*/maestro-sha: 0000000/' "$r4/.maestro/project/install.yaml"

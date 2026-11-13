@@ -341,27 +341,28 @@ if [ "$cmd" = check ]; then
 	# headless, in Playwright's Chromium. Open one the same way, from a temp
 	# folder so its files land there, under a session name no run uses, and
 	# close only that session: other runs' browsers may share the machine.
-	# A short idle timeout ends it even if the close never runs.
+	# A short idle timeout ends it even if the close never runs, and
+	# NO_UPDATE_NOTIFIER keeps it off the network and out of its cache.
 	if [ "$browser" = playwright-cli ]; then
 		if ! command -v playwright-cli >/dev/null; then
 			problem "playwright-cli isn't on PATH: QA sessions can't open a page; INSTALL.md step 7"
 		else
-			probe=$(mktemp -d)
-			if ! out=$(cd "$probe" && playwright-cli -s="maestro-check-$$" open --browser=chromium --idle-timeout=60000 'data:text/html,<title>ok</title>' 2>&1); then
+			probe=$(mktemp -d) pw=maestro-check-$$-$RANDOM
+			if ! out=$(cd "$probe" && NO_UPDATE_NOTIFIER=1 playwright-cli -s="$pw" open --browser=chromium --idle-timeout=60000 'data:text/html,<title>ok</title>' 2>&1); then
 				# The cause, else the first error line but the daemon's,
 				# which only says it exited.
-				why=$(grep -m1 -oE 'Host system is missing dependencies to run browsers|error while loading shared libraries: [^:]+|Browser "[^"]+" is not installed|Chromium distribution [^ ]+ is not found' <<<"$out" ||
+				why=$(grep -m1 -oE 'Playwright requires Node.js [0-9]+ or higher|Host system is missing dependencies to run browsers|error while loading shared libraries: [^:]+|Browser "[^"]+" is not installed|Chromium distribution [^ ]+ is not found' <<<"$out" ||
 					grep -v 'Daemon pid=' <<<"$out" | grep -m1 -oE 'Error: .*[^[:space:]]' || true)
 				problem "playwright-cli can't open a headless page${why:+ ($why)}: INSTALL.md step 7"
 			fi
-			(cd "$probe" && playwright-cli -s="maestro-check-$$" close) >/dev/null 2>&1 || true
+			(cd "$probe" && NO_UPDATE_NOTIFIER=1 playwright-cli -s="$pw" close) >/dev/null 2>&1 || true
 			rm -rf -- "$probe"
 		fi
 	fi
-	# Its own skill loads in every session and tells it to close every
-	# browser session, other runs' too.
-	for d in .claude .agents; do
-		[ ! -e "$target/$d/skills/playwright-cli" ] ||
+	# Its own skill, in the repo or the user's home, loads in every session
+	# and tells it to close every browser session, other runs' too.
+	for d in "$target/.claude" "$target/.agents" "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}" "${HOME:-}/.agents"; do
+		[ ! -e "$d/skills/playwright-cli" ] ||
 			warn "$d/skills/playwright-cli is Playwright CLI's own skill: it loads in every session and tells it to close every browser session, other runs' too; INSTALL.md step 7 leaves it out"
 	done
 	for f in "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/settings.json" "$target/.claude/settings.json" "$target/.claude/settings.local.json"; do
