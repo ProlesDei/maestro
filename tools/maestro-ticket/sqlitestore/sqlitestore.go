@@ -1746,13 +1746,13 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		return rep, err
 	}
 	if len(stalled) == 0 {
-		add("stalls", true, "no in_review ticket has waited %s with no one on it", ticket.DefaultStall)
+		add("stalls", true, "no in_review ticket has waited %d minutes with no one on it", int(ticket.DefaultStall.Minutes()))
 	} else {
 		if len(stalled) > 10 {
 			stalled = append(stalled[:10], fmt.Sprintf("and %d more", len(stalled)-10))
 		}
-		add("stalls", true, "warning: in_review with no one on it for %s or more: %s (maestro-ticket alerts lists them)",
-			ticket.DefaultStall, strings.Join(stalled, ", "))
+		add("stalls", true, "warning: in_review with no one on it for %d minutes or more: %s (maestro-ticket alerts lists them)",
+			int(ticket.DefaultStall.Minutes()), strings.Join(stalled, ", "))
 	}
 
 	// Statuses and roles are checked in Go, not by the schema: list the

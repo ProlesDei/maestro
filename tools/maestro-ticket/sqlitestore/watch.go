@@ -111,6 +111,16 @@ func (s *Store) SetETA(ctx context.Context, req ticket.SetETARequest) (ticket.ET
 	}
 	var out ticket.ETA
 	err := s.write(ctx, func(tx *sql.Tx, now int64) error {
+		// A goal no ticket carries, such as a misspelt slug, would read as
+		// met for ever and never alert.
+		var one int
+		err := tx.QueryRowContext(ctx, "SELECT 1 FROM tickets WHERE goal = ? LIMIT 1", req.Goal).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: no ticket has goal %s", ticket.ErrNotFound, req.Goal)
+		}
+		if err != nil {
+			return err
+		}
 		ids := make([]string, len(req.Tickets))
 		for i, id := range req.Tickets {
 			var one int
@@ -123,7 +133,7 @@ func (s *Store) SetETA(ctx context.Context, req ticket.SetETARequest) (ticket.ET
 			}
 			ids[i] = fmt.Sprint(int64(id))
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO etas (goal, due_at, tickets, set_by, set_at) VALUES (?, ?, ?, ?, ?)
+		_, err = tx.ExecContext(ctx, `INSERT INTO etas (goal, due_at, tickets, set_by, set_at) VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(goal) DO UPDATE SET due_at = excluded.due_at, tickets = excluded.tickets,
 				set_by = excluded.set_by, set_at = excluded.set_at`,
 			req.Goal, req.Due.UnixMilli(), strings.Join(ids, ","), req.Actor, now)

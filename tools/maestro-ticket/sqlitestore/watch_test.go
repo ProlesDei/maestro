@@ -86,7 +86,14 @@ func TestETAs(t *testing.T) {
 	s, clk := newStore(t)
 	ctx := context.Background()
 	a := mustCreate(t, s, "demo", "", 2)
+	g := "demo"
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: a.ID, Goal: &g}); err != nil {
+		t.Fatal(err)
+	}
 	due := clk.Now().Add(time.Hour)
+	if _, err := s.SetETA(ctx, ticket.SetETARequest{Goal: "dmeo", Due: due}); !errors.Is(err, ticket.ErrNotFound) {
+		t.Fatalf("a goal no ticket has: %v", err)
+	}
 	if _, err := s.SetETA(ctx, ticket.SetETARequest{Goal: "demo", Due: due, Tickets: []ticket.ID{a.ID, 9}}); !errors.Is(err, ticket.ErrNotFound) {
 		t.Fatalf("unknown ticket: %v", err)
 	}
@@ -101,6 +108,11 @@ func TestETAs(t *testing.T) {
 	e, err := s.SetETA(ctx, ticket.SetETARequest{Goal: "demo", Due: later, Actor: "planner"})
 	if err != nil || !e.Due.Equal(later) || len(e.Tickets) != 0 || e.SetBy != "planner" {
 		t.Fatalf("replace: %v %+v", err, e)
+	}
+	b := mustCreate(t, s, "alpha", "", 2)
+	g = "alpha"
+	if _, err := s.Update(ctx, ticket.UpdateRequest{ID: b.ID, Goal: &g}); err != nil {
+		t.Fatal(err)
 	}
 	mustSetETA(t, s, "alpha", due)
 	list, _ := s.ETAs(ctx)

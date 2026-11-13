@@ -107,7 +107,7 @@ Plain `get` sets the ticket body and each comment four spaces in, so a line at t
 
 `log-run` records each run as it starts reading (actor, ticket, pid), and how it ended: `result`, or `no_result` for an empty or unreadable reply. On `no_result` it frees the run's claim the same way `died` does, and says so on stderr. `export` lists the runs under `launches`.
 
-`eta --goal G --by TIME [--tickets T-1,T-2]` records when the owner was told a goal, or those tickets, would be ready; a second call replaces it, and `--clear` drops it. `--by` takes `21:15` (today), `2026-11-12 21:15`, an RFC 3339 time or a length such as `90m`, and refuses a time already past. It is met once each named ticket is `done`, or, with none named, once the goal has no open ticket; a named ticket that was cancelled was never delivered. `eta` alone lists each with `met`, `open` or `missed`. Schema v8 adds the `launches` and `etas` tables.
+`eta --goal G --by TIME [--tickets T-1,T-2]` records when the owner was told a goal, or those tickets, would be ready; a second call replaces it, and `--clear` drops it. `--by` takes `21:15` (today), `2026-11-12 21:15`, an RFC 3339 time or a length such as `90m`, and refuses a time already past, as `eta` refuses a goal no ticket has (a misspelt slug would read as met for ever). It is met once each named ticket is `done`, or, with none named, once the goal has no open ticket; a named ticket that was cancelled was never delivered. `eta` alone lists each with `met`, `open` or `missed`. Schema v8 adds the `launches` and `etas` tables.
 
 ## Layout
 
