@@ -18,7 +18,7 @@ main
 
 ## Checks
 
-<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`>
+<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`. Wrap a check that takes minutes, strains the machine or writes temp files, such as a test run, in `maestro-ticket slot`, such as - test: `maestro-ticket slot --max 4 -- make test`, so many sessions at once don't make it slow or flaky, and each run's temp files go when it ends>
 
 ## Run
 
@@ -34,4 +34,4 @@ main
 
 ## Conventions
 
-<commit style, where tests live, files never to touch>
+<commit style, where tests live, files never to touch, and the shared helpers new code must use instead of its own, such as one for safe file paths or for errors that never print a secret; engineers and review hold every change to them>

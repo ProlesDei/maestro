@@ -984,6 +984,7 @@ type Export struct {
 	LastSeq       int64    `json:"last_seq"`
 	Tickets       []Detail `json:"tickets"`
 	Events        []Event  `json:"events"`
+	Runs          []Run    `json:"runs"`
 }
 
 // Check is one doctor result.
@@ -991,6 +992,8 @@ type Check struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
 	Detail string `json:"detail"`
+	// Warn marks a passing check that found something a person should see.
+	Warn bool `json:"warn,omitempty"`
 }
 
 // DoctorReport is the result of Store.Doctor.
@@ -1038,6 +1041,12 @@ type Store interface {
 	// make a cycle fails with ErrInvalid.
 	Update(ctx context.Context, req UpdateRequest) (Ticket, error)
 	Events(ctx context.Context, f EventFilter) ([]Event, error)
+	// LogRun records a session's spend. Logging a session again keeps
+	// its first actor and replaces its totals, unless the new cost is
+	// lower: a session's total only grows, so that reply is older.
+	LogRun(ctx context.Context, req LogRunRequest) (Run, error)
+	// Runs lists runs, oldest session first.
+	Runs(ctx context.Context, f RunFilter) ([]RunRow, error)
 	// LastSeq returns the newest event seq, or 0 for an empty log.
 	LastSeq(ctx context.Context) (int64, error)
 	Doctor(ctx context.Context) (DoctorReport, error)

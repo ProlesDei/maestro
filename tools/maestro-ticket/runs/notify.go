@@ -23,8 +23,15 @@ var BotPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // Webhooks live one per bot in notify/<bot>.url next to the store, outside
 // every work tree, readable only by their owner: a webhook URL often holds
-// its secret.
+// its secret. A webhook that wants a bearer key keeps it in <bot>.key.
 func webhookPath(dir, bot string) string { return filepath.Join(dir, bot+".url") }
+func keyPath(dir, bot string) string     { return filepath.Join(dir, bot+".key") }
+
+// Hook is a bot's webhook: its URL and, if it wants one, the key sent as
+// Authorization: Bearer. Neither is ever printed or logged.
+type Hook struct {
+	URL, Key string
+}
 
 // CheckURL refuses anything but an http or https URL with a host.
 func CheckURL(s string) error {
@@ -35,20 +42,45 @@ func CheckURL(s string) error {
 	return nil
 }
 
-// SetWebhook saves bot's webhook URL, or removes it when url is "".
+// SetWebhook saves bot's webhook URL, or removes it, and its key, when u
+// is "".
 func SetWebhook(dir, bot, u string) error {
-	if !BotPattern.MatchString(bot) {
-		return fmt.Errorf("bot id %q: use lowercase letters, digits and single hyphens", bot)
-	}
 	if u == "" {
-		err := os.Remove(webhookPath(dir, bot))
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
+		if err := remove(webhookPath(dir, bot)); err != nil {
+			return err
 		}
-		return err
+		return remove(keyPath(dir, bot))
 	}
 	if err := CheckURL(u); err != nil {
 		return err
+	}
+	return writeSecret(dir, bot, webhookPath(dir, bot), u)
+}
+
+// SetKey saves the bearer key bot's webhook wants, or removes it when key
+// is "".
+func SetKey(dir, bot, key string) error {
+	if key == "" {
+		return remove(keyPath(dir, bot))
+	}
+	if strings.ContainsAny(key, " \t\r\n") || len(key) > 4096 {
+		return errors.New("want a key of one word, up to 4096 characters")
+	}
+	return writeSecret(dir, bot, keyPath(dir, bot), key)
+}
+
+func remove(name string) error {
+	if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// writeSecret writes a file only its owner can read, whole, through a
+// rename.
+func writeSecret(dir, bot, name, v string) error {
+	if !BotPattern.MatchString(bot) {
+		return fmt.Errorf("bot id %q: use lowercase letters, digits and single hyphens", bot)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -58,33 +90,38 @@ func SetWebhook(dir, bot, u string) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if _, err := f.WriteString(u + "\n"); err != nil {
+	if _, err := f.WriteString(v + "\n"); err != nil {
 		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), webhookPath(dir, bot))
+	return os.Rename(f.Name(), name)
 }
 
-// Webhook returns bot's webhook URL, or "" if it has none.
-func Webhook(dir, bot string) (string, error) {
+// Webhook returns bot's webhook, or a zero Hook if it has none.
+func Webhook(dir, bot string) (Hook, error) {
 	if !BotPattern.MatchString(bot) {
-		return "", nil
+		return Hook{}, nil
 	}
 	b, err := os.ReadFile(webhookPath(dir, bot))
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+		return Hook{}, nil
 	}
 	if err != nil {
-		return "", err
+		return Hook{}, err
 	}
-	u := strings.TrimSpace(string(b))
-	if err := CheckURL(u); err != nil {
-		return "", fmt.Errorf("webhook for %s: %v", bot, err)
+	h := Hook{URL: strings.TrimSpace(string(b))}
+	if err := CheckURL(h.URL); err != nil {
+		return Hook{}, fmt.Errorf("webhook for %s: %v", bot, err)
 	}
-	return u, nil
+	k, err := os.ReadFile(keyPath(dir, bot))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Hook{}, err
+	}
+	h.Key = strings.TrimSpace(string(k))
+	return h, nil
 }
 
 // Webhooks lists the bots that have one.
@@ -128,7 +165,7 @@ func Notice(r Record) Notification {
 		on = " on " + r.Ticket
 	}
 	return Notification{
-		Text:     fmt.Sprintf("Maestro run %s%s ended: %s. Run maestro-ticket pickup to read its result.", r.ID, on, r.State),
+		Text:     fmt.Sprintf("Maestro run %s%s ended: %s. Run maestro-ticket pickup to read it, then ack it.", r.ID, on, r.State),
 		Run:      r.ID,
 		Ticket:   r.Ticket,
 		Launcher: r.Launcher,
@@ -136,8 +173,10 @@ func Notice(r Record) Notification {
 	}
 }
 
-// Ring POSTs n as JSON to u; any 2xx answer counts.
-func Ring(ctx context.Context, u string, n Notification) error {
+// Ring POSTs n as JSON to h, with its key as a bearer token if it has
+// one; any 2xx answer counts.
+func Ring(ctx context.Context, h Hook, n Notification) error {
+	u := h.URL
 	b, _ := json.Marshal(n)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -146,6 +185,9 @@ func Ring(ctx context.Context, u string, n Notification) error {
 		return errors.New("bad webhook URL")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if h.Key != "" {
+		req.Header.Set("Authorization", "Bearer "+h.Key)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		// The error repeats the URL, and with it any secret it holds.

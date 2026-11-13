@@ -173,8 +173,11 @@ func printDoctor(w io.Writer, rep ticket.DoctorReport) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, c := range rep.Checks {
 		mark := "ok"
-		if !c.OK {
+		switch {
+		case !c.OK:
 			mark = "FAIL"
+		case c.Warn:
+			mark = "warn"
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", mark, c.Name, c.Detail)
 	}

@@ -40,6 +40,9 @@ type Env struct {
 	// StoreChecks checks the store's directory before opening it; nil
 	// means envcheck.Store. Tests use it to fake an unsafe filesystem.
 	StoreChecks func(dir string, allow bool) []ticket.Check
+	// DiskFree measures a directory's filesystem for claim and slot; nil
+	// means envcheck.DiskFree. Tests use it to fake a full disk.
+	DiskFree func(dir string) (envcheck.Free, bool, error)
 }
 
 // OSEnv returns an Env wired to the real process.
@@ -72,15 +75,20 @@ Commands:
               [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
               (ordered by priority, then id)
   goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
+  log-run     [--ticket ID]   (reads a claude -p --output-format json reply on stdin, prints it
+              unchanged, and records the session's cost and tokens; a resume replaces its total)
+  costs       [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since DATE|DURATION]
+              (logged spend per group: runs, dollars, share, median per run and per ticket)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
-  pickup      (reports once each run you launched that ended; lists yours still running)
+  pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
+  ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
-  notify      [<bot-id>] [--url-file F|-] [--clear] [--test]   (the webhook launch rings)
+  notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
@@ -91,6 +99,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
+              (runs the command once one of --max slots is free, so the sessions on
+              one ticket store run at most that many at once, with a TMPDIR of its
+              own that is removed when it ends; exits with its code)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -114,6 +126,11 @@ WAL; any write to the ticket frees its expired lease too. Until then, the
 holder's heartbeat revives it (lease_revived), as after a machine sleeps.
 Kill switch: while a file named STOP sits next to the store, claim refuses
 (stopped, exit 4).
+Low disk: claim and slot refuse (low_disk, exit 4) while the store's, the
+temp dir's or the working directory's filesystem has under 10% of its
+inodes free and under 1Mi, or under 10% of its space and under 10 GiB
+($MAESTRO_TICKET_MIN_FREE sets the percent; 0 is off). A store write that
+runs out of disk fails with low_disk too.
 
 Roles: chief-of-staff planner engineer qa-lead reviewer
 Statuses: backlog todo in_progress in_review blocked done cancelled
@@ -147,12 +164,15 @@ var commands = []command{
 	{"get", runGet},
 	{"list", runList},
 	{"goals", runGoals},
+	{"log-run", runLogRun},
+	{"costs", runCosts},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
 	{"launch", runLaunch},
 	{"supervise", runSupervise},
 	{"pickup", runPickup},
+	{"ack", runAck},
 	{"runs", runRuns},
 	{"notify", runNotify},
 	{"release", runRelease},
@@ -164,6 +184,7 @@ var commands = []command{
 	{"export", runExport},
 	{"render", runRender},
 	{"doctor", runDoctor},
+	{"slot", runSlot},
 }
 
 // call is one parsed invocation.
@@ -175,6 +196,11 @@ type call struct {
 	actor     string
 	idemKey   string
 	args      []string // positional arguments
+	store     struct { // storePath's answer, so git runs once a call
+		done         bool
+		path, source string
+		err          error
+	}
 }
 
 // usageError marks errors caused by bad command-line input.
@@ -359,6 +385,14 @@ func (c *call) out(v any, human func(w io.Writer)) error {
 // Maestro's own copy in .maestro/src (a second, empty store); pass --store
 // there.
 func (c *call) storePath() (path, source string, err error) {
+	if !c.store.done {
+		c.store.path, c.store.source, c.store.err = c.resolveStore()
+		c.store.done = true
+	}
+	return c.store.path, c.store.source, c.store.err
+}
+
+func (c *call) resolveStore() (path, source string, err error) {
 	abs := func(p string) string {
 		if filepath.IsAbs(p) {
 			return p
@@ -409,6 +443,36 @@ func (c *call) envChecks(path string) []ticket.Check {
 		checks = c.env.StoreChecks
 	}
 	return checks(dir, c.env.Getenv(envcheck.AllowEnv) == "1")
+}
+
+// tempDir is where a command's temp files go: $TMPDIR, else the OS default.
+func (c *call) tempDir() string {
+	if d := c.env.Getenv("TMPDIR"); d != "" {
+		return d
+	}
+	return os.TempDir()
+}
+
+// minFree reads the free-disk margin. Callers read it before any wait, so
+// a bad value fails at once.
+func (c *call) minFree() (int, error) {
+	return envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
+}
+
+// headroom refuses, with ErrLowDisk, while the store's, the temp dir's or
+// the working directory's filesystem is under the min margin, as
+// envcheck.Headroom counts it. Work started there would die mid-run with
+// "no space left on device", and the store's own writes with it.
+func (c *call) headroom(store string, min int) error {
+	free := envcheck.DiskFree
+	if c.env.DiskFree != nil {
+		free = c.env.DiskFree
+	}
+	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
+	if err != nil {
+		return fmt.Errorf("refused: %w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
+	}
+	return nil
 }
 
 func (c *call) git(args ...string) (string, error) {
@@ -802,6 +866,10 @@ func runClaim(ctx context.Context, c *call) error {
 	ttl := c.fs.Duration("ttl", ticket.DefaultTTL, "lease length")
 	keepPID := c.fs.Int("keepalive", 0, "start a background keepalive for this claim, alive while this process id lives")
 	return c.withStore(ctx, func(s ticket.Store) error {
+		min, err := c.minFree()
+		if err != nil {
+			return err
+		}
 		if *keepPID != 0 {
 			if why := unwatchable(*keepPID); why != "" {
 				return usagef("claim: --keepalive %d: %s", *keepPID, why)
@@ -818,8 +886,16 @@ func runClaim(ctx context.Context, c *call) error {
 			}
 			req.ID = id
 		}
-		var err error
 		if req.Statuses, err = ticket.ParseStatuses(*status); err != nil {
+			return err
+		}
+		// A claim taken on a full disk is one its run can't finish, and
+		// may not be able to release.
+		path, _, err := c.storePath()
+		if err != nil {
+			return err
+		}
+		if err := c.headroom(path, min); err != nil {
 			return err
 		}
 		t, err := s.ClaimNext(ctx, req)
@@ -1281,7 +1357,7 @@ func runDoctor(ctx context.Context, c *call) error {
 	}
 	rep.Checks = append(rep.Checks, checks...)
 	if envcheck.Err(checks) == nil {
-		rep.Checks = append(rep.Checks, c.runsCheck(path))
+		rep.Checks = append(rep.Checks, c.runsCheck(ctx, path))
 	}
 	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {

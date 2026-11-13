@@ -60,7 +60,7 @@ func TestUnder(t *testing.T) {
 	}
 }
 
-func TestCreateAndPickOnce(t *testing.T) {
+func TestCreateAndAckOnce(t *testing.T) {
 	dir := t.TempDir()
 	r, err := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: time.Now()}, []byte("in"))
 	if err != nil || !ValidID(r.ID) || r.State != Starting {
@@ -74,11 +74,11 @@ func TestCreateAndPickOnce(t *testing.T) {
 		t.Fatalf("record with no supervisor past the grace: %s", got.State)
 	}
 	now := time.Now()
-	if ok, err := Pick(dir, r.ID, "planner", now); !ok || err != nil {
-		t.Fatalf("first pick: %v %v", ok, err)
+	if ok, err := Ack(dir, r.ID, "planner", now); !ok || err != nil {
+		t.Fatalf("first ack: %v %v", ok, err)
 	}
-	if ok, _ := Pick(dir, r.ID, "planner", now); ok {
-		t.Fatal("second pick succeeded")
+	if ok, _ := Ack(dir, r.ID, "planner", now); ok {
+		t.Fatal("second ack succeeded")
 	}
 	if err := Prune(dir, time.Hour, now.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
@@ -99,22 +99,40 @@ func TestUnreadableRecordShows(t *testing.T) {
 	}
 }
 
-// Prune leaves .picked until last, so a pickup running alongside never
-// takes a pruned run again.
+// Prune removes only acked runs; an unacked one stays however old.
 func TestPruneKeepsUnpicked(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	old, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
-	Pick(dir, old.ID, "planner", now)
+	Ack(dir, old.ID, "planner", now)
 	waiting, _ := Create(dir, Record{Launcher: "gone-bot", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
 	Prune(dir, time.Hour, now.Add(30*24*time.Hour))
 	ents, _ := os.ReadDir(dir)
 	for _, e := range ents {
 		if strings.HasPrefix(e.Name(), old.ID) {
-			t.Fatalf("picked run left %s", e.Name())
+			t.Fatalf("acked run left %s", e.Name())
 		}
 	}
 	if _, err := Load(dir, waiting.ID); err != nil {
-		t.Fatalf("unpicked run pruned: %v", err)
+		t.Fatalf("unacked run pruned: %v", err)
+	}
+}
+
+// Orphans hands each run whose supervisor went away to one caller only,
+// and skips a run on another machine, whose supervisor it can't test.
+func TestOrphansOnce(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	r, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
+	far, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
+	far.Host = "another-machine"
+	Save(dir, far)
+	later := now.Add(time.Minute)
+	got, err := Orphans(dir, later)
+	if err != nil || len(got) != 1 || got[0].ID != r.ID || got[0].State != Died || got[0].EndedAt == nil {
+		t.Fatalf("orphans: %+v %v", got, err)
+	}
+	if again, _ := Orphans(dir, later); len(again) != 0 {
+		t.Fatalf("second look: %+v", again)
 	}
 }

@@ -14,6 +14,9 @@
 #                                   hold claude, which every bot runs)
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
 #   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
+#   code-graph: mcp|none            codebase-memory-mcp in the repo's .mcp.json,
+#                                   without its hooks, or none (required:
+#                                   INSTALL.md step 7)
 #
 # apply copies each skill in skills/ beside this script into every harness
 # folder, writes project-setup.md once, creates the ticket store and lists
@@ -37,8 +40,10 @@
 # check reports what's wrong with an install and with the machine its
 # bots run on, and changes nothing: copies that are missing or changed, a
 # store that is empty, unreadable or no SQLite file, a missing claude, gh or jq, an
-# unset git identity. It warns while origin's main branch lacks
-# project-setup.md or the committed skills.
+# unset git identity, a code graph install.yaml asks for that .mcp.json
+# lacks. It warns while origin's main branch lacks project-setup.md or the
+# committed skills, and on codebase-memory-mcp hooks in Claude Code's
+# settings.
 # uninstall removes the files the record lists, except those changed since.
 #
 # Exit codes: 0 ok, 1 a clash or a problem, 2 usage.
@@ -104,7 +109,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha='' harnesses=() home='' bots=()
+sha='' harnesses=() home='' bots=() graph=''
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -122,6 +127,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	# Older installs wrote the default; any other tracker is gone.
 	tickets) [ "$val" = maestro-ticket ] || die "install.yaml:$n: tickets: Maestro's bots run only on maestro-ticket; remove the line" ;;
 	bots) read -ra bots <<<"$val" ;;
+	code-graph) graph=$val ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
 	esac
 done <"$choices"
@@ -135,6 +141,9 @@ head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git chec
 [ "$cmd" != apply ] || [ -z "$(git -C "$root" status --porcelain -- skills templates)" ] ||
 	die "Maestro at $root has uncommitted changes in skills/ or templates/; commit them and pin that commit"
 [[ $home == committed || $home == hidden ]] || die "install.yaml: skills-home wants committed or hidden"
+# An install with no answer here never ran step 7, by mistake or not.
+[ "$cmd" = uninstall ] || [[ $graph == mcp || $graph == none ]] ||
+	die "install.yaml: code-graph wants mcp or none; INSTALL.md step 4 says how to pick"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
 for h in "${harnesses[@]}"; do
@@ -311,6 +320,20 @@ if [ "$cmd" = check ]; then
 	for t in claude gh jq; do
 		command -v "$t" >/dev/null || problem "$t isn't on PATH: the bots' runs need it"
 	done
+	# The code graph (INSTALL.md step 7): in this repo's .mcp.json, with
+	# none of its hooks, which run on every bot session's tool calls.
+	graphed=false
+	[ -f "$target/.mcp.json" ] && grep -q '"codebase-memory-mcp"[[:space:]]*:' "$target/.mcp.json" && graphed=true
+	if [ "$graph" = mcp ]; then
+		$graphed || problem "code-graph is mcp, but .mcp.json registers no codebase-memory-mcp server: INSTALL.md step 7"
+		command -v codebase-memory-mcp >/dev/null || problem "codebase-memory-mcp isn't on PATH: sessions can't start the code graph"
+	elif $graphed; then
+		warn "code-graph is none, but .mcp.json registers codebase-memory-mcp: set code-graph to mcp, or remove the server"
+	fi
+	for f in "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/settings.json" "$target/.claude/settings.json" "$target/.claude/settings.local.json"; do
+		[ -f "$f" ] && grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*(cbm-|codebase-memory)' "$f" &&
+			warn "$f runs codebase-memory-mcp hooks, which fire on every bot session's tool calls: INSTALL.md step 7 leaves them out"
+	done
 	for k in name email; do
 		v=$(git -C "$target" config "user.$k" || true)
 		a=GIT_AUTHOR_${k^^} c=GIT_COMMITTER_${k^^}
@@ -359,6 +382,11 @@ if [ "$cmd" = check ]; then
 	# shellcheck disable=SC2043 # one tool today; the loop takes more
 	for b in maestro-ticket; do
 		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
+		# Every bot starts its runs with launch (team-rules.md); a build
+		# without it starts nothing, and the bot's job stops.
+		help=$("$bin" help 2>/dev/null || true)
+		[[ $help == *$'\n  launch '* ]] ||
+			problem "$b at $bin has no launch, which every bot starts its runs with: rebuild it from $root/tools/$b"
 		command -v go >/dev/null || continue
 		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
 		if [ -z "$rev" ]; then

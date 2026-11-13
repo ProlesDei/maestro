@@ -20,25 +20,28 @@ const RunIDEnv = "MAESTRO_RUN_ID"
 // SIGKILL.
 const killGrace = 10 * time.Second
 
-// pickPoll is how often a ringing supervisor looks for a pickup.
+// pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
 
 // DefaultRings are when, after a run ends, the supervisor rings the
-// launcher's webhook while no one has picked the result up.
+// launcher's webhook while no one has acked the result.
 var DefaultRings = []time.Duration{0, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute}
 
 // Options configure a supervisor.
 type Options struct {
 	Env   []string        // the command's environment, before RunIDEnv
 	Rings []time.Duration // DefaultRings if nil
-	// NotifyURL returns the launcher's webhook, or "" for none.
-	NotifyURL func(launcher string) (string, error)
-	Now       func() time.Time
+	// Hook returns the launcher's webhook; a zero Hook for none.
+	Hook func(launcher string) (Hook, error)
+	// OnEnd, if set, runs once the result is saved, before the first ring:
+	// to log the run's cost and free a ticket it left claimed.
+	OnEnd func(Record)
+	Now   func() time.Time
 }
 
 // Supervise runs the command of a starting record to its end within its
 // time limit, writes the result, then rings the launcher's webhook until
-// someone picks the result up or the rings run out. Stopping ctx stops the
+// someone acks the result or the rings run out. Stopping ctx stops the
 // command and records it as failed.
 func Supervise(ctx context.Context, dir, id string, o Options) error {
 	if o.Now == nil {
@@ -68,6 +71,9 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 	}
 	if r.Error != "" && r.PID == 0 {
 		return nil // never started: launch reports it
+	}
+	if o.OnEnd != nil {
+		o.OnEnd(r)
 	}
 	ring(ctx, dir, r, o)
 	return nil
@@ -181,25 +187,25 @@ func join(a, b string) string {
 }
 
 // ring rings the launcher's webhook at each of o.Rings after the end
-// while no one has picked the result up.
+// while no one has acked the result.
 func ring(ctx context.Context, dir string, r Record, o Options) {
-	if o.NotifyURL == nil {
+	if o.Hook == nil {
 		return
 	}
-	url, err := o.NotifyURL(r.Launcher)
+	h, err := o.Hook(r.Launcher)
 	if err != nil {
 		r.RingError = err.Error()
 		Save(dir, r)
 		return
 	}
-	if url == "" {
+	if h.URL == "" {
 		return
 	}
 	end := *r.EndedAt
 	for _, at := range o.Rings {
-		// Look for a pickup every few seconds while it waits, so a
-		// supervisor whose result was read exits soon after.
-		for !Picked(dir, r.ID) {
+		// Look for an ack every few seconds while it waits, so a
+		// supervisor whose result was acked exits soon after.
+		for !Acked(dir, r.ID) {
 			wait := time.Until(end.Add(at))
 			if wait <= 0 {
 				break
@@ -210,12 +216,12 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 			case <-time.After(min(wait, pickPoll)):
 			}
 		}
-		if Picked(dir, r.ID) {
+		if Acked(dir, r.ID) {
 			return
 		}
 		r.Rings++
 		r.RingError = ""
-		if err := Ring(ctx, url, Notice(r)); err != nil {
+		if err := Ring(ctx, h, Notice(r)); err != nil {
 			r.RingError = err.Error()
 		}
 		Save(dir, r)

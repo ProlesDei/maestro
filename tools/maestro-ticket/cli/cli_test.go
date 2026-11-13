@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -39,6 +40,13 @@ type harness struct {
 	now func() time.Time // store clock; nil means the database's
 	// checks replaces the store-directory checks when set.
 	checks func(dir string, allow bool) []ticket.Check
+	// disk measures each filesystem claim and slot check; nil reports
+	// half of everything free, so no test hangs on the real disk's state.
+	disk func(dir string) (envcheck.Free, bool, error)
+}
+
+func halfFree(string) (envcheck.Free, bool, error) {
+	return envcheck.Free{Inodes: 50, Space: 50}, true, nil
 }
 
 func newHarness(t *testing.T) *harness {
@@ -49,9 +57,14 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) run(stdin string, args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
+	disk := h.disk
+	if disk == nil {
+		disk = halfFree
+	}
 	code := Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb,
 		Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, Now: h.now, StoreChecks: h.checks,
+		DiskFree: disk,
 	})
 	return code, out.String(), errb.String()
 }
@@ -437,7 +450,7 @@ func TestRaceClaimProcesses(t *testing.T) {
 			defer done.Done()
 			holder := fmt.Sprintf("bot-%d/session-%d", i%5, i)
 			cmd := exec.Command(exe, "claim", "--next", "--holder", holder, "--json")
-			cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+			cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
 			var out, errb bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &out, &errb
 			start.Wait()
@@ -967,7 +980,7 @@ func TestClaimKeepaliveRefusesCommandSession(t *testing.T) {
 	store := h.env["MAESTRO_TICKET_STORE"]
 	run := func(args string) (int, string) {
 		cmd := exec.Command("sh", "-c", `"$0" `+args+`; exit $?`, exe)
-		cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
+		cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+store)
 		detach(cmd)
 		out, err := cmd.CombinedOutput()
 		if _, ok := err.(*exec.ExitError); err != nil && !ok {
@@ -1016,7 +1029,7 @@ func TestClaimStartsKeepalive(t *testing.T) {
 	h.ok(nil, "create", "--title", "long step")
 	sl := startSleeper(t)
 	cmd := exec.Command(exe, "claim", "T-1", "--holder", "jse/s1", "--ttl", "6s", "--keepalive", fmt.Sprint(sl.Process.Pid), "--json")
-	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
+	cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("claim: %v\n%s", err, out)
 	}
@@ -1054,7 +1067,7 @@ func TestClaimDefaultTTLKeepaliveRuns(t *testing.T) {
 	}()
 	store := h.env["MAESTRO_TICKET_STORE"]
 	cmd := exec.Command(exe, "claim", "T-1", "--holder", "jse/s1", "--ttl", "0", "--keepalive", fmt.Sprint(sl.Process.Pid), "--json")
-	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+store)
+	cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+store)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("claim: %v\n%s", err, out)
 	}
@@ -1403,4 +1416,43 @@ func TestGoalsAndParked(t *testing.T) {
 		t.Fatalf("backlog with no reason: %q", msg)
 	}
 	h.fails(2, "create", "--title", "g", "--status", "backlog", "--parked", "deps")
+}
+
+// Under the margin, claim refuses before it takes a lease: a run started
+// on a full disk dies mid-run and may not be able to release.
+func TestClaimRefusesOnLowDisk(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "x")
+	low := map[string]bool{}
+	h.disk = func(d string) (envcheck.Free, bool, error) {
+		if low[d] {
+			return envcheck.Free{Inodes: 60, Space: 2}, true, nil
+		}
+		return halfFree(d)
+	}
+	low[h.dir] = true // the working directory's filesystem
+	if code := h.fails(4, "claim", "T-1", "--holder", "reviewer/a"); code != "low_disk" {
+		t.Fatalf("code %q; want low_disk", code)
+	}
+	code, _, errs := h.run("", "claim", "T-1", "--holder", "reviewer/a")
+	if code != 4 || !strings.Contains(errs, h.dir+" has 2.0% of its space free (0 MiB), under the 10% margin") || !strings.HasPrefix(errs, "maestro-ticket: refused: low disk") || !strings.Contains(errs, "MAESTRO_TICKET_MIN_FREE") {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var got ticket.Ticket
+	h.ok(&got, "get", "T-1")
+	if got.Claim != nil {
+		t.Fatalf("claimed on a full disk: %+v", got.Claim)
+	}
+	// The margin is the team's to set; 0 turns the check off.
+	h.env[envcheck.MinFreeEnv] = "1"
+	h.ok(nil, "claim", "T-1", "--holder", "reviewer/a")
+	h.env[envcheck.MinFreeEnv] = "ten"
+	if code := h.fails(2, "claim", "T-1", "--holder", "reviewer/b"); code != "invalid" {
+		t.Fatalf("bad margin: code %q; want invalid", code)
+	}
+	// Only claim checks: the lease already held can still be released.
+	low[h.dir] = false
+	delete(h.env, envcheck.MinFreeEnv)
+	h.disk = func(string) (envcheck.Free, bool, error) { return envcheck.Free{Inodes: 0, Space: 0}, true, nil }
+	h.ok(nil, "release", "T-1", "--holder", "reviewer/a", "--token", "1", "--died")
 }

@@ -1,6 +1,6 @@
 # Chief of staff: starting memories
 
-The chief of staff saves each bullet as one memory when it is set up. Change each default to your own answer first. Delete a bullet to have it ask you instead.
+Sent to the chief of staff as a message once it is set up; it saves each bullet as one memory. Change each default to your own answer first. Delete a bullet to have it ask you instead.
 
 - Spending: add up to $50 a month in new costs without asking; above that, ask.
 - Speed or care: care wins where money, user data or security is involved; speed wins everywhere else.

@@ -44,6 +44,7 @@ Write the answers to `.maestro/project/install.yaml`, one `key: value` per line.
 | `harnesses` | Which harnesses the team runs. `claude` reads `.claude/skills/`; `codex` and `grok` read `.agents/skills/`. Space-separated; must include `claude`, which every bot runs. | `claude`, plus any other on this machine |
 | `skills-home` | Where the skills live. `committed`: tracked in git, so every clone, worktree and CI run has them; each update shows up as a diff to commit. If the team's ignore rules hide `.claude/` or `.agents/`, `committed` can't track them: offer `hidden`, or a change to those rules with the person's yes. `hidden`: copies hidden from git; no diffs, but each teammate's checkout runs the install. | `committed` for a team, `hidden` for a trial |
 | `bots` | Which Grok bots the team will run, space-separated: `chief-of-staff planner senior-engineer junior-engineer qa-lead reviewer`. | all six names |
+| `code-graph` | Whether sessions get the codebase-memory-mcp code graph, which finds symbols and callers before they grep. `mcp`: step 7 installs it for this repo, without its hooks. `none`: no code graph. `apply` refuses until this has an answer. | `mcp` for a codebase too big to read by grep, else `none` |
 
 ## 5. Apply
 
@@ -56,25 +57,27 @@ If it prints `clash:` lines, nothing was written. Every skill installs; none can
 `.maestro/project/project-setup.md` tells every session how this project works. Its header explains each section. Draft each section from the repo (CI config, Makefile, `package.json` or other task runners, README, contributing docs), then ask the person about it:
 
 - **Main branch**: the branch PRs merge into. Read its protection rules on GitHub. The bots open and merge PRs with one `gh` login, and GitHub never lets a login approve its own PR, so a rule that asks for an approving review, or for a branch up to date with main (main moves on every merge), fails every merge. So does a repo that turns off merge commits or asks for linear history: QA merges with a merge commit, and engineers merge main into their branch. Signed commits and a CODEOWNERS review fail it the same way, and a required status check that is slow or flaky stalls every merge until it's green. Tell the person, and settle with them how the bot's merges get through, before you go on.
-- **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks.
+- **Checks**: each command a change must pass, the way CI runs it. Run each one on the main branch first, in a fresh worktree outside the repo, as the bots do: it must pass and leave `git status` clean. A fresh worktree has no installed dependencies, so the first check installs them (such as `npm ci`). Offer the ones that don't to the person as fixes, not as checks. Time each one, and run the slowest twice at once: one that takes minutes, fails under load or writes temp files (a test run), wrap in `maestro-ticket slot`, with a `--max` the person picks for this machine, since every engineer, review and QA session runs it; `slot` also gives each run its own temp folder and removes it after, so a test runner's files don't fill the disk. If every check finishes within 5 minutes, waiting for its `slot` included when many sessions run, add a starting memory that says so to each engineer bot, the reviewer and the QA lead, in step 8: the team rules then give their runs the cheaper 5-minute prompt cache.
 - **Run** and **QA**: how to start the app and see it work, as a person would. If the app has screens, name in `## QA` the browser tool QA sessions use, and check that a headless `claude -p` session in this repo can open a page with it. With none, every ticket that changes a screen blocks at QA: tell the person. Start the app from a fresh worktree, twice at once, as QA sessions do: a gitignored `.env`, a fixed port or a fixed container name breaks them, so settle each with the person.
-- **Review** and **Conventions**: high-risk paths, commit style, files never to touch.
+- **Review** and **Conventions**: high-risk paths, commit style, files never to touch, and any shared helper new code must use (safe paths, errors that print no secret).
 
 Keep the shape of `## Main branch` and `## Checks`: `install.sh check` parses them.
 
-## 7. Extras
+## 7. Code graph
 
-Ask about each:
+Skip this step for `code-graph: none`.
 
-- **Code graph.** The codebase-memory-mcp MCP server lets sessions find symbols and callers before they grep. It's a third-party tool: read its install steps before you run any, and add it only with the person's yes.
+For `mcp`: codebase-memory-mcp is a third-party tool, so read its install steps before you run any, and run them with the person's yes. Put its binary on `PATH`, then register it for this repo only: a server named `codebase-memory-mcp`, run by that bare command, in `.mcp.json` at the repo's root (Claude Code's project scope), added beside any servers the team's file already lists, not in the user's settings. A headless `claude -p` session in all-permissions mode, as the bots run, loads a project's `.mcp.json` with no prompt.
+
+Leave its hooks out. Its installer may add hooks to the user's Claude Code settings: a reminder at every session start, and a gate on search tool calls (on every Bash call in some versions). They run in every session on the machine, the bots' too, where most calls are tests, git and ticket commands, and each one adds tokens that 300 sessions multiply. If it added them, remove them with the person's yes; a newer Maestro may ship a setup for them. `install.sh check` reports a missing registration and warns on any of its hooks it finds.
 
 ## 8. Set up the bots
 
-For each bot in `bots:` that has a `.maestro/src/bot-profiles/<bot>/memory.md`, read its starting memories there and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped.
+Starting memories are short standing rules a team sets: limits, thresholds, calls handed down. For each bot in `bots:` that has a `.maestro/src/bot-profiles/<bot>/memory.md`, read its starting memories there and ask the person about each default. If they change any, copy the whole file to `.maestro/project/bots/<bot>.memory.md` and edit it there: the copy replaces the defaults, so a bullet left out is dropped. A bot with no `memory.md` that needs one, such as step 6's 5-minute memory, gets its own file there, one bullet per memory. Keep each bullet short, as the team rules' memory rule says.
 
-Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. It writes one block per bot to `.maestro/bots/<bot>.md` and prints its size and whether it's `new`, `changed` or `same`; it removes the block of a bot no longer under `bots:`. The person pastes each block into its own Grok bot's instructions, then gives each bot the ids of the others. If Grok turns a block down for length, tell the person; don't cut it yourself.
+Then run `.maestro/src/scripts/bot-bundle.sh <repo>`. For each bot it writes its instructions to `.maestro/bots/<bot>.md`, and its memories, if it has any, to `.maestro/bots/<bot>.memories.md`, and prints whether each is `new`, `changed` or `same`. It removes the files of a bot no longer under `bots:`, and refuses a block over Grok's 20,000-character limit for a bot's instructions: tell the person; don't cut it yourself. The person pastes each block into its own Grok bot's instructions, then sends that bot its `<bot>.memories.md` as a message, so it saves them as memories, and gives each bot the ids of the others. The bot marks each `Starting:`, so when they change, the same file, sent again, replaces the old set; each bullet, as the owner's word, replaces any memory on its topic, and the bot says which. Memories stay out of the instructions because Grok caps those; a bot keeps its memories across chats.
 
-Then the webhooks. A bot starts each Claude session with `maestro-ticket launch`, ends its turn, and learns the run ended when `launch` rings its webhook. Ask the person, for each bot, for a URL that wakes it (a POST with a JSON body whose `text` says which run ended). A webhook URL often holds its secret, so the person runs `maestro-ticket notify <bot> --url-file -` at the repo's root and pastes it on stdin; it never goes in chat or on a command line. Then run `maestro-ticket notify <bot> --test` and ask the person whether the bot woke. A bot with no webhook learns a run ended only on its next turn: tell the person.
+Then the webhooks. A bot starts each Claude session with `maestro-ticket launch`, ends its turn, and learns the run ended when `launch` rings its webhook. Ask the person, for each bot, for a URL that wakes it (a POST with a JSON body: `text` says which run ended, `launcher` which bot launched it, so one URL can serve several bots), and whether it wants a key as `Authorization: Bearer`. Both are secrets, so the person runs `maestro-ticket notify <bot> --url-file -` at the repo's root and pastes the URL on stdin, then, for a key, `maestro-ticket notify <bot> --key-file -`; neither goes in chat or on a command line. Then run `maestro-ticket notify <bot> --test` and ask the person whether the bot woke. A bot with no webhook learns a run ended only on its next turn: tell the person.
 
 ## 9. Prove it
 
@@ -82,26 +85,27 @@ Run `.maestro/src/scripts/install.sh check <repo>`. Fix every `problem:` line wi
 
 ## 10. Report
 
-Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found. Then what's left for them:
+Tell the person, short: the mode, the harnesses, how many skills, the pinned sha, the checks you found, the code graph. Then what's left for them:
 
 - `committed`: commit `.maestro/project/` and the skills folder of each harness in `harnesses`. A commit hook or formatter that rewrites Markdown changes the copies, and `check` then reports each as changed since install, as the next update will: first, with the person's yes, leave the `maestro-*` skill folders and `.maestro/project/installed.list` out of the team's formatters and hooks, and run `check` again after the commit.
 - `hidden`: commit `.maestro/project/`; each teammate's agent then follows this guide.
+- Either way, with `code-graph: mcp`, commit `.mcp.json` too: a clone without it has no code graph, and `check` there says so.
 - Either way, get it onto the main branch before the first bot runs, by push or by PR: each ticket's worktree branches from there, so until then engineers can't see the checks. After a fetch, `check` warns until it's there.
 - Start every bot's session at this checkout's root. A `hidden` install puts no skills in a worktree, so a session started inside one finds none. The ticket store lives in this clone's git folder: `maestro-ticket` refuses in another clone, and an install there makes a second, empty board.
-- Paste each bot block into Grok.
+- Paste each bot block into Grok, and send each bot its memories file.
 
 ## Update
 
 1. Ask which commit to move to; if `maestro-sha` already names one `.maestro/src/` isn't on, a teammate updated: take that one and don't ask. Move `.maestro/src/` to it, with the same sparse paths plus any the new `INSTALL.md` adds to step 2.
 2. Read `.maestro/src/INSTALL.md` again: this guide may have changed.
 3. Rebuild the tools if the copies on `PATH` are older (step 3).
-4. Set `maestro-sha` to the new sha and run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
-5. Rebuild the bot blocks and tell the person which ones it marks `new` or `changed`: they paste those before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
+4. Set `maestro-sha` to the new sha. Ask each key of step 4's table that `install.yaml` lacks, and act on it (`code-graph` through step 7). Then run `apply`. A clash now is a file the team changed since the last install: ask about each. `apply` prints `kept as the team's` for each folder it no longer places but left because the team changed it; tell the person. In a `hidden` install, git now sees that folder: they commit it or delete it. After a switch from `committed` to `hidden`, `apply` untracks the copies: tell the person that once they commit it, every other clone loses the skills on its next pull, until its agent follows [A teammate's checkout](#a-teammates-checkout).
+5. Rebuild the bot blocks and tell the person which files it marks `new` or `changed`: they paste those blocks, and send those memories files as messages, before any bot takes its next job. A bot on an old block hands tickets out by the old rules, against skills that now follow the new ones.
 6. Run `check`.
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
 
 ## Uninstall
 
@@ -113,3 +117,4 @@ Run `.maestro/src/scripts/install.sh uninstall <repo>`. It removes the files its
 - `.maestro/src/` and `.maestro/bots/`.
 - The ticket store in `maestro/` under the git common dir: it holds every ticket. Offer `maestro-ticket backup` first.
 - The tools on `PATH`: other repos may use them.
+- With `code-graph: mcp`, the `codebase-memory-mcp` server in `.mcp.json`, and the tool itself.

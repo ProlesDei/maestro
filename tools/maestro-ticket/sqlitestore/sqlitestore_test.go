@@ -700,7 +700,7 @@ func TestDoctorFlagsBadSettings(t *testing.T) {
 	if !rep.OK() {
 		t.Fatalf("doctor: %+v", rep)
 	}
-	s.w.Exec("PRAGMA user_version = 7")
+	s.w.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1))
 	rep, _ = s.Doctor(context.Background())
 	if rep.OK() {
 		t.Fatal("doctor should flag a wrong schema version")

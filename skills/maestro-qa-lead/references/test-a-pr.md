@@ -16,7 +16,8 @@ You are the last check before production. Review read the diff and passed it; yo
 ## Phase B: Plan by risk
 
 1. Pick the tier from the changed files with the table in Phase C of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)). When unsure, go up.
-2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it.
+2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it. Prove each criterion in the running app, not by rerunning the tests review read: what QA adds is what reading and unit tests can't show.
+3. **Retest only what changed.** If the ticket's latest QA verdict is a `Kickback: QA fail at <K>` that tested (not `not tested:`), and `K` is an ancestor of `H`, plan only: each item that failed, was `not checked` or was `waived` there (a waiver binds at one sha); each criterion, flow and angle whose code, or anything it calls, the author's change or main's merge since `K` touches, with the delta worked out as Phase C step 2 of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)) does; and the checks, the production build's start and one pass through each critical flow, since main moved. Every other item that passed or was carried at `K` is `carried: <K>, <comment id>`. Plan in full instead if the delta passes 400 changed lines or 15 files or raises the tier, or if the delta or main since that verdict's `G` changes how the app builds, starts, migrates or is configured, or its dependencies.
 
 | Tier | Angles |
 |---|---|
@@ -29,7 +30,7 @@ You are the last check before production. Review read the diff and passed it; yo
 1. Build and start it the way production does: production mode, real config shape, migrations run, real services in place of mocks where the project can run them. Note each way your setup still differs from production.
 2. Keep state private: a new data dir or database, a free port, a browser profile of your own, and test accounts you create. Use a shared test account read-only. Never touch a shared or production service.
 3. At tier 2, start the main branch first on that state, make the data the change touches, stop it, then start `H` on the same data.
-4. If it won't build or start, that is a fail: keep the command and the error line.
+4. If it won't build or start, that is a fail: keep the command and the error line. One that died of a full disk is no verdict: stop as the `Stop on refused` rule of **maestro-working-principles** says, after Phase E step 2, and reply `test: blocked: <id | PR url> at <H>` with `infra block: disk full` under `Answer:`.
 
 ## Phase D: Test
 
@@ -37,14 +38,14 @@ You are the last check before production. Review read the diff and passed it; yo
 2. Run each angle in the plan. Then explore: use the change as a new user, a careless one and a hostile one, until two rounds in a row find nothing new.
 3. When something looks wrong, run the same steps on the main branch. Wrong there too means it was already there: a new ticket, unless `H` makes it worse.
 4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
-5. Run each command under `## Checks` in the worktree, hooks and tests included: review ran them on an older main. A red one fails the PR, unless it is red the same way on `G` alone, in a second detached worktree.
+5. Run each command under `## Checks` in the worktree, hooks and tests included: review ran them on an older main. A red one fails the PR, unless it is red the same way on `G` alone, in a second detached worktree, or died of a full disk, as Phase C step 4 says.
 6. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
 7. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, never a pass: escalate it as step 8 says, asking "rewrite <criterion> as <your rewrite>, or waive it at <H>?". Only the planner rewrites a criterion.
 8. Missing a tool or account the plan needs, such as a browser: test the rest, then escalate, so no one sends QA again until it's there. Post `Escalation: QA at <H>`, what's missing, what you tested, the one question "add <what's missing>, or waive <these checks> at <H>?", and a last line `Return-role: <the ticket's role>`, keyed `<run>-escalation`. Then move the ticket from `in_review` to `blocked`, keyed `<run>-blocked`. With no ticket, comment on the PR. An escalation ends the job with no verdict: do Phase E step 2 and Phase F step 5, then reply `test: blocked: <id | PR url> at <H>`, with what's missing under `Answer:`.
 
 ## Phase E: Judge and post
 
-1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` check fails nothing. List every other problem as a possible new ticket, worst first.
+1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` or `carried` check fails nothing. List every other problem as a possible new ticket, worst first.
 2. Stop every process you started and close each browser.
 3. If the PR's head has moved past `H`, post at `H` anyway and merge nothing: the new head needs review first, so on a pass post the `Rereview:` of Phase A step 3 after your verdict, naming the new head.
 4. Post this comment on the ticket with `maestro-ticket comment`, sent as **maestro-working-principles** says for quoted text, keyed `<run>-verdict`. With no ticket, comment on the PR.
@@ -54,7 +55,7 @@ You are the last check before production. Review read the diff and passed it; yo
    Setup: <build, data and services used; each way it differs from production>
    - 1 pass: <proof>: <excerpt or screenshot path>
    - 2 fail: steps <exact, from a fresh start>; expected <...>; actual <quoted>; on main: <same | works>; rate <n/3>; evidence <path>
-   - 3 not checked: <why> | not checkable: <question> | waived: <answer comment id>
+   - 3 not checked: <why> | not checkable: <question> | waived: <answer comment id> | carried: <K>, <comment id>
    Checks: <each command: exit code>
    Flows: <each critical flow: pass | fail>
    Angles: <each one tried: what you did, what happened>
@@ -81,6 +82,6 @@ Only for a ticket with a `Review: GO at <H>` and your `QA: pass at <H>`. With no
      --holder <holder> --token <token> --note "Merged: $M (QA pass at $H)" --idempotency-key <run>-done
    ```
 4. If the merge fails, or `M` is empty because gh only queued the PR or turned on auto-merge (on a branch with a merge queue it exits 0 before it merges), skip the move to `done`; turning auto-merge off keeps GitHub from merging a later push no one reviewed or tested. If the PR now shows merged, escalate as Phase A step 2 says for a merged PR; if its head is no longer `H`, do as step 1 says. Else post `Escalation: QA at <H>: merge: <gh's output>`, such as merge commits turned off or an approval the bot can't give, saying first if it printed `auto-merge off: false`, with a last line `Return-role: <the ticket's role>`, keyed `<run>-escalation`, and move the ticket to `blocked`, keyed `<run>-blocked`; the reply opens `test: blocked`. Never try another merge method.
-5. Release the ticket if you still hold it, then remove each worktree you made and its temp folder. If it isn't clean, leave it and name the path. After a merge, also remove the engineer's `.maestro/worktrees/<id>`, without force, since its session ended at the handoff; if git refuses for changes, leave it and name it in the reply.
+5. Release the ticket if you still hold it, then remove each worktree you made and its temp folder. After a merge, also remove the engineer's `.maestro/worktrees/<id>`, since its session ended at the handoff. Remove each without force; one git refuses for changes stays, emptied of its rebuildable folders as **maestro-working-principles** says, and you name it in the reply.
 
 In the reply, put the verdict and tier in the first line, then one line per criterion, the steps for each failure, the comment id, the merge commit or why there is none, and any worktree left behind. `Next:` is `none` after a merge; `engineer: fix <id>` after a fail; `reviewer: review <id>` after a `Rereview:` or a head that moved; `planner: <id>: <what's missing>` after an escalation. The planner hands each out.
