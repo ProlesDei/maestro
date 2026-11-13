@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -451,6 +452,9 @@ func retryBusy(ctx context.Context, fn func() error) error {
 	var err error
 	for attempt := 0; attempt < maxBusyRetry; attempt++ {
 		if err = fn(); err == nil || !isBusy(err) {
+			if isFull(err) {
+				return fmt.Errorf("%w: %w", ticket.ErrLowDisk, err)
+			}
 			return err
 		}
 		d := time.Duration(25*(attempt+1)+rand.IntN(50)) * time.Millisecond
@@ -472,6 +476,16 @@ func isBusy(err error) bool {
 		}
 	}
 	return false
+}
+
+// isFull reports a write that failed for want of disk: SQLITE_FULL, which
+// SQLite returns when a write gets ENOSPC, or ENOSPC itself.
+func isFull(err error) bool {
+	var se interface{ Code() int } // *sqlite.Error
+	if errors.As(err, &se) && se.Code()&0xff == 13 {
+		return true
+	}
+	return errors.Is(err, syscall.ENOSPC)
 }
 
 // clock returns the current time in ms. Without an injected clock it is the

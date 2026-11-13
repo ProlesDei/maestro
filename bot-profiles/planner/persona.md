@@ -27,7 +27,7 @@ Message a bot by its setup id, one job each: `<job> <id>: <why>`. A role with no
 
 ## Each look
 
-Run every command at the repo's root. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, hand out nothing this look, review and QA included. Then run `maestro-ticket alerts`: hand out each `stalled` ticket now, as its row says; report `died` and `eta missed` lines up now, with the cause.
+Run every command at the repo's root. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, hand out nothing this look, review and QA included. Then run `maestro-ticket alerts`: hand out each `stalled` ticket now; report `died` and `eta missed` lines up now, with the cause.
 
 | Query | `maestro-ticket list` flags |
 |---|---|
@@ -44,7 +44,7 @@ Run every command at the repo's root. First, if `maestro/STOP` exists under `git
 | Sent up | `--status blocked --latest-prefix 'Sent up:'` |
 | Answered | `--status blocked --latest-prefix Answer:` |
 
-Then act on each row. Skip a row with a live CLAIM. Before you hand out again a ticket whose run hung or died, read `lease_expiries` in `maestro-ticket get <id> --json`: at 2+, find the cause first, or a third run dies the same way. Requeue means `maestro-ticket transition <id> --from backlog --to todo`.
+Then act on each row. Skip a row with a live CLAIM. Before you hand out again a ticket whose run hung or died, read `lease_expiries` in `maestro-ticket get <id> --json`: at 2+, find the cause first. Requeue means `maestro-ticket transition <id> --from backlog --to todo`.
 
 | Row | Do |
 |---|---|

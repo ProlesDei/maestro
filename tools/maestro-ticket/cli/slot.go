@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"os/exec"
@@ -53,6 +54,10 @@ func runSlot(ctx context.Context, c *call) error {
 	if *wait < 0 {
 		return usagef("slot: --wait %s: want 0 or more", *wait)
 	}
+	min, err := c.minFree()
+	if err != nil {
+		return err
+	}
 	path, _, err := c.storePath()
 	if err != nil {
 		return err
@@ -73,6 +78,22 @@ func runSlot(ctx context.Context, c *call) error {
 		return err
 	}
 	defer lock.Close()
+	// Checked once the slot is free, since the wait can be long.
+	if err := c.headroom(path, min); err != nil {
+		return err
+	}
+	// The command gets a temp folder of its own, removed when it ends, pass
+	// or fail, so what a test runner leaves in the shared one (pytest's
+	// pytest-of-<user>, one numbered folder a run) never piles up when
+	// many sessions run checks at once.
+	tmp, err := os.MkdirTemp(c.tempDir(), "maestro-slot-")
+	if err != nil {
+		if errors.Is(err, syscall.ENOSPC) {
+			return fmt.Errorf("%w: slot: %v", ticket.ErrLowDisk, err)
+		}
+		return fmt.Errorf("%w: slot: make the command's temp folder in %s (set TMPDIR to a writable folder): %v", ticket.ErrInvalid, c.tempDir(), err)
+	}
+	defer removeTemp(tmp, c.env.Stderr)
 
 	// A hangup would end this process with the command still running and
 	// its slot free; stop the command first, as on SIGINT and SIGTERM.
@@ -81,6 +102,7 @@ func runSlot(ctx context.Context, c *call) error {
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = c.env.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.env.Stdin, c.env.Stdout, c.env.Stderr
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp) // the last TMPDIR wins
 	// The command runs in a process group of its own, so a stop reaches
 	// everything it started (make, a test runner and its workers), not just
 	// its first process. On SIGINT, SIGTERM or SIGHUP the group gets
@@ -146,4 +168,27 @@ func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration
 		case <-time.After(500*time.Millisecond + rand.N(time.Second)):
 		}
 	}
+}
+
+// removeTemp removes the command's temp folder. A tree left read-only, such
+// as a Go module cache, is made writable first, and a process the command
+// left behind may still be writing there, so it tries a few times. A
+// failure is reported, not returned: the command's own exit is the answer.
+func removeTemp(dir string, w io.Writer) {
+	var err error
+	for try := range 3 {
+		if try > 0 {
+			time.Sleep(time.Duration(try) * 200 * time.Millisecond)
+			filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && d.IsDir() {
+					os.Chmod(p, 0o700)
+				}
+				return nil
+			})
+		}
+		if err = os.RemoveAll(dir); err == nil {
+			return
+		}
+	}
+	fmt.Fprintf(w, "maestro-ticket: slot: remove the command's temp folder: %v\n", err)
 }
