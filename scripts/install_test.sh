@@ -18,7 +18,8 @@
 # uninstall; a linked worktree refuses, and one that holds
 # a stray .maestro/src/ says to delete it; a repo git doesn't trust shows
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
-# bot block that differs only in its Maestro line is the same; uninstall
+# bot block that differs only in its Maestro line is the same, one over
+# Grok's limit refuses, and memories go in a message apart; uninstall
 # runs off the pin;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
 # failed copy stays hidden and a rerun finishes it; a file git can't hash
@@ -306,41 +307,82 @@ printf %s "$(cat "$rec")" >"$rec"
 ok check "$r"
 cp "$tmp/rec" "$rec"
 
-# bot-bundle: one block per bot named, with the team's own memories.
+# bot-bundle: one block per bot named, and the team's own memories in a
+# message apart from it.
 mkdir -p "$r/.maestro/project/bots"
 printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
 # INSTALL.md runs it as a command, not through bash.
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
-[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md reviewer.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
-b=$r/.maestro/bots/planner.md
-grep -qxF -- "- Runs at once: up to 3." "$b" && grep -qxF "  Wrapped." "$b" || fail "planner block lacks the team's memory"
-! grep -qF "Intro." "$b" || fail "planner block holds the memory file's intro"
+[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md reviewer.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
+b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md
+grep -qxF -- "- Runs at once: up to 3." "$bm" && grep -qxF "  Wrapped." "$bm" || fail "planner memories lack the team's memory"
+! grep -qF "Intro." "$bm" || fail "planner memories hold the memory file's intro"
+grep -qF 'save each bullet below as one memory that starts `Starting:`' "$bm" || fail "planner memories don't say to save them"
+! grep -qF "Runs at once" "$b" || fail "planner block holds a memory: Grok caps the block, so memories go in their own message"
 grep -qF "$(sed -n 2p "$m/bot-profiles/team-rules.md")" "$b" || fail "planner block lacks the team rules"
 ! grep -q '^name: planner' "$b" || fail "planner block holds front matter"
 grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 # A rebuild says which blocks changed, and drops a bot no longer listed.
-says "planner: new"
+says "planner: new" && says "planner memories: new"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && says "reviewer: same"
+says "planner: same" && says "planner memories: same" && says "reviewer: same"
+! grep -qF "reviewer memories" "$tmp/out" || fail "bot-bundle wrote memories for a bot with none"
 # An update that changes no persona changes only the block's Maestro line:
 # the block is the same, so no one pastes it again.
 sed -i 's/^- Maestro: .*/- Maestro: 0000000/' "$b"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
 says "planner: same" && grep -qxF -- "- Maestro: 0000000" "$b" || fail "a block that differs only in its Maestro line was rewritten"
-# Only that last line: a memory that starts the same way still counts.
+# A changed memory changes only the memories, and every line of them
+# counts, the last too. The message replaces the bot's starting memories
+# as a set, and each bullet any memory on its topic: it is the owner's.
 echo "- Maestro: pin updates to Mondays." >>"$r/.maestro/project/bots/planner.memory.md"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: changed"
+says "planner: same" && says "planner memories: changed"
 sed -i 's/Mondays/Fridays/' "$r/.maestro/project/bots/planner.memory.md"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: changed" && grep -qxF -- "- Maestro: pin updates to Fridays." "$b" || fail "a changed memory that starts - Maestro: didn't count"
+says "planner memories: changed" && grep -qxF -- "- Maestro: pin updates to Fridays." "$bm" || fail "a changed last memory didn't count"
+grep -q "^Forget your old starting memories: each starts \`Starting:\`, or you saved it from a \`## Starting memories\` list.*the owner's: each takes the place of any memory on its topic; tell" "$bm" || fail "the memories don't replace the old set: $(cat "$bm")"
 echo "- Another." >>"$r/.maestro/project/bots/planner.memory.md"
 cp "$r/.maestro/project/install.yaml" "$tmp/choices"
 sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
-grep -qxF -- "- Another." "$b" || fail "planner block lacks the new memory"
+says "planner memories: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
+grep -qxF -- "- Another." "$bm" || fail "planner memories lack the new memory"
 [ ! -e "$r/.maestro/bots/reviewer.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+# A dropped bot loses its memories too. A bot whose memories went gets a
+# message to forget the old ones.
+sed -i 's|^bots: .*|bots: reviewer|' "$r/.maestro/project/install.yaml"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner: removed .maestro/bots/planner.memories.md" && [ ! -e "$bm" ] || fail "a dropped bot kept its memories"
+sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: new"
+mv "$r/.maestro/project/bots/planner.memory.md" "$tmp/mem" && printf '# none\n' >"$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: changed" && grep -q '^Forget your old starting memories.*set none in their place' "$bm" && ! grep -q '^- ' "$bm" || fail "no message to forget the memories that went: $(cat "$bm")"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: same"
+mv "$tmp/mem" "$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: changed" && grep -qxF -- "- Another." "$bm" || fail "memories didn't come back with the team's file"
+# A bot set up from an older block, with its memories in it, gets a
+# message to forget them even when the team now sets none.
+cp "$r/.maestro/project/bots/planner.memory.md" "$tmp/mem" && printf '# none\n' >"$r/.maestro/project/bots/planner.memory.md"
+printf 'Persona.\n\n## Starting memories\n\n- Runs at once: up to 9.\n\n## Where you work\n' >"$b" && rm "$bm"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: new" && grep -q 'set none in their place' "$bm" || fail "an old block's memories got no message to forget them"
+mv "$tmp/mem" "$r/.maestro/project/bots/planner.memory.md"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
+says "planner memories: changed" && grep -qxF -- "- Another." "$bm" || fail "the team's memories didn't come back after the old block's"
+# Every shipped profile fits in Grok's 20,000 characters, with room for a
+# long repo path: bot-bundle refuses one that doesn't.
+all=$(cd "$m/bot-profiles" && ls -d */ | tr -d / | tr '\n' ' ')
+sed -i "s|^bots: .*|bots: $all|" "$r/.maestro/project/install.yaml"
+bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "a shipped profile's block is over Grok's limit"; }
+for p in $all; do
+	n=$(sed '/^## Where you work$/,$d' "$r/.maestro/bots/$p.md" | wc -c)
+	[ "$n" -le 19700 ] || fail "$p: persona and team rules are $n bytes; keep them under 19,700 so the block fits Grok's 20,000 with a repo path up to about 190 characters"
+done
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
 # A CRLF checkout of install.yaml names the same bots.
@@ -366,8 +408,27 @@ mem=$r/.maestro/project/bots/planner.memory.md
 mv "$mem" "$tmp/memory" && printf -- '- token: s3cr3t\n' >"$tmp/victim" && ln -s "$tmp/victim" "$mem"
 if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle read a symlinked memory file"; fi
 says ".maestro/project/bots/planner.memory.md is a symlink"
-! grep -qF s3cr3t "$b" || fail "bot-bundle pasted a symlink's target into the block"
+! grep -qF s3cr3t "$b" "$bm" || fail "bot-bundle pasted a symlink's target into a block"
 rm "$mem" && mv "$tmp/memory" "$mem"
+echo outside >"$tmp/victim"
+mv "$bm" "$tmp/planner.memories.md" && ln -s "$tmp/victim" "$bm"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked memories file"; fi
+says ".maestro/bots/planner.memories.md is a symlink"
+[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked memories file"
+rm "$bm" && mv "$tmp/planner.memories.md" "$bm"
+# A block over Grok's limit refuses before any bot's files are written,
+# even a bot listed first that is due a new one.
+sed -i 's|^bots: .*|bots: reviewer planner|' "$r/.maestro/project/install.yaml"
+rm -f "$r/.maestro/bots/reviewer.md"
+echo "- One more." >>"$r/.maestro/project/bots/planner.memory.md"
+snap "$r/.maestro/bots" >"$tmp/before"
+head -c 20000 /dev/zero | tr '\0' x >>"$m/bot-profiles/planner/persona.md"
+git -C "$m" commit -q -am big && sed -i "s/^maestro-sha: .*/maestro-sha: $(git -C "$m" rev-parse --short HEAD)/" "$r/.maestro/project/install.yaml"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote a block over Grok's limit"; fi
+says "over Grok's 20,000-character limit"
+snap "$r/.maestro/bots" | diff "$tmp/before" - >/dev/null || fail "bot-bundle wrote files before it refused a block over Grok's limit"
+git -C "$m" reset -q --hard HEAD~1 && cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+sed -i '/^- One more\.$/d' "$r/.maestro/project/bots/planner.memory.md"
 # The blocks come from the pinned commit, as install.sh's copies do.
 echo "- An edit no one reviewed." >>"$m/bot-profiles/team-rules.md"
 if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took uncommitted bot-profiles"; fi
