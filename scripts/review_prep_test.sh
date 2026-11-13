@@ -95,19 +95,26 @@ pr 7 maestro/T-7 "$H" false README.md src/a.go
 comments T-7 "Handoff: PR 7 at $H"
 
 # --route reads the file list only.
-pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md .gitignore LICENSE
+pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md docs/sub/a.rst .gitignore LICENSE LICENSE-MIT .mailmap
 bash "$prep" --route 8 >"$tmp/out" || fail "route light exited $?"
 has route=light
 # Agents obey what the root rules name, and code hides in docs-like names.
 for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migrations/1.sql src/a.go tests/a.md \
 	.maestro/project/project-setup.md bot-profiles/qa/persona.md INSTALL.md docs/rules.md Claude.md \
-	CLAUDE.local.md .kiro/steering/a.md CMakeLists.txt docs/page.mdx .prettierrc.cjs .gitattributes; do
+	CLAUDE.local.md .kiro/steering/a.md CMakeLists.txt docs/page.mdx .prettierrc.cjs .gitattributes \
+	e.md src/notes.md scripts/CHANGELOG.sh .changeset/x.md AGENT.md; do
 	pr 9 mixed "$H" false README.md "$f"
 	bash "$prep" --route 9 >"$tmp/out" || fail "route $f exited $?"
 	has route=full
 	grep -q "^why=$f is " "$tmp/out" || fail "route $f: no why"
 done
 [ -z "$(ls "$TMPDIR")" ] || fail "--route wrote to the temp dir"
+# The rules as main has them, not as a stale main checkout does.
+echo "nothing named" >AGENTS.md
+pr 9 mixed "$H" false docs/rules.md
+bash "$prep" --route 9 >"$tmp/out" || fail "route stale exited $?"
+has route=full
+git checkout -q AGENTS.md
 
 # A ticket with no verdict: full mode, and every file it names is there.
 bash "$prep" T-7 >"$tmp/out" || fail "prep T-7 exited $?"
@@ -121,11 +128,13 @@ grep -qxF "$(printf '1\t0\tREADME.md\tdocs')" "$C/files.txt" || fail "files.txt 
 cmp -s "$tmp/out" "$C/prep.txt" || fail "prep.txt differs from the output"
 bash "$prep" maestro/T-7 >"$tmp/out" || fail "prep maestro/T-7 exited $?"
 has ticket=T-7
-# A -diff attribute in the main checkout hides no line from the counts.
+# A -diff attribute in the main checkout hides no line from the counts
+# or the patch.
 echo '*.go -diff' >.gitattributes
 bash "$prep" T-7 >"$tmp/out" || fail "prep with -diff exited $?"
 has lines=3
-has binary=1
+has binary=0
+grep -q '^+three' "$(val C)/diff.patch" || fail "-diff hid the patch"
 rm .gitattributes
 
 # Review's kickback at K, then a QA kickback: incremental from K.

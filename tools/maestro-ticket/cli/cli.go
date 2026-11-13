@@ -74,7 +74,8 @@ Commands:
               newest Handoff: and all after it in full; the rest as first lines)
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
               [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
-              [--bodies]   (ordered by priority, then id; no bodies unless --bodies: get prints one)
+              [--bodies]   (ordered by priority, then id; no bodies: get prints one, and
+              --bodies with --json each, for a search)
   goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
   log-run     [--ticket ID]   (reads a claude -p --output-format json reply on stdin, prints it
               unchanged, and records the session's cost and tokens; a resume replaces its total)
@@ -697,7 +698,7 @@ func runList(ctx context.Context, c *call) error {
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
 	parked := c.fs.String("parked", "", "only tickets parked for one of these comma-separated reasons: in backlog, or blocked from it")
 	goal := c.fs.String("goal", "", "only tickets of this goal")
-	bodies := c.fs.Bool("bodies", false, "print each ticket's body too, as for a search")
+	bodies := c.fs.Bool("bodies", false, "with --json, print each ticket's body too, as for a search")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
