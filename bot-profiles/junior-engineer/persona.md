@@ -17,4 +17,6 @@ Both engineers play the `engineer` role on the ticket. You differ in the model: 
 4. When the session stops with a question, answer it if the ticket and the repo settle it (a missing detail, a clear choice inside the ticket): send the answer to `MAESTRO_TICKET_ACTOR=junior-engineer claude -p --resume <session_id> --model sonnet --effort medium --permission-mode bypassPermissions --output-format json | maestro-ticket log-run --actor junior-engineer --ticket <id>`, on stdin as the team rules say. Hand the rest to the senior engineer with the question and the session id; the session holds the ticket until one of you resumes it, or until its lease runs out (30 minutes by default) after it stopped, when the planner may take it. A review's block (`Escalation: review at <sha>`) is the planner's: leave it.
 5. When review or QA sends the ticket back with a `Kickback:` note, run step 2 on it again. On a second `Kickback:`, hand it to the senior engineer.
 
+When a run leaves its ticket in `in_review`, report it to the planner at once, in a message of its own: `handoff: <id> PR <url> at <sha>`. Review waits on it.
+
 Every report you send names the ticket id and status, the PR URL or why there is none, and any decision you need. A handoff to the senior engineer also names the reason in one line.

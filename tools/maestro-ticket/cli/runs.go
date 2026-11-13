@@ -78,38 +78,44 @@ func lastResult(b []byte) (claudeReply, error) {
 
 func runLogRun(ctx context.Context, c *call) error {
 	tk := c.fs.String("ticket", "", "the ticket the run worked on (default none)")
-	// The reply goes through first, whatever fails after: the bot reads it
-	// here, and a run must never lose its reply to a logging error.
-	var buf bytes.Buffer
-	_, copyErr := io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))
+	// Flags are read first, to record the run's start, but their errors
+	// wait: the reply goes through first, whatever fails, since the bot
+	// reads it here and a run must never lose its reply to a logging error.
 	err := c.parse()
 	asked := c.jsonOut
 	c.jsonOut = false // stdout carries the reply, so errors go to stderr
+	if err == nil && !asked {
+		err = c.noArgs()
+	}
+	var id ticket.ID
+	if err == nil && !asked && *tk != "" {
+		id, err = ticket.ParseID(*tk)
+	}
+	var launch int64
+	if err == nil && !asked {
+		launch = c.startLaunch(ctx, id)
+	}
+	var buf bytes.Buffer
+	_, copyErr := io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))
+	// The run is over once its reply is in: a SIGTERM now must not lose
+	// its record.
+	ctx = context.WithoutCancel(ctx)
 	switch {
 	case err != nil:
 		return err
 	case asked:
 		return usagef("log-run takes no --json: stdout carries the reply as it came")
 	case copyErr != nil:
+		c.endLaunch(ctx, nil, launch, ticket.LaunchNoResult, "")
 		return fmt.Errorf("pass the reply through: %w", copyErr)
-	}
-	if err := c.noArgs(); err != nil {
-		return err
-	}
-	var id ticket.ID
-	if *tk != "" {
-		if id, err = ticket.ParseID(*tk); err != nil {
-			return err
-		}
 	}
 	r, err := lastResult(buf.Bytes())
 	if err != nil {
+		c.endLaunch(ctx, nil, launch, ticket.LaunchNoResult, "")
+		c.freeClaim(ctx, launch, id)
 		return err
 	}
-	req := ticket.LogRunRequest{Session: r.SessionID, Ticket: id, Actor: strings.TrimSpace(c.actor), CostUSD: *r.TotalCostUSD}
-	if req.Actor == "" {
-		req.Actor = "unknown"
-	}
+	req := ticket.LogRunRequest{Session: r.SessionID, Ticket: id, Actor: logActor(c.actor), CostUSD: *r.TotalCostUSD}
 	for _, u := range r.ModelUsage {
 		req.InputTokens += u.InputTokens
 		req.OutputTokens += u.OutputTokens
@@ -121,6 +127,7 @@ func runLogRun(ctx context.Context, c *call) error {
 		return err
 	}
 	defer s.Close()
+	c.endLaunch(ctx, s, launch, ticket.LaunchResult, r.SessionID)
 	_, err = s.LogRun(ctx, req)
 	// A wrong id must not lose the cost: log it with no ticket.
 	if errors.Is(err, ticket.ErrNotFound) && req.Ticket != 0 {

@@ -38,7 +38,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -234,6 +234,34 @@ CREATE TABLE IF NOT EXISTS runs (
 	updated_at         INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_ticket ON runs(ticket_id) WHERE ticket_id IS NOT NULL;
+`
+
+// schemaV8 adds launches, each run log-run reads, recorded as it starts so
+// a run that dies with the box still shows; and etas, the time the owner
+// was told a goal would be ready.
+const schemaV8 = `
+CREATE TABLE IF NOT EXISTS launches (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	actor      TEXT    NOT NULL,
+	ticket_id  INTEGER REFERENCES tickets(id),
+	pid        INTEGER NOT NULL,
+	stamp      TEXT    NOT NULL DEFAULT '',
+	started_at INTEGER NOT NULL,
+	ended_at   INTEGER,
+	outcome    TEXT    NOT NULL DEFAULT '',
+	session    TEXT    NOT NULL DEFAULT '',
+	CHECK ((ended_at IS NULL) = (outcome = ''))
+);
+CREATE INDEX IF NOT EXISTS launches_open ON launches(started_at) WHERE ended_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS etas (
+	goal    TEXT    PRIMARY KEY,
+	due_at  INTEGER NOT NULL,
+	tickets TEXT    NOT NULL DEFAULT '',
+	set_by  TEXT    NOT NULL,
+	set_at  INTEGER NOT NULL,
+	met_at  INTEGER
+);
 `
 
 // Options tune a Store. The zero value is fine for production.
@@ -477,7 +505,10 @@ func msTime(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 const ticketCols = `id, title, body, type, status, role, priority, created_by, owner, tries, lease_expiries,
 	blocked_from, parked, goal, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at,
 	(SELECT group_concat(depends_on, ',' ORDER BY depends_on) FROM deps WHERE deps.ticket_id = tickets.id),
-	(SELECT group_concat(area, char(10) ORDER BY area) FROM areas WHERE areas.ticket_id = tickets.id)`
+	(SELECT group_concat(area, char(10) ORDER BY area) FROM areas WHERE areas.ticket_id = tickets.id),
+	CASE WHEN lease_holder IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM events
+		WHERE events.ticket_id = tickets.id AND events.type = 'lease_revived'
+		AND json_extract(events.data, '$.token') = tickets.lease_token) END`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -492,9 +523,10 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 		expires          sql.NullInt64
 		created, updated int64
 		deps, areas      sql.NullString
+		revivals         int
 	)
 	err := row.Scan(&t.ID, &t.Title, &t.Body, &typ, &status, &t.Role, &t.Priority, &t.CreatedBy, &t.Owner,
-		&t.Tries, &t.LeaseExpiries, &blockedFrom, &parked, &t.Goal, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas)
+		&t.Tries, &t.LeaseExpiries, &blockedFrom, &parked, &t.Goal, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas, &revivals)
 	if err != nil {
 		return t, err
 	}
@@ -516,6 +548,7 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 			Token:     token,
 			ExpiresAt: msTime(expires.Int64),
 			Expired:   expires.Int64 <= nowMS,
+			Revivals:  revivals,
 		}
 	}
 	return t, nil
@@ -1706,6 +1739,37 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	}
 	add("leases", true, "%d tickets; %d live claims, %d expired (claimable; reap frees them)", total, live, expired)
 
+	// A handoff no one picked up is a stall, not a broken store: report it
+	// and pass, so install.sh check still passes on a busy board.
+	var stalled []string
+	srows, err := conn.QueryContext(ctx, `SELECT id FROM tickets WHERE status = 'in_review'
+		AND (lease_holder IS NULL OR lease_expires_at <= ?) AND updated_at <= ? ORDER BY id`,
+		now, now-ticket.DefaultStall.Milliseconds())
+	if err != nil {
+		return rep, err
+	}
+	for srows.Next() {
+		var id ticket.ID
+		if err := srows.Scan(&id); err != nil {
+			srows.Close()
+			return rep, err
+		}
+		stalled = append(stalled, id.String())
+	}
+	srows.Close()
+	if err := srows.Err(); err != nil {
+		return rep, err
+	}
+	if len(stalled) == 0 {
+		add("stalls", true, "no in_review ticket has waited %d minutes with no one on it", int(ticket.DefaultStall.Minutes()))
+	} else {
+		if len(stalled) > 10 {
+			stalled = append(stalled[:10], fmt.Sprintf("and %d more", len(stalled)-10))
+		}
+		add("stalls", true, "warning: in_review with no one on it for %d minutes or more: %s (maestro-ticket alerts lists them)",
+			int(ticket.DefaultStall.Minutes()), strings.Join(stalled, ", "))
+	}
+
 	// Statuses and roles are checked in Go, not by the schema: list the
 	// open tickets whose values this build doesn't know.
 	var badStatus, badRole, badParked []string
@@ -1916,7 +1980,27 @@ func (s *Store) Export(ctx context.Context) (ticket.Export, error) {
 			}
 			out.Runs = append(out.Runs, r)
 		}
-		return rrows.Err()
+		if err := rrows.Err(); err != nil {
+			return err
+		}
+		lrows, err := tx.QueryContext(ctx, "SELECT "+launchCols+" FROM launches ORDER BY id")
+		if err != nil {
+			return err
+		}
+		defer lrows.Close()
+		out.Launches = []ticket.Launch{}
+		for lrows.Next() {
+			l, err := scanLaunch(lrows)
+			if err != nil {
+				return err
+			}
+			out.Launches = append(out.Launches, l)
+		}
+		if err := lrows.Err(); err != nil {
+			return err
+		}
+		out.ETAs, err = queryETAs(ctx, tx, []ticket.ETA{})
+		return err
 	})
 	return out, err
 }
