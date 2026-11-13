@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -222,21 +223,27 @@ func runAlerts(ctx context.Context, c *call) error {
 	})
 }
 
-// reapReport frees every expired lease, as reap does, and lists whose.
+// reapReport frees every expired lease, as reap does, and lists whose,
+// from the lease_expired events the reap logged.
 func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
-	all, err := s.List(ctx, ticket.ListFilter{})
+	before, err := s.LastSeq(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := s.Reap(ctx)
+	if err != nil || len(res.Reaped) == 0 {
+		return err
+	}
+	evs, err := s.Events(ctx, ticket.EventFilter{Since: before, Type: ticket.EventLeaseExpired})
 	if err != nil {
 		return err
 	}
 	holder := map[ticket.ID]string{}
-	for _, t := range all {
-		if t.Claim != nil && t.Claim.Expired {
-			holder[t.ID] = t.Claim.Holder
+	for _, e := range evs {
+		var d struct{ Holder string }
+		if json.Unmarshal(e.Data, &d) == nil {
+			holder[e.TicketID] = d.Holder
 		}
-	}
-	res, err := s.Reap(ctx)
-	if err != nil {
-		return err
 	}
 	for _, id := range res.Reaped {
 		rep.Expired = append(rep.Expired, expiredLease{id, holder[id]})
@@ -380,7 +387,7 @@ func printAlerts(w io.Writer, r alertReport, now time.Time) {
 		fmt.Fprintln(w)
 	}
 	for _, e := range r.Expired {
-		fmt.Fprintf(w, "expired: %s lease of %s ran out and is freed: its run hung or died\n", e.Ticket, dash(e.Holder))
+		fmt.Fprintf(w, "expired: %s lease of %s ran out; freed\n", e.Ticket, dash(e.Holder))
 	}
 	for _, e := range r.ETAMissed {
 		fmt.Fprintf(w, "eta missed: %s due %s, %s ago; open: %s\n", e.Goal, e.Due.Local().Format("Jan 2 15:04"),

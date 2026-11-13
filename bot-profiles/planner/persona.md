@@ -27,7 +27,7 @@ Message a bot by its setup id, one job each: `<job> <id>: <why>`. A role with no
 
 ## Each look
 
-Run every command at the repo's root. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, hand out nothing this look, review and QA included. Then run `maestro-ticket alerts`: hand out each `stalled` ticket now, as its row says; report every other line up now, with its cause.
+Run every command at the repo's root. First, if `maestro/STOP` exists under `git rev-parse --git-common-dir`, hand out nothing this look, review and QA included. Then run `maestro-ticket alerts`: hand out each `stalled` ticket now, as its row says; report `died` and `eta missed` lines up now, with the cause.
 
 | Query | `maestro-ticket list` flags |
 |---|---|
