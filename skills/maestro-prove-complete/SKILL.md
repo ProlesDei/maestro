@@ -29,7 +29,7 @@ Pick the strongest proof for each:
 | a bug | the repro failing on the base commit and passing on yours | both outputs |
 | a CLI | the real command against the built binary | command, output excerpt, exit code |
 | an HTTP API | `curl -i` against the running app | request, status, the headers that matter, body excerpt |
-| a UI | drive the real page as the first section of [browser.md](../maestro-qa-lead/references/browser.md) says, with `eng-<id>` as `<run>` and step 5's folder | screenshot of the state the criterion names, URL, steps to get there |
+| a UI | drive the real page as [browser.md](../maestro-qa-lead/references/browser.md#open-a-browser-of-your-own) says; a run with no `<run>` of its own names one `eng-<id>-<6 random letters from the OS>` and uses Phase A step 5's folder | screenshot of the state the criterion names, URL, steps to get there |
 | data or a migration | a query before and after, on a scratch database | both results, row counts |
 | speed | one benchmark run 5 or more times before and after, on one machine | median and spread of each |
 | background work | the log lines that show it ran, with timestamps | excerpt, never the whole log |

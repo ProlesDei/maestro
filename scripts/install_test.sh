@@ -202,10 +202,12 @@ rm "$r/.mcp.json" "$tmp/bin/codebase-memory-mcp"
 sed -i 's/^browser: .*/browser: playwright-cli/' "$r/.maestro/project/install.yaml"
 PATH=$(hide playwright-cli) refuses "problem: playwright-cli isn't on PATH" "$r" check "$r"
 # shellcheck disable=SC2016 # the stub's code, not ours
+# Like the real one, open leaves the session's error log in the cache.
 printf '%s\n' '#!/usr/bin/env bash' 'echo "$PWD $* nu=${NO_UPDATE_NOTIFIER-}" >>"$PW_LOG"' \
+	'[[ " $* " != *" open "* ]] || { mkdir -p "$XDG_CACHE_HOME/ms-playwright/daemon/h" && : >"$XDG_CACHE_HOME/ms-playwright/daemon/h/${1#-s=}.err"; }' \
 	'[[ " $* " != *" open "* || -z "${PW_FAIL:-}" ]] || { printf "Error: Daemon pid=1: Daemon process exited with code 1\n%s\n" "$PW_FAIL"; exit 1; }' >"$tmp/bin/playwright-cli"
 chmod +x "$tmp/bin/playwright-cli"
-export PW_LOG=$tmp/pw.log
+export PW_LOG=$tmp/pw.log XDG_CACHE_HOME=$tmp/cache
 before=$(snap "$r")
 : >"$PW_LOG"
 ok check "$r"
@@ -226,6 +228,7 @@ grep -q -- ' open --browser=chromium --idle-timeout=60000 ' "$PW_LOG" && ! grep 
 ok check "$r"
 read -r _ s3 _ < <(sed -n 1p "$PW_LOG")
 [ "$s3" != "$s1" ] || fail "two checks used one session name: $s1"
+[ -z "$(ls -A "$XDG_CACHE_HOME/ms-playwright/daemon/h")" ] || fail "check left its session's error log: $(ls "$XDG_CACHE_HOME/ms-playwright/daemon/h")"
 [[ $d1 != "$(cd "$r" && pwd -P)"* ]] || fail "check opened the browser inside the repo: $d1"
 [ ! -e "$d1" ] || fail "check left its browser folder: $d1"
 PW_FAIL="/x/chrome: error while loading shared libraries: libasound.so.2: cannot open shared object file" refuses \

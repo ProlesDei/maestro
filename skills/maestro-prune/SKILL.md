@@ -19,7 +19,7 @@ Open a todo list with one item per phase below. From the main checkout, run `git
 |---|---|
 | Worktrees | each `git worktree list` entry other than the main checkout and your own, and entries marked `prunable` |
 | Branches | local branches no worktree has checked out that are `merged` (Phase B), whose upstream `git branch -vv` shows `gone`, or whose ticket is `done` or `cancelled` |
-| Maestro leftovers | `<common>/evidence/<id>/` for tickets the saved ticket list shows `done` or `cancelled` |
+| Maestro leftovers | `<common>/evidence/<id>/` for tickets the saved ticket list shows `done` or `cancelled`, and each `<common>/evidence/<job>/<run>/` of a QA job with no ticket (`answer`, `repro`, `second-look`) |
 | Rebuildable folders | `!!` lines of `git status --ignored --porcelain` named `node_modules/`, `.venv/`, `venv/`, `target/`, `dist/`, `build/`, `.next/`, `.turbo/`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/` or `coverage/`. No other `!!` line is a candidate: ignored files also hold secrets, local config, databases and `.maestro/worktrees/` |
 | Temp files | `find . -path ./.git -prune -o -path ./.maestro/worktrees -prune -o -name node_modules -prune -o -type f \( -name '*.orig' -o -name '*.rej' -o -name '*.tmp' -o -name '*.swp' -o -name '*~' -o -name .DS_Store \) -print`, minus tracked files; empty folders from the same `find` with `-type d -empty` |
 | Temp folders | `find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' -type d -user "$(id -un)"` (what `mktemp -d` leaves) where `find <dir> -mmin -10080 -print -quit` prints nothing: untouched for 7 days |

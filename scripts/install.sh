@@ -356,6 +356,11 @@ if [ "$cmd" = check ]; then
 				problem "playwright-cli can't open a headless page${why:+ ($why)}: INSTALL.md step 7"
 			fi
 			(cd "$probe" && NO_UPDATE_NOTIFIER=1 playwright-cli -s="$pw" close) >/dev/null 2>&1 || true
+			# It never removes a session's error log; the name is this check's
+			# alone. The daemon folder is in the user's cache: Linux, then macOS.
+			for c in "${XDG_CACHE_HOME:-${HOME:-}/.cache}" "${HOME:-}/Library/Caches"; do
+				[ ! -d "$c/ms-playwright/daemon" ] || find "$c/ms-playwright/daemon" -maxdepth 2 -type f -name "$pw.err" -delete 2>/dev/null || true
+			done
 			rm -rf -- "$probe"
 		fi
 	fi
