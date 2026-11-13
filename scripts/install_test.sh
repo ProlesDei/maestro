@@ -837,12 +837,33 @@ ok apply "$r9"
 if run check "$r9"; then fail "check passed with committed skills git ignores"; fi
 says ".claude/skills/maestro-tdd is hidden from git, but skills-home is committed"
 
-# Maestro's own rules, skills and workflow never ship: no file a harness
-# loads sits in a path INSTALL.md step 2 checks out.
-if git -C "$here/.." ls-files -- .gitattributes INSTALL.md bot-profiles scripts skills templates tools |
-	grep -iE '(^|/)((agents|agents\.override|claude|claude\.local|gemini)\.md|\.mcp\.json|\.(claude|agents|codex|grok|cursor|gemini|maestro)/)' >"$tmp/out"; then
-	fail "Maestro ships a file the team's harnesses would load as Maestro's own rules"
-fi
+# Maestro's own rules, skills and workflow never ship. This tree, as git
+# tracks it, cloned in full: apply names Maestro's own files and refuses.
+# Cloned with the sparse patterns INSTALL.md step 2 gives: none is left.
+real=$tmp/real
+mkdir "$real"
+(cd "$here/.." && git ls-files -z | tar --null -T - -cf -) | tar -xf - -C "$real"
+git -C "$real" init -q && git -C "$real" add -A && git -C "$real" commit -q -m real
+mapfile -t sparse < <(sed -n '/^Clone `github.com/p' "$here/../INSTALL.md" | grep -o '`/[^`]\+`' | tr -d '`')
+[[ " ${sparse[*]} " == *" /scripts/ "* && " ${sparse[*]} " == *" /skills/ "* ]] || fail "no sparse patterns in INSTALL.md step 2: ${sparse[*]}"
+for how in full sparse; do
+	rr=$tmp/real-$how
+	git init -q "$rr" && git -C "$rr" commit -q --allow-empty -m init && mkdir -p "$rr/.maestro/project"
+	printf '%s\n' "maestro-sha: $(git -C "$real" rev-parse HEAD)" "harnesses: claude" "skills-home: hidden" "code-graph: none" "browser: none" >"$rr/.maestro/project/install.yaml"
+	if [ $how = full ]; then
+		git clone -q "$real" "$rr/.maestro/src"
+	else
+		git clone -q --no-checkout "$real" "$rr/.maestro/src"
+		git -C "$rr/.maestro/src" sparse-checkout set --no-cone "${sparse[@]}" && git -C "$rr/.maestro/src" checkout -q
+	fi
+	if bash "$rr/.maestro/src/scripts/install.sh" apply "$rr" >"$tmp/out" 2>&1; then
+		[ $how = sparse ] || fail "apply passed with all of Maestro cloned in .maestro/src"
+	elif [ $how = full ]; then
+		says "where the team's harnesses would load them: .agents .claude .maestro AGENTS.md CLAUDE.md;"
+	else
+		fail "apply failed from a sparse clone of Maestro as INSTALL.md step 2 makes it"
+	fi
+done
 
 # apply and check, through a symlinked path, check Maestro's clone in
 # .maestro/src/ for files the harnesses would load, at any depth.
@@ -861,7 +882,20 @@ if bash "$tmp/via/cloned/.maestro/src/scripts/install.sh" check "$tmp/via/cloned
 says "problem: .maestro/src/AGENTS.md exists"
 says "problem: .maestro/src/.claude exists"
 says "problem: .maestro/src/tools/t/claude.md exists"
-rm -r "$r8/.maestro/src/.claude" "$r8/.maestro/src/tools"
+# The same, from a Maestro outside the repo; a harness folder in any case.
+rm -r "$r8/.maestro/src/.claude" && mkdir "$r8/.maestro/src/.Agents"
+if run check "$r8"; then fail "check from outside passed with AGENTS.md in .maestro/src"; fi
+says "problem: .maestro/src/.Agents exists"
+rm -r "$r8/.maestro/src/.Agents" "$r8/.maestro/src/tools"
+# A folder find can't read stops apply with a reason, and fails check.
+if [ "$(id -u)" != 0 ]; then
+	mkdir "$r8/.maestro/src/locked" && chmod 000 "$r8/.maestro/src/locked"
+	if run apply "$r8"; then fail "apply passed with an unreadable .maestro/src"; fi
+	says "install.sh: couldn't read all of .maestro/src/"
+	if run check "$r8"; then fail "check passed with an unreadable .maestro/src"; fi
+	says "problem: couldn't read all of .maestro/src/"
+	chmod 755 "$r8/.maestro/src/locked" && rmdir "$r8/.maestro/src/locked"
+fi
 # A clone that skipped apply leaves Maestro's clone in sight of git add.
 sed -i '\#^/\.maestro/src/$#d' "$r8/.git/info/exclude"
 if bash "$r8/.maestro/src/scripts/install.sh" check "$r8" >"$tmp/out" 2>&1; then fail "check passed with .maestro/src/ seen by git"; fi

@@ -294,22 +294,28 @@ write_exclude() {
 	mv "$tmp" "$exclude"
 }
 
-# leaks: Maestro's own files in its clone in .maestro/src/ that a harness
-# in the team's repo would load as its rules, skills or servers, at any
-# depth: Maestro's AGENTS.md and CLAUDE.md, its .claude/ and .agents/
-# skills, its .maestro/ setup. INSTALL.md's sparse checkout leaves them
-# out; a full clone, or an update that lost the sparse setting, brings
-# them back. One path per line, from .maestro/src/.
+# leaks: set leaked to Maestro's own files in .maestro/src/ that Claude
+# Code, Codex or Grok in the team's repo would load as its rules, skills
+# or servers, at any depth and in any case: Maestro's AGENTS.md and
+# CLAUDE.md, its .claude/ and .agents/ skills, its .maestro/ setup. One
+# path per line, from .maestro/src/. INSTALL.md's sparse checkout leaves
+# them out; a full clone, or an update that lost the sparse setting,
+# brings them back. Fails if find can't read the whole folder.
+leakfix="check out only what INSTALL.md step 2 lists"
 leaks() {
-	[ "$root" = "$target/.maestro/src" ] || return 0
-	(cd -- "$root" && find . -path ./.git -prune -o \( -iname AGENTS.md -o -iname AGENTS.override.md \
-		-o -iname CLAUDE.md -o -iname CLAUDE.local.md -o -iname GEMINI.md -o -name .mcp.json \
-		-o -name .claude -o -name .agents -o -name .codex -o -name .grok -o -name .cursor -o -name .gemini \
-		-o -name .maestro \) -print -prune) | sed 's#^\./##' | LC_ALL=C sort
+	local out
+	leaked=
+	[ -d "$target/.maestro/src" ] || return 0
+	out=$(cd -- "$target/.maestro/src" && find . -path ./.git -prune -o \( -iname AGENTS.md -o -iname AGENTS.override.md \
+		-o -iname CLAUDE.md -o -iname CLAUDE.local.md -o -iname .mcp.json -o -iname .claude -o -iname .agents \
+		-o -iname .codex -o -iname .grok -o -iname .maestro \) -print -prune) || return 1
+	out=${out#./} out=${out//$'\n'.\//$'\n'}
+	leaked=$(LC_ALL=C sort <<<"$out")
 }
+leakread="couldn't read all of .maestro/src/ to look for Maestro's own files: make it readable"
 if [ "$cmd" = apply ]; then
-	l=$(leaks)
-	[ -z "$l" ] || die "Maestro's own files are in .maestro/src/, where the team's harnesses would load them: ${l//$'\n'/ }; check out only what INSTALL.md step 2 lists, then run again; nothing was changed"
+	leaks || die "$leakread, then run again; nothing was changed"
+	[ -z "$leaked" ] || die "Maestro's own files are in .maestro/src/, where the team's harnesses would load them: ${leaked//$'\n'/ }; $leakfix, then run again; nothing was changed"
 fi
 
 # Temp files go in one folder in the git dir, out of the work tree, and
@@ -326,9 +332,13 @@ if [ "$cmd" = check ]; then
 	problems=0
 	problem() { echo "problem: $*"; problems=$((problems + 1)); }
 	warn() { echo "warn: $*"; }
-	while IFS= read -r p; do
-		problem ".maestro/src/$p exists: harnesses would load Maestro's own files; check out only what INSTALL.md lists"
-	done < <(leaks)
+	if leaks; then
+		while IFS= read -r p; do
+			[ -z "$p" ] || problem ".maestro/src/$p exists: harnesses would load Maestro's own files; $leakfix"
+		done <<<"$leaked"
+	else
+		problem "$leakread"
+	fi
 	# apply makes both in each clone; a clone that skipped it has neither.
 	store=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
 	if [[ $store != /* ]]; then
