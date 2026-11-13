@@ -1188,6 +1188,45 @@ func TestListLatestPrefix(t *testing.T) {
 	}
 }
 
+// The store compares the prefix, not Go: it must match as strings.HasPrefix
+// does, by exact characters, with no wildcard and past multi-byte ones.
+func TestListLatestPrefixExact(t *testing.T) {
+	h := newHarness(t)
+	for i, b := range []string{"Kickback: QA fail — ünï ✓", "Kick", "50%_done", "Review: GO"} {
+		h.ok(nil, "create", "--title", "t", "--body", "secret body")
+		h.ok(nil, "comment", fmt.Sprintf("T-%d", i+1), "--body", b)
+	}
+	ids := func(args ...string) string {
+		t.Helper()
+		var l struct{ Tickets []map[string]any }
+		h.ok(&l, append([]string{"list"}, args...)...)
+		var out []string
+		for _, x := range l.Tickets {
+			if _, has := x["body"]; has {
+				t.Fatalf("list --json printed a body: %v", x)
+			}
+			out = append(out, x["id"].(string))
+		}
+		return fmt.Sprint(out)
+	}
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--latest-prefix", "Kickback: QA fail — ü"}, "[T-1]"},
+		{[]string{"--latest-prefix", "Kickback: QA fail — u"}, "[]"},
+		{[]string{"--latest-prefix", "Kickback"}, "[T-1]"}, // longer than T-2's comment
+		{[]string{"--latest-prefix", "50%_"}, "[T-3]"},
+		{[]string{"--latest-prefix", "5_%"}, "[]"},
+		{[]string{"--not-latest-prefix", "Kick", "--limit", "1"}, "[T-3]"},
+	}
+	for _, c := range cases {
+		if got := ids(c.args...); got != c.want {
+			t.Errorf("list %v = %s; want %s", c.args, got, c.want)
+		}
+	}
+}
+
 // Maestro's own clone in .maestro/src is a git repo too; its default store
 // would be a second, empty one.
 func TestStorePathTraps(t *testing.T) {

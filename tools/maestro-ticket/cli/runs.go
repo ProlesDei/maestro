@@ -21,6 +21,9 @@ import (
 // log-run reads. On a resumed session the totals are the session's so far.
 type claudeReply struct {
 	Type         string   `json:"type"`
+	Subtype      string   `json:"subtype"`
+	IsError      bool     `json:"is_error"`
+	Result       string   `json:"result"`
 	SessionID    string   `json:"session_id"`
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	// ModelUsage holds every model the session called, its subagents' too.
@@ -78,6 +81,7 @@ func lastResult(b []byte) (claudeReply, error) {
 
 func runLogRun(ctx context.Context, c *call) error {
 	tk := c.fs.String("ticket", "", "the ticket the run worked on (default none)")
+	short := c.fs.Bool("brief", false, "print only the session id, any error and the result text, not the whole reply")
 	// Flags are read first, to record the run's start, but their errors
 	// wait: the reply goes through first, whatever fails, since the bot
 	// reads it here and a run must never lose its reply to a logging error.
@@ -96,10 +100,18 @@ func runLogRun(ctx context.Context, c *call) error {
 		launch = c.startLaunch(ctx, id)
 	}
 	var buf bytes.Buffer
-	_, copyErr := io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))
+	var copyErr error
+	if *short && err == nil {
+		_, copyErr = io.Copy(&buf, c.env.Stdin)
+	} else {
+		_, copyErr = io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))
+	}
 	// The run is over once its reply is in: a SIGTERM now must not lose
 	// its record.
 	ctx = context.WithoutCancel(ctx)
+	if *short && err == nil {
+		printBrief(c.env.Stdout, buf.Bytes())
+	}
 	switch {
 	case err != nil:
 		return err
@@ -136,6 +148,26 @@ func runLogRun(ctx context.Context, c *call) error {
 		_, err = s.LogRun(ctx, req)
 	}
 	return err
+}
+
+// printBrief prints what a bot acts on in a reply: the session id to
+// resume, the error when there is one, then the result text as written.
+// The rest of the reply (usage per model, timings, ids) is for log-run,
+// and every bot reads every reply. A reply with no result message prints
+// as it came, so a bot never loses what a broken run said.
+func printBrief(w io.Writer, b []byte) {
+	r, err := lastResult(b)
+	if err != nil {
+		w.Write(b)
+		return
+	}
+	fmt.Fprintf(w, "session_id: %s\n", r.SessionID)
+	if r.IsError || (r.Subtype != "" && r.Subtype != "success") {
+		fmt.Fprintf(w, "error: %s\n", dash(r.Subtype))
+	}
+	if r.Result != "" {
+		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(r.Result, "\n"))
+	}
 }
 
 // costRow is one group of runs in a costs report.

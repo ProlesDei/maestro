@@ -74,10 +74,11 @@ Commands:
               newest Handoff: and all after it in full; the rest as first lines)
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
               [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
-              (ordered by priority, then id)
+              (ordered by priority, then id; no bodies: get prints one)
   goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
-  log-run     [--ticket ID]   (reads a claude -p --output-format json reply on stdin, prints it
-              unchanged, and records the session's cost and tokens; a resume replaces its total)
+  log-run     [--ticket ID] [--brief]   (reads a claude -p --output-format json reply on stdin,
+              prints it unchanged, or with --brief only its session_id, error and result, and
+              records the session's cost and tokens; a resume replaces its total)
   costs       [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since DATE|DURATION]
               (logged spend per group: runs, dollars, share, median per run and per ticket)
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
@@ -542,8 +543,7 @@ func (c *call) readBody(body, file string) (string, error) {
 	return string(b), checkBody(string(b))
 }
 
-// maxBody caps a body or comment: every list --latest-prefix reads the
-// latest comment of each ticket it lists.
+// maxBody caps a body or comment.
 const maxBody = 1 << 20
 
 func checkBody(s string) error {
@@ -693,17 +693,14 @@ func runList(ctx context.Context, c *call) error {
 		if err := ticket.ValidateRole(*role); err != nil {
 			return err
 		}
-		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit, Goal: strings.TrimSpace(*goal)}
+		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit, Goal: strings.TrimSpace(*goal),
+			LatestPrefix: *latest, NotLatestPrefix: *notLatest}
 		if err := ticket.ValidateGoal(f.Goal); err != nil {
 			return err
 		}
 		var err error
 		if f.Parked, err = ticket.ParseParkedList(*parked); err != nil {
 			return err
-		}
-		byComment := *latest != "" || *notLatest != ""
-		if byComment {
-			f.Limit = 0 // the limit applies after the comment filter
 		}
 		if f.Statuses, err = ticket.ParseStatuses(*status); err != nil {
 			return err
@@ -731,43 +728,14 @@ func runList(ctx context.Context, c *call) error {
 		if err != nil {
 			return err
 		}
-		if byComment {
-			if list, err = filterLatest(ctx, s, list, *latest, *notLatest, *limit); err != nil {
-				return err
-			}
+		// Without bodies, as writes print a ticket: a list of hundreds would
+		// put every body in the reader's context. get prints one.
+		out := make([]noBody, len(list))
+		for i, t := range list {
+			out[i] = withoutBody(t)
 		}
-		return c.out(map[string]any{"tickets": list}, func(w io.Writer) { printList(w, list) })
+		return c.out(map[string]any{"tickets": out}, func(w io.Writer) { printList(w, list) })
 	})
-}
-
-// filterLatest keeps the tickets whose latest comment starts with prefix
-// (when set) and doesn't start with notPrefix (when set), in list order, up
-// to limit (0 = all). A ticket with no comments never matches prefix and
-// always passes notPrefix. Comments are read after the list, so one added in
-// between counts.
-func filterLatest(ctx context.Context, s ticket.Store, list []ticket.Ticket, prefix, notPrefix string, limit int) ([]ticket.Ticket, error) {
-	out := []ticket.Ticket{}
-	for _, t := range list {
-		if limit > 0 && len(out) == limit {
-			break
-		}
-		d, err := s.Get(ctx, t.ID)
-		if err != nil {
-			return nil, err
-		}
-		body, has := "", len(d.Comments) > 0
-		if has {
-			body = d.Comments[len(d.Comments)-1].Body
-		}
-		if prefix != "" && !(has && strings.HasPrefix(body, prefix)) {
-			continue
-		}
-		if notPrefix != "" && has && strings.HasPrefix(body, notPrefix) {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out, nil
 }
 
 // goalRow counts one goal's tickets by status. Total leaves out cancelled

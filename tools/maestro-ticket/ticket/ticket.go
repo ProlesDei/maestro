@@ -785,8 +785,13 @@ type ListFilter struct {
 	// Parked keeps only tickets parked for one of these reasons.
 	Parked []Parked
 	// Goal keeps only the tickets of this goal.
-	Goal  string
-	Limit int
+	Goal string
+	// LatestPrefix keeps only tickets whose latest comment starts with it;
+	// NotLatestPrefix keeps tickets with no comment, or whose latest
+	// comment doesn't start with it. Both match case-sensitively.
+	LatestPrefix    string
+	NotLatestPrefix string
+	Limit           int
 }
 
 // ClaimRequest leases the next matching ticket, or a specific one when ID is
