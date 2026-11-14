@@ -264,17 +264,19 @@ const SystemActor = "maestro-ticket"
 // Roles. Review comes first and QA last: the reviewer records a pass as a
 // comment starting "Review: GO", not as a status. Only the QA lead sets
 // ship tickets done, after it merges the PR, or the planner when the PR
-// merged outside QA.
+// merged outside QA. The designer works a "Design:" scout ticket the
+// planner owns, so only the planner closes it, once the owner approves.
 const (
 	RoleChiefOfStaff = "chief-of-staff"
 	RolePlanner      = "planner"
 	RoleEngineer     = "engineer"
 	RoleQALead       = "qa-lead"
 	RoleReviewer     = "reviewer"
+	RoleDesigner     = "designer"
 )
 
 // Roles lists every role a ticket or an actor may have.
-var Roles = []string{RoleChiefOfStaff, RolePlanner, RoleEngineer, RoleQALead, RoleReviewer}
+var Roles = []string{RoleChiefOfStaff, RolePlanner, RoleEngineer, RoleQALead, RoleReviewer, RoleDesigner}
 
 // Priority runs 0 (most urgent) to 3.
 const (

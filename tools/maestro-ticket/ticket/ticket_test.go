@@ -114,7 +114,7 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestValidateRole(t *testing.T) {
-	for _, r := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead", "reviewer"} {
+	for _, r := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead", "reviewer", "designer"} {
 		if err := ValidateRole(r); err != nil {
 			t.Errorf("ValidateRole(%q) = %v", r, err)
 		}
@@ -277,6 +277,9 @@ func TestCheckGate(t *testing.T) {
 		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},
 		{"reviewer can't close a scout", scout, StatusDone, "rev", RoleReviewer, false},
 		{"scout with no owner", Ticket{Type: TypeScout, Owner: "unknown"}, StatusDone, "unknown", "", false},
+		{"designer can't close the planner's design", Ticket{Type: TypeScout, Owner: "planner"}, StatusDone, "designer", RoleDesigner, false},
+		{"planner closes its design", Ticket{Type: TypeScout, Owner: "planner"}, StatusDone, "planner", RolePlanner, true},
+		{"designer can't set a ship ticket done", ship, StatusDone, "designer", RoleDesigner, false},
 	}
 	for _, c := range cases {
 		err := c.t.CheckGate(c.to, c.actor, c.role)
