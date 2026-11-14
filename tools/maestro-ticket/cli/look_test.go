@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -168,7 +169,7 @@ func TestLookRows(t *testing.T) {
 	os.WriteFile(filepath.Join(l.h.dir, "STOP"), nil, 0o644)
 	os.RemoveAll(filepath.Join(l.h.dir, "handouts"))
 	stopped := l.look("", "--limit", "3")
-	if stopped[0] != "stopped: maestro/STOP is set: look hands out, starts and writes nothing" || len(with(stopped, "send ")) != 0 || len(with(stopped, "judge: ")) != 0 {
+	if stopped[0] != "stopped: maestro/STOP is set: look hands out and starts nothing" || len(with(stopped, "send ")) != 0 || len(with(stopped, "judge: ")) != 0 {
 		t.Errorf("STOP: %q", stopped)
 	}
 }
@@ -260,4 +261,90 @@ func TestLookQuietAndSmall(t *testing.T) {
 		t.Fatalf("look printed %d chars on a 140-ticket board; want under 5,000:\n%s", len(out), out)
 	}
 	t.Logf("look on 140 open tickets: %d chars", len(out))
+}
+
+// Of looks at once, one takes each handout; a stale one is taken again.
+func TestClaimHandout(t *testing.T) {
+	dir, now := t.TempDir(), time.Now()
+	var wg sync.WaitGroup
+	won := make(chan bool, 40)
+	for range 40 {
+		wg.Add(1)
+		go func() { defer wg.Done(); won <- claimHandout(dir, "T-1", "reviewer", "review T-1", time.Minute, now) }()
+	}
+	wg.Wait()
+	close(won)
+	n := 0
+	for w := range won {
+		if w {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d of 40 claims won; want 1", n)
+	}
+	if claimHandout(dir, "T-1", "reviewer", "review T-1", time.Minute, now) {
+		t.Fatal("a fresh handout was taken again")
+	}
+	if !claimHandout(dir, "T-1", "reviewer", "review T-1", time.Minute, now.Add(2*time.Minute)) {
+		t.Fatal("a stale handout wasn't taken again")
+	}
+	if !claimJudge(dir, "T-2", "blocked v3 1", now) || claimJudge(dir, "T-2", "blocked v3 1", now) {
+		t.Fatal("judge claim: want one take per state")
+	}
+	if !claimJudge(dir, "T-2", "blocked v4 2", now) {
+		t.Fatal("a changed ticket is judged again")
+	}
+}
+
+// A judge run's tickets are busy while it runs; a failed live run is
+// planned again; answered tickets back in review go to the judge as
+// reruns, judged once per state.
+func TestLookJudgeRows(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "x")
+	l.move("T-1", "blocked")
+	l.comment("T-1", "Escalation: build at abc: which key?\nReturn-role: engineer")
+	slow := filepath.Join(l.bin, "claude")
+	os.WriteFile(slow, []byte(strings.Replace(fakeClaude, "printf '{", "sleep 3; printf '{", 1)), 0o755)
+	got := l.look("", "--limit", "2", "--judge", "--stall", "1s")
+	if len(with(got, "judging: ")) != 1 || len(with(got, "judge: ")) != 0 {
+		t.Fatalf("judge: %q", got)
+	}
+	time.Sleep(1500 * time.Millisecond) // past --stall, the judge still runs
+	if again := l.look("", "--limit", "2", "--judge", "--stall", "1s"); len(with(again, "judg")) != 0 {
+		t.Fatalf("judged again while the first runs: %q", again)
+	}
+	os.WriteFile(slow, []byte(fakeClaude), 0o755)
+
+	l.h.ok(nil, "create", "--title", "Live run: demo", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead")
+	l.h.ok(nil, "transition", "T-2", "--to", "backlog", "--parked", "hold")
+	l.comment("T-2", "Hold: set by qa-lead: live run failed at abc; lifts when each fix is a dep of this ticket")
+	started := with(l.look("", "--limit", "2"), "started: ")
+	if len(started) != 1 || !strings.HasSuffix(started[0], " plan T-2") {
+		t.Fatalf("a failed live run: %q", started)
+	}
+	r := l.waitEnded(strings.Fields(strings.TrimPrefix(started[0], "started: "))[0], 20*time.Second)
+	if got := l.seen(r.ID); got.stdin[0] != "/maestro-planner fix T-2" {
+		t.Fatalf("plan fix: %q", got.stdin)
+	}
+
+	l.h.ok(nil, "create", "--title", "y")
+	l.move("T-3", "in_progress", "in_review", "in_progress")
+	l.comment("T-3", "Kickback: at abc1234\nF1")
+	l.move("T-3", "in_review")
+	l.comment("T-3", "Answer: F1 falls: the test covers it")
+	rows := with(l.look("", "--limit", "0"), "judge: T-3")
+	if len(rows) != 1 || !strings.HasPrefix(rows[0], "judge: T-3 rerun: answered, back in review") {
+		t.Fatalf("rerun: %q", rows)
+	}
+}
+
+func TestResumeUsesThisBinary(t *testing.T) {
+	exe, _ := os.Executable()
+	cmd := []string{"env", "A=1", "/old/path/" + filepath.Base(exe), "slot", "--name", "qa", "--max", "6", "--", "claude", "-p", "--session-id", "S"}
+	got := resumeCommand(cmd, "S", false)
+	if got[2] != exe {
+		t.Fatalf("slot binary: %q", got)
+	}
 }

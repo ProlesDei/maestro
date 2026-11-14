@@ -10,8 +10,8 @@ For each id, in order:
 
 | Row | Call |
 |---|---|
-| `blocked` | A merged PR, or a split or drop whose named dependent has no live claim now: make the writes [finish.md](finish.md) makes instead. Else answer it: a split, rewrite, order, deps or which bot; an engineer's question the code or criteria settle; or a review's block over findings it sent back at two shas, judged as `dispute` is, rewriting the ticket if any stand. |
-| `dispute` | Judge each finding the engineer disputes in the latest `Kickback:` against the criteria and the PR at its head, found as the chief-of-staff skill's look at a finding says. Answer which stand and which fall, and why. |
+| `rerun` | A ticket back in review after an `Answer:`: hand it on as step 4 says for the escalation that answer settled, with the flags it calls for. |
+| `blocked` | A merged PR, or a split or drop whose named dependent has no live claim now: make the writes [finish.md](finish.md) makes instead. Else answer it: a split, rewrite, order, deps or which bot; an engineer's question the code or criteria settle; or a review's block over findings it sent back at two shas: judge each finding against the criteria and the PR at its head, as the chief-of-staff skill's look at a finding says, and rewrite the ticket if any stand. |
 | `unready` | Requeue it if a command or the app can check each criterion; else rewrite it. |
 | `deferred` | Requeue it if the slice before it merged; plan a `Follow-ups:` ticket instead of requeuing it. Dropping one is the chief of staff's. |
 | `hold` | If the fact its latest `Hold:` says lifts it is true on the board, requeue it with a `--note` naming that fact; else leave it. |

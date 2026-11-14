@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,7 +31,8 @@ func newRouteHarness(t *testing.T) *routeHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	return &routeHarness{harness: h, s: s, c: &call{actor: "reviewer"}}
+	env := Env{Getenv: func(k string) string { return h.env[k] }, Dir: h.dir}
+	return &routeHarness{harness: h, s: s, c: &call{actor: "reviewer", env: env}}
 }
 
 // comment posts a note on a ticket.
@@ -57,6 +60,23 @@ func (h *routeHarness) move(id string, to ...string) {
 			args = append(args, "--actor-role", "qa-lead")
 		}
 		h.ok(nil, args...)
+	}
+}
+
+// timedOut records an earlier run of job on the ticket that ran out of
+// time, as the supervisor would have, starting now.
+func (h *routeHarness) timedOut(id, job string) {
+	h.t.Helper()
+	dir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(dir, 0o755)
+	r, err := runs.Create(dir, runs.Record{Launcher: "reviewer", Limit: "45m", Command: []string{"true"}}, nil)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	now := time.Now()
+	r.State, r.Ticket, r.Job, r.StartedAt, r.EndedAt = runs.TimedOut, id, job, now, &now
+	if err := runs.Save(dir, r); err != nil {
+		h.t.Fatal(err)
 	}
 }
 
@@ -111,8 +131,27 @@ func TestRouteBuild(t *testing.T) {
 		t.Fatalf("a junior's question goes to Opus, unread: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "build", Ticket: "T-2", Command: opusCmd(), Reply: "Plan...\nShould the cache be per user?"})
-	if got := sends(rt); len(got) != 1 || !strings.HasPrefix(got[0], "send planner: block T-2") || len(rt.Do) != 0 {
-		t.Fatalf("Opus's question goes up: %+v", rt)
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-aaaaaaaa --escalate"}) || len(rt.Send) != 0 {
+		t.Fatalf("Opus asked but posted nothing: it writes the question up: %+v", rt)
+	}
+
+	// Escalated, an Opus session's block goes to the planner, and its claim
+	// goes with it, so the judge needn't wait out the lease.
+	h.ok(nil, "create", "--title", "esc")
+	h.move("T-3", "in_progress")
+	var cl struct{ Claim struct{ Token int64 } }
+	h.ok(&cl, "claim", "T-3", "--holder", "senior-engineer/s7", "--status", "in_progress")
+	tok := strconv.FormatInt(cl.Claim.Token, 10)
+	if code, out, errs := h.run("Escalation: build at abc: which key?\nReturn-role: engineer", "comment", "T-3", "--body-file", "-", "--holder", "senior-engineer/s7", "--token", tok); code != 0 {
+		t.Fatalf("comment: %s %s", out, errs)
+	}
+	h.ok(nil, "transition", "T-3", "--to", "blocked", "--holder", "senior-engineer/s7", "--token", tok)
+	rt = h.route(runs.Record{ID: "R-bbbbbbbb", Job: "build", Ticket: "T-3", Launcher: "senior-engineer", Command: opusCmd(), Reply: "build: blocked: T-3"})
+	if got := sends(rt); len(got) != 1 || !strings.HasPrefix(got[0], "send planner: block T-3: Escalation: build at abc") || !slices.Equal(rt.Wrote, []string{"released T-3 for the planner"}) {
+		t.Fatalf("escalated: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 3); d.LiveClaim() != nil {
+		t.Fatalf("the claim stayed: %+v", d.Claim)
 	}
 	h.move("T-2", "blocked")
 	h.comment("T-2", "Escalation: outside step: make a Stripe test account: owner's call\nReturn-role: engineer")
@@ -140,7 +179,7 @@ func TestRouteReview(t *testing.T) {
 	}
 	h.move("T-1", "in_progress", "in_review")
 	h.comment("T-1", "Review: GO at "+sha+"\nFor QA: the login form")
-	if got := sends(h.route(runs.Record{Job: "review", Ticket: "T-1"})); !slices.Equal(got, []string{"send qa-lead: qa T-1 at " + sha}) {
+	if got := sends(h.route(runs.Record{Job: "review", Ticket: "T-1"})); !slices.Equal(got, []string{"send qa-lead: qa T-1"}) {
 		t.Fatalf("GO: %v", got)
 	}
 
@@ -182,7 +221,8 @@ func TestRouteReview(t *testing.T) {
 
 	// A review that ran past its limit blocks the ticket, once.
 	h.comment("T-4", "Handoff: PR https://x/pull/4 at "+sha+"\nchecks: 0")
-	timedOut := runs.Record{ID: "R-bbbbbbbb", Job: "review", Ticket: "T-4", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now().Add(-time.Minute)}
+	h.timedOut("T-4", "review") // once already at this head
+	timedOut := runs.Record{ID: "R-bbbbbbbb", Job: "review", Ticket: "T-4", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now()}
 	rt = h.route(timedOut)
 	if rt.Status != "blocked" || len(rt.Wrote) != 1 || !strings.HasPrefix(rt.Send[0].Line, "block T-4") {
 		t.Fatalf("timed out: %+v", rt)
@@ -257,8 +297,19 @@ func TestRouteOutcomes(t *testing.T) {
 		t.Fatalf("judge: %v", got)
 	}
 	rt = h.route(runs.Record{Job: "plan", Reply: "plan: done: T-7 T-8\nT-7 junior ..."})
-	if rt.Reply == "" || len(rt.Send) != 0 {
-		t.Fatalf("a text job's reply is the answer: %+v", rt)
+	if rt.Reply != "" || len(rt.Send) != 0 || rt.First != "plan: done: T-7 T-8" {
+		t.Fatalf("the planner reads a plan's first line only: %+v", rt)
+	}
+	rt = h.route(runs.Record{ID: "R-pppppppp", Job: "plan", Reply: "plan: draft: goal demo\n...\nup: What: a paid API | Question: pay $20?"})
+	if got := sends(rt); !slices.Equal(got, []string{"send chief-of-staff: plan R-pppppppp: What: a paid API | Question: pay $20?"}) {
+		t.Fatalf("a plan's owner call goes up, naming its run: %v", got)
+	}
+	rt = h.route(runs.Record{ID: "R-pppppppp", Job: "plan", Reply: "plan: stopped: which area is the cart in?"})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-pppppppp --decide"}) {
+		t.Fatalf("a plan's question: the session decides: %+v", rt)
+	}
+	if rt := h.route(runs.Record{Job: "cos", Reply: "card: ..."}); rt.Reply == "" {
+		t.Fatalf("a cos reply is the answer: %+v", rt)
 	}
 }
 
@@ -281,7 +332,7 @@ func TestRouteFilesFollowUps(t *testing.T) {
 		Comments                    []struct{ Body string }
 	}
 	h.ok(&d, "get", "T-2", "--full")
-	if d.Title != "Follow-ups: api/auth" || d.Status != "backlog" || d.Parked != "deferred" || d.Goal != "demo" || len(d.Areas) != 1 {
+	if d.Title != "Follow-ups: api/auth" || d.Status != "backlog" || d.Parked != "deferred" || d.Goal != "" || len(d.Areas) != 1 {
 		t.Fatalf("follow-ups ticket: %+v", d)
 	}
 	want := "From T-1 review (R-cccccccc):\n- api/auth:\n- urgent: tokens never expire (api/auth/token.go:40)\n- logs print emails"
@@ -326,5 +377,78 @@ func TestRouteDesignReady(t *testing.T) {
 	d, _ := h.s.Get(context.Background(), 1)
 	if last := latest(d).Body; last != "Sent up: chief of staff: approve the design on T-1?" {
 		t.Fatalf("Sent up: %q", last)
+	}
+}
+
+// A run out of time goes again once with twice the time; a second at the
+// same head blocks the ticket for the planner.
+func TestRouteTimeouts(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Handoff: PR https://x/pull/1 at "+sha)
+	first := runs.Record{ID: "R-tttttttt", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now().Add(-time.Minute), Command: opusCmd()}
+	rt := h.route(first)
+	if !slices.Equal(rt.Do, []string{"maestro-ticket job review T-1 --limit 1h30m"}) || len(rt.Wrote) != 0 {
+		t.Fatalf("first timeout: %+v", rt)
+	}
+	h.timedOut("T-1", "review")
+	second := runs.Record{ID: "R-uuuuuuuu", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "1h30m", StartedAt: time.Now(), Command: opusCmd()}
+	rt = h.route(second)
+	if rt.Status != "blocked" || len(rt.Wrote) != 1 {
+		t.Fatalf("second timeout: %+v", rt)
+	}
+
+	// QA the same way, at a GO.
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.comment("T-2", "Review: GO at "+sha)
+	q := runs.Record{ID: "R-vvvvvvvv", Job: "qa", Ticket: "T-2", State: runs.TimedOut, Limit: "2h", StartedAt: time.Now().Add(-time.Minute), Command: opusCmd()}
+	if rt := h.route(q); !slices.Equal(rt.Do, []string{"maestro-ticket job qa T-2 --limit 4h"}) {
+		t.Fatalf("QA's first timeout: %+v", rt)
+	}
+	h.timedOut("T-2", "qa")
+	q.ID, q.Limit = "R-wwwwwwww", "4h"
+	rt = h.route(q)
+	if rt.Status != "blocked" || !strings.HasPrefix(rt.Send[0].Line, "block T-2: QA ran past 4h twice") {
+		t.Fatalf("QA's second timeout: %+v", rt)
+	}
+	d, _ := h.s.Get(context.Background(), 2)
+	if !strings.HasPrefix(latest(d).Body, "Escalation: QA at "+sha+": ran past 4h twice") {
+		t.Fatalf("QA escalation: %q", latest(d).Body)
+	}
+}
+
+// A usage limit pauses every job until it resets.
+func TestRouteUsageLimitPauses(t *testing.T) {
+	h := newRouteHarness(t)
+	reset := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	rt := h.route(runs.Record{Job: "build", Ticket: "", State: runs.Failed, IsError: true, Reply: "Claude AI usage limit reached|" + strconv.FormatInt(reset.Unix(), 10)})
+	if rt.Outcome != outUsageLimit || len(rt.Wrote) != 1 {
+		t.Fatalf("usage limit: %+v", rt)
+	}
+	p, ok := readPause(h.dir, time.Now())
+	if !ok || !p.Until.Equal(reset) {
+		t.Fatalf("pause: %+v %v", p, ok)
+	}
+	if msg := h.fails(4, "job", "plan", "--actor", "planner"); msg != "paused" {
+		t.Fatalf("job while paused: %q", msg)
+	}
+	if code, out, _ := h.run("", "look", "--limit", "2", "--actor", "planner"); code != 0 || !strings.HasPrefix(out, "paused: usage limit") {
+		t.Fatalf("look while paused: %d %s", code, out)
+	}
+	os.WriteFile(filepath.Join(h.dir, "STOP"), nil, 0o644)
+	if msg := h.fails(4, "job", "plan", "--actor", "planner"); msg != "stopped" {
+		t.Fatalf("job under STOP: %q", msg)
+	}
+}
+
+func TestRouteNamesAKilledRun(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	code := 137
+	rt := h.route(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, Exit: &code, Command: opusCmd()})
+	if rt.First != "exit 137, no reply" || rt.Outcome != outFailed {
+		t.Fatalf("killed: %+v", rt)
 	}
 }

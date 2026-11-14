@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -150,11 +152,24 @@ type route struct {
 // reads only the PR's file list: route=light when every file is docs or
 // inert config, and the PR's changed lines.
 func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
-	root, err := c.git("rev-parse", "--show-toplevel")
+	if _, err := exec.LookPath("gh"); err != nil {
+		return route{lines: -1, why: "no gh to read the PR's files"}, nil // full, by default
+	}
+	top, err := c.git("rev-parse", "--show-toplevel")
 	if err != nil {
 		return route{}, fmt.Errorf("%w: job review: run it inside the repo: %v", ticket.ErrInvalid, err)
 	}
-	script := filepath.Join(strings.TrimSpace(root), ".claude", "skills", "maestro-code-review", "scripts", "review-prep.sh")
+	root := strings.TrimSpace(top)
+	rel := filepath.Join(".claude", "skills", "maestro-code-review", "scripts", "review-prep.sh")
+	script := filepath.Join(root, rel)
+	if !fileExists(script) {
+		// Skills hidden from git live in the main checkout only.
+		if common, err := c.git("rev-parse", "--path-format=absolute", "--git-common-dir"); err == nil {
+			if alt := filepath.Join(filepath.Dir(strings.TrimSpace(common)), rel); fileExists(alt) {
+				script = alt
+			}
+		}
+	}
 	cmd := exec.CommandContext(ctx, "bash", script, "--route", target)
 	cmd.Dir = strings.TrimSpace(root)
 	var stderr strings.Builder
@@ -282,6 +297,9 @@ func runJob(ctx context.Context, c *call) error {
 func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, string, error) {
 	k, ids := req.kind, slices.Clone(req.ids)
 	fail := func(err error) (runs.Record, string, string, error) { return runs.Record{}, "", "", err }
+	if err := c.mayStart(); err != nil {
+		return fail(err)
+	}
 	switch {
 	case k.ticket && len(ids) != 1:
 		return fail(usagef("job %s: want one ticket id", k.name))
@@ -313,6 +331,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	dropWhy := oneLineText(req.dropWhy)
 	if req.drop != "" && dropWhy == "" {
 		return fail(usagef("job review: --drop-file is empty: say why the findings dropped"))
+	}
+	if ticketID != "" {
+		if err := c.jobFits(ctx, k, ticketID); err != nil {
+			return fail(err)
+		}
 	}
 
 	m, why := k.model, ""
@@ -398,6 +421,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
 		Command: withEnv(cmd),
 	}
+	if k.ids {
+		rec.Tickets = ids
+	}
 	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
 	if err != nil {
 		return fail(err)
@@ -409,6 +435,102 @@ var (
 	shaPattern  = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
 	dropPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$`)
 )
+
+// jobStatuses are the statuses a job's ticket may be in: a job on any
+// other only refuses once its session starts, after it spent the start.
+var jobStatuses = map[string][]ticket.Status{
+	"build":  {ticket.StatusTodo, ticket.StatusInProgress},
+	"review": {ticket.StatusInReview},
+	"qa":     {ticket.StatusInReview},
+	"live":   {ticket.StatusTodo, ticket.StatusInProgress},
+	"design": {ticket.StatusTodo, ticket.StatusInProgress},
+}
+
+// jobFits refuses a job on a ticket in a status it can't work, and a
+// second run of one job on one ticket while the first goes: of two bots
+// handed the same job, one runs it.
+func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
+	if want, ok := jobStatuses[k.name]; ok {
+		t, err := c.ticketForJob(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(want, t.Status) {
+			return fmt.Errorf("%w: job %s: %s is %s, not %s: nothing to do", ticket.ErrStatusConflict, k.name, id, t.Status, joinStatuses(want))
+		}
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	list, _ := runs.List(dir, time.Now(), false)
+	for _, r := range list {
+		if !r.Ended() && r.Ticket == id && r.Job == k.name {
+			return fmt.Errorf("%w: job %s: run %s, %s's, already works on %s", ticket.ErrClaimed, k.name, r.ID, r.Launcher, id)
+		}
+	}
+	return nil
+}
+
+func joinStatuses(st []ticket.Status) string {
+	s := make([]string, len(st))
+	for i, x := range st {
+		s[i] = string(x)
+	}
+	return strings.Join(s, " or ")
+}
+
+// mayStart refuses a new run while maestro/STOP sits next to the store,
+// or while a usage limit pickup saw holds: such a run only stops, or fails
+// again, and spends a start.
+func (c *call) mayStart() error {
+	store, _, err := c.storePath()
+	if err != nil {
+		return err
+	}
+	if fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)) {
+		return fmt.Errorf("%w: maestro/STOP is set: start no run", ticket.ErrStopped)
+	}
+	if p, ok := readPause(filepath.Dir(store), time.Now()); ok {
+		return fmt.Errorf("%w: %s, until %s: start no run until then", ticket.ErrPaused, p.Why, p.Until.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// A pause is a usage limit pickup saw: no job starts until it lifts, on
+// any bot, since the plan's limit is the whole team's.
+type pause struct {
+	Until time.Time `json:"until"`
+	Why   string    `json:"why"`
+}
+
+func pausePath(dir string) string { return filepath.Join(dir, "paused.json") }
+
+// readPause reads the pause next to the store, if one holds now.
+func readPause(dir string, now time.Time) (pause, bool) {
+	b, err := os.ReadFile(pausePath(dir))
+	if err != nil {
+		return pause{}, false
+	}
+	var p pause
+	if json.Unmarshal(b, &p) != nil || !now.Before(p.Until) {
+		return pause{}, false
+	}
+	return p, true
+}
+
+// setPause records a pause until the later of its time and any pause
+// already set, written whole so a reader never sees half of one.
+func setPause(dir string, p pause, now time.Time) {
+	if old, ok := readPause(dir, now); ok && old.Until.After(p.Until) {
+		return
+	}
+	b, _ := json.Marshal(p)
+	tmp := pausePath(dir) + ".tmp" + newSessionID()[:8]
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, pausePath(dir))
+	}
+}
 
 // ticketForJob reads the ticket a job names, so a typo fails here and not
 // in a session that already spent its start.
@@ -465,6 +587,14 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 // diedText is what a run that died is resumed with.
 const diedText = "Your run died. Go on from your last step."
 
+// escalateText is what a build session that ended on a question, with
+// no Escalation: posted, is resumed with, so the planner can answer it.
+const escalateText = "You stopped on a question. Post it on the ticket as an Escalation:, as maestro-working-principles says for a block, move the ticket to blocked, release it, and stop."
+
+// decideText is what a planner session that stopped on a question is
+// resumed with: it picks what is the planner's, and sends up the rest.
+const decideText = "Make each call you stopped on that is the planner's yourself, naming your pick, and finish. Put each call that is the chief of staff's on a line of its own: up: <the card in the team rules' shape, on one line, its fields split by |>."
+
 // opusText is what a junior build's stuck session is resumed with, once
 // it moves to Opus in the senior engineer's place.
 const opusText = "You are now on Opus, in the senior engineer's place. Settle your question yourself if the ticket and the repo settle it, and go on. If they don't, send it up as your skill says."
@@ -475,6 +605,8 @@ const opusText = "You are now on Opus, in the senior engineer's place. Settle yo
 func runResume(ctx context.Context, c *call) error {
 	died := c.fs.Bool("died", false, "the run died: resume it once with \""+diedText+"\"")
 	opus := c.fs.Bool("opus", false, "resume on Opus at high effort, as for a junior build's stuck session")
+	escalate := c.fs.Bool("escalate", false, "resume a build that ended on a question with \""+escalateText+"\"")
+	decide := c.fs.Bool("decide", false, "resume a planner session that stopped on a question: it decides, or sends calls up")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -517,21 +649,26 @@ func runResume(ctx context.Context, c *call) error {
 	if session == "" {
 		return fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID)
 	}
-	if *died {
-		list, err := runs.List(dir, now, true)
-		if err != nil {
-			return err
+	all, err := runs.List(dir, now, true)
+	if err != nil {
+		return err
+	}
+	for _, o := range all {
+		if o.ResumeOf == r.ID {
+			return fmt.Errorf("%w: resume: run %s was resumed already, as %s: act on that run's result", ticket.ErrStatusConflict, r.ID, o.ID)
 		}
-		for _, o := range list {
-			if o.AfterDeath && flagValue(o.Command, "--resume") == session {
-				return fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, o.ID)
-			}
+		if *died && o.AfterDeath && flagValue(o.Command, "--resume") == session {
+			return fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, o.ID)
 		}
 	}
 	text := ""
 	switch {
 	case *died:
 		text = diedText
+	case *escalate:
+		text = escalateText
+	case *decide:
+		text = decideText
 	default:
 		b, err := c.readStdin()
 		if err != nil {
@@ -550,10 +687,15 @@ func runResume(ctx context.Context, c *call) error {
 		Ticket: r.Ticket, Limit: r.Limit, Job: r.Job, Command: cmd,
 		ResumeOf: r.ID, AfterDeath: *died,
 	}
+	if err := c.mayStart(); err != nil {
+		return err
+	}
 	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings)
 	if err != nil {
 		return err
 	}
+	// Its result is acted on: pickup stops showing it, and its rings stop.
+	runs.Ack(dir, r.ID, c.actor, time.Now())
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)
 }
 
@@ -575,8 +717,15 @@ func flagValue(cmd []string, flag string) string {
 // with opus the model and effort become Opus at high.
 func resumeCommand(cmd []string, session string, opus bool) []string {
 	out := []string{}
+	exe, exeErr := os.Executable()
 	for i := 0; i < len(cmd); i++ {
 		w := cmd[i]
+		// The slot wrapper runs this binary as it is now, not the path the
+		// run started from, which an upgrade may have moved.
+		if exeErr == nil && i+1 < len(cmd) && cmd[i+1] == "slot" && filepath.Base(w) == filepath.Base(exe) {
+			out = append(out, exe)
+			continue
+		}
 		name, _, eq := strings.Cut(w, "=")
 		switch {
 		case w == "--session-id" || w == "--resume" || (opus && (w == "--model" || w == "--effort")):

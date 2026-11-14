@@ -62,6 +62,9 @@ type Record struct {
 	// qa, ...), which pickup reads to say what the result means; empty for
 	// a plain launch.
 	Job string `json:"job,omitempty"`
+	// Tickets are the tickets a job names beyond Ticket, as a judge run
+	// names every ticket it judges, so look counts them busy meanwhile.
+	Tickets []string `json:"tickets,omitempty"`
 	// ResumeOf is the run whose session this one resumed; AfterDeath marks
 	// the one resume a session gets after its run died.
 	ResumeOf   string     `json:"resume_of,omitempty"`

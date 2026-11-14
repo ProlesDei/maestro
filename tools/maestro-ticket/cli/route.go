@@ -3,7 +3,10 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -219,11 +222,32 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	if out.First == "" {
 		out.First = headLine(r.Error)
 	}
+	if out.First == "" && r.Exit != nil {
+		out.First = fmt.Sprintf("exit %d, no reply", *r.Exit)
+	}
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
 	id := r.Ticket
+	// A judge run that gave no answer frees its rows for the next look.
+	if r.Job == "judge" && out.Outcome != outDone {
+		if dir, err := c.besideStore("handouts"); err == nil {
+			for _, tk := range r.Tickets {
+				os.Remove(handoutPath(dir, tk, "judge"))
+			}
+		}
+	}
 
 	switch out.Outcome {
 	case outUsageLimit:
+		// The limit is the team's plan's: no bot starts a run until it
+		// lifts. A reset pickup can't read waits an hour.
+		until := time.Now().Add(time.Hour)
+		if t, err := time.Parse(time.RFC3339, out.Reset); err == nil && t.After(time.Now()) {
+			until = t
+		}
+		if store, _, err := c.storePath(); err == nil {
+			setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now())
+			out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
+		}
 		planner(strings.TrimSpace("usage_limit " + id + " " + resetSuffix(out.Reset)))
 		return out, nil
 	case outDiskFull:
@@ -240,10 +264,18 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		out.Reply = r.Reply + joinNL(r.Error)
 	}
 	if textJobs[r.Job] {
-		out.Reply = r.Reply
-		if r.Job == "judge" {
-			out.Send = append(out.Send, judgeSends(r.Reply)...)
-			out.Reply = ""
+		switch r.Job {
+		case "judge":
+			out.Send = append(out.Send, judgeSends(r.Reply, "")...)
+		case "plan", "rule", "finish":
+			// The planner reads none of it: owner's calls go up as cards
+			// that name the run, and a question gets the session to decide.
+			out.Send = append(out.Send, judgeSends(r.Reply, r.Job+" "+r.ID+": ")...)
+			if out.Outcome == outQuestion {
+				out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --decide")
+			}
+		default: // cos, qa-ask: the asker reads the answer
+			out.Reply = r.Reply
 		}
 		return out, nil
 	}
@@ -292,11 +324,16 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	case "review":
 		switch {
 		case out.Outcome == outTimedOut:
+			if h, ok := latestWith(d, "Handoff:"); !ok || !c.timedOutBefore(r, h.CreatedAt) {
+				// Once at a head: again, with twice the time.
+				out.Do = append(out.Do, fmt.Sprintf("maestro-ticket job review %s --limit %s", id, short(min(2*r.LimitDuration(), 4*time.Hour))))
+				return out, nil
+			}
 			return c.reviewTimedOut(ctx, s, r, d, out)
 		case fullModelText.MatchString(out.First):
 			out.Do = append(out.Do, "maestro-ticket job review "+id+" --full")
 		case t.Status == ticket.StatusInReview && strings.HasPrefix(last.Body, "Review: GO"):
-			out.Send = append(out.Send, send{"qa-lead", "qa " + id + " at " + shaIn(last.Body)})
+			out.Send = append(out.Send, send{"qa-lead", "qa " + id})
 		case t.Status == ticket.StatusInProgress && strings.HasPrefix(last.Body, "Kickback:"):
 			next, err := kickbackRoute(ctx, s, t)
 			if err != nil {
@@ -314,7 +351,14 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	case "qa", "live":
 		switch {
 		case out.Outcome == outTimedOut:
-			planner("timed_out " + id)
+			gate, _ := latestWith(d, "Review: GO")
+			if !c.timedOutBefore(r, gate.CreatedAt) {
+				out.Do = append(out.Do, fmt.Sprintf("maestro-ticket job %s %s --limit %s", r.Job, id, short(min(2*r.LimitDuration(), 4*time.Hour))))
+				return out, nil
+			}
+			return c.qaTimedOut(ctx, s, r, d, out)
+		case r.Job == "live" && t.Status == ticket.StatusBacklog && strings.HasPrefix(last.Body, "Hold: set by qa-lead: live run failed"):
+			planner("live fail " + id)
 		case t.Status == ticket.StatusDone:
 			done, err := goalDone(ctx, s, t.Goal)
 			if err != nil {
@@ -355,6 +399,20 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out routed) (routed, error) {
 	t, id, last := d.Ticket, d.ID.String(), latest(d)
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
+	// up hands a block to the planner. The session stopped and won't go
+	// on, so its claim goes too: else the judge waits out the lease.
+	up := func(line string) error {
+		planner(line)
+		cl := t.LiveClaim()
+		if cl == nil || ticket.HolderBot(cl.Holder) != ticket.HolderBot(r.Launcher) {
+			return nil
+		}
+		if _, err := s.Release(ctx, ticket.ReleaseRequest{ID: t.ID, Holder: cl.Holder, Token: cl.Token, Actor: c.actor, IdempotencyKey: r.ID + "-release"}); err != nil {
+			return err
+		}
+		out.Wrote = append(out.Wrote, "released "+id+" for the planner")
+		return nil
+	}
 	escalated := t.Status == ticket.StatusBlocked && strings.HasPrefix(last.Body, "Escalation:")
 	outside := strings.Contains(firstLine(last.Body), "outside step:")
 	switch {
@@ -373,8 +431,13 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		// The junior's session holds the ticket; on Opus it settles the
 		// question itself or sends it up (owner's ruling, Nov 14 2026).
 		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --opus")
-	case escalated || out.Outcome == outQuestion:
-		planner("block " + id + ": " + firstLine(last.Body))
+	case escalated:
+		if err := up("block " + id + ": " + firstLine(last.Body)); err != nil {
+			return out, err
+		}
+	case out.Outcome == outQuestion:
+		// Asked, but posted nothing: the session writes it on the ticket.
+		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --escalate")
 	case out.Outcome == outRefused:
 		planner("refused " + id + ": " + out.First)
 	default:
@@ -436,6 +499,49 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	return out, nil
 }
 
+// timedOutBefore reports whether another run of r's job on its ticket ran
+// out of time since since: a second timeout at one head goes up.
+func (c *call) timedOutBefore(r runs.Record, since time.Time) bool {
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return false
+	}
+	list, _ := runs.List(dir, time.Now(), true)
+	for _, o := range list {
+		if o.ID != r.ID && o.Ticket == r.Ticket && o.Job == r.Job && o.State == runs.TimedOut && o.StartedAt.After(since) {
+			return true
+		}
+	}
+	return false
+}
+
+// qaTimedOut blocks a ticket whose QA ran out of time twice at one GO,
+// with an Escalation the planner answers, unless a verdict landed.
+func (c *call) qaTimedOut(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out routed) (routed, error) {
+	t, id := d.Ticket, d.ID.String()
+	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
+	gate, ok := latestWith(d, "Review: GO")
+	if t.Status != ticket.StatusInReview || t.LiveClaim() != nil || !ok {
+		planner("timed_out " + id)
+		return out, nil
+	}
+	sha := shaIn(gate.Body)
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{
+		ID: t.ID, From: ticket.StatusInReview, To: ticket.StatusBlocked, Actor: c.actor,
+		Note: "QA ran past its limit twice", IdempotencyKey: r.ID + "-timeout-move",
+	}); err != nil {
+		return out, err
+	}
+	body := fmt.Sprintf("Escalation: QA at %s: ran past %s twice: a hung app or a test too big for one run?\nReturn-role: qa-lead", sha, r.Limit)
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-timeout-note"}); err != nil {
+		return out, err
+	}
+	out.Status = string(ticket.StatusBlocked)
+	out.Wrote = append(out.Wrote, id+" blocked: QA ran past "+r.Limit+" twice")
+	planner("block " + id + ": QA ran past " + r.Limit + " twice")
+	return out, nil
+}
+
 // designReady: the designer's session handed a design up as the
 // owner's card, and no answer or Sent up came after it.
 func designReady(d ticket.Detail) bool {
@@ -467,9 +573,10 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, ou
 	return nil
 }
 
-// judgeSends reads a judge reply's send and up lines; an up line goes to
-// the chief of staff.
-func judgeSends(reply string) []send {
+// judgeSends reads a reply's send and up lines; an up line goes to the
+// chief of staff, after tag, which names the run a planning card came
+// from so the answer can resume it.
+func judgeSends(reply, tag string) []send {
 	out := []send{}
 	for _, l := range strings.Split(reply, "\n") {
 		l = strings.TrimSpace(l)
@@ -479,7 +586,7 @@ func judgeSends(reply string) []send {
 			}
 		}
 		if rest, ok := strings.CutPrefix(l, "up: "); ok {
-			out = append(out, send{"chief-of-staff", rest})
+			out = append(out, send{"chief-of-staff", tag + rest})
 		}
 	}
 	return out
@@ -585,11 +692,20 @@ func (c *call) fileFollowUps(ctx context.Context, s ticket.Store, r runs.Record,
 		if area != "general" {
 			areas = []string{area}
 		}
-		t, err := s.Create(ctx, ticket.CreateRequest{
+		// No goal: it is no part of one, and would keep its goal from
+		// ever reading done. Keyed by area and day, and made by the store's
+		// own actor so every bot's request is the same: pickups at once
+		// make one. A key whose ticket closed since makes a new one.
+		req := ticket.CreateRequest{
 			Title: title, Status: ticket.StatusBacklog, Parked: ticket.ParkedDeferred, Role: ticket.RoleEngineer,
-			Areas: areas, Goal: d.Goal, Actor: c.actor, IdempotencyKey: r.ID + "-followups-ticket",
+			Areas: areas, Actor: ticket.SystemActor, IdempotencyKey: "followups:" + area + ":" + time.Now().UTC().Format("2006-01-02"),
 			Body: "Collects problems review and QA found in " + area + " outside their tickets. Plan it before it is built: it is never moved to todo as it is.",
-		})
+		}
+		t, err := s.Create(ctx, req)
+		if err == nil && t.Status.Terminal() || errors.Is(err, ticket.ErrIdempotencyConflict) {
+			req.IdempotencyKey = r.ID + "-followups-ticket"
+			t, err = s.Create(ctx, req)
+		}
 		if err != nil {
 			return err
 		}

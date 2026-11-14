@@ -36,8 +36,9 @@ func recordHandouts(dir string, sends []send) {
 	}
 	os.MkdirAll(dir, 0o755)
 	for _, s := range sends {
+		// A line to the planner is a report, not a job it was handed.
 		id := ticketInLine.FindString(s.Line)
-		if id == "" || !runs.BotPattern.MatchString(s.Bot) {
+		if id == "" || !runs.BotPattern.MatchString(s.Bot) || s.Bot == "planner" {
 			continue
 		}
 		p := handoutPath(dir, id, s.Bot)
@@ -48,10 +49,44 @@ func recordHandouts(dir string, sends []send) {
 	}
 }
 
-// handedOut reports whether bot was sent a job on the ticket within d.
-func handedOut(dir, id, bot string, d time.Duration, now time.Time) bool {
-	fi, err := os.Stat(handoutPath(dir, id, bot))
-	return err == nil && now.Sub(fi.ModTime()) < d
+// claimHandout takes a ticket's handout to bot for this look, unless one
+// stands from within d: the file is made with O_EXCL, so of two looks at
+// once only one takes it. A stale one is moved aside first, and of two
+// looks that both find it stale, one still wins the create. body is what
+// the file holds.
+func claimHandout(dir, id, bot, body string, d time.Duration, now time.Time) bool {
+	os.MkdirAll(dir, 0o755)
+	p := handoutPath(dir, id, bot)
+	for range 2 {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.WriteString(body + "\n")
+			f.Close()
+			return true
+		}
+		fi, serr := os.Stat(p)
+		if serr == nil && now.Sub(fi.ModTime()) < d {
+			return false
+		}
+		os.Rename(p, p+".stale"+newSessionID()[:8])
+	}
+	return false
+}
+
+// judgeWindow is how long a judged row stays judged while the ticket
+// doesn't change: a "leave it" writes nothing, and what lifts a hold
+// often lies on another ticket.
+const judgeWindow = 6 * time.Hour
+
+// judged reports whether the judge took this row, in this state, lately.
+func judged(dir, id, fp string, now time.Time) bool {
+	p := handoutPath(dir, id, "judge")
+	b, err := os.ReadFile(p)
+	if err != nil || strings.TrimSpace(string(b)) != fp {
+		return false
+	}
+	fi, err := os.Stat(p)
+	return err == nil && now.Sub(fi.ModTime()) < judgeWindow
 }
 
 // pruneHandouts drops records over a day old.
@@ -73,12 +108,14 @@ type judgeRow struct {
 	ID    string `json:"id"`
 	Row   string `json:"row"`
 	Facts string `json:"facts"`
+	fp    string // the ticket's state as judged
 }
 
 func (j judgeRow) String() string { return "judge: " + j.ID + " " + j.Row + ": " + j.Facts }
 
 type lookOut struct {
 	Stopped bool       `json:"stopped"`
+	Paused  string     `json:"paused,omitempty"`
 	Alerts  []string   `json:"alerts"`
 	Wrote   []string   `json:"wrote"`
 	Started []string   `json:"started"`
@@ -91,7 +128,7 @@ type lookOut struct {
 }
 
 func (o lookOut) quiet() bool {
-	return len(o.Alerts)+len(o.Wrote)+len(o.Started)+len(o.Send)+len(o.Judge)+len(o.Errors) == 0 && o.Judged == "" && !o.Stopped
+	return len(o.Alerts)+len(o.Wrote)+len(o.Started)+len(o.Send)+len(o.Judge)+len(o.Errors) == 0 && o.Judged == "" && !o.Stopped && o.Paused == ""
 }
 
 // lookPrefixes are the note starts the planner's rows turn on; look reads
@@ -139,19 +176,22 @@ func runLook(ctx context.Context, c *call) error {
 	}
 	rdir := filepath.Join(filepath.Dir(hdir), "runs")
 	var out lookOut
+	paused := ""
+	if p, ok := readPause(filepath.Dir(store), time.Now()); ok {
+		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
+	}
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
-		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report,
+		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
 			stopped: fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)), handouts: hdir, runs: rdir})
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	if *judge && len(out.Judge) > 0 && !out.Stopped {
+	if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
 		c.startJudge(ctx, &out, rules, hdir)
 	}
-	recordHandouts(hdir, out.Send)
 	pruneHandouts(hdir, time.Now())
 	if err := c.out(out, func(w io.Writer) { printLook(w, out) }); err != nil {
 		return err
@@ -170,18 +210,31 @@ func fileExists(p string) bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
-// startJudge starts one judge session on every judge row, and keeps each
-// as handed out, so the next look doesn't judge it again while it runs.
+// maxJudgeRows is how many rows one judge session takes; the rest wait
+// for the next look, so a prompt and its reply stay small.
+const maxJudgeRows = 20
+
+// startJudge starts one judge session on the judge rows it can claim,
+// each kept as judged in its state, so neither the next look nor one
+// running beside this one judges it again.
 func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string) {
 	k, _ := findJob("judge")
 	ids, rows := []string{}, []string{"Rows:"}
 	seen := map[string]bool{}
+	now := time.Now()
 	for _, j := range out.Judge {
+		if len(rows) > maxJudgeRows || !claimJudge(hdir, j.ID, j.fp, now) {
+			continue
+		}
 		if !seen[j.ID] {
 			ids = append(ids, j.ID)
 			seen[j.ID] = true
 		}
 		rows = append(rows, j.String())
+	}
+	if len(ids) == 0 {
+		out.Judge = nil
+		return
 	}
 	if rules == "" {
 		rules = "none"
@@ -189,15 +242,35 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	text := strings.Join(rows, "\n") + "\nStanding rules:\n" + rules
 	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
 	if err != nil {
+		for _, id := range ids {
+			os.Remove(handoutPath(hdir, id, "judge"))
+		}
 		out.Errors = append(out.Errors, "judge: "+err.Error())
 		return
 	}
-	out.Judged = r.ID
-	sends := []send{}
-	for _, id := range ids {
-		sends = append(sends, send{"judge", id})
+	out.Judged = fmt.Sprintf("%s on %d rows", r.ID, len(rows)-1)
+	out.Judge = nil // the session reads them; the bot needn't
+}
+
+// claimJudge takes a row for this look's judge, unless the judge took the
+// ticket in this state within judgeWindow; as claimHandout does, of two
+// looks at once only one takes it.
+func claimJudge(dir, id, fp string, now time.Time) bool {
+	os.MkdirAll(dir, 0o755)
+	p := handoutPath(dir, id, "judge")
+	for range 2 {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.WriteString(fp + "\n")
+			f.Close()
+			return true
+		}
+		if judged(dir, id, fp, now) {
+			return false
+		}
+		os.Rename(p, p+".stale"+newSessionID()[:8])
 	}
-	recordHandouts(hdir, sends)
+	return false
 }
 
 type lookOpts struct {
@@ -205,6 +278,7 @@ type lookOpts struct {
 	stall    time.Duration
 	report   bool
 	stopped  bool
+	paused   string // a usage limit pickup saw: why, and until when
 	handouts string
 	runs     string
 }
@@ -214,7 +288,10 @@ type lookOpts struct {
 // rest become judge rows. A ticket with a live claim or run is busy.
 func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, error) {
 	now := c.now()
-	out := lookOut{Stopped: o.stopped, Alerts: []string{}, Wrote: []string{}, Started: []string{}, Send: []send{}, Judge: []judgeRow{}, Errors: []string{}}
+	// Stopped or paused, look still frees what dead runs hold and counts
+	// the board, but hands out, starts and sends nothing.
+	idle := o.stopped || o.paused != ""
+	out := lookOut{Stopped: o.stopped, Paused: o.paused, Alerts: []string{}, Wrote: []string{}, Started: []string{}, Send: []send{}, Judge: []judgeRow{}, Errors: []string{}}
 	keep := func(err error) {
 		if err != nil {
 			out.Errors = append(out.Errors, err.Error())
@@ -225,11 +302,12 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		keep(e)
 	}
 	out.Alerts = alertLines(rep, now)
-	for _, d := range rep.Died {
-		out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("died: run %d, %s on %s, never gave a result", d.ID, d.Actor, ticketOrNone(d.Ticket))})
-	}
+	// A died run's bot learns of it through pickup, which resumes it; a
+	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
-		out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
+		if !idle {
+			out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
+		}
 	}
 
 	open, err := s.List(ctx, ticket.ListFilter{Statuses: openStatuses})
@@ -264,6 +342,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if !r.Ended() && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
+			if !r.Ended() {
+				for _, tk := range r.Tickets { // a judge run's
+					liveRun[tk] = true
+				}
+			}
 		}
 	}
 	// What goals still have work moving, for "the goal needs it next".
@@ -282,7 +365,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	n := struct{ busy, build, review, blocked, sentUp, todo, ready, backlog, waiting int }{}
 	var stuck, held, sentUp []string
 	hand := func(bot, line string, id ticket.ID) {
-		if o.stopped || handedOut(o.handouts, id.String(), bot, o.stall, now) {
+		if idle || !claimHandout(o.handouts, id.String(), bot, line, o.stall, now) {
 			return
 		}
 		out.Send = append(out.Send, send{bot, line})
@@ -290,20 +373,26 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// build hands a build out while a work slot is free; one handed out
 	// lately still holds its slot on its way to a claim.
 	build := func(bot string, id ticket.ID) {
-		if o.stopped || free == 0 {
+		if idle || free == 0 {
 			return
 		}
-		free--
+		free-- // a build on its way to a claim holds its slot too
 		hand(bot, "build "+id.String(), id)
 	}
-	judgeIt := func(id ticket.ID, row, facts string) {
-		if o.stopped || handedOut(o.handouts, id.String(), "judge", o.stall, now) {
+	// judgeIt sends a row to the judge, unless it judged the ticket in
+	// this state lately: fp names the state.
+	judgeIt := func(t ticket.Ticket, row, facts, fp string) {
+		if idle {
 			return
 		}
-		out.Judge = append(out.Judge, judgeRow{id.String(), row, facts})
+		fp = fmt.Sprintf("%s v%d %d %s", row, t.Version, t.UpdatedAt.UnixMilli(), fp)
+		if judged(o.handouts, t.ID.String(), fp, now) {
+			return
+		}
+		out.Judge = append(out.Judge, judgeRow{t.ID.String(), row, facts, fp})
 	}
 	start := func(kind string, id ticket.ID, text string) {
-		if o.stopped || handedOut(o.handouts, id.String(), "planner", o.stall, now) {
+		if idle || !claimHandout(o.handouts, id.String(), "planner-job", kind, o.stall, now) {
 			return
 		}
 		k, _ := findJob(kind)
@@ -319,7 +408,6 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			return
 		}
 		out.Started = append(out.Started, fmt.Sprintf("%s %s %s", r.ID, kind, id))
-		recordHandouts(o.handouts, []send{{"planner", id.String()}})
 	}
 	detail := func(id ticket.ID) (ticket.Detail, bool) {
 		d, err := s.Get(ctx, id)
@@ -350,7 +438,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		case ticket.RoleQALead:
 			hand("qa-lead", "live "+t.ID.String(), t.ID)
 		default:
-			judgeIt(t.ID, "blocked", "a "+string(t.Status)+" ticket for role "+t.Role+": who takes it?")
+			judgeIt(t, "blocked", "a "+string(t.Status)+" ticket for role "+t.Role+": who takes it?", "")
 		}
 		return true
 	}
@@ -390,7 +478,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				if e, ok := latestWith(d, "Escalation:"); ok && strings.HasPrefix(e.Body, "Escalation: QA") {
 					hand("qa-lead", "qa "+id.String(), id)
 				} else {
-					judgeIt(id, "blocked", "answered, back to review: "+firstLine(latest(d).Body))
+					judgeIt(t, "rerun", "answered, back in review: "+firstLine(latest(d).Body), fmt.Sprint(latest(d).ID))
 				}
 			default:
 				d, ok := detail(id)
@@ -398,7 +486,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					continue
 				}
 				if answerAfterKickback(d) {
-					judgeIt(id, "blocked", "back to review after a ruling: "+firstLine(latest(d).Body))
+					judgeIt(t, "rerun", "back in review after a ruling: "+firstLine(latest(d).Body), fmt.Sprint(latest(d).ID))
 				} else {
 					hand("reviewer", "review "+id.String(), id)
 				}
@@ -416,7 +504,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				case t.Tries == 2:
 					start("plan", id, id.String())
 				default:
-					c.sendUpTries(ctx, s, t, &out, keep, o.stopped)
+					c.sendUpTries(ctx, s, t, &out, keep, idle)
 				}
 				continue
 			}
@@ -425,7 +513,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				continue
 			}
 			if t.LeaseExpiries >= 2 && p != "Escalation:" {
-				judgeIt(id, "blocked", fmt.Sprintf("its runs died or hung %d times: find the cause before it runs again", t.LeaseExpiries))
+				judgeIt(t, "blocked", fmt.Sprintf("its runs died or hung %d times: find the cause before it runs again", t.LeaseExpiries), "")
 				continue
 			}
 			if !byRole(t) {
@@ -443,7 +531,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			if designReady(d) {
 				// The owner's card on a design: up, not stuck.
-				if !o.stopped {
+				if !idle {
 					var rt routed
 					if err := c.designUp(ctx, s, d, &rt); err != nil {
 						keep(err)
@@ -465,7 +553,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if first == "" {
 				first = "no Escalation: note; latest " + quoteFirst(latest(d).Body)
 			}
-			judgeIt(id, "blocked", first)
+			judgeIt(t, "blocked", first, fmt.Sprint(latest(d).ID))
 		case ticket.StatusTodo:
 			n.todo++
 			if !readyTodo[id] {
@@ -486,7 +574,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			case ticket.ParkedPlanning:
 				if stale, err := planStopped(ctx, s, id, now); err != nil {
 					keep(err)
-				} else if stale && !o.stopped {
+				} else if stale && !idle {
 					if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: id, From: ticket.StatusBacklog, To: ticket.StatusTodo,
 						ExpectVersion: t.Version, Actor: c.actor, Note: "look: its plan stopped"}); err != nil {
 						keep(fmt.Errorf("requeue %s: %w", id, err))
@@ -496,22 +584,29 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				}
 			case ticket.ParkedHold:
 				held = append(held, id.String())
-				judgeIt(id, "hold", "held; is what lifts it true?")
+				if strings.HasPrefix(t.Title, "Live run:") {
+					// A failed live run waits for its fixes: plan them.
+					if d, ok := detail(id); ok && strings.HasPrefix(latest(d).Body, "Hold: set by qa-lead: live run failed") {
+						start("plan", id, "fix "+id.String())
+						continue
+					}
+				}
+				judgeIt(t, "hold", "held; is what lifts it true?", "")
 			case ticket.ParkedUnready, ticket.ParkedDeferred:
 				if strings.HasPrefix(t.Title, "Follow-ups: ") {
 					if d, ok := detail(id); ok && urgentText.MatchString(latest(d).Body) && !strings.HasPrefix(latest(d).Body, "Taken:") {
-						judgeIt(id, "urgent", "a follow-up marked urgent: "+trim(firstLine(latest(d).Body), 100))
+						judgeIt(t, "urgent", "a follow-up marked urgent: "+trim(firstLine(latest(d).Body), 100), fmt.Sprint(latest(d).ID))
 						continue
 					}
 				}
 				if t.Goal != "" && !moving[t.Goal] {
-					judgeIt(id, string(t.Parked), "goal "+t.Goal+" has nothing else in todo, build or review")
+					judgeIt(t, string(t.Parked), "goal "+t.Goal+" has nothing else in todo, build or review", "")
 				}
 			}
 		}
 	}
 	if len(trouble) >= 3 {
-		judgeIt(mustID(trouble[0]), "cause", strings.Join(trouble, " ")+" are blocked or sent back: one cause?")
+		judgeIt(ticket.Ticket{ID: mustID(trouble[0])}, "cause", capped(trouble)+" are blocked or sent back: one cause?", strings.Join(trouble, " "))
 	}
 	out.Counts = fmt.Sprintf("open %d; building %d/%d; review %d; blocked %d (sent up %d); todo %d (ready %d); backlog %d; busy %d; waiting on deps or areas %d",
 		len(open), going, o.limit, n.review, n.blocked, n.sentUp, n.todo, n.ready, n.backlog, n.busy, n.waiting)
@@ -519,7 +614,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		rows, err := c.goalProgress(ctx, s)
 		keep(err)
 		out.Report = append(out.Report, "progress: "+rows, fmt.Sprintf("runs: %d/%d", going, o.limit),
-			"stuck: "+orNone(stuck), "held: "+orNone(held), "sent up: "+orNone(sentUp))
+			"stuck: "+capped(stuck), "held: "+capped(held), "sent up: "+capped(sentUp))
 	}
 	return out, nil
 }
@@ -651,7 +746,10 @@ func printLook(w io.Writer, o lookOut) {
 		return
 	}
 	if o.Stopped {
-		fmt.Fprintln(w, "stopped: maestro/STOP is set: look hands out, starts and writes nothing")
+		fmt.Fprintln(w, "stopped: maestro/STOP is set: look hands out and starts nothing")
+	}
+	if o.Paused != "" {
+		fmt.Fprintf(w, "paused: %s: look hands out and starts nothing\n", o.Paused)
 	}
 	for _, l := range o.Alerts {
 		fmt.Fprintf(w, "alert: %s\n", l)
@@ -665,11 +763,15 @@ func printLook(w io.Writer, o lookOut) {
 	for _, s := range o.Send {
 		fmt.Fprintln(w, s.String())
 	}
-	for _, j := range o.Judge {
+	for i, j := range o.Judge {
+		if i == maxJudgeRows {
+			fmt.Fprintf(w, "judge: and %d more\n", len(o.Judge)-i)
+			break
+		}
 		fmt.Fprintln(w, j.String())
 	}
 	if o.Judged != "" {
-		fmt.Fprintf(w, "judging: %s, a judge session on the judge rows\n", o.Judged)
+		fmt.Fprintf(w, "judging: %s\n", o.Judged)
 	}
 	for _, e := range o.Errors {
 		fmt.Fprintf(w, "error: %s\n", e)
@@ -685,6 +787,15 @@ func ticketOrNone(id ticket.ID) string {
 		return "no ticket"
 	}
 	return id.String()
+}
+
+// capped names up to 10, then how many more, so a line stays short on a
+// board of hundreds.
+func capped(xs []string) string {
+	if len(xs) > 10 {
+		return strings.Join(xs[:10], "; ") + fmt.Sprintf("; and %d more", len(xs)-10)
+	}
+	return orNone(xs)
 }
 
 func orNone(xs []string) string {

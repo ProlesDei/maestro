@@ -204,6 +204,13 @@ func TestJobTextJobs(t *testing.T) {
 	if got := j.seen(r.ID); got.stdin[0] != "/maestro-chief-of-staff is T-1 ready?" || r.Ticket != "T-1" {
 		t.Fatalf("cos: %q %+v", got.stdin, r)
 	}
+	_, r = j.job("", "live", "T-1")
+	if got := j.seen(r.ID); got.stdin[0] != "/maestro-qa-lead live T-1" {
+		t.Fatalf("live: %q", got.stdin)
+	}
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
 	_, r = j.job("", "qa", "T-1")
 	if got := j.seen(r.ID); got.flag("--model") != "opus" || got.stdin[0] != "/maestro-qa-lead T-1" {
 		t.Fatalf("qa runs on Opus: %q", got.args)
@@ -216,10 +223,7 @@ func TestJobTextJobs(t *testing.T) {
 		t.Fatalf("--slots: %q", r.Command)
 	}
 	j.fails(2, "", "job", "build", "T-1", "--slots", "2")
-	_, r = j.job("", "live", "T-1")
-	if got := j.seen(r.ID); got.stdin[0] != "/maestro-qa-lead live T-1" {
-		t.Fatalf("live: %q", got.stdin)
-	}
+	j.fails(4, "", "job", "live", "T-1") // in review: no live run to do
 	if out := j.fails(2, "", "job", "plan"); !strings.Contains(out, "stdin") {
 		t.Fatalf("plan with no ask: %s", out)
 	}
@@ -230,6 +234,11 @@ func TestJobReview(t *testing.T) {
 	j := newJobHarness(t, "reviewer")
 	j.h.ok(nil, "create", "--title", "a")
 	j.h.ok(nil, "create", "--title", "b")
+	for _, id := range []string{"T-1", "T-2"} {
+		for _, st := range []string{"in_progress", "in_review"} {
+			j.h.ok(nil, "transition", id, "--to", st)
+		}
+	}
 	git := func(args ...string) {
 		c := exec.Command("git", args...)
 		c.Dir = j.h.dir
@@ -264,7 +273,11 @@ esac
 		t.Fatalf("full review with a ruling: %+v %q %s", s, got.stdin, r.Limit)
 	}
 	j.h.ok(nil, "create", "--title", "c")
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-3", "--to", st)
+	}
 	j.fails(3, "", "job", "review", "T-3")
+	j.fails(4, "", "job", "build", "T-3") // in review: no build to do
 	j.fails(2, "", "job", "review", "T-2", "--drop", "F2")
 	j.fails(2, "", "job", "review", "T-2", "--approved", "not a sha")
 }
@@ -284,32 +297,42 @@ func TestResume(t *testing.T) {
 		t.Fatalf("resumed record: %+v (%s)", nr, s.Model)
 	}
 
-	_, or := j.resume("", r.ID, "--opus")
+	if out := j.fails(4, "x", "resume", r.ID); !strings.Contains(out, "resumed already, as "+nr.ID) {
+		t.Fatalf("a run resumed twice: %s", out)
+	}
+	if p := j.pickup(); slices.ContainsFunc(p.Ended, func(x runs.Record) bool { return x.ID == r.ID }) {
+		t.Fatalf("a resumed run is acked: pickup still shows it")
+	}
+
+	_, or := j.resume("", nr.ID, "--opus")
 	got = j.seen(or.ID)
 	if got.flag("--model") != "opus" || got.flag("--effort") != "high" || got.stdin[0] != opusText || strings.Count(strings.Join(got.args, " "), "--model") != 1 {
 		t.Fatalf("--opus: %q %q", got.args, got.stdin)
 	}
 
-	j.fails(4, "", "resume", r.ID, "--died")
-	j.fails(2, "", "resume", r.ID)
+	j.fails(4, "", "resume", or.ID, "--died")
+	j.fails(2, "", "resume", or.ID)
 	dir := filepath.Join(j.h.dir, "runs")
-	dead := r
-	dead.State, dead.Reply, dead.SessionID = runs.Died, "", ""
-	if err := runs.Save(dir, dead); err != nil {
-		t.Fatal(err)
+	die := func(x runs.Record) {
+		x.State, x.Reply, x.SessionID = runs.Died, "", ""
+		if err := runs.Save(dir, x); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_, dr := j.resume("", r.ID, "--died")
+	die(or)
+	_, dr := j.resume("", or.ID, "--died")
 	if got := j.seen(dr.ID); got.flag("--resume") != sid || got.stdin[0] != diedText || !dr.AfterDeath {
 		t.Fatalf("--died takes the session from the command: %q %+v", got.args, dr)
 	}
-	if out := j.fails(4, "", "resume", r.ID, "--died"); !strings.Contains(out, "once") {
+	die(dr)
+	if out := j.fails(4, "", "resume", dr.ID, "--died"); !strings.Contains(out, "once") {
 		t.Fatalf("a second resume after a death: %s", out)
 	}
 
 	other := newJobHarness(t, "senior-engineer")
 	other.h = j.h
 	other.actor = "senior-engineer"
-	other.fails(2, "x", "resume", r.ID)
+	other.fails(2, "x", "resume", dr.ID)
 }
 
 func TestResumeCommand(t *testing.T) {
@@ -339,10 +362,9 @@ func TestResumeCommand(t *testing.T) {
 func TestPickupRoutesAJob(t *testing.T) {
 	j := newJobHarness(t, "junior-engineer")
 	j.h.ok(nil, "create", "--title", "docs", "--tier", "junior")
-	for _, st := range []string{"in_progress", "in_review"} {
-		j.h.ok(nil, "transition", "T-1", "--to", st)
-	}
+	j.h.ok(nil, "transition", "T-1", "--to", "in_progress")
 	_, r := j.job("", "build", "T-1")
+	j.h.ok(nil, "transition", "T-1", "--to", "in_review") // as the session would
 	out, err := j.cmd("", "pickup").Output()
 	if err != nil {
 		t.Fatalf("pickup: %v\n%s", err, out)

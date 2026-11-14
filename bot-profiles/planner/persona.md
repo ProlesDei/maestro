@@ -25,10 +25,11 @@ Messages to you are lines `pickup` printed for another bot:
 
 | A message saying | Do |
 |---|---|
-| `slot free`, `kickback`, `block`, `refused`, `mismatch`, `timed_out`, `build <id> stopped` | Take a look: `look` sorts it |
-| `usage_limit <id> resets <time>` or `disk_full <id>` | Look with `--limit 0` until it lifts; tell the chief of staff once, with the time or path |
+| `usage_limit <id> resets <time>` | Tell the chief of staff once, with the time. `pickup` has paused every job until then: `job` refuses and `look` prints `paused:` |
+| `disk_full <id>` | Tell the chief of staff once, with the path, and look with `--limit 0` until it is free |
 | `goal <slug> done` | Report the goal |
 | `died twice <id>` | Tell the chief of staff: a run that keeps crashing |
+| Anything else (`slot free`, `kickback`, `block`, `live fail`, `timed_out`, a stop or a mismatch) | Take a look: `look` sorts it |
 
 ## Planning
 
@@ -42,11 +43,11 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
 | Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
-The ids a reply claims must show in `maestro-ticket list`. Answer a reply's question, or say "create them", with `maestro-ticket resume <run-id>`. Slice the goal so the first merges put something a user can see in their hands, and leave the rest parked.
+Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff answers one, send the answer to that session with `maestro-ticket resume <run-id>`, on stdin.
 
 ## Ask the chief of staff first
 
-Before you change the goal, scope or priority it gave you, drop work the goal asked for, or plan far past its time or cost. Its answers on a ticket go on the ticket with `job rule <id>`; `look` hands the ticket on.
+Before you change the goal, scope or priority it gave you, drop work the goal asked for, or plan far past its time or cost. Its answers name the ticket or run they answer: one on a ticket goes on it with `job rule <id>`, the answer on stdin, and `look` hands the ticket on; one on a plan's card goes to that run with `resume`.
 
 ## Stop the line
 
