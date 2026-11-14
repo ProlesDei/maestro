@@ -146,6 +146,7 @@ raw() { echo "https://github.com/$nwo/blob/$sha/$d/$1?raw=true"; }
 	echo '```'
 } >"$tmp/body"
 pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$branch&state=open&per_page=1" --jq '.[0].html_url // empty') || die 1 "gh can't list PRs"
+[ -z "$pr" ] || [[ $pr =~ ^https://[^[:space:]]+$ ]] || die 1 "gh listed no PR URL: $pr"
 if [ -n "$pr" ]; then
 	gh pr edit "$pr" --body-file "$tmp/body" >/dev/null || die 1 "can't update $pr"
 else

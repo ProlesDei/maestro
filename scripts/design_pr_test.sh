@@ -170,6 +170,14 @@ grep -qxF "transition T-7 --from in_progress --to blocked --holder $H --token 3 
 	fail "no block: $(grep transition "$FX/log")"
 [ "$(git worktree list | wc -l)" = 1 ] || fail "a worktree was left: $(git worktree list)"
 
+# A PR lookup that answers something other than a URL stops before any
+# PR call or ticket write.
+ticket in_progress "$H"
+echo '[]' >"$FX/open-pr"
+: >"$FX/log"
+if run T-7 "$run_dir" --holder "$H" --token 3; then fail "used a PR lookup that gave no URL"; else rc=$?; [ $rc = 1 ] || fail "exit $rc on a bad PR lookup"; fi
+! grep -qE '^(gh pr|comment|transition)' "$FX/log" || fail "wrote after a bad PR lookup"
+
 # A rework: the owner asked for A. The open PR is updated, not reopened,
 # and the branch moves on with A's shots in place of B's.
 echo https://github.com/o/r/pull/9 >"$FX/open-pr"
