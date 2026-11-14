@@ -67,13 +67,15 @@ Usage: maestro-ticket <command> [flags]
 Commands:
   create      --title T [--body B | --body-file F|-] [--type ship|scout] [--role R] [--priority 0-3]
               [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
-              [--areas path,path] [--split-from T-1] [--goal G] [--parked R (required for backlog)]
+              [--areas path,path] [--split-from T-1] [--goal G] [--tier senior|junior]
+              [--parked R (required for backlog)]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
+              [--tier senior|junior]
               [--split-from T-1 (a cancelled ticket this one replaces)] [--holder H --token N]
   get         <id> [--full]   (default: the newest comment of each kind, every Answer:, and the
               newest Handoff: and all after it in full; the rest as first lines)
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
-              [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G]
+              [--latest-prefix P] [--not-latest-prefix P] [--parked R,...] [--goal G] [--tier T]
               [--bodies]   (ordered by priority, then id; no bodies: get prints one, and
               --bodies with --json each, for a search)
   goals       [--goal G] [--all]   (tickets per goal by status; --all adds goals with none open)
@@ -158,6 +160,8 @@ deferred (cut from the current slice), unready (a criterion can't be
 checked yet) or planning (a planner session is splitting it). A ticket
 that waits on another goes in todo with --deps, never in backlog.
 Goals: --goal tags a ticket with its goal's slug; a split keeps its goal.
+Tiers: --tier says which engineer builds a ticket: junior (routine) or
+senior (the rest); none means senior. A split keeps its tier.
 Exit codes: 0 ok, 1 internal, 2 usage/invalid, 3 not found, 4 conflict or busy, 5 no work
 `
 
@@ -585,6 +589,7 @@ func runCreate(ctx context.Context, c *call) error {
 	splitFrom := c.fs.String("split-from", "", "the ticket this splits or rewrites; the new one keeps its tries and goal")
 	parked := c.fs.String("parked", "", "why a backlog ticket waits: hold, deferred, unready or planning (required for backlog)")
 	goal := c.fs.String("goal", "", "slug of the goal the ticket serves")
+	tier := c.fs.String("tier", "", "which engineer builds it: senior or junior (default: the split's, else none, which means senior)")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -619,7 +624,7 @@ func runCreate(ctx context.Context, c *call) error {
 		t, err := s.Create(ctx, ticket.CreateRequest{
 			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
 			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from,
-			Parked: pk, Goal: strings.TrimSpace(*goal), Actor: c.actor, IdempotencyKey: c.idemKey,
+			Parked: pk, Goal: strings.TrimSpace(*goal), Tier: strings.TrimSpace(*tier), Actor: c.actor, IdempotencyKey: c.idemKey,
 		})
 		if err != nil {
 			return err
@@ -634,6 +639,7 @@ func runUpdate(ctx context.Context, c *call) error {
 	areas := c.fs.String("areas", "", "replace the code areas (comma-separated; \"\" clears them)")
 	parked := c.fs.String("parked", "", "a new reason for a backlog ticket: hold, deferred, unready or planning")
 	goal := c.fs.String("goal", "", "replace the goal slug (\"\" clears it)")
+	tier := c.fs.String("tier", "", "replace the tier: senior or junior (\"\" clears it, which means senior)")
 	splitFrom := c.fs.String("split-from", "", "the cancelled ticket this one replaces: add its tries, take its goal if this has none, and count its runs here")
 	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, required if the ticket is claimed")
 	token := c.fs.Int64("token", 0, "lease token from your claim, required if the ticket is claimed")
@@ -665,6 +671,10 @@ func runUpdate(ctx context.Context, c *call) error {
 			if f.Name == "goal" {
 				g := strings.TrimSpace(*goal)
 				req.Goal = &g
+			}
+			if f.Name == "tier" {
+				t := strings.TrimSpace(*tier)
+				req.Tier = &t
 			}
 		})
 		t, err := s.Update(ctx, req)
@@ -705,6 +715,7 @@ func runList(ctx context.Context, c *call) error {
 	notLatest := c.fs.String("not-latest-prefix", "", "only tickets with no comment, or whose latest comment doesn't start with this")
 	parked := c.fs.String("parked", "", "only tickets parked for one of these comma-separated reasons: in backlog, or blocked from it")
 	goal := c.fs.String("goal", "", "only tickets of this goal")
+	tier := c.fs.String("tier", "", "only tickets of this tier (senior includes tickets with none)")
 	bodies := c.fs.Bool("bodies", false, "with --json, print each ticket's body too, as for a search")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
@@ -716,6 +727,10 @@ func runList(ctx context.Context, c *call) error {
 		f := ticket.ListFilter{Role: *role, Holder: *holder, Ready: *ready, Limit: *limit, Goal: strings.TrimSpace(*goal),
 			LatestPrefix: *latest, NotLatestPrefix: *notLatest}
 		if err := ticket.ValidateGoal(f.Goal); err != nil {
+			return err
+		}
+		f.Tier = strings.TrimSpace(*tier)
+		if err := ticket.ValidateTier(f.Tier); err != nil {
 			return err
 		}
 		var err error
