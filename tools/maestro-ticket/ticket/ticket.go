@@ -400,6 +400,13 @@ func (t Ticket) NextStatuses() []Status {
 		if !back.Valid() || back == StatusBlocked || back.Terminal() {
 			back = StatusTodo
 		}
+		// A designer's scout ticket blocks while the owner looks at the
+		// design; their yes closes it in one move, so no stop part way
+		// leaves it where review or a build would take it. CheckGate
+		// still lets only its owner set it done.
+		if t.Type == TypeScout && t.Role == RoleDesigner {
+			return []Status{back, StatusDone, StatusCancelled}
+		}
 		return []Status{back, StatusCancelled}
 	}
 	return append([]Status(nil), workflows[t.Type][t.Status]...)

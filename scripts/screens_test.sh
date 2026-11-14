@@ -48,7 +48,7 @@ const get = u => new Promise(ok => http.get(u, r => { r.resume(); ok(r.statusCod
   const base = (jobs.find(j => j.url.startsWith("http://127.0.0.1")) || {}).url;
   if (base) {
     const root = base.replace(/(:[0-9]+).*/, "$1");
-    for (const p of ["/p/..%2F..%2Fsecret", "/p/../other/x.html", "/x/a.html", "/o/..%2Fsecret"])
+    for (const p of ["/p/..%2F..%2Fsecret", "/p/../other/x.html", "/x/a.html", "/o/..%2Fsecret", "/p/50%.png", "/p/a.html"])
       fs.appendFileSync(process.env.LOG, "probe " + p + " " + await get(root + p) + "\n");
     fs.writeFileSync(process.env.LOG + ".port", root);
   }
@@ -110,8 +110,10 @@ grep -qxF "job http://127.0.0.1:PORT/p/a.html 1280 dark" "$LOG" || fail "no dark
 grep -qxF "job https://example.test/x 375 light" "$LOG" || fail "a URL wasn't shot as given"
 grep -qxF "job http://127.0.0.1:PORT/o/.sheet-1280-dark.html 1600 light" "$LOG" || fail "no 1600-wide sheet shot"
 for p in "/p/..%2F..%2Fsecret" "/p/../other/x.html" "/x/a.html" "/o/..%2Fsecret"; do
-	grep -qE "^probe $p (404|0)$" "$LOG" || fail "the server answered $p: $(grep "^probe $p " "$LOG")"
+	grep -qE "^probe $p 404$" "$LOG" || fail "the server answered $p: $(grep "^probe $p " "$LOG")"
 done
+grep -qxF "probe /p/50%.png 400" "$LOG" || fail "a bad escape got: $(grep "^probe /p/50" "$LOG")"
+grep -qxF "probe /p/a.html 200" "$LOG" || fail "the server died after a bad escape"
 grep -qE "^t-ok run-code $tmp/o$" "$LOG" || fail "browser commands didn't run from the output folder"
 grep -q "^t-ok close " "$LOG" || fail "the browser wasn't closed"
 root=$(cat "$LOG.port")

@@ -5,8 +5,9 @@
 # Covers bad arguments; each spec gap, refused before any write; a ticket
 # that isn't ours to hand up; the first hand-up (branch, files, [skip ci],
 # draft PR on the main branch the setup names, spec and card comments in
-# order, the block); a rework that updates the PR and swaps the shots;
-# and a rerun that repeats nothing.
+# order, the block) past hooks that fail; a rework that updates the PR
+# and swaps the shots; a rerun that repeats nothing; and a repo with no
+# draft PRs.
 # Run from anywhere: bash scripts/design_pr_test.sh
 set -euo pipefail
 
@@ -28,9 +29,10 @@ cat >"$tmp/bin/gh" <<'EOF'
 set -euo pipefail
 echo "gh $*" >>"$FX/log"
 case "$1 $2" in
-"repo view") echo o/r ;;
+"repo view") echo https://github.com/o/r ;;
 "api repos/{owner}/{repo}/pulls?head={owner}:"*) cat "$FX/open-pr" 2>/dev/null || true ;;
 "pr create")
+	[ ! -f "$FX/no-draft" ] || [[ " $* " != *" --draft "* ]] || { echo "draft pull requests are not supported in this repository" >&2; exit 1; }
 	while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" "$FX/body"; shift; done
 	echo "Creating draft pull request"; echo https://github.com/o/r/pull/9 ;;
 "pr edit")
@@ -64,6 +66,11 @@ mkdir -p .maestro/project
 printf '# Project setup\n\n## Main branch\n\n%s\n' '`trunk`' >.maestro/project/project-setup.md
 echo app >app.txt
 git add -A && git commit -qm init && git push -q origin HEAD:trunk
+# The team's hooks fail here, as hooks that need installed dependencies
+# would in a fresh worktree: the hand-up must not run them.
+printf '#!/bin/sh\necho hook ran >&2\nexit 1\n' >"$(git rev-parse --git-common-dir)/hooks/pre-commit"
+cp "$(git rev-parse --git-common-dir)/hooks/pre-commit" "$(git rev-parse --git-common-dir)/hooks/pre-push"
+chmod +x "$(git rev-parse --git-common-dir)"/hooks/pre-*
 
 ticket() { # <status> <holder> [title] [type]
 	jq -n --arg s "$1" --arg h "$2" --arg t "${3:-Design: pricing page}" --arg y "${4:-scout}" \
@@ -75,6 +82,7 @@ spec() { # writes a good spec to $1/spec.md, picking $2
 Problem: buyers can't compare plans before they sign up.
 Breadboard:
 - Pricing (/pricing): three plans; Start buttons go to /signup?plan=<name>
+\`\`\` a note typed as a fence
 Directions:
 A: three cards in a row, Pro raised.
 B: a table with one row per feature.
@@ -121,8 +129,16 @@ gap "is not one of the directions" 's/^Pick: B/Pick: C/'
 gap "want 'Pick: <letter>" 's/^Pick: B.*/Pick: b/'
 gap "'2.' names no width" 's/^2\. At 1280px/2. On desktop/'
 gap "want numbered lines" '/^[0-9]\. /d'
+gap "each its own letter" 's/^B: /A: /'
+gap "'2.' names no width as" 's/^2\. At 1280px every plan/2. A 16px gap between plans, every plan/'
 gap "no sheet" '' 'sheet-*.png'
 gap "no b-\*.png shots" '' 'b-*.png'
+
+# A spec with CRLF line ends passes the spec checks (it stops at the
+# ticket instead).
+cp -R "$run_dir" "$tmp/crlf" && sed -i 's/$/\r/' "$tmp/crlf/spec.md"
+ticket blocked ""
+if run T-7 "$tmp/crlf" --holder "$H" --token 3; then fail "passed a blocked ticket"; else rc=$?; [ $rc = 3 ] || fail "exit $rc for a CRLF spec"; fi
 
 # A ticket that isn't ours to hand up.
 nope() { # <want stop substring>
@@ -163,9 +179,10 @@ e=$FX/comment-2
 head -1 "$e" | grep -qxF "Escalation: design ready: PR https://github.com/o/r/pull/9: owner's call" || fail "escalation head: $(head -1 "$e")"
 tail -1 "$e" | grep -qxF "Return-role: designer" || fail "escalation tail: $(tail -1 "$e")"
 grep -qxF "What: Design: pricing page. 2 directions in code; the Designer picks B: easiest to compare." "$e" || fail "card What: $(grep ^What "$e")"
-grep -qxF "Options: A: three cards in a row, Pro raised.; B: a table with one row per feature." "$e" || fail "card Options: $(grep ^Options "$e")"
+grep -A2 -xF "Options:" "$e" | tail -2 | tr '\n' '|' | grep -qxF -- "- A: three cards in a row, Pro raised.|- B: a table with one row per feature.|" || fail "card Options: $(grep -A2 ^Options "$e")"
 grep -qxF "Default: B. Taste calls, with the Designer's defaults: Pro gets the brand color; default yes." "$e" || fail "card Default: $(grep ^Default "$e")"
-grep -q "^Question: Build direction B? Answer approved: <letter>, or changes: " "$e" || fail "card Question"
+grep -q "^Question: Build direction B? Answer approved: B, which takes the defaults above, or changes: " "$e" || fail "card Question"
+[ "$(grep -c '^```' "$FX/body")" = 2 ] || fail "a fence in the spec broke out of the PR body's block"
 grep -qxF "transition T-7 --from in_progress --to blocked --holder $H --token 3 --release --idempotency-key $H-blocked-$sha" "$FX/log" ||
 	fail "no block: $(grep transition "$FX/log")"
 [ "$(git worktree list | wc -l)" = 1 ] || fail "a worktree was left: $(git worktree list)"
@@ -199,5 +216,16 @@ grep -qxF "comment 2 $H-escalation-$sha2 actor=designer" "$FX/log" || fail "rewo
 run T-7 "$run_dir" --holder "$H" --token 3 || fail "the rerun failed"
 has "sha=$sha2"
 grep -qxF "comment 1 $H-spec-$sha2 actor=designer" "$FX/log" || fail "the rerun changed the spec key"
+
+# A repo with no draft PRs: a plain PR, titled so no person merges it.
+git push -q --no-verify origin --delete maestro/T-7
+rm -f "$FX/open-pr" "$FX/n"
+touch "$FX/no-draft"
+ticket in_progress "$H"
+: >"$FX/log"
+run T-7 "$run_dir" --holder "$H" --token 3 || fail "the hand-up failed with no draft PRs"
+grep -qE "^gh pr create --base trunk --head maestro/T-7 --title Design: pricing page \(do not merge\) --body-file " "$FX/log" ||
+	fail "no plain PR: $(grep 'pr create' "$FX/log")"
+has "status=blocked"
 
 echo "design_pr_test: ok"

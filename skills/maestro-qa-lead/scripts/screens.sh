@@ -12,7 +12,7 @@
 #     every page side by side, all in <dir>. Prints key=value lines:
 #     run=, then shot= and sheet= per file, then ok=1.
 #
-# Needs playwright-cli and node on PATH. With no browser it prints
+# Needs jq, and playwright-cli and node on PATH. With no browser it prints
 # stop=no browser and exits 4. Exit 2: bad arguments; 1: any other
 # failure. The browser session is named after the run and closed on exit;
 # the file server stops with this script.
@@ -43,6 +43,7 @@ if [ -z "$run" ]; then
 	run=shots-$(od -An -N3 -tx1 /dev/urandom | tr -d ' \n')
 fi
 
+command -v jq >/dev/null 2>&1 || die 1 "needs jq on PATH"
 if ! command -v playwright-cli >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
 	echo "run=$run"
 	echo "stop=no browser"
@@ -95,7 +96,9 @@ const parent = process.ppid;
 const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png",
   ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".json": "application/json" };
 const s = http.createServer((q, r) => {
-  const u = decodeURIComponent(new URL(q.url, "http://x").pathname).split("/");
+  let u;
+  try { u = decodeURIComponent(new URL(q.url, "http://x").pathname).split("/"); }
+  catch { r.writeHead(400); return r.end(); }
   const root = roots[u[1]];
   const f = root && path.resolve(root, "." + path.sep + u.slice(2).join(path.sep));
   if (!root || (f !== root && !f.startsWith(root + path.sep))) { r.writeHead(404); return r.end(); }
@@ -183,7 +186,7 @@ for w in "${ws[@]}"; do
 		{
 			printf '<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#fff;font:600 20px sans-serif;color:#111}'
 			printf '.g{display:grid;grid-template-columns:repeat(%s,1fr);gap:16px;align-items:start}' "$cols"
-			printf 'figure{margin:0}figcaption{padding:0 0 8px}img{width:100%%;border:1px solid #ccc}</style><div class="g">'
+			printf 'figure{margin:0}figcaption{padding:0 0 8px}img{max-width:100%%;border:1px solid #ccc}</style><div class="g">'
 			for n in "${names[@]}"; do
 				printf '<figure><figcaption>%s (%spx%s)</figcaption><img src="/o/%s"></figure>' "$n" "$w" "${sfx:+, dark}" "$n-$w$sfx.png"
 			done

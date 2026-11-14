@@ -61,10 +61,10 @@ The `Design: <slug>` ticket is made the way `plan.md` makes a `Live run:` ticket
 | 1. Ready | Designer | Opens a draft PR on `maestro/<id>` holding the spec and a contact sheet of the directions. Posts the spec, then `Escalation: design ready: PR <url>: owner's call` with the card's text in it and a last line `Return-role: designer`. Blocks the ticket and releases its claim | `in_progress` → `blocked` |
 | 2. Ask | Planner, chief of staff | Unblock sends an owner's call up and posts `Sent up:`, as today. The chief of staff sends the card from the note: *Build direction A? Answer `approved: A`, `approved: B`, or `changes: <what>`.* The PR link carries the shots | `blocked` |
 | 3. Look | Owner | Opens the PR on GitHub, where the shots show, and answers the card in chat. A comment on GitHub reaches no bot | `blocked` |
-| 4a. Approved | Planner | `/maestro-planner rule <id>: approved: <direction>`. The skill posts `Answer:`, writes the screen tickets from the spec as `plan.md` does, makes a `Walk: <slug>` scout ticket (role and owner `designer`, as QA owns its `Live run:`) that deps on them, moves the `Design:` ticket to `done`, and closes the PR | `blocked` → `in_progress` → `in_review` → `done` |
+| 4a. Approved | Planner | `/maestro-planner rule <id>: approved: <the pick>`. The skill posts `Answer:`, writes the screen tickets from the spec as `plan.md` does, moves the `Design:` ticket to `done`, and closes the PR. Slice 2 adds a `Walk: <slug>` scout ticket (role and owner `designer`, as QA owns its `Live run:`) that deps on them. Approving another direction goes back to the Designer as a change, since only the pick has criteria | `blocked` → `done`, one move |
 | 4b. Changes | Planner, then Designer | `/maestro-planner rule <id>: changes: <the owner's words>`. The ticket goes back to `in_progress` with role `designer`; the next look hands it to the Designer, which reworks the same PR in a fresh run | `blocked` → `in_progress` |
 
-The approval's three moves happen in one `rule` session, in a row. If that session dies between them, the ticket can sit in `in_review`, where the board would send it to the reviewer: `rule <id>: again` finishes it, and `rule.md` says so.
+The store lets a designer's scout ticket go from `blocked` straight to `done`, by its owner only, so no stop part way leaves it where review or a build would take it. If the `rule` session dies after writing the screen tickets, the ticket is still `blocked` under an `Answer:`, and the planner's existing row sends `rule <id>: again`, which finds the tickets it made.
 
 The PR never merges. The record is the `Answer:` note and the screen tickets' criteria; the shots are for looking, and also stay in the run's evidence folder.
 
@@ -179,7 +179,7 @@ Each canvas tool waits for a spike that proves a headless designer run can use i
 | `bot-profiles/planner/persona.md` | "Same engineer" also counts a `designer/` holder (about 14 bytes). No other line: it already hands a new role's tickets to that role's bot, and sends an owner's call up | 1 |
 | `bot-profiles/chief-of-staff/persona.md` | "Approving a design" joins the owner's calls, the one place that rule lives; its answers are `approved: <direction>` or `changes: <what>`, never a bare yes | 1 |
 | `skills/maestro-planner/references/plan.md` | A goal with screens gets a `Design:` ticket and plans its other tickets now | 1 |
-| `skills/maestro-planner/references/rule.md` | `designer` as a `Return-role`; `approved:` writes the screen tickets and the `Walk:` ticket, then closes the `Design:` ticket; `changes:` sends it back; `again` finishes an approval that stopped short | 1 |
+| `skills/maestro-planner/references/rule.md` | `designer` as a `Return-role`; `approved:` writes the screen tickets, then closes the `Design:` ticket; `changes:`, or approving another direction, sends it back; `again` finishes an approval that stopped short. Slice 2 adds the `Walk:` ticket | 1 |
 | `skills/maestro-designer/` | New: `SKILL.md`, `agents/openai.yaml`, `references/design.md`, `scripts/design-pr.sh` with tests; `walk.md` in slice 2, `system.md` in slice 4 | 1 |
 | `skills/maestro-qa-lead/scripts/screens.sh` | New, with tests; `--shoot` in slice 1, `--check` in slice 2 | 1, 2 |
 | `skills/maestro-create-ticket/SKILL.md` | `designer` in the role table | 1 |
