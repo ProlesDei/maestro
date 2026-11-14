@@ -787,11 +787,21 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		return err
 	}
 	commit(nr.ID)
+	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
+		// The rerun holds the ticket, as look's start would, so no look
+		// starts a second planner run beside it.
+		if hdir, err := c.besideStore("handouts"); err == nil {
+			recordHandouts(hdir, []send{{"planner-job", r.Ticket}})
+		}
+	}
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "again: "+r.ID)
 }
 
 // diedText is what a run that died is resumed with.
 const diedText = "Your run died. Go on from your last step."
+
+// goOnText is what a session a usage limit stopped is resumed with.
+const goOnText = "A usage limit stopped your run; it has lifted. Go on from your last step."
 
 // escalateText is what a build session that ended on a question, with
 // no Escalation: posted, is resumed with, so the planner can answer it.
@@ -813,6 +823,7 @@ func runResume(ctx context.Context, c *call) error {
 	opus := c.fs.Bool("opus", false, "resume on Opus at high effort, as for a junior build's stuck session")
 	escalate := c.fs.Bool("escalate", false, "resume a build that ended on a question with \""+escalateText+"\"")
 	decide := c.fs.Bool("decide", false, "resume a planner session that stopped on a question: it decides, or sends calls up")
+	goOn := c.fs.Bool("go-on", false, "resume a session a usage limit stopped, once the limit lifts")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -869,6 +880,9 @@ func runResume(ctx context.Context, c *call) error {
 		nudge = "decide"
 	}
 	for _, o := range all {
+		if neverRan(o) {
+			continue // its start failed: it holds nothing
+		}
 		if nudge != "" && o.Nudge == nudge && flagValue(o.Command, "--resume") == session {
 			return fmt.Errorf("%w: resume --%s: session %s had it once already (%s): it goes up instead", ticket.ErrStatusConflict, nudge, session, o.ID)
 		}
@@ -887,6 +901,8 @@ func runResume(ctx context.Context, c *call) error {
 		text = escalateText
 	case *decide:
 		text = decideText
+	case *goOn:
+		text = goOnText
 	default:
 		b, err := c.readStdin()
 		if err != nil {

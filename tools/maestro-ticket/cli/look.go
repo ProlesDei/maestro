@@ -604,7 +604,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				// The owner's card on a design: up, not stuck.
 				if !idle {
 					var rt routed
-					if err := c.designUp(ctx, s, d, "look", &rt); err != nil {
+					if err := c.designUp(ctx, s, d, "look "+newSessionID()[:8], &rt); err != nil {
 						keep(err)
 					} else {
 						out.Wrote = append(out.Wrote, rt.Wrote...)

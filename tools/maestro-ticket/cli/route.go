@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -233,9 +234,10 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	id := r.Ticket
 	// A judge run that gave no answer frees its rows for the next look,
 	// unless it died: then its resume works them.
-	if r.Job == "judge" && out.Outcome != outDone && !(out.Outcome == outDied && !r.AfterDeath) {
+	// A usage limit doesn't free them either: the run goes on once it lifts.
+	if r.Job == "judge" && out.Outcome != outDone && out.Outcome != outUsageLimit && !(out.Outcome == outDied && !r.AfterDeath) {
 		if dir, err := c.besideStore("handouts"); err == nil {
-			for _, tk := range r.Tickets {
+			for _, tk := range append(slices.Clone(r.Tickets), "cause") {
 				os.Remove(handoutPath(dir, tk, "judge"))
 			}
 		}
@@ -261,10 +263,15 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			}
 		}
 		if r.Job != "" {
-			// The work isn't lost: once the pause lifts, the run's job
-			// starts again; job refuses it till then, and the bot leaves
-			// the run unacked.
-			out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
+			// The work isn't lost: once the pause lifts, the session goes
+			// on where it stopped, answers it was given and all; one with
+			// no session starts afresh. Both refuse till then, and the bot
+			// leaves the run unacked.
+			if cmp.Or(r.SessionID, flagValue(r.Command, "--session-id"), flagValue(r.Command, "--resume")) != "" {
+				out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --go-on")
+			} else {
+				out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
+			}
 		}
 		// A limit is no death: free the claim the stopped session left, so
 		// it counts no lease expiry and the rerun can take the ticket.
@@ -588,7 +595,7 @@ func (c *call) nudged(r runs.Record, nudge string) bool {
 	}
 	list, _ := runs.List(dir, time.Now(), true)
 	for _, o := range list {
-		if o.Nudge == nudge && flagValue(o.Command, "--resume") == session {
+		if o.Nudge == nudge && flagValue(o.Command, "--resume") == session && !neverRan(o) {
 			return true
 		}
 	}
@@ -606,12 +613,15 @@ func (c *call) diedBefore(r runs.Record) bool {
 	}
 	list, _ := runs.List(dir, time.Now(), true)
 	for _, o := range list {
-		if o.AfterDeath && flagValue(o.Command, "--resume") == session {
+		if o.AfterDeath && flagValue(o.Command, "--resume") == session && !neverRan(o) {
 			return true
 		}
 	}
 	return false
 }
+
+// neverRan: a run whose supervisor never started it counts for nothing.
+func neverRan(r runs.Record) bool { return r.State == runs.Failed && r.PID == 0 }
 
 // timedOutBefore reports whether another run of r's job on its ticket ran
 // out of time since since: a second timeout at one head goes up.

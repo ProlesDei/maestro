@@ -530,3 +530,20 @@ func TestRouteNudgeOnce(t *testing.T) {
 		t.Fatalf("after --opus, once --escalate: %+v", rt)
 	}
 }
+
+// A usage limit resumes a session where it stopped, and a judge's rows
+// stay held for it.
+func TestRouteUsageLimitGoesOn(t *testing.T) {
+	h := newRouteHarness(t)
+	hdir := filepath.Join(h.dir, "handouts")
+	os.MkdirAll(hdir, 0o755)
+	os.WriteFile(handoutPath(hdir, "T-4", "judge"), []byte("blocked v1 1\n"), 0o644)
+	rt := h.route(runs.Record{ID: "R-gggggggg", Job: "judge", Tickets: []string{"T-4"}, State: runs.Failed, IsError: true,
+		Command: opusCmd(), Reply: "Claude AI usage limit reached|" + strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-gggggggg --go-on"}) {
+		t.Fatalf("a limited session goes on: %+v", rt)
+	}
+	if _, err := os.Stat(handoutPath(hdir, "T-4", "judge")); err != nil {
+		t.Fatal("a limited judge freed its rows")
+	}
+}
