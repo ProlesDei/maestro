@@ -514,8 +514,16 @@ if [ "$cmd" = check ]; then
 		fi
 		# Engineers skip the full proof unless ## Proof says engineer, so a
 		# typo there must not quietly hand it to QA.
-		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ && line() !~ /^<!--/ {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print tolower(t); exit}' <<<"$sections")
+		# The first word under it, past HTML comments; - when there is no
+		# such heading, which a typo in the heading also gives.
+		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ {f=1; t=line()
+			if (c) { if (t ~ /-->/) c=0; next }
+			if (t ~ /^<!--/) { if (t !~ /-->/) c=1; next }
+			sub(/[ \t]*<!--.*$/, "", t); sub(/^[-* ]+/, "", t); gsub(/^[`*_ ]+|[`*_ ]+$/, "", t)
+			if (t != "") { print tolower(t); exit } }
+			END { if (!f) print "-" }' <<<"$sections")
 		case $proof in
+		-) warn "project-setup.md has no ## Proof, so QA proves each criterion, the default: add it to choose qa or engineer" ;;
 		'' | qa | engineer) ;;
 		*) problem "project-setup.md: ## Proof says $proof; want qa or engineer" ;;
 		esac

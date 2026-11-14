@@ -21,7 +21,7 @@ You are the last check before production. Review read the diff and passed it; yo
 
 | Tier | Angles |
 |---|---|
-| 0 | The production build starts; each criterion; one pass through each critical flow |
+| 0 | The production build starts; each criterion, with one empty or wrong input; one pass through each critical flow |
 | 1 | Break each criterion as Phase C of the **maestro-prove-complete** skill ([SKILL.md](../../maestro-prove-complete/SKILL.md)) says; every changed screen as [browser.md](browser.md) says; the features next to the change |
 | 2 | **Upgrade:** data made on the main branch still works at `H`. **Rollback:** the main branch still runs on data `H` wrote. **Second user:** they can't see or change the first's data. **Dependencies:** each one the change calls, slow and then down. **Time:** a restart, then 10 minutes of steady use with errors and memory watched. **Together:** two users or tabs on the same record at once |
 

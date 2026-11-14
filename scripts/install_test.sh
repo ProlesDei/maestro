@@ -788,6 +788,16 @@ if run check "$r7"; then fail "check passed ## Proof (who proves): engneer"; fi
 says "## Proof says engneer"
 sed -i 's/^engneer\r$/qa\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
+# An inline comment, underscores and a comment over several lines are no word.
+sed -i 's/^qa\r$/_engineer_ <!-- or qa -->\r/; s/^<!-- qa or engineer -->\r$/<!--\r\nnot a word\r\n-->\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+! grep -q "## Proof says" "$tmp/out" || fail "check read a comment or underscores as the ## Proof word"
+# A missing ## Proof, or a typo in its heading, warns that QA proves.
+! grep -q "has no ## Proof" "$tmp/out" || fail "check warned of a missing ## Proof that is there"
+sed -i 's/^## Proof (who proves)\r$/## Proofs\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md has no ## Proof"
+sed -i 's/^## Proofs\r$/## Proof\r/' "$r7/.maestro/project/project-setup.md"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
 printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"

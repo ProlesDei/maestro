@@ -899,15 +899,15 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			if err := t.CheckFence(req.Holder, req.Token); err != nil {
 				return t, err
 			}
-			tries, link := t.Tries, req.SplitFrom != 0
+			tries, link, fromGoal := t.Tries, req.SplitFrom != 0, ""
 			if link {
 				var again bool
-				if tries, again, err = linkSplit(ctx, tx, t, req.SplitFrom); err != nil {
+				if tries, fromGoal, again, err = linkSplit(ctx, tx, t, req.SplitFrom); err != nil {
 					return t, err
 				}
 				// A retry of a link that went through changes nothing.
 				link = !again
-				if again && len(req.AddDeps) == 0 && len(req.RemoveDeps) == 0 && req.Areas == nil && req.Parked == "" && req.Goal == nil {
+				if again && !req.ChangesBesidesLink() {
 					return t, nil
 				}
 			}
@@ -948,6 +948,9 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			}
 			if req.Goal != nil {
 				goal = *req.Goal
+				data["goal"] = goal
+			} else if link && goal == "" && fromGoal != "" {
+				goal = fromGoal // a re-file serves the goal its ticket served
 				data["goal"] = goal
 			}
 			if link {

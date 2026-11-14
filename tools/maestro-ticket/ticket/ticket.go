@@ -733,9 +733,15 @@ type UpdateRequest struct {
 	SplitFrom ID `json:"split_from,omitempty"`
 }
 
+// ChangesBesidesLink reports whether the request changes anything but
+// SplitFrom.
+func (r *UpdateRequest) ChangesBesidesLink() bool {
+	return len(r.AddDeps) > 0 || len(r.RemoveDeps) > 0 || r.Areas != nil || r.Parked != "" || r.Goal != nil
+}
+
 // Validate checks the request and fills defaults.
 func (r *UpdateRequest) Validate() error {
-	if len(r.AddDeps) == 0 && len(r.RemoveDeps) == 0 && r.Areas == nil && r.Parked == "" && r.Goal == nil && r.SplitFrom == 0 {
+	if !r.ChangesBesidesLink() && r.SplitFrom == 0 {
 		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked, --goal or --split-from)", ErrInvalid)
 	}
 	switch {

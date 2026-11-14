@@ -223,3 +223,52 @@ func TestUpdateSplitFromLinksARefile(t *testing.T) {
 		t.Fatalf("refused links changed old's tries: %d", o.Tries)
 	}
 }
+
+// A link carries the old ticket's goal, as create --split-from does,
+// unless the new ticket has one or the request sets one; and retrying a
+// link made at create is a no-op, even while the old ticket is open.
+func TestUpdateSplitFromCarriesTheGoal(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	mk := func(title, goal string) ticket.Ticket {
+		t.Helper()
+		tk, err := s.Create(ctx, ticket.CreateRequest{Title: title, Role: "engineer", Actor: "planner", Goal: goal})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tk
+	}
+	link := func(req ticket.UpdateRequest) ticket.Ticket {
+		t.Helper()
+		req.Actor = "planner"
+		got, err := s.Update(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	old := mk("old", "auth")
+	move(t, s, old.ID, ticket.StatusCancelled)
+	if got := link(ticket.UpdateRequest{ID: mk("bare", "").ID, SplitFrom: old.ID}); got.Goal != "auth" {
+		t.Fatalf("bare re-file goal %q; want auth", got.Goal)
+	}
+	old2 := mk("old2", "auth")
+	move(t, s, old2.ID, ticket.StatusCancelled)
+	if got := link(ticket.UpdateRequest{ID: mk("own", "billing").ID, SplitFrom: old2.ID}); got.Goal != "billing" {
+		t.Fatalf("a re-file's own goal changed to %q", got.Goal)
+	}
+	old3 := mk("old3", "auth")
+	move(t, s, old3.ID, ticket.StatusCancelled)
+	other := "speed"
+	if got := link(ticket.UpdateRequest{ID: mk("asked", "").ID, SplitFrom: old3.ID, Goal: &other}); got.Goal != "speed" {
+		t.Fatalf("--goal lost to the link: %q", got.Goal)
+	}
+	open := mk("open", "")
+	kid, err := s.Create(ctx, ticket.CreateRequest{Title: "kid", Role: "engineer", Actor: "planner", SplitFrom: open.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := link(ticket.UpdateRequest{ID: kid.ID, SplitFrom: open.ID}); got.Tries != kid.Tries {
+		t.Fatalf("retry of a create-time link: %+v", got)
+	}
+}

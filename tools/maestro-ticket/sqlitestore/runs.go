@@ -166,30 +166,30 @@ WHERE type IN (?, ?) AND json_extract(data, '$.split_from') IS NOT NULL`, ticket
 }
 
 // linkSplit checks that t may be linked to from, the cancelled ticket it
-// replaces, and returns t's tries with from's added; or, when t is linked
-// to from already, as a retry finds it, t's tries and again true.
-func linkSplit(ctx context.Context, tx *sql.Tx, t ticket.Ticket, from ticket.ID) (tries int, again bool, err error) {
-	var status string
-	err = tx.QueryRowContext(ctx, "SELECT status, tries FROM tickets WHERE id = ?", from).Scan(&status, &tries)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, from)
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	if ticket.Status(status) != ticket.StatusCancelled {
-		return 0, false, fmt.Errorf("%w: %s is %s; link only a cancelled ticket to the one that replaced it (to split an open ticket, create the new ones with --split-from)",
-			ticket.ErrInvalid, from, status)
-	}
+// replaces, and returns t's tries with from's added and from's goal; or,
+// when t is linked to from already, as a retry finds it, again true.
+func linkSplit(ctx context.Context, tx *sql.Tx, t ticket.Ticket, from ticket.ID) (tries int, goal string, again bool, err error) {
 	parents, err := splitParents(ctx, tx)
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	if p, ok := parents[t.ID]; ok {
 		if p == from {
-			return t.Tries, true, nil
+			return t.Tries, "", true, nil
 		}
-		return 0, false, fmt.Errorf("%w: %s is already split from %s", ticket.ErrInvalid, t.ID, p)
+		return 0, "", false, fmt.Errorf("%w: %s is already split from %s", ticket.ErrInvalid, t.ID, p)
+	}
+	var status string
+	err = tx.QueryRowContext(ctx, "SELECT status, tries, goal FROM tickets WHERE id = ?", from).Scan(&status, &tries, &goal)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", false, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, from)
+	}
+	if err != nil {
+		return 0, "", false, err
+	}
+	if ticket.Status(status) != ticket.StatusCancelled {
+		return 0, "", false, fmt.Errorf("%w: %s is %s; link only a cancelled ticket to the one that replaced it (to split an open ticket, create the new ones with --split-from)",
+			ticket.ErrInvalid, from, status)
 	}
 	// A second replacement would take the first one's runs away from it,
 	// and count from's tries twice.
@@ -200,15 +200,15 @@ func linkSplit(ctx context.Context, tx *sql.Tx, t ticket.Ticket, from ticket.ID)
 		}
 	}
 	if kid != 0 {
-		return 0, false, fmt.Errorf("%w: %s already has %s split from it", ticket.ErrInvalid, from, kid)
+		return 0, "", false, fmt.Errorf("%w: %s already has %s split from it", ticket.ErrInvalid, from, kid)
 	}
 	for p, seen := from, map[ticket.ID]bool{}; p != 0 && !seen[p]; p = parents[p] {
 		seen[p] = true
 		if p == t.ID {
-			return 0, false, fmt.Errorf("%w: %s comes from %s, so %s can't be split from it", ticket.ErrInvalid, from, t.ID, t.ID)
+			return 0, "", false, fmt.Errorf("%w: %s comes from %s, so %s can't be split from it", ticket.ErrInvalid, from, t.ID, t.ID)
 		}
 	}
-	return t.Tries + tries, false, nil
+	return t.Tries + tries, goal, false, nil
 }
 
 // scanRun reads runCols, then any extra columns into extra.
