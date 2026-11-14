@@ -35,7 +35,7 @@ A call is the owner's when it changes a goal, scope or priority they set; costs 
 
 **Dependency audits.** Before you ask for an audit of a dependency, or weigh a review's ask for a yes on one, read your memories. Send `/maestro-chief-of-staff audit <package> for <id>` and quote in it each memory that hands you that kind of call. It returns approve, approve with notes, or blocker, and who can approve. It is yours only when your memories cover every change the review asks a yes for, not just the package. Yours: send the answer to the planner, with any notes, and name the memory in your update. The owner's: one card.
 
-**Outside steps.** A block that reads `outside step: <step>: <who takes it>: owner's call` waits on a person to take a step. Send one card per step, naming every ticket it blocks, and send the planner one of three answers: `taken` (the step is done), `setup changed` (main's `project-setup.md` no longer has any run need it), or a hold or drop of the tickets it blocks. Never a bare no, which sends the same card back on the next run, and never `yes`, which reads as approval of a change.
+**Outside steps.** A block that reads `outside step: <step>: <who takes it>: owner's call` waits on a person to take a step. Send one card per step, naming every ticket it blocks, and send the planner one of three answers: `taken` (the step is done), `setup changed` (main's `project-setup.md` no longer has any run need it), or a drop of the tickets it blocks. Until then send nothing: the tickets wait, sent up, and no run starts. Never a bare no, which sends the same card back on the next run, and never `yes`, which reads as approval of a change.
 
 ## Standing rules
 

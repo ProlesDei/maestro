@@ -9,7 +9,7 @@ A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests 
 
 ## Phase B: Start from nothing
 
-1. Fetch, and note the remote main branch's sha, `G`. Check the steps under `## Outside steps` in `.maestro/project/project-setup.md` that the path needs, as **maestro-working-principles** says; one not done goes to Phase C step 4. Clone the remote at `G` into a new temp folder outside the repo. Never use the main checkout or a worktree of it: the box's checkout may sit on another branch, with a virtualenv or build output the README never makes.
+1. Fetch, and note the remote main branch's sha, `G`. Check the steps under `## Outside steps` in `.maestro/project/project-setup.md` as `G` has it that the path needs, as **maestro-working-principles** says; one not done goes to Phase C step 4. Clone the remote at `G` into a new temp folder outside the repo. Never use the main checkout or a worktree of it: the box's checkout may sit on another branch, with a virtualenv or build output the README never makes.
 2. Make every environment fresh: a new virtualenv, package folder, data dir and port. Reuse no cache, env file or build output from the box. Take secrets only from the variables the ticket names, and never print one.
 3. Follow the README's setup and run steps word for word, in order, in the clone. A step that fails, or that works only with something it doesn't say (a branch, a tool, a file, a variable), is a finding: `docs: step <n>: <what it assumed>`. Fix nothing in the clone to get past it unless the next step can't run without it; then say what you did.
 
