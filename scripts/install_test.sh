@@ -775,6 +775,43 @@ says "warn: project-setup.md: ## Run still holds"
 printf '## Project\n\n- Name: <name>\n- Summary: a shop\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Project still holds"
+# ## Proof takes qa or engineer, in any case; anything else is a problem.
+grep -qx $'qa\r' "$r7/.maestro/project/project-setup.md" || fail "the template's ## Proof isn't qa"
+sed -i 's/^qa\r$/`engineers`\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed ## Proof: engineers"; fi
+says "problem: project-setup.md: ## Proof says engineers; want qa or engineer"
+sed -i 's/^`engineers`\r$/Engineer\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+# A heading with words after it and a comment above the word still parse.
+sed -i 's/^## Proof\r$/## Proof (who proves)\r\n<!-- qa or engineer -->\r/; s/^Engineer\r$/engneer\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed ## Proof (who proves): engneer"; fi
+says "## Proof says engneer"
+sed -i 's/^engneer\r$/qa\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+# An inline comment, underscores and a comment over several lines are no word.
+sed -i 's/^qa\r$/_engineer_ <!-- or qa -->\r/; s/^<!-- qa or engineer -->\r$/<!--\r\nnot a word\r\n-->\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+! grep -q "## Proof says" "$tmp/out" || fail "check read a comment or underscores as the ## Proof word"
+# A missing ## Proof, a typo in its heading, or no word under it warns
+# that QA proves; a word after a comment, or after it on its line, counts.
+! grep -q "no word under ## Proof" "$tmp/out" || fail "check warned of a missing ## Proof that is there"
+sed -i 's/^## Proof (who proves)\r$/## Proofs\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md: no word under ## Proof"
+sed -i 's/^## Proofs\r$/## Proof\r/; s/^_engineer_ <!-- or qa -->\r$/<!-- who --> engneer\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed a typo after a comment under ## Proof"; fi
+says "## Proof says engneer"
+for w in 'engineer (no QA bot here)' '1. **Engineer**:' '> QA.'; do
+	sed -i "s/^\(<!-- who --> engneer\|engineer (no QA bot here)\|1\. \*\*Engineer\*\*:\)\r$/$w\r/" "$r7/.maestro/project/project-setup.md"
+	grep -qxF "$w"$'\r' "$r7/.maestro/project/project-setup.md" || fail "the test didn't write $w"
+	ok check "$r7"
+	! grep -q "## Proof" "$tmp/out" || fail "check misread $w"
+done
+sed -i 's/^> QA\.\r$/engineer (no QA bot here)\r/' "$r7/.maestro/project/project-setup.md"
+sed -i 's/^engineer (no QA bot here)\r$/<!-- none yet -->\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md: no word under ## Proof"
+sed -i 's/^<!-- none yet -->\r$/qa\r/' "$r7/.maestro/project/project-setup.md"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
 printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"

@@ -727,12 +727,28 @@ type UpdateRequest struct {
 	Token          int64     `json:"-"`
 	Actor          string    `json:"actor"`
 	IdempotencyKey string    `json:"-"`
+	// SplitFrom links a ticket made without --split-from to the cancelled
+	// ticket it replaces: it adds that ticket's tries to its own, and
+	// costs counts that ticket's runs toward it.
+	SplitFrom ID `json:"split_from,omitempty"`
+}
+
+// ChangesBesidesLink reports whether the request changes anything but
+// SplitFrom.
+func (r *UpdateRequest) ChangesBesidesLink() bool {
+	return len(r.AddDeps) > 0 || len(r.RemoveDeps) > 0 || r.Areas != nil || r.Parked != "" || r.Goal != nil
 }
 
 // Validate checks the request and fills defaults.
 func (r *UpdateRequest) Validate() error {
-	if len(r.AddDeps) == 0 && len(r.RemoveDeps) == 0 && r.Areas == nil && r.Parked == "" && r.Goal == nil {
-		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked or --goal)", ErrInvalid)
+	if !r.ChangesBesidesLink() && r.SplitFrom == 0 {
+		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked, --goal or --split-from)", ErrInvalid)
+	}
+	switch {
+	case r.SplitFrom < 0:
+		return fmt.Errorf("%w: bad ticket id %d", ErrInvalid, r.SplitFrom)
+	case r.SplitFrom != 0 && r.SplitFrom == r.ID:
+		return fmt.Errorf("%w: %s can't be split from itself", ErrInvalid, r.ID)
 	}
 	if r.Parked != "" && !r.Parked.Valid() {
 		return fmt.Errorf("%w: unknown parked reason %q (want %s)", ErrInvalid, r.Parked, parkedNames())

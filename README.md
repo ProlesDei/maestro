@@ -40,7 +40,7 @@ flowchart TD
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
-    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · test first · project checks ·<br/>prove each criterion · open PR · ticket to in_review"]
+    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · test first · project checks ·<br/>tests and a real run per criterion · open PR · ticket to in_review"]
 
     Done([Merged · ticket done])
 

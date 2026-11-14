@@ -899,6 +899,18 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			if err := t.CheckFence(req.Holder, req.Token); err != nil {
 				return t, err
 			}
+			tries, link, fromGoal := t.Tries, req.SplitFrom != 0, ""
+			if link {
+				var again bool
+				if tries, fromGoal, again, err = linkSplit(ctx, tx, t, req.SplitFrom); err != nil {
+					return t, err
+				}
+				// A retry of a link that went through changes nothing.
+				link = !again
+				if again && !req.ChangesBesidesLink() {
+					return t, nil
+				}
+			}
 			// A working claim already holds its areas: new ones must be free.
 			if req.Areas != nil && t.LiveClaim() != nil && t.Status.WritesCode() {
 				if err := checkAreas(ctx, tx, t.ID, *req.Areas, now); err != nil {
@@ -937,9 +949,16 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			if req.Goal != nil {
 				goal = *req.Goal
 				data["goal"] = goal
+			} else if link && goal == "" && fromGoal != "" {
+				goal = fromGoal // a re-file serves the goal its ticket served
+				data["goal"] = goal
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET parked = ?, goal = ?, updated_at = ? WHERE id = ?",
-				parked, goal, now, t.ID); err != nil {
+			if link {
+				data["split_from"] = req.SplitFrom
+				data["tries"] = tries
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET parked = ?, goal = ?, tries = ?, updated_at = ? WHERE id = ?",
+				parked, goal, tries, now, t.ID); err != nil {
 				return t, err
 			}
 			if err := appendEvent(ctx, tx, t.ID, ticket.EventUpdated, req.Actor, data, now); err != nil {

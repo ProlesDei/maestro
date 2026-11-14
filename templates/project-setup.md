@@ -1,9 +1,10 @@
 # Project setup
 
-`scripts/install.sh apply` copies this to `.maestro/project/project-setup.md` once; [INSTALL.md](https://github.com/ProlesDei/maestro/blob/main/INSTALL.md) has your agent fill it in with you. `install.sh check` reads two sections, so keep their shape:
+`scripts/install.sh apply` copies this to `.maestro/project/project-setup.md` once; [INSTALL.md](https://github.com/ProlesDei/maestro/blob/main/INSTALL.md) has your agent fill it in with you. `install.sh check` reads three sections, so keep their shape:
 
 - `## Main branch`: one line, the branch PRs merge into.
 - `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
+- `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove with tests and one real run of the changed path, and QA proves the rest before it merges, so engineers spend no build run on test-only work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
 
 Sessions read the rest as plain text.
 
@@ -27,6 +28,14 @@ main
 ## QA
 
 <what every QA run covers, read by `/maestro-qa-lead`: how to build and start the app the way production does; the user flows that must never break, one per line; how to load data like production's; test accounts, by environment variable name; the screen sizes to check; a browser tool only if QA uses one other than Playwright CLI>
+
+## Proof
+
+qa
+
+## Outside steps
+
+<each step a person or outside system takes before the app can be tested, one per line, with what needs it (running the app, one flow), who takes it, and the command or page that shows it's done, such as a feature flag turned on, a login, a VPN, or a reserved test host and how long to reserve it for. A session checks the steps its work needs before it starts the app or a test that calls an outside system, and stops, never waits, when one isn't done. Write none if there are none>
 
 ## Review
 

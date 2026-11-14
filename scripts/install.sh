@@ -512,6 +512,25 @@ if [ "$cmd" = check ]; then
 		elif [ -n "$main" ]; then
 			warn "no origin/$main ref as of the last fetch: each ticket's worktree branches from there, and QA merges into it; check that origin is the GitHub repo and that a fetch brings its $main in as origin/$main"
 		fi
+		# Engineers skip the full proof unless ## Proof says engineer, so a
+		# typo there must not quietly hand it to QA.
+		# The first word under it, its letters only, past HTML comments
+		# and any bullet, number or bold around it; or - when there is
+		# none: no such heading (a typo in it too), or an empty section.
+		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ {t=line()
+			if (c) { k = index(t, "-->"); if (!k) next; t = substr(t, k + 3); c = 0 }
+			while ((i = index(t, "<!--")) > 0) {
+				k = index(substr(t, i + 4), "-->")
+				if (k) t = substr(t, 1, i - 1) substr(t, i + k + 6)
+				else { t = substr(t, 1, i - 1); c = 1 }
+			}
+			if (match(t, /[A-Za-z]+/)) { p = 1; print tolower(substr(t, RSTART, RLENGTH)); exit } }
+			END { if (!p) print "-" }' <<<"$sections")
+		case $proof in
+		-) warn "project-setup.md: no word under ## Proof, so QA proves each criterion, the default: write qa or engineer there" ;;
+		'' | qa | engineer) ;;
+		*) problem "project-setup.md: ## Proof says $proof; want qa or engineer" ;;
+		esac
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the engineers run none"
 		# Any other bullet there isn't a check an engineer can run.
