@@ -633,7 +633,7 @@ func runUpdate(ctx context.Context, c *call) error {
 	areas := c.fs.String("areas", "", "replace the code areas (comma-separated; \"\" clears them)")
 	parked := c.fs.String("parked", "", "a new reason for a backlog ticket: hold, deferred, unready or planning")
 	goal := c.fs.String("goal", "", "replace the goal slug (\"\" clears it)")
-	splitFrom := c.fs.String("split-from", "", "the cancelled ticket this one replaces: add its tries, and count its runs here")
+	splitFrom := c.fs.String("split-from", "", "the cancelled ticket this one replaces: add its tries, take its goal if this has none, and count its runs here")
 	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, required if the ticket is claimed")
 	token := c.fs.Int64("token", 0, "lease token from your claim, required if the ticket is claimed")
 	return c.withStore(ctx, func(s ticket.Store) error {

@@ -792,12 +792,22 @@ ok check "$r7"
 sed -i 's/^qa\r$/_engineer_ <!-- or qa -->\r/; s/^<!-- qa or engineer -->\r$/<!--\r\nnot a word\r\n-->\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 ! grep -q "## Proof says" "$tmp/out" || fail "check read a comment or underscores as the ## Proof word"
-# A missing ## Proof, or a typo in its heading, warns that QA proves.
-! grep -q "has no ## Proof" "$tmp/out" || fail "check warned of a missing ## Proof that is there"
+# A missing ## Proof, a typo in its heading, or no word under it warns
+# that QA proves; a word after a comment, or after it on its line, counts.
+! grep -q "no word under ## Proof" "$tmp/out" || fail "check warned of a missing ## Proof that is there"
 sed -i 's/^## Proof (who proves)\r$/## Proofs\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
-says "warn: project-setup.md has no ## Proof"
-sed -i 's/^## Proofs\r$/## Proof\r/' "$r7/.maestro/project/project-setup.md"
+says "warn: project-setup.md: no word under ## Proof"
+sed -i 's/^## Proofs\r$/## Proof\r/; s/^_engineer_ <!-- or qa -->\r$/<!-- who --> engneer\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed a typo after a comment under ## Proof"; fi
+says "## Proof says engneer"
+sed -i 's/^<!-- who --> engneer\r$/engineer (no QA bot here)\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+! grep -q "## Proof" "$tmp/out" || fail "check misread engineer (no QA bot here)"
+sed -i 's/^engineer (no QA bot here)\r$/<!-- none yet -->\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
+says "warn: project-setup.md: no word under ## Proof"
+sed -i 's/^<!-- none yet -->\r$/qa\r/' "$r7/.maestro/project/project-setup.md"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
 printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"

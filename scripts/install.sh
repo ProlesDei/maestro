@@ -514,16 +514,20 @@ if [ "$cmd" = check ]; then
 		fi
 		# Engineers skip the full proof unless ## Proof says engineer, so a
 		# typo there must not quietly hand it to QA.
-		# The first word under it, past HTML comments; - when there is no
-		# such heading, which a typo in the heading also gives.
-		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ {f=1; t=line()
-			if (c) { if (t ~ /-->/) c=0; next }
-			if (t ~ /^<!--/) { if (t !~ /-->/) c=1; next }
-			sub(/[ \t]*<!--.*$/, "", t); sub(/^[-* ]+/, "", t); gsub(/^[`*_ ]+|[`*_ ]+$/, "", t)
-			if (t != "") { print tolower(t); exit } }
-			END { if (!f) print "-" }' <<<"$sections")
+		# The first word under it, past HTML comments, or - when there is
+		# none: no such heading (a typo in it too), or an empty section.
+		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ {t=line()
+			if (c) { k = index(t, "-->"); if (!k) next; t = substr(t, k + 3); c = 0 }
+			while ((i = index(t, "<!--")) > 0) {
+				k = index(substr(t, i + 4), "-->")
+				if (k) t = substr(t, 1, i - 1) substr(t, i + k + 6)
+				else { t = substr(t, 1, i - 1); c = 1 }
+			}
+			sub(/^[-*+ \t]+/, "", t); split(t, w, /[ \t]+/); t = w[1]; gsub(/^[`*_]+|[`*_]+$/, "", t)
+			if (t != "") { p = 1; print tolower(t); exit } }
+			END { if (!p) print "-" }' <<<"$sections")
 		case $proof in
-		-) warn "project-setup.md has no ## Proof, so QA proves each criterion, the default: add it to choose qa or engineer" ;;
+		-) warn "project-setup.md: no word under ## Proof, so QA proves each criterion, the default: write qa or engineer there" ;;
 		'' | qa | engineer) ;;
 		*) problem "project-setup.md: ## Proof says $proof; want qa or engineer" ;;
 		esac
