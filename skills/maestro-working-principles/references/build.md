@@ -26,5 +26,5 @@ Read this before you build, as [SKILL.md](../SKILL.md) says. Its session rules a
 ## Pull requests
 
 - Open one when the work is done: each command under `## Checks` in `.maestro/project/project-setup.md` exits 0 (with none listed, the repo's build, lint and tests) and each thing asked for is proved as Phase D step 2 of the **maestro-software-engineer** skill ([SKILL.md](../../maestro-software-engineer/SKILL.md)) says. Push the branch and open the PR against the main branch, with the tool the repo's contributing docs name, else GitHub's.
-- One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths and the risks. Then hand off its ticket, as the `Handoff:` bullet above says.
+- One PR per worktree. The body says what changed and why, each check with its exit code, the evidence paths if any, and the risks. Then hand off its ticket, as the `Handoff:` bullet above says.
 - Never push the main branch, merge or deploy. Review passes a ticket's PR, then QA tests and merges it; a person merges a PR with no ticket. Answer either with new commits on the same branch. After the merge, remove your worktree as **Share the machine** in [SKILL.md](../SKILL.md) says.

@@ -35,7 +35,7 @@ qa
 
 ## Outside steps
 
-<each step a person or outside system takes before the app can be tested, one per line, with the command or page that shows it's done, such as a feature flag turned on, a login, a VPN, or a reserved test host and how long to reserve it for; sessions check each before long work and stop, never wait, when one isn't done. Write none if there are none>
+<each step a person or outside system takes before the app can be tested, one per line, with what needs it (running the app, one flow) and the command or page that shows it's done, such as a feature flag turned on, a login, a VPN, or a reserved test host and how long to reserve it for; sessions check each before long work and stop, never wait, when one isn't done. Write none if there are none>
 
 ## Review
 
