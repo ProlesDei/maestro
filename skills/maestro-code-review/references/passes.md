@@ -30,7 +30,7 @@ Three limits bind every pass, so a ticket can pass review:
 Give each finding an `action`: `auto-fix` (fixable without asking about intent: correctness, errors, security, performance, tests); `ask-user` (product behaviour, the author's deliberate choice, or a fix that adds state, a schema or a subsystem; the default when unsure); `no-op` (for the record). Merge every pass's and subagent's findings into one list. A finding raised in an earlier `Kickback:` keeps its id; number new ones after the highest id in those comments, so a `--drop` names one finding across every review of the ticket:
 
 ```json
-{"head": "<H>", "verdict": "GO|NO-GO|ESCALATE", "tier": 0, "mode": "full|incremental",
+{"head": "<H>", "verdict": "GO|NO-GO|ESCALATE", "tier": 0, "mode": "full|incremental|ruling",
  "findings": [{"id": "F1", "severity": "blocker|major|minor|nit", "action": "auto-fix|ask-user|no-op",
   "pass": 3, "file": "path", "line": 1, "evidence": "command and output", "impact": "...", "fix": "...",
   "prior": "new|still present"}]}
