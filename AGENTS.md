@@ -10,7 +10,7 @@ Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hun
 
 The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher; the one webhook rings a bot when a run it launched ends (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
 
-That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the six profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the seven profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
 1. The chief of staff talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
@@ -57,8 +57,8 @@ Where Maestro takes from them: the chief of staff is a firstmate; `/maestro-code
 
 ## Layout
 
-- `bot-profiles/`: the six personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
-- `skills/`: Maestro's 18 `maestro-*` skills. List and writing format in `skills/README.md`.
+- `bot-profiles/`: the seven personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`, `designer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
+- `skills/`: Maestro's 19 `maestro-*` skills. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
 - `INSTALL.md`: the install guide an agent follows in a team's repo. `scripts/install.sh` applies the choices it writes down; `scripts/bot-bundle.sh` builds each Grok bot's paste block; `scripts/install_test.sh` tests both.
 - `tools/maestro-ticket/`: the ticket store and CLI.
@@ -74,7 +74,7 @@ From `tools/maestro-ticket/`:
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 
-Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review prep: `bash scripts/review_prep_test.sh`, after changing `skills/maestro-code-review/scripts/`.
+Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review prep: `bash scripts/review_prep_test.sh`, after changing `skills/maestro-code-review/scripts/`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
 
 ## Changing shipped skills
 

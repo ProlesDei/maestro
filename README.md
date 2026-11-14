@@ -11,7 +11,7 @@ Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A
 
 ## Who drives it
 
-Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the six profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the seven profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 ## How work moves
 
@@ -36,6 +36,7 @@ flowchart TD
         Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>/maestro-designer design &lt;id&gt;<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -56,6 +57,9 @@ flowchart TD
     Planner -->|"routine ticket"| Jr
     Planner -->|"review a PR"| Rev
     Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
+    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
+    Des -.->|"draft PR, the owner's card"| Planner
+    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -100,7 +104,7 @@ flowchart TD
     class Build,L1 session
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
 ```
@@ -148,7 +152,7 @@ Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-rev
 
 ## Your own skills
 
-Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
+Maestro ships 19 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
 
 ## How a bot works
 
@@ -166,16 +170,16 @@ flowchart TD
 
     subgraph Installed ["Their repo after INSTALL.md"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>19 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
 
-    subgraph Roles ["One Grok Bot, six profiles: what each role does"]
+    subgraph Roles ["One Grok Bot, seven profiles: what each role does"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"] ~~~ E7["<b>Designer</b><br/>/maestro-designer ·<br/>screens the owner approves"]
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
@@ -196,7 +200,7 @@ flowchart TD
     class P1,P2 profile
     class H harness
     class S1,S2,S3 ours
-    class E1,E2,E3,E6,E4,E5 role
+    class E1,E2,E3,E6,E4,E5,E7 role
     class Guard note
 ```
 
