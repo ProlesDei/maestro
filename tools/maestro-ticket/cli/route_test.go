@@ -371,8 +371,13 @@ func TestRouteDesignReady(t *testing.T) {
 	if got := sends(rt); !slices.Equal(got, []string{want}) || len(rt.Wrote) != 1 {
 		t.Fatalf("design ready: %v %v", got, rt.Wrote)
 	}
-	if rt := h.route(run); len(rt.Send) != 0 {
-		t.Fatalf("sent up twice: %+v", rt)
+	if rt := h.route(run); !slices.Equal(sends(rt), []string{want}) {
+		t.Fatalf("a second pickup of the run, before its ack, shows the card again: %+v", rt)
+	}
+	d0, _ := h.s.Get(context.Background(), 1)
+	var rt2 routed
+	if err := h.c.designUp(context.Background(), h.s, d0, "look", &rt2); err != nil || len(rt2.Send) != 0 {
+		t.Fatalf("a look sends the card pickup sent: %+v %v", rt2, err)
 	}
 	d, _ := h.s.Get(context.Background(), 1)
 	if last := latest(d).Body; last != "Sent up: chief of staff: approve the design on T-1?" {

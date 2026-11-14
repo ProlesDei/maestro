@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -262,7 +263,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		planner(strings.Join(strings.Fields("disk_full "+id), " ") + ": " + out.First)
 		return out, nil
 	case outDied:
-		if r.AfterDeath {
+		if r.AfterDeath || c.diedBefore(r) {
 			planner(strings.TrimSpace("died twice " + id))
 		} else {
 			out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --died")
@@ -324,9 +325,13 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	case "design":
 		switch {
 		case t.Status == ticket.StatusBlocked && strings.HasPrefix(last.Body, "Sent up:"):
-			// up already: the owner's answer comes back through the planner
+			// Up already. If this run's pickup sent it, show the card again
+			// until the run is acked: a bot that stopped loses nothing.
+			if err := c.designUp(ctx, s, d, "pickup "+r.ID, &out); err != nil {
+				return out, err
+			}
 		case t.Status == ticket.StatusBlocked && designReady(d):
-			if err := c.designUp(ctx, s, d, &out); err != nil {
+			if err := c.designUp(ctx, s, d, "pickup "+r.ID, &out); err != nil {
 				return out, err
 			}
 		case t.Status == ticket.StatusBlocked:
@@ -520,6 +525,24 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	return out, nil
 }
 
+// diedBefore reports whether r's session was resumed once after a death
+// already, as resume counts it: a second death goes up, not to a resume
+// resume refuses.
+func (c *call) diedBefore(r runs.Record) bool {
+	session := cmp.Or(r.SessionID, flagValue(r.Command, "--session-id"), flagValue(r.Command, "--resume"))
+	dir, err := c.besideStore("runs")
+	if err != nil || session == "" {
+		return false
+	}
+	list, _ := runs.List(dir, time.Now(), true)
+	for _, o := range list {
+		if o.AfterDeath && flagValue(o.Command, "--resume") == session {
+			return true
+		}
+	}
+	return false
+}
+
 // timedOutBefore reports whether another run of r's job on its ticket ran
 // out of time since since: a second timeout at one head goes up.
 func (c *call) timedOutBefore(r runs.Record, since time.Time) bool {
@@ -582,11 +605,21 @@ func designReady(d ticket.Detail) bool {
 // designer's session wrote it, one line, and marks the ticket Sent up so
 // no look sends it again. The write is keyed by the escalation, so pickup
 // and look never mark one twice.
-func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, out *routed) error {
-	e, _ := latestWith(d, "Escalation: design ready")
+func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, sender string, out *routed) error {
+	e, ok := latestWith(d, "Escalation: design ready")
+	if !ok {
+		return nil
+	}
 	key := fmt.Sprintf("design-up-%s-%d", d.ID, e.ID)
-	if dir, err := c.besideStore("handouts"); err == nil && !claimHandout(dir, d.ID.String(), "chief-of-staff", key, 24*time.Hour, time.Now()) {
-		return nil // another look or pickup sends this card
+	dir, err := c.besideStore("handouts")
+	if err != nil {
+		return err
+	}
+	mine := key + " " + sender
+	if !claimHandout(dir, d.ID.String(), "chief-of-staff", mine, 24*time.Hour, time.Now()) {
+		if b, _ := os.ReadFile(handoutPath(dir, d.ID.String(), "chief-of-staff")); strings.TrimSpace(string(b)) != mine {
+			return nil // another look or pickup sends this card
+		}
 	}
 	var lines []string
 	for _, l := range strings.Split(e.Body, "\n") {
@@ -596,6 +629,7 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, ou
 	}
 	card := strings.Join(strings.Fields(strings.Join(lines, " | ")), " ")
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: d.ID, Body: "Sent up: chief of staff: approve the design on " + d.ID.String() + "?", Actor: c.actor, IdempotencyKey: key}); err != nil {
+		os.Remove(handoutPath(dir, d.ID.String(), "chief-of-staff")) // the next one tries again
 		return err
 	}
 	out.Wrote = append(out.Wrote, d.ID.String()+" sent up: design ready")

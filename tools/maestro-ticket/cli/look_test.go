@@ -375,3 +375,20 @@ func TestLookRoundTwo(t *testing.T) {
 		t.Fatal("a later note hid the urgent one")
 	}
 }
+
+func TestPruneKeepsEtaMarks(t *testing.T) {
+	dir, now := t.TempDir(), time.Now()
+	for _, n := range []string{"eta-demo-1.chief-of-staff", "T-1.reviewer"} {
+		p := filepath.Join(dir, n)
+		os.WriteFile(p, nil, 0o644)
+		old := now.Add(-48 * time.Hour)
+		os.Chtimes(p, old, old)
+	}
+	pruneHandouts(dir, now)
+	if _, err := os.Stat(filepath.Join(dir, "eta-demo-1.chief-of-staff")); err != nil {
+		t.Fatal("a missed date's mark went after a day")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "T-1.reviewer")); err == nil {
+		t.Fatal("a day-old handout stayed")
+	}
+}

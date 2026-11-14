@@ -112,7 +112,11 @@ func pruneHandouts(dir string, now time.Time) {
 		return
 	}
 	for _, e := range es {
-		if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > 24*time.Hour {
+		keep := 24 * time.Hour
+		if strings.HasPrefix(e.Name(), "eta-") {
+			keep = 30 * 24 * time.Hour // a missed date goes up once
+		}
+		if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > keep {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
@@ -239,10 +243,12 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	ids, rows := []string{}, []string{"Rows:"}
 	seen := map[string]bool{}
 	now := time.Now()
+	var claimed []string
 	for _, j := range out.Judge {
 		if len(rows) > maxJudgeRows || !claimJudge(hdir, cmp.Or(j.key, j.ID), j.fp, now) {
 			continue
 		}
+		claimed = append(claimed, cmp.Or(j.key, j.ID))
 		if !seen[j.ID] {
 			ids = append(ids, j.ID)
 			seen[j.ID] = true
@@ -259,8 +265,8 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	text := strings.Join(rows, "\n") + "\nStanding rules:\n" + rules
 	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
 	if err != nil {
-		for _, j := range out.Judge {
-			os.Remove(handoutPath(hdir, cmp.Or(j.key, j.ID), "judge"))
+		for _, k := range claimed { // only this look's: another's stand
+			os.Remove(handoutPath(hdir, k, "judge"))
 		}
 		out.Errors = append(out.Errors, "judge: "+err.Error())
 		return
@@ -540,7 +546,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				n.waiting++
 				continue
 			}
-			if t.LeaseExpiries >= 2 && p != "Escalation:" {
+			if p == "Escalation:" {
+				judgeIt(t, "blocked", "in progress under an Escalation:, no run on it", "")
+				continue
+			}
+			if t.LeaseExpiries >= 2 {
 				judgeIt(t, "blocked", fmt.Sprintf("its runs died or hung %d times: find the cause before it runs again", t.LeaseExpiries), "")
 				continue
 			}
@@ -561,7 +571,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				// The owner's card on a design: up, not stuck.
 				if !idle {
 					var rt routed
-					if err := c.designUp(ctx, s, d, &rt); err != nil {
+					if err := c.designUp(ctx, s, d, "look", &rt); err != nil {
 						keep(err)
 					} else {
 						out.Wrote = append(out.Wrote, rt.Wrote...)
@@ -713,21 +723,29 @@ func (c *call) sendUpTries(ctx context.Context, s ticket.Store, t ticket.Ticket,
 	}
 	id, key := t.ID.String(), fmt.Sprintf("look-tries-%s-%d", t.ID, t.Tries)
 	q := "split, rewrite or drop " + id + "?"
-	if dir, err := c.besideStore("handouts"); err != nil || !claimHandout(dir, id, "chief-of-staff", key, 24*time.Hour, time.Now()) {
+	dir, err := c.besideStore("handouts")
+	if err != nil || !claimHandout(dir, id, "chief-of-staff", key, 24*time.Hour, time.Now()) {
 		return // a look beside this one sends it
+	}
+	failed := func(what string, err error) {
+		os.Remove(handoutPath(dir, id, "chief-of-staff")) // the next look tries again
+		keep(fmt.Errorf("%s %s: %w", what, id, err))
+	}
+	// The note first, then the move: a stop between leaves an in_progress
+	// ticket under an Escalation:, which look sends to the judge, not to
+	// a build.
+	body := fmt.Sprintf("Escalation: build at TRIES %d: sent back each time for:\n- %s\nQuestion: %s\nReturn-role: engineer", t.Tries, strings.Join(kicks, "\n- "), q)
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: key + "-note"}); err != nil {
+		failed("escalate", err)
+		return
 	}
 	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInProgress, To: ticket.StatusBlocked,
 		ExpectVersion: t.Version, Actor: c.actor, Note: "sent back " + fmt.Sprint(t.Tries) + " times", IdempotencyKey: key + "-move"}); err != nil {
-		keep(fmt.Errorf("block %s: %w", id, err))
-		return
-	}
-	body := fmt.Sprintf("Escalation: build at TRIES %d: sent back each time for:\n- %s\nQuestion: %s\nReturn-role: engineer", t.Tries, strings.Join(kicks, "\n- "), q)
-	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: key + "-note"}); err != nil {
-		keep(fmt.Errorf("escalate %s: %w", id, err))
+		failed("block", err)
 		return
 	}
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: "Sent up: chief of staff: " + q, Actor: c.actor, IdempotencyKey: key + "-up"}); err != nil {
-		keep(fmt.Errorf("send up %s: %w", id, err))
+		failed("send up", err)
 		return
 	}
 	out.Wrote = append(out.Wrote, fmt.Sprintf("%s blocked at TRIES %d, sent up", id, t.Tries))

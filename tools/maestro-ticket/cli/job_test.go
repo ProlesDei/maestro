@@ -432,3 +432,55 @@ func TestJobAgain(t *testing.T) {
 		t.Fatalf("again keeps --slots: %q", nr.Command)
 	}
 }
+
+// A resumed build holds the ticket's build as a job does; a resume mark
+// a crash left empty is taken over; job again on a resumed run starts
+// from the session's first prompt; a second death goes up.
+func TestResumeRoundThree(t *testing.T) {
+	j := newJobHarness(t, "junior-engineer")
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	_, r := j.job("", "build", "T-1")
+	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(strings.Replace(fakeClaude, "printf '{", "sleep 2; printf '{", 1)), 0o755)
+	var s started
+	out, err := j.cmd("go on\n", "resume", "--json", r.ID).Output()
+	if err != nil {
+		t.Fatalf("resume: %v %s", err, out)
+	}
+	json.Unmarshal(out, &s)
+	if o := j.fails(4, "", "job", "build", "T-1"); !strings.Contains(o, "already does it") {
+		t.Fatalf("a build beside a resumed one: %s", o)
+	}
+	nr := j.waitEnded(s.Run.ID, 20*time.Second)
+	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(fakeClaude), 0o755)
+
+	// job again from the resumed run: the first prompt, a new session.
+	_, ar := j.job("", "again", nr.ID)
+	if got := j.seen(ar.ID); got.stdin[0] != "/maestro-software-engineer T-1" || got.flag("--resume") != "" || got.flag("--session-id") == "" {
+		t.Fatalf("again on a resumed run: %q %q", got.stdin, got.args)
+	}
+
+	// A crash left an empty resume mark an hour ago: it is taken over.
+	dir := filepath.Join(j.h.dir, "runs")
+	mark := filepath.Join(dir, ar.ID+".resumed")
+	os.WriteFile(mark, nil, 0o644)
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(mark, old, old)
+	if _, x := j.resume("go on\n", ar.ID); x.ResumeOf != ar.ID {
+		t.Fatalf("stale mark: %+v", x)
+	}
+}
+
+func TestRouteSecondDeathBySession(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	dir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(dir, 0o755)
+	// R2 resumed the session after a death; R3 resumed R2 with an answer.
+	r2, _ := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "2h", Command: []string{"claude", "-p", "--resume", "S9"}}, nil)
+	r2.State, r2.AfterDeath = runs.Done, true
+	runs.Save(dir, r2)
+	rt := h.route(runs.Record{ID: "R-zzzzzzzz", Job: "build", Ticket: "T-1", State: runs.Died, Command: []string{"claude", "-p", "--resume", "S9"}})
+	if !slices.Equal(sends(rt), []string{"send planner: died twice T-1"}) || len(rt.Do) != 0 {
+		t.Fatalf("a second death in one session: %+v", rt)
+	}
+}
