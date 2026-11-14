@@ -455,6 +455,7 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 // end a turn. It shows a result again until the bot acks it, so a bot that
 // stopped before it acted on one loses nothing.
 func runPickup(ctx context.Context, c *call) error {
+	full := c.fs.Bool("full", false, "print every ended job's whole reply")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -485,12 +486,51 @@ func runPickup(ctx context.Context, c *call) error {
 		}
 	}
 	runs.Prune(dir, keepAcked, now)
-	return c.out(map[string]any{"ended": ended, "running": running}, func(w io.Writer) {
+	// A job's result is sorted and routed, so the bot reads a few lines
+	// and sends what they say; a plain launch prints as it ran.
+	routes, routeErr := map[string]routed{}, map[string]error{}
+	if slices.ContainsFunc(ended, func(r runs.Record) bool { return r.Job != "" }) {
+		s, err := c.open(ctx)
 		for _, r := range ended {
-			printRun(w, r, now)
+			switch {
+			case r.Job == "":
+			case err != nil:
+				routeErr[r.ID] = err
+			default:
+				if rt, err := c.route(ctx, s, r); err != nil {
+					routeErr[r.ID] = err
+				} else {
+					routes[r.ID] = rt
+				}
+			}
+		}
+		if err == nil {
+			s.Close()
+		}
+	}
+	routeList := []routed{}
+	for _, r := range ended {
+		if rt, ok := routes[r.ID]; ok {
+			routeList = append(routeList, rt)
+		}
+	}
+	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList}, func(w io.Writer) {
+		ids := []string{}
+		for _, r := range ended {
+			ids = append(ids, r.ID)
+			rt, ok := routes[r.ID]
+			if !ok || *full {
+				printRun(w, r, now)
+			}
+			if err := routeErr[r.ID]; err != nil {
+				fmt.Fprintf(w, "route: %v\n", err)
+			}
+			if ok {
+				printRoute(w, rt, *full)
+			}
 		}
 		if len(ended) > 0 {
-			fmt.Fprintln(w, "ack each once you have acted on it: maestro-ticket ack <run-id>")
+			fmt.Fprintf(w, "ack each once you have acted on it: maestro-ticket ack %s\n", strings.Join(ids, " "))
 		}
 		switch {
 		case len(ended) == 0 && len(running) == 0:
@@ -570,6 +610,39 @@ func runAck(ctx context.Context, c *call) error {
 			}
 		}
 	})
+}
+
+// printRoute prints a routed job: one line for what happened, then each
+// message to send, command to run and write made, and the reply only
+// when the bot has to read it.
+func printRoute(w io.Writer, rt routed, full bool) {
+	on, st := "", ""
+	if rt.Ticket != "" {
+		on = " on " + rt.Ticket
+	}
+	if rt.Status != "" {
+		st = " (" + rt.Status + ")"
+	}
+	reset := ""
+	if rt.Reset != "" {
+		reset = ", resets " + rt.Reset
+	}
+	fmt.Fprintf(w, "%s %s %s%s%s%s: %s\n", rt.Run, rt.Job, rt.Outcome, on, st, reset, dash(rt.First))
+	if rt.Mismatch != "" {
+		fmt.Fprintf(w, "mismatch: want %s\n", rt.Mismatch)
+	}
+	for _, x := range rt.Wrote {
+		fmt.Fprintf(w, "wrote: %s\n", x)
+	}
+	for _, x := range rt.Do {
+		fmt.Fprintf(w, "do: %s\n", x)
+	}
+	for _, x := range rt.Send {
+		fmt.Fprintln(w, x.String())
+	}
+	if rt.Reply != "" && !full {
+		fmt.Fprintf(w, "reply:\n%s\n", indent(rt.Reply))
+	}
 }
 
 // printRun prints one run's result: a header line, then the reply and any

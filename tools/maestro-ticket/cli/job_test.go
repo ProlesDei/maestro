@@ -318,3 +318,21 @@ func TestResumeCommand(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// The whole path: a job ends, and pickup prints what to send.
+func TestPickupRoutesAJob(t *testing.T) {
+	j := newJobHarness(t, "junior-engineer")
+	j.h.ok(nil, "create", "--title", "docs", "--tier", "junior")
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	_, r := j.job("", "build", "T-1")
+	out, err := j.cmd("", "pickup").Output()
+	if err != nil {
+		t.Fatalf("pickup: %v\n%s", err, out)
+	}
+	want := r.ID + " build done on T-1 (in_review): job: done: " + r.ID + "\nsend reviewer: review T-1\nack each once you have acted on it: maestro-ticket ack " + r.ID + "\n"
+	if string(out) != want {
+		t.Fatalf("pickup:\n%s\nwant:\n%s", out, want)
+	}
+}
