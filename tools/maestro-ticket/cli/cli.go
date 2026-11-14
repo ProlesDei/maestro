@@ -86,6 +86,9 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
+  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, a line per message to send, judge rows for the rest;
+              --judge starts one judge session on them, standing rules on stdin)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -185,6 +188,7 @@ var commands = []command{
 	{"log-run", runLogRun},
 	{"costs", runCosts},
 	{"alerts", runAlerts},
+	{"look", runLook},
 	{"eta", runETA},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},

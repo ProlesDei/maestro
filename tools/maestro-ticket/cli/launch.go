@@ -512,6 +512,8 @@ func runPickup(ctx context.Context, c *call) error {
 	for _, r := range ended {
 		if rt, ok := routes[r.ID]; ok {
 			routeList = append(routeList, rt)
+			// A look in the next minutes sends none of these again.
+			recordHandouts(filepath.Join(filepath.Dir(dir), "handouts"), rt.Send)
 		}
 	}
 	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList}, func(w io.Writer) {

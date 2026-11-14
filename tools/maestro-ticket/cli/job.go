@@ -162,6 +162,19 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 	return r, nil
 }
 
+// jobReq is one job to start, as runJob parses it or look builds it.
+type jobReq struct {
+	kind          jobKind
+	ids           []string // ticket ids, as T-<n>
+	ticket        string   // a text job's ticket
+	text          string   // the bot's text, for a text job
+	approved      string   // review
+	drop, dropWhy string   // review
+	full          bool     // review
+	model, effort string   // overrides
+	limit         time.Duration
+}
+
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
 // picks the model, effort and time limit, gives the run a session id,
 // and launches it as launch does. A bot spends one step on it.
@@ -184,20 +197,12 @@ func runJob(ctx context.Context, c *call) error {
 	if !ok {
 		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
 	}
-	ids := c.args[1:]
+	req := jobReq{kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit}
 	if !runs.Supported {
 		return usagef("job needs a unix system")
 	}
 	if err := c.needActor("job"); err != nil {
 		return err
-	}
-	switch {
-	case k.ticket && len(ids) != 1:
-		return usagef("job %s: want one ticket id", k.name)
-	case k.ids && len(ids) == 0:
-		return usagef("job %s: want one or more ticket ids", k.name)
-	case !k.ticket && !k.ids && len(ids) > 0:
-		return usagef("job %s: takes no ticket id; give it as --ticket, and the ask on stdin", k.name)
 	}
 	if k.name != "review" && (*approved != "" || *drop != "" || *dropFile != "" || *full) {
 		return usagef("job %s: --approved, --drop, --drop-file and --full are for review", k.name)
@@ -205,59 +210,74 @@ func runJob(ctx context.Context, c *call) error {
 	if (*drop == "") != (*dropFile == "") {
 		return usagef("job review: --drop names the findings and --drop-file gives why: pass both")
 	}
-	if *approved != "" && !shaPattern.MatchString(*approved) {
-		return usagef("job review: --approved %q: want a commit sha", *approved)
-	}
-	if *drop != "" && !dropPattern.MatchString(*drop) {
-		return usagef("job review: --drop %q: want finding ids such as F1,F3", *drop)
-	}
-	for i, id := range ids {
-		t, err := ticket.ParseID(id)
-		if err != nil {
-			return err
-		}
-		ids[i] = t.String()
-	}
-	ticketID := ""
-	switch {
-	case k.ticket:
-		ticketID = ids[0]
-	case *tk != "":
-		if k.ids {
-			return usagef("job %s: the ids name its tickets; drop --ticket", k.name)
-		}
+	if *tk != "" {
 		t, err := ticket.ParseID(*tk)
 		if err != nil {
 			return err
 		}
-		ticketID = t.String()
+		req.ticket = t.String()
 	}
-
-	var text string
 	if k.text != "" || *dropFile == "-" {
 		b, err := c.readStdin()
 		if err != nil {
 			return err
 		}
-		text = strings.TrimSpace(string(b))
-		if k.text == "need" && text == "" {
-			return usagef("job %s: send the ask on stdin, in a quoted heredoc", k.name)
-		}
+		req.text = strings.TrimSpace(string(b))
 	}
-	dropWhy := ""
 	if *dropFile != "" {
 		if *dropFile == "-" {
-			dropWhy = text
+			req.dropWhy, req.text = req.text, ""
 		} else {
 			b, err := c.readBody("", *dropFile)
 			if err != nil {
 				return err
 			}
-			dropWhy = b
+			req.dropWhy = b
 		}
-		if dropWhy = oneLineText(dropWhy); dropWhy == "" {
-			return usagef("job review: --drop-file is empty: say why the findings dropped")
+	}
+	r, m, why, err := c.startJob(ctx, req)
+	if err != nil {
+		return err
+	}
+	return c.printStarted(r, m, why)
+}
+
+// startJob checks a job, builds its prompt and command, and starts it. It
+// returns the run, its model and why that model.
+func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, string, error) {
+	k, ids := req.kind, slices.Clone(req.ids)
+	fail := func(err error) (runs.Record, string, string, error) { return runs.Record{}, "", "", err }
+	switch {
+	case k.ticket && len(ids) != 1:
+		return fail(usagef("job %s: want one ticket id", k.name))
+	case k.ids && len(ids) == 0:
+		return fail(usagef("job %s: want one or more ticket ids", k.name))
+	case !k.ticket && !k.ids && len(ids) > 0:
+		return fail(usagef("job %s: takes no ticket id; give it as --ticket, and the ask on stdin", k.name))
+	case k.text == "need" && req.text == "":
+		return fail(usagef("job %s: send the ask on stdin, in a quoted heredoc", k.name))
+	case req.approved != "" && !shaPattern.MatchString(req.approved):
+		return fail(usagef("job review: --approved %q: want a commit sha", req.approved))
+	case req.drop != "" && !dropPattern.MatchString(req.drop):
+		return fail(usagef("job review: --drop %q: want finding ids such as F1,F3", req.drop))
+	}
+	for i, id := range ids {
+		t, err := ticket.ParseID(id)
+		if err != nil {
+			return fail(err)
 		}
+		ids[i] = t.String()
+	}
+	ticketID := req.ticket
+	switch {
+	case k.ticket:
+		ticketID = ids[0]
+	case k.ids && ticketID != "":
+		return fail(usagef("job %s: the ids name its tickets; drop --ticket", k.name))
+	}
+	dropWhy := oneLineText(req.dropWhy)
+	if req.drop != "" && dropWhy == "" {
+		return fail(usagef("job review: --drop-file is empty: say why the findings dropped"))
 	}
 
 	m, why := k.model, ""
@@ -270,7 +290,7 @@ func runJob(ctx context.Context, c *call) error {
 	case "tier":
 		t, err := c.ticketForJob(ctx, ticketID)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		m = modelOpus
 		if t.Tier == ticket.TierJunior {
@@ -279,14 +299,14 @@ func runJob(ctx context.Context, c *call) error {
 		why = "tier " + dash(t.Tier)
 	case "route":
 		if _, err := c.ticketForJob(ctx, ticketID); err != nil {
-			return err
+			return fail(err)
 		}
 		r, err := c.reviewRoute(ctx, ticketID)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		m, why = modelOpus, "full review"
-		if r.light && !*full {
+		if r.light && !req.full {
 			m, why = modelSonnet, "light review: "+r.why
 		}
 		if r.lines >= 0 {
@@ -295,7 +315,7 @@ func runJob(ctx context.Context, c *call) error {
 	default:
 		if ticketID != "" {
 			if _, err := c.ticketForJob(ctx, ticketID); err != nil {
-				return err
+				return fail(err)
 			}
 		}
 	}
@@ -304,36 +324,34 @@ func runJob(ctx context.Context, c *call) error {
 		if m == modelSonnet {
 			words = append(words, "--light")
 		}
-		if *approved != "" {
-			words = append(words, "--approved", *approved)
+		if req.approved != "" {
+			words = append(words, "--approved", req.approved)
 		}
-		if *drop != "" {
-			words = append(words, "--drop", *drop+":", dropWhy)
+		if req.drop != "" {
+			words = append(words, "--drop", req.drop+":", dropWhy)
 		}
 	}
 	prompt := strings.Join(words, " ")
-	if k.text != "" && text != "" {
-		sep := " "
-		if k.ids {
-			sep = "\n" // judge: the rows and rules follow the ids
-		}
-		prompt += sep + text
+	switch {
+	case k.name == "rule":
+		prompt += ": " + req.text
+	case k.ids && req.text != "":
+		prompt += "\n" + req.text // judge: the rows and rules follow the ids
+	case k.text != "" && req.text != "":
+		prompt += " " + req.text
 	}
-	if k.name == "rule" {
-		prompt = strings.Join(words, " ") + ": " + text
-	}
-	if *model != "" {
-		m = *model
+	if req.model != "" {
+		m = req.model
 	}
 	e := effortHigh
-	if *effort != "" {
-		e = *effort
+	if req.effort != "" {
+		e = req.effort
 	}
-	if *limit != 0 {
-		runLimit = *limit
+	if req.limit != 0 {
+		runLimit = req.limit
 	}
 	if runLimit < time.Second || runLimit > 24*time.Hour {
-		return usagef("job: --limit %s: want 1s to 24h", runLimit)
+		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
@@ -341,9 +359,9 @@ func runJob(ctx context.Context, c *call) error {
 	}
 	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	return c.printStarted(r, m, why)
+	return r, m, why, nil
 }
 
 var (
