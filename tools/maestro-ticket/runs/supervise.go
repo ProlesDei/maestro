@@ -140,16 +140,35 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	// The limit leaves out time the command spent waiting for a slot, up
+	// to maxSlotCredit, so the deadline moves on each time it comes.
+	begun := time.Now()
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
 	why := ""
-	select {
-	case <-done:
-	case <-timer.C:
-		why = TimedOut
-	case <-ctx.Done():
-		why = "stopped"
+	var credit time.Duration
+wait:
+	for {
+		select {
+		case <-done:
+			break wait
+		case <-timer.C:
+			credit = min(SlotWait(dir, r.ID, begun, time.Now()), maxSlotCredit)
+			if left := time.Until(begun.Add(limit + credit)); left > 0 {
+				// While a wait goes on, the deadline moves as fast as the
+				// clock: look again no sooner than liveWait, not in a spin,
+				// but never past the latest the deadline can be.
+				timer.Reset(min(max(left, liveWait), time.Until(begun.Add(limit+maxSlotCredit))))
+				continue
+			}
+			why = TimedOut
+			break wait
+		case <-ctx.Done():
+			why = "stopped"
+			break wait
+		}
 	}
+	removeWaits(dir, r.ID)
 	if why != "" {
 		// Anything the command left in its group goes with it on a stop,
 		// even when the command exits on SIGTERM and a child ignores it;
@@ -185,6 +204,12 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	case why == TimedOut:
 		r.State = TimedOut
 		r.Error = fmt.Sprintf("the %s time limit ended it", r.Limit)
+		if credit > 0 {
+			r.Error += fmt.Sprintf(", which left out %s waiting for a slot", credit.Round(time.Second))
+			if credit == maxSlotCredit {
+				r.Error += " (the most it leaves out)"
+			}
+		}
 	case why != "":
 		r.State, r.Error = Failed, "the launcher was stopped, so it stopped the run"
 	case code == 0:

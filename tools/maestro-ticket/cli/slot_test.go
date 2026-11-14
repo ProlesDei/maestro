@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 )
 
 // slotFails is h.fails with --json before the --: after it, the flag is
@@ -333,5 +334,168 @@ func TestSlotRefusesUnwritableTempDir(t *testing.T) {
 	code, _, errs := h.run("", "slot", "--", "true")
 	if code != 2 || !strings.Contains(errs, "set TMPDIR to a writable folder") {
 		t.Fatalf("exit %d: %s; want 2, set TMPDIR", code, errs)
+	}
+}
+
+// holdSlot takes slot name.i in h's store the way a running check does,
+// and returns its file: closing it frees the slot.
+func holdSlot(t *testing.T, h *harness, name string, i int) *os.File {
+	t.Helper()
+	dir := filepath.Join(h.dir, "slots")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, fmt.Sprintf("%s.%d.lock", name, i)), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f
+}
+
+// Waiters take slots in the order they came, however their retries fall.
+func TestSlotServesWaitersInOrder(t *testing.T) {
+	h := newHarness(t)
+	held := holdSlot(t, h, "checks", 0)
+	order := filepath.Join(h.dir, "order")
+	const n = 4
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			code, _, errs := h.run("", "slot", "--max", "1", "--", "sh", "-c", "echo $0 >> "+order+"; sleep 0.2", strconv.Itoa(i))
+			if code != 0 {
+				t.Errorf("waiter %d: exit %d: %s", i, code, errs)
+			}
+		}()
+		// Each joins the line before the next comes.
+		deadline := time.Now().Add(5 * time.Second)
+		for countLine(t, h) < i+1 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	held.Close()
+	wg.Wait()
+	b, _ := os.ReadFile(order)
+	if got := strings.Fields(string(b)); strings.Join(got, " ") != "0 1 2 3" {
+		t.Fatalf("served %v; want 0 1 2 3", got)
+	}
+	if c := countLine(t, h); c != 0 {
+		t.Fatalf("%d waiters left in line", c)
+	}
+}
+
+func countLine(t *testing.T, h *harness) int {
+	t.Helper()
+	ents, _ := os.ReadDir(filepath.Join(h.dir, "slots"))
+	n := 0
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), "checks.q.") {
+			n++
+		}
+	}
+	return n
+}
+
+// A waiter that died leaves its file in line, unlocked: the next waiter
+// removes it instead of waiting behind it for good.
+func TestSlotSkipsDeadWaiters(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.dir, "slots")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dead := filepath.Join(dir, fmt.Sprintf("checks.q.%020d-%d", 1, 99999))
+	if err := os.WriteFile(dead, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// One that died halfway through joining, a while ago.
+	joining := filepath.Join(dir, "checks.t.123")
+	if err := os.WriteFile(joining, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(joining, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := h.run("", "slot", "--max", "1", "--wait", "5s", "--", "true"); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	for _, f := range []string{dead, joining} {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("%s is still in slots/", filepath.Base(f))
+		}
+	}
+}
+
+// A waiter for fewer slots at the head of the line doesn't hold back one
+// behind it that can use a slot it can't, as when lint runs with --max 1
+// and tests with --max 2 under one name. Line files are readable, so a
+// waiter of another user can test their locks.
+func TestSlotWaiterBehindUsesAFreeSlot(t *testing.T) {
+	h := newHarness(t)
+	held := holdSlot(t, h, "checks", 0)
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := h.run("", "slot", "--max", "1", "--", "true")
+		done <- code
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for countLine(t, h) < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	ents, _ := os.ReadDir(filepath.Join(h.dir, "slots"))
+	for _, e := range ents {
+		if info, err := e.Info(); err == nil && strings.HasPrefix(e.Name(), "checks.q.") && info.Mode().Perm()&0o044 != 0o044 {
+			t.Errorf("line file %s has mode %v; want readable by all", e.Name(), info.Mode().Perm())
+		}
+	}
+	if code, _, errs := h.run("", "slot", "--max", "2", "--wait", "5s", "--", "true"); code != 0 {
+		t.Fatalf("--max 2 behind a --max 1 waiter: exit %d: %s", code, errs)
+	}
+	held.Close()
+	if code := <-done; code != 0 {
+		t.Fatalf("--max 1 waiter: exit %d", code)
+	}
+}
+
+// A run launch started marks its slot wait, so its time limit leaves the
+// wait out; outside a run, slot marks nothing.
+func TestSlotMarksTheRunsWait(t *testing.T) {
+	h := newHarness(t)
+	rdir := filepath.Join(h.dir, "runs")
+	r, err := runs.Create(rdir, runs.Record{Launcher: "qa-lead", Limit: "1h"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.env[runs.RunIDEnv] = r.ID
+	held := holdSlot(t, h, "checks", 0)
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		held.Close()
+	}()
+	begun := time.Now()
+	if code, _, errs := h.run("", "slot", "--max", "1", "--", "true"); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if got := runs.SlotWait(rdir, r.ID, begun, time.Now()); got < time.Second || got > 4*time.Second {
+		t.Fatalf("marked wait %s; want about 1.5s", got)
+	}
+}
+
+// End to end: a launched run whose check waits for a slot past its time
+// limit isn't ended by it, and finishes once the slot frees.
+func TestLaunchedRunsLimitLeavesOutSlotWait(t *testing.T) {
+	l := newLauncher(t, "qa-lead")
+	held := holdSlot(t, l.h, "checks", 0)
+	r := l.launch("", "--limit", "2s", "--", envcheck.MinFreeEnv+"=0", "sh", "-c", `"$0" slot --max 1 -- true`, l.exe)
+	time.Sleep(4 * time.Second)
+	held.Close()
+	if e := l.waitEnded(r.ID, 20*time.Second); e.State != runs.Done {
+		t.Fatalf("run: %s: %s", e.State, e.Error)
 	}
 }

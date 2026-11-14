@@ -109,7 +109,8 @@ Commands:
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
-              own that is removed when it ends; exits with its code)
+              own that is removed when it ends; waiters go in the order they came,
+              and a launched run's limit leaves out the wait; exits with its code)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)

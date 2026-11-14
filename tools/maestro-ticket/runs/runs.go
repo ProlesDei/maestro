@@ -6,9 +6,10 @@
 // A run is a few files in one directory, which every worktree shares (runs/
 // next to the ticket store): <id>.json, the record; <id>.in, .out and .err,
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
-// holds while it lives; and <id>.acked, made once when the launcher says it
-// acted on the result. Only one process writes a record at a time: launch
-// until the supervisor starts, then whoever holds <id>.lock: the
+// holds while it lives; <id>.acked, made once when the launcher says it
+// acted on the result; and <id>.wait.* and <id>.waited.*, the slot waits
+// its command marked (wait.go). Only one process writes a record at a
+// time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
 package runs
 
@@ -348,6 +349,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	if err != nil {
 		return nil
 	}
+	pruned := map[string]bool{}
 	for _, e := range ents {
 		id, ok := strings.CutSuffix(e.Name(), ".acked")
 		if !ok || !ValidID(id) {
@@ -357,10 +359,18 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		if err != nil || now.Sub(info.ModTime()) < keep {
 			continue
 		}
+		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
 		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
 			os.Remove(path(dir, id, ext))
+		}
+	}
+	// Their slot wait marks, from the same listing: one listing per run
+	// would cost the square of the runs.
+	for _, e := range ents {
+		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
+			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 	return nil
