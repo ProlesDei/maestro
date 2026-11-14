@@ -122,8 +122,12 @@ if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
 	retry git fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" || die 1 "can't fetch $branch"
 	start=refs/remotes/origin/$branch
 fi
+# The team's hooks expect their dependencies, which this worktree lacks,
+# and LFS files aren't needed for a commit of images and a spec: run no
+# hook and fetch no LFS object on the way.
+nohook() { GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null "$@"; }
 wt=$tmp/wt
-git worktree add -q --detach "$wt" "$start" || die 1 "can't add a worktree at $start"
+nohook worktree add -q --detach "$wt" "$start" || die 1 "can't add a worktree at $start"
 d=.maestro/design/$id
 rm -rf "${wt:?}/$d"
 mkdir -p "$wt/$d"
@@ -131,12 +135,10 @@ cp "$spec" "$dir"/sheet-*.png "$dir/$lp"-*.png "$wt/$d/"
 git -C "$wt" add -A -- "$d"
 if ! git -C "$wt" diff --cached --quiet; then
 	printf 'Design %s for the owner'"'"'s look [skip ci]\n\nShots and spec only; this branch never merges.\n' "$id" >"$tmp/msg"
-	# No hooks: the team's hooks expect their dependencies, which this
-	# worktree lacks, and the commit holds only a spec and images.
-	git -C "$wt" commit -q --no-verify -F "$tmp/msg" || die 1 "commit failed"
+	nohook -C "$wt" commit -q --no-verify -F "$tmp/msg" || die 1 "commit failed"
 fi
 sha=$(git -C "$wt" rev-parse HEAD)
-retry git -C "$wt" push -q --no-verify origin "HEAD:refs/heads/$branch" || die 1 "push to $branch failed"
+retry nohook -C "$wt" push -q --no-verify origin "HEAD:refs/heads/$branch" || die 1 "push to $branch failed"
 
 # The draft PR, from this repo only: a fork's PR on the same branch
 # name is never ours.
@@ -166,9 +168,11 @@ else
 	# A private repo on a plan with no draft PRs refuses --draft: open a
 	# plain one, titled so no person merges it. No bot would: the design
 	# ticket never reaches review or QA.
-	pr=$(gh pr create --draft --base "$main" --head "$branch" --title "$title" --body-file "$tmp/body" 2>"$tmp/err") ||
+	if ! pr=$(gh pr create --draft --base "$main" --head "$branch" --title "$title" --body-file "$tmp/body" 2>"$tmp/err"); then
+		grep -qi 'draft' "$tmp/err" || die 1 "can't open the PR: $(head -c 300 "$tmp/err")"
 		pr=$(gh pr create --base "$main" --head "$branch" --title "$title (do not merge)" --body-file "$tmp/body") ||
-		die 1 "can't open the PR: $(head -c 300 "$tmp/err")"
+			die 1 "can't open the PR"
+	fi
 	pr=$(tail -n1 <<<"$pr")
 fi
 [[ $pr =~ ^https:// ]] || die 1 "gh gave no PR URL: $pr"

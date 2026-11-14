@@ -52,7 +52,7 @@ func TestTransitions(t *testing.T) {
 		{blocked(TypeScout, StatusInReview), StatusInReview},
 		{blocked(TypeShip, ""), StatusTodo}, // a blocked ticket with no origin returns to todo
 		// The owner's yes closes a blocked design in one move.
-		{Ticket{Type: TypeScout, Role: RoleDesigner, Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeScout, Role: RoleDesigner, Title: "Design: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
 	}
 	for _, p := range allowed {
 		if !p.t.CanMove(p.to) {
@@ -73,7 +73,8 @@ func TestTransitions(t *testing.T) {
 		{blocked(TypeShip, StatusInProgress), StatusTodo}, {blocked(TypeShip, StatusInReview), StatusInProgress},
 		{scout(StatusInProgress), StatusDone}, {blocked(TypeScout, StatusInReview), StatusDone},
 		// Only a designer's scout ticket skips back from blocked to done.
-		{Ticket{Type: TypeScout, Role: RoleQALead, Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeScout, Role: RoleQALead, Title: "Design: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeScout, Role: RoleDesigner, Title: "Scout: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
 		{Ticket{Type: TypeShip, Role: RoleDesigner, Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
 		{Ticket{Type: TypeScout, Role: RoleDesigner, Status: StatusInProgress}, StatusDone},
 		// Unknown statuses, such as removed ones, have no moves.

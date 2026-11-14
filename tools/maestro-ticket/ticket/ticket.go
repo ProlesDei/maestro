@@ -404,7 +404,7 @@ func (t Ticket) NextStatuses() []Status {
 		// design; their yes closes it in one move, so no stop part way
 		// leaves it where review or a build would take it. CheckGate
 		// still lets only its owner set it done.
-		if t.Type == TypeScout && t.Role == RoleDesigner {
+		if t.Type == TypeScout && t.Role == RoleDesigner && strings.HasPrefix(t.Title, "Design:") {
 			return []Status{back, StatusDone, StatusCancelled}
 		}
 		return []Status{back, StatusCancelled}

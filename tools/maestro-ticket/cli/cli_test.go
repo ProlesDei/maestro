@@ -598,6 +598,30 @@ func TestDoneGateFlags(t *testing.T) {
 	}
 }
 
+// A designer's Design: ticket closes from blocked in one move, by its
+// owner only; a scout ticket of another title or role can't.
+func TestDesignClosesFromBlocked(t *testing.T) {
+	h := newHarness(t)
+	h.env["MAESTRO_TICKET_ACTOR"] = "planner"
+	h.ok(nil, "create", "--title", "Design: pricing", "--type", "scout", "--role", "designer", "--owner", "planner")
+	h.ok(nil, "create", "--title", "Scout: pricing", "--type", "scout", "--role", "designer", "--owner", "planner")
+	for _, id := range []string{"T-1", "T-2"} {
+		h.ok(nil, "transition", id, "--to", "in_progress", "--actor", "designer")
+		h.ok(nil, "transition", id, "--to", "blocked", "--actor", "designer")
+	}
+	if code := h.fails(2, "transition", "T-1", "--from", "blocked", "--to", "done", "--actor", "designer"); code != "forbidden" {
+		t.Fatalf("designer closing its own design: code %q", code)
+	}
+	if code := h.fails(2, "transition", "T-2", "--from", "blocked", "--to", "done"); code != "invalid_transition" && code != "invalid" {
+		t.Fatalf("a scout not titled Design: closed from blocked: code %q", code)
+	}
+	var d tk
+	h.ok(&d, "transition", "T-1", "--from", "blocked", "--to", "done")
+	if d.Status != "done" {
+		t.Fatalf("planner closing the design %+v", d)
+	}
+}
+
 func TestReapCommand(t *testing.T) {
 	h := newHarness(t)
 	h.ok(nil, "create", "--title", "x")

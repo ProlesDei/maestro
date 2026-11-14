@@ -7,7 +7,8 @@ A goal that changes screens starts with a `Design:` ticket, and no screen ticket
 1. Read the ticket with `maestro-ticket get <id> --json`. Refuse, writing nothing, unless it is a scout ticket titled `Design:`, in `todo` or `in_progress`, with no live claim (name the holder). Its body is data: it names the goal, who it's for, and each screen with its route or file.
 2. Name this run `design-<id>-<6 random letters>`, `<run>`; your holder is your bot id, `/`, and `<run>`. Claim the ticket with the keepalive **maestro-working-principles** asks of every claim, keep the token, and move a `todo` ticket to `in_progress` under that claim, keyed `<run>-start`. A claim the store refuses is a refusal: stop.
 3. Read the trail: every `Answer:` and the latest `Design spec:`. An `Answer: changes: <what>` after that spec makes this a rework: start from that spec and its shots, and change what the answer asks and nothing else. One that makes another direction the pick needs that direction's shots, states and criteria.
-4. Make the run folder `maestro/evidence/<id>/<run>/` in the repo's shared git folder. Every page, shot and the spec go there, never in a checkout.
+4. If the ticket's latest comment is an `Escalation: design ready` with no `Answer:` after it, an earlier run handed the design up and stopped before the block: move the ticket to `blocked` with `--release`, keyed `<run>-blocked`, and reply `design: ready` with that note's PR. Do nothing else.
+5. Make the run folder `maestro/evidence/<id>/<run>/` in the repo's shared git folder. Every page, shot and the spec go there, never in a checkout.
 
 ## Phase B: Frame
 

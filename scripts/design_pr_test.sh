@@ -29,10 +29,11 @@ cat >"$tmp/bin/gh" <<'EOF'
 set -euo pipefail
 echo "gh $*" >>"$FX/log"
 case "$1 $2" in
-"repo view") echo https://github.com/o/r ;;
+"repo view") cat "$FX/repo-url" 2>/dev/null || echo https://github.com/o/r ;;
 "api repos/{owner}/{repo}/pulls?head={owner}:"*) cat "$FX/open-pr" 2>/dev/null || true ;;
 "pr create")
 	[ ! -f "$FX/no-draft" ] || [[ " $* " != *" --draft "* ]] || { echo "draft pull requests are not supported in this repository" >&2; exit 1; }
+	[ ! -f "$FX/pr-down" ] || { echo "HTTP 502: server error" >&2; exit 1; }
 	while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" "$FX/body"; shift; done
 	echo "Creating draft pull request"; echo https://github.com/o/r/pull/9 ;;
 "pr edit")
@@ -70,7 +71,8 @@ git add -A && git commit -qm init && git push -q origin HEAD:trunk
 # would in a fresh worktree: the hand-up must not run them.
 printf '#!/bin/sh\necho hook ran >&2\nexit 1\n' >"$(git rev-parse --git-common-dir)/hooks/pre-commit"
 cp "$(git rev-parse --git-common-dir)/hooks/pre-commit" "$(git rev-parse --git-common-dir)/hooks/pre-push"
-chmod +x "$(git rev-parse --git-common-dir)"/hooks/pre-*
+cp "$(git rev-parse --git-common-dir)/hooks/pre-commit" "$(git rev-parse --git-common-dir)/hooks/post-checkout"
+chmod +x "$(git rev-parse --git-common-dir)"/hooks/pre-* "$(git rev-parse --git-common-dir)/hooks/post-checkout"
 
 ticket() { # <status> <holder> [title] [type]
 	jq -n --arg s "$1" --arg h "$2" --arg t "${3:-Design: pricing page}" --arg y "${4:-scout}" \
@@ -217,9 +219,24 @@ run T-7 "$run_dir" --holder "$H" --token 3 || fail "the rerun failed"
 has "sha=$sha2"
 grep -qxF "comment 1 $H-spec-$sha2 actor=designer" "$FX/log" || fail "the rerun changed the spec key"
 
-# A repo with no draft PRs: a plain PR, titled so no person merges it.
+# A gh that can't give the repo's URL, and a PR create that fails for a
+# reason other than drafts, stop with no ticket write and no plain PR.
 git push -q --no-verify origin --delete maestro/T-7
 rm -f "$FX/open-pr" "$FX/n"
+ticket in_progress "$H"
+echo 'not a url' >"$FX/repo-url"
+: >"$FX/log"
+if run T-7 "$run_dir" --holder "$H" --token 3; then fail "used a repo URL that isn't one"; else rc=$?; [ $rc = 1 ] || fail "exit $rc on a bad repo URL"; fi
+! grep -qE '^(gh pr|comment|transition)' "$FX/log" || fail "wrote after a bad repo URL"
+rm -f "$FX/repo-url"
+touch "$FX/pr-down"
+: >"$FX/log"
+if run T-7 "$run_dir" --holder "$H" --token 3; then fail "passed when gh couldn't open a PR"; else rc=$?; [ $rc = 1 ] || fail "exit $rc when gh failed"; fi
+[ "$(grep -c '^gh pr create' "$FX/log")" = 1 ] || fail "fell back to a plain PR on a non-draft error"
+! grep -qE '^(comment|transition)' "$FX/log" || fail "wrote after gh failed"
+rm -f "$FX/pr-down"
+
+# A repo with no draft PRs: a plain PR, titled so no person merges it.
 touch "$FX/no-draft"
 ticket in_progress "$H"
 : >"$FX/log"
