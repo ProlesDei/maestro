@@ -69,7 +69,7 @@ Commands:
               [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
               [--areas path,path] [--split-from T-1] [--goal G] [--parked R (required for backlog)]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
-              [--holder H --token N]
+              [--split-from T-1 (a cancelled ticket this one replaces)] [--holder H --token N]
   get         <id> [--full]   (default: the newest comment of each kind, every Answer:, and the
               newest Handoff: and all after it in full; the rest as first lines)
   list        [--status S,...] [--role R] [--holder H] [--claimed | --unclaimed | --ready] [--limit N]
@@ -633,6 +633,7 @@ func runUpdate(ctx context.Context, c *call) error {
 	areas := c.fs.String("areas", "", "replace the code areas (comma-separated; \"\" clears them)")
 	parked := c.fs.String("parked", "", "a new reason for a backlog ticket: hold, deferred, unready or planning")
 	goal := c.fs.String("goal", "", "replace the goal slug (\"\" clears it)")
+	splitFrom := c.fs.String("split-from", "", "the cancelled ticket this one replaces: add its tries, and count its runs here")
 	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, required if the ticket is claimed")
 	token := c.fs.Int64("token", 0, "lease token from your claim, required if the ticket is claimed")
 	return c.withStore(ctx, func(s ticket.Store) error {
@@ -649,6 +650,11 @@ func runUpdate(ctx context.Context, c *call) error {
 		}
 		if req.RemoveDeps, err = ticket.ParseIDs(*remove); err != nil {
 			return err
+		}
+		if *splitFrom != "" {
+			if req.SplitFrom, err = ticket.ParseID(*splitFrom); err != nil {
+				return err
+			}
 		}
 		c.fs.Visit(func(f *flag.Flag) {
 			if f.Name == "areas" {

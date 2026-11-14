@@ -55,18 +55,27 @@ func (r LogRunRequest) Validate() error {
 
 // RunFilter selects runs. Zero values select all.
 type RunFilter struct {
+	// Ticket keeps the runs logged on it or counted toward it.
 	Ticket ID
 	// Since keeps sessions first logged at or after it.
 	Since time.Time
 }
 
 // RunRow is a run with what its ticket says about where the work came
-// from, for grouping. All three are empty for a run with no ticket.
+// from, for grouping. Goal, Origin and Tries are empty for a run with no
+// ticket.
+//
+// Its Ticket is the ticket the run counts toward: a run logged on a
+// cancelled ticket that was rewritten as one other ticket (that one made
+// or linked with --split-from it) counts toward that one, down the chain,
+// and CarriedFrom names the ticket it was logged on. A cancelled ticket
+// split into several keeps its runs, as no one of them is its work.
 type RunRow struct {
 	Run
-	Goal string `json:"goal,omitempty"`
-	// Origin is who created the ticket, or "split" for a ticket made with
-	// --split-from: a rewrite or split of another.
+	CarriedFrom ID     `json:"carried_from,omitempty"`
+	Goal        string `json:"goal,omitempty"`
+	// Origin is who created the ticket, or "split" for a ticket made or
+	// linked with --split-from: a rewrite or split of another.
 	Origin string `json:"origin,omitempty"`
 	Tries  int    `json:"tries"`
 }

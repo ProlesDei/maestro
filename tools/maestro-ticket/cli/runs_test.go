@@ -212,3 +212,40 @@ func TestCostsGroups(t *testing.T) {
 		t.Fatalf("--since 1h kept %d runs", got.Total.Runs)
 	}
 }
+
+// SEC-242's case: a cancelled ticket re-filed by hand gets linked, and its
+// spend and tries move to the new ticket.
+func TestCostsFollowARefile(t *testing.T) {
+	h := newHarness(t)
+	h.ok(nil, "create", "--title", "first try")
+	h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	h.ok(nil, "transition", "T-1", "--to", "in_review")
+	h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	if code, _, errs := h.run(reply("s1", 14.91, "m"), "log-run", "--actor", "senior-engineer", "--ticket", "T-1"); code != 0 {
+		t.Fatalf("log-run: exit %d: %s", code, errs)
+	}
+	h.ok(nil, "create", "--title", "re-filed")
+	if code := h.fails(2, "update", "T-2", "--split-from", "T-1"); code != "invalid" {
+		t.Fatalf("link to an open ticket: code %q", code)
+	}
+	h.ok(nil, "transition", "T-1", "--to", "cancelled")
+	var tk struct{ Tries int }
+	h.ok(&tk, "update", "T-2", "--split-from", "T-1")
+	if tk.Tries != 1 {
+		t.Fatalf("tries %d; want T-1's 1", tk.Tries)
+	}
+	var got struct {
+		Rows []struct {
+			Key string
+			USD float64
+		}
+	}
+	h.ok(&got, "costs", "--by", "ticket")
+	if len(got.Rows) != 1 || got.Rows[0].Key != "T-2" || got.Rows[0].USD != 14.91 {
+		t.Fatalf("by ticket: %+v", got.Rows)
+	}
+	h.ok(&got, "costs", "--by", "tries")
+	if len(got.Rows) != 1 || got.Rows[0].Key != "1" {
+		t.Fatalf("by tries: %+v", got.Rows)
+	}
+}

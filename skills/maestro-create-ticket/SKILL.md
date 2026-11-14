@@ -44,6 +44,7 @@ Follow the **maestro-working-principles** skill.
    - Leave out `--type`: the default, `ship`, is a ticket that ends in a merged PR.
    - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted and new each time, as **maestro-working-principles** says for quoted text.
    - The slugs are lowercase letters, digits and hyphens. Leave out `--deps`, `--areas` or `--goal` when empty, and `--parked` unless the status is `backlog`.
+   - A ticket that replaces a cancelled one (a re-file) gets `--split-from '<old id>'`, so its tries carry over and `maestro-ticket costs` counts the old ticket's runs toward it. One made without it can be linked later with `update <new id> --split-from <old id>`.
    - A `hold` needs a note right after: comment `Hold: set by <the owner, or the bot>, <date>: <why>; lifts when <a fact the board shows>`, sent on stdin in a heredoc as the body was.
    - If the store refuses, show its message, fix only the field it names, and run again with the same key. On `idempotency_conflict`, another ticket got this title today: read it; if it is this work and not `cancelled`, reply with its id, else change the title, and with it the key.
 

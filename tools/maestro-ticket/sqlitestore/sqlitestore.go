@@ -899,6 +899,12 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			if err := t.CheckFence(req.Holder, req.Token); err != nil {
 				return t, err
 			}
+			tries := t.Tries
+			if req.SplitFrom != 0 {
+				if tries, err = linkSplit(ctx, tx, t, req.SplitFrom); err != nil {
+					return t, err
+				}
+			}
 			// A working claim already holds its areas: new ones must be free.
 			if req.Areas != nil && t.LiveClaim() != nil && t.Status.WritesCode() {
 				if err := checkAreas(ctx, tx, t.ID, *req.Areas, now); err != nil {
@@ -938,8 +944,12 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 				goal = *req.Goal
 				data["goal"] = goal
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET parked = ?, goal = ?, updated_at = ? WHERE id = ?",
-				parked, goal, now, t.ID); err != nil {
+			if req.SplitFrom != 0 {
+				data["split_from"] = req.SplitFrom
+				data["tries"] = tries
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE tickets SET parked = ?, goal = ?, tries = ?, updated_at = ? WHERE id = ?",
+				parked, goal, tries, now, t.ID); err != nil {
 				return t, err
 			}
 			if err := appendEvent(ctx, tx, t.ID, ticket.EventUpdated, req.Actor, data, now); err != nil {
