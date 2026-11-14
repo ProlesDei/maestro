@@ -514,7 +514,7 @@ if [ "$cmd" = check ]; then
 		fi
 		# Engineers skip the full proof unless ## Proof says engineer, so a
 		# typo there must not quietly hand it to QA.
-		proof=$(awk -F'\t' "$line"' $1=="proof" {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print tolower(t); exit}' <<<"$sections")
+		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ && line() !~ /^<!--/ {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print tolower(t); exit}' <<<"$sections")
 		case $proof in
 		'' | qa | engineer) ;;
 		*) problem "project-setup.md: ## Proof says $proof; want qa or engineer" ;;

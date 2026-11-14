@@ -782,6 +782,12 @@ if run check "$r7"; then fail "check passed ## Proof: engineers"; fi
 says "problem: project-setup.md: ## Proof says engineers; want qa or engineer"
 sed -i 's/^`engineers`\r$/Engineer\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
+# A heading with words after it and a comment above the word still parse.
+sed -i 's/^## Proof\r$/## Proof (who proves)\r\n<!-- qa or engineer -->\r/; s/^Engineer\r$/engneer\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed ## Proof (who proves): engneer"; fi
+says "## Proof says engneer"
+sed -i 's/^engneer\r$/qa\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
 printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
