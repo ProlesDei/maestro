@@ -545,9 +545,13 @@ func runPickup(ctx context.Context, c *call) error {
 			if len(ended) == 0 {
 				fmt.Fprint(w, "no run of yours ended; ")
 			}
-			s := make([]string, len(running))
+			s := []string{}
 			for i, r := range running {
-				s[i] = fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), ago(now.Sub(r.StartedAt)))
+				if i == 10 { // a bot reads this every turn: keep it short
+					s = append(s, fmt.Sprintf("and %d more", len(running)-10))
+					break
+				}
+				s = append(s, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), ago(now.Sub(r.StartedAt))))
 			}
 			fmt.Fprintf(w, "running: %s\n", strings.Join(s, ", "))
 		}

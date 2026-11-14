@@ -254,10 +254,12 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			until = t
 		}
 		if store, _, err := c.storePath(); err == nil && until.After(time.Now()) {
-			setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now())
-			out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
+			// One line to the planner per pause, not one per stopped run.
+			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
+				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
+				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
+			}
 		}
-		planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 		if r.Job != "" {
 			// The work isn't lost: once the pause lifts, the run's job
 			// starts again; job refuses it till then, and the bot leaves
@@ -307,7 +309,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			out.Send = append(out.Send, sent...)
 			// A question beside cards waits on their answers; alone, the
 			// session decides.
-			if out.Outcome == outQuestion && len(sent) == 0 {
+			if out.Outcome == outQuestion && len(sent) == 0 && !c.nudged(r, "decide") {
 				out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --decide")
 			}
 		default: // cos, qa-ask: the asker reads the answer
@@ -474,7 +476,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		}
 	case out.Outcome == outTimedOut:
 		planner("timed_out " + id)
-	case (out.Outcome == outQuestion || escalated) && !outside && flagValue(r.Command, "--model") == modelSonnet:
+	case (out.Outcome == outQuestion || escalated) && !outside && flagValue(r.Command, "--model") == modelSonnet && !c.nudged(r, "opus"):
 		// The junior's session holds the ticket; on Opus it settles the
 		// question itself or sends it up (owner's ruling, Nov 14 2026).
 		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --opus")
@@ -482,9 +484,31 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		if err := up("block " + id + ": " + firstLine(last.Body)); err != nil {
 			return out, err
 		}
-	case out.Outcome == outQuestion:
+	case out.Outcome == outQuestion && !c.nudged(r, "escalate"):
 		// Asked, but posted nothing: the session writes it on the ticket.
 		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --escalate")
+	case out.Outcome == outQuestion:
+		// Told once to post it, it asked again: pickup posts the question
+		// itself and blocks the ticket, so no look builds it again before
+		// the judge answers.
+		q := headLine(lastLine(r.Reply))
+		req := ticket.CommentRequest{ID: t.ID, Body: "Escalation: build: " + q + "\nReturn-role: engineer", Actor: c.actor, IdempotencyKey: r.ID + "-question"}
+		move := ticket.TransitionRequest{ID: t.ID, To: ticket.StatusBlocked, Actor: c.actor, Note: "a question the session didn't post", IdempotencyKey: r.ID + "-question-move"}
+		if cl := t.LiveClaim(); cl != nil {
+			req.Holder, req.Token = cl.Holder, cl.Token
+			move.Holder, move.Token, move.Release = cl.Holder, cl.Token, true
+		}
+		if t.Status != ticket.StatusBlocked {
+			if _, err := s.Comment(ctx, req); err != nil {
+				return out, err
+			}
+			if _, err := s.Transition(ctx, move); err != nil {
+				return out, err
+			}
+			out.Status = string(ticket.StatusBlocked)
+			out.Wrote = append(out.Wrote, id+" blocked: Escalation: build: "+trim(q, 80))
+		}
+		planner("question " + id + ": " + q)
 	case out.Outcome == outRefused:
 		planner("refused " + id + ": " + out.First)
 	default:
@@ -550,6 +574,25 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	out.Wrote = append(out.Wrote, id+" blocked: Escalation: review at "+sha+": ran past "+r.Limit)
 	planner("block " + id + ": review ran past " + r.Limit)
 	return out, nil
+}
+
+// nudged reports whether r's session had the fixed resume nudge once.
+func (c *call) nudged(r runs.Record, nudge string) bool {
+	if r.Nudge == nudge {
+		return true
+	}
+	session := cmp.Or(r.SessionID, flagValue(r.Command, "--session-id"), flagValue(r.Command, "--resume"))
+	dir, err := c.besideStore("runs")
+	if err != nil || session == "" {
+		return false
+	}
+	list, _ := runs.List(dir, time.Now(), true)
+	for _, o := range list {
+		if o.Nudge == nudge && flagValue(o.Command, "--resume") == session {
+			return true
+		}
+	}
+	return false
 }
 
 // diedBefore reports whether r's session was resumed once after a death

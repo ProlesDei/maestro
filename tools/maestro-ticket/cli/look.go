@@ -84,9 +84,30 @@ func claimHandout(dir, id, bot, body string, d time.Duration, now time.Time) boo
 		if serr == nil && now.Sub(fi.ModTime()) < d {
 			return false
 		}
-		os.Rename(p, p+".stale"+newSessionID()[:8])
+		if !moveStale(p, fi) {
+			return false
+		}
 	}
 	return false
+}
+
+// moveStale moves a stale file aside under a takeover lock, and only if it
+// is still the file seen, so of takers that all found it stale one wins.
+func moveStale(p string, seen os.FileInfo) bool {
+	lock := p + ".takeover"
+	lf, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if fi, err := os.Stat(lock); err == nil && time.Since(fi.ModTime()) > activeGrace {
+			os.Remove(lock) // its taker died; the next try takes it
+		}
+		return false
+	}
+	lf.Close()
+	defer os.Remove(lock)
+	if fi, err := os.Stat(p); err == nil && seen != nil && os.SameFile(fi, seen) && fi.ModTime().Equal(seen.ModTime()) {
+		os.Rename(p, p+".stale"+newSessionID()[:8])
+	}
+	return true
 }
 
 // judgeWindow is how long a judged row stays judged while the ticket
@@ -113,6 +134,9 @@ func pruneHandouts(dir string, now time.Time) {
 	}
 	for _, e := range es {
 		keep := 24 * time.Hour
+		if strings.Contains(e.Name(), ".stale") || strings.HasSuffix(e.Name(), ".takeover") {
+			keep = time.Hour
+		}
 		if strings.HasPrefix(e.Name(), "eta-") {
 			keep = 30 * 24 * time.Hour // a missed date goes up once
 		}
@@ -291,7 +315,10 @@ func claimJudge(dir, id, fp string, now time.Time) bool {
 		if judged(dir, id, fp, now) {
 			return false
 		}
-		os.Rename(p, p+".stale"+newSessionID()[:8])
+		fi, _ := os.Stat(p)
+		if !moveStale(p, fi) {
+			return false
+		}
 	}
 	return false
 }
@@ -363,7 +390,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	liveRun := map[string]bool{}
 	if list, err := runs.List(o.runs, now, false); err == nil {
 		for _, r := range list {
-			if !r.Ended() && r.Ticket != "" {
+			// A job run that ended lately and isn't acked is its bot's to
+			// route: its pickup sends what comes next.
+			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
+			if (!r.Ended() || fresh) && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
 			if !r.Ended() {

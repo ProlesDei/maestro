@@ -473,8 +473,37 @@ func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 		if !slices.Contains(want, t.Status) {
 			return fmt.Errorf("%w: job %s: %s is %s, not %s: nothing to do", ticket.ErrStatusConflict, k.name, id, t.Status, joinStatuses(want))
 		}
+		if k.name == "review" {
+			if d, err := c.detailForJob(ctx, id); err == nil && strings.HasPrefix(latest(d).Body, "Review: GO") {
+				return fmt.Errorf("%w: job review: %s passed review at its head: its GO stands, and QA takes it", ticket.ErrStatusConflict, id)
+			}
+		}
+	}
+	// A run started before job marked its runs, or by plain launch, holds
+	// the ticket too.
+	if dir, err := c.besideStore("runs"); err == nil {
+		list, _ := runs.List(dir, time.Now(), false)
+		for _, r := range list {
+			if !r.Ended() && r.Ticket == id && (r.Job == k.name || r.Job == "") {
+				return fmt.Errorf("%w: job %s: run %s, %s's, already works on %s", ticket.ErrClaimed, k.name, r.ID, r.Launcher, id)
+			}
+		}
 	}
 	return nil
+}
+
+// detailForJob reads a job's ticket with its notes.
+func (c *call) detailForJob(ctx context.Context, id string) (ticket.Detail, error) {
+	tid, err := ticket.ParseID(id)
+	if err != nil {
+		return ticket.Detail{}, err
+	}
+	s, err := c.open(ctx)
+	if err != nil {
+		return ticket.Detail{}, err
+	}
+	defer s.Close()
+	return s.Get(ctx, tid)
 }
 
 // activeFile marks the one live run of a job on a ticket: made with
@@ -603,15 +632,16 @@ func readPause(dir string, now time.Time) (pause, bool) {
 
 // setPause records a pause until the later of its time and any pause
 // already set, written whole so a reader never sees half of one.
-func setPause(dir string, p pause, now time.Time) {
-	if old, ok := readPause(dir, now); ok && old.Until.After(p.Until) {
-		return
+func setPause(dir string, p pause, now time.Time) bool {
+	if old, ok := readPause(dir, now); ok && !p.Until.After(old.Until) {
+		return false // as long a pause holds already
 	}
 	b, _ := json.Marshal(p)
 	tmp := pausePath(dir) + ".tmp" + newSessionID()[:8]
 	if os.WriteFile(tmp, b, 0o644) == nil {
 		os.Rename(tmp, pausePath(dir))
 	}
+	return true
 }
 
 // ticketForJob reads the ticket a job names, so a typo fails here and not
@@ -829,7 +859,19 @@ func runResume(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	nudge := ""
+	switch {
+	case *opus:
+		nudge = "opus"
+	case *escalate:
+		nudge = "escalate"
+	case *decide:
+		nudge = "decide"
+	}
 	for _, o := range all {
+		if nudge != "" && o.Nudge == nudge && flagValue(o.Command, "--resume") == session {
+			return fmt.Errorf("%w: resume --%s: session %s had it once already (%s): it goes up instead", ticket.ErrStatusConflict, nudge, session, o.ID)
+		}
 		if o.ResumeOf == r.ID {
 			return fmt.Errorf("%w: resume: run %s was resumed already, as %s: act on that run's result", ticket.ErrStatusConflict, r.ID, o.ID)
 		}
@@ -861,7 +903,7 @@ func runResume(ctx context.Context, c *call) error {
 	cmd := resumeCommand(r.Command, session, *opus)
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		ResumeOf: r.ID, AfterDeath: *died,
+		ResumeOf: r.ID, AfterDeath: *died, Nudge: nudge,
 	}
 	if err := c.mayStart(); err != nil {
 		return err

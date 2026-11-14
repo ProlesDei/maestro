@@ -270,7 +270,8 @@ func TestRouteOutcomes(t *testing.T) {
 	h.move("T-1", "in_progress", "in_review")
 
 	rt := h.route(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Reply: "Claude AI usage limit reached|1763150400"})
-	if rt.Outcome != outUsageLimit || rt.Reset != "2025-11-14T20:00:00Z" || !slices.Equal(sends(rt), []string{"send planner: usage_limit T-1 resets 2025-11-14T20:00:00Z"}) {
+	// The reset passed long ago: no pause, and the job simply runs again.
+	if rt.Outcome != outUsageLimit || rt.Reset != "2025-11-14T20:00:00Z" || len(rt.Send) != 0 || !slices.Equal(rt.Do, []string{"maestro-ticket job again R-aaaaaaaa"}) {
 		t.Fatalf("usage limit: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "build", Ticket: "T-1", Reply: "You've hit your limit · resets 3pm (UTC)"})
@@ -507,5 +508,25 @@ func TestRouteUsageLimitKeepsWork(t *testing.T) {
 	}
 	if d, _ := h.s.Get(context.Background(), 1); d.LiveClaim() != nil || d.LeaseExpiries != 0 {
 		t.Fatalf("claim: %+v, expiries %d", d.Claim, d.LeaseExpiries)
+	}
+}
+
+// A session told once to post its question that asks again goes up.
+func TestRouteNudgeOnce(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress")
+	rt := h.route(runs.Record{ID: "R-nnnnnnnn", Job: "build", Ticket: "T-1", Nudge: "escalate", Command: opusCmd(), Reply: "Which key should I use?"})
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send planner: question T-1: Which key should I use?"}) || rt.Status != "blocked" {
+		t.Fatalf("asked again: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 1); latest(d).Body != "Escalation: build: Which key should I use?\nReturn-role: engineer" {
+		t.Fatalf("posted: %q", latest(d).Body)
+	}
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress")
+	rt = h.route(runs.Record{ID: "R-oooooooo", Job: "build", Ticket: "T-2", Nudge: "opus", Command: opusCmd(), Reply: "Which key?"})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-oooooooo --escalate"}) {
+		t.Fatalf("after --opus, once --escalate: %+v", rt)
 	}
 }

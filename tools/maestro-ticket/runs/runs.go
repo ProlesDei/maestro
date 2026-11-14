@@ -67,20 +67,24 @@ type Record struct {
 	Tickets []string `json:"tickets,omitempty"`
 	// ResumeOf is the run whose session this one resumed; AfterDeath marks
 	// the one resume a session gets after its run died.
-	ResumeOf   string     `json:"resume_of,omitempty"`
-	AfterDeath bool       `json:"after_death,omitempty"`
-	Dir        string     `json:"dir"`
-	StartedAt  time.Time  `json:"started_at"`
-	State      string     `json:"state"`
-	PID        int        `json:"pid,omitempty"`
-	EndedAt    *time.Time `json:"ended_at,omitempty"`
-	Exit       *int       `json:"exit,omitempty"`
-	SessionID  string     `json:"session_id,omitempty"`
-	IsError    bool       `json:"is_error,omitempty"`
-	Reply      string     `json:"reply,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	Rings      int        `json:"rings,omitempty"`
-	RingError  string     `json:"ring_error,omitempty"`
+	ResumeOf   string `json:"resume_of,omitempty"`
+	AfterDeath bool   `json:"after_death,omitempty"`
+	// Nudge is the fixed resume a run began with (opus, escalate,
+	// decide): each comes once per session, so a session that asks again
+	// goes up instead of round and round.
+	Nudge     string     `json:"nudge,omitempty"`
+	Dir       string     `json:"dir"`
+	StartedAt time.Time  `json:"started_at"`
+	State     string     `json:"state"`
+	PID       int        `json:"pid,omitempty"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	Exit      *int       `json:"exit,omitempty"`
+	SessionID string     `json:"session_id,omitempty"`
+	IsError   bool       `json:"is_error,omitempty"`
+	Reply     string     `json:"reply,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	Rings     int        `json:"rings,omitempty"`
+	RingError string     `json:"ring_error,omitempty"`
 	// Rang is true once a ring reached the webhook; OrphanTries counts the
 	// rings readers tried for a run whose supervisor went away first.
 	Rang        bool `json:"rang,omitempty"`
@@ -383,8 +387,9 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
 			os.Remove(filepath.Join(dir, e.Name()))
 		}
-		// An active-run mark a later start moved aside.
-		if strings.Contains(e.Name(), ".active.stale") {
+		// An active-run mark a later start moved aside, or one whose run
+		// ended a day ago.
+		if strings.Contains(e.Name(), ".active.stale") || strings.HasSuffix(e.Name(), ".active") || strings.HasSuffix(e.Name(), ".takeover") {
 			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > keep {
 				os.Remove(filepath.Join(dir, e.Name()))
 			}

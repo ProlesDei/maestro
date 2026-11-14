@@ -447,7 +447,7 @@ func TestResumeRoundThree(t *testing.T) {
 		t.Fatalf("resume: %v %s", err, out)
 	}
 	json.Unmarshal(out, &s)
-	if o := j.fails(4, "", "job", "build", "T-1"); !strings.Contains(o, "already does it") {
+	if o := j.fails(4, "", "job", "build", "T-1"); !strings.Contains(o, "already") {
 		t.Fatalf("a build beside a resumed one: %s", o)
 	}
 	nr := j.waitEnded(s.Run.ID, 20*time.Second)
@@ -482,5 +482,31 @@ func TestRouteSecondDeathBySession(t *testing.T) {
 	rt := h.route(runs.Record{ID: "R-zzzzzzzz", Job: "build", Ticket: "T-1", State: runs.Died, Command: []string{"claude", "-p", "--resume", "S9"}})
 	if !slices.Equal(sends(rt), []string{"send planner: died twice T-1"}) || len(rt.Do) != 0 {
 		t.Fatalf("a second death in one session: %+v", rt)
+	}
+}
+
+// A run that started before job marked runs (plain launch) holds its
+// ticket; a review whose GO stands isn't run again.
+func TestJobHonoursOlderRuns(t *testing.T) {
+	j := newJobHarness(t, "senior-engineer")
+	j.h.ok(nil, "create", "--title", "a")
+	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(strings.Replace(fakeClaude, "printf '{", "sleep 2; printf '{", 1)), 0o755)
+	c := j.cmd("/maestro-software-engineer T-1\n", "launch", "--ticket", "T-1", "--", "claude", "-p", "--session-id", newSessionID())
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("launch: %v %s", err, out)
+	}
+	if o := j.fails(4, "", "job", "build", "T-1"); !strings.Contains(o, "already works on T-1") {
+		t.Fatalf("a build beside a plain launch: %s", o)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(fakeClaude), 0o755)
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	if code, out, errs := j.h.run("Review: GO at abc1234", "comment", "T-1", "--body-file", "-"); code != 0 {
+		t.Fatal(out, errs)
+	}
+	if o := j.fails(4, "", "job", "review", "T-1"); !strings.Contains(o, "GO stands") {
+		t.Fatalf("a second review of a GO: %s", o)
 	}
 }
