@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,6 +48,21 @@ func recordHandouts(dir string, sends []send) {
 			os.Rename(tmp, p)
 		}
 	}
+}
+
+// urgentSince is the newest note marked urgent after the latest Taken:,
+// so a later finding in the area doesn't hide it.
+func urgentSince(d ticket.Detail) (ticket.Comment, bool) {
+	for i := len(d.Comments) - 1; i >= 0; i-- {
+		b := d.Comments[i].Body
+		if strings.HasPrefix(b, "Taken:") {
+			return ticket.Comment{}, false
+		}
+		if urgentText.MatchString(b) {
+			return d.Comments[i], true
+		}
+	}
+	return ticket.Comment{}, false
 }
 
 // claimHandout takes a ticket's handout to bot for this look, unless one
@@ -109,6 +125,7 @@ type judgeRow struct {
 	Row   string `json:"row"`
 	Facts string `json:"facts"`
 	fp    string // the ticket's state as judged
+	key   string // the handout it is judged under, if not the ticket's
 }
 
 func (j judgeRow) String() string { return "judge: " + j.ID + " " + j.Row + ": " + j.Facts }
@@ -223,7 +240,7 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	seen := map[string]bool{}
 	now := time.Now()
 	for _, j := range out.Judge {
-		if len(rows) > maxJudgeRows || !claimJudge(hdir, j.ID, j.fp, now) {
+		if len(rows) > maxJudgeRows || !claimJudge(hdir, cmp.Or(j.key, j.ID), j.fp, now) {
 			continue
 		}
 		if !seen[j.ID] {
@@ -242,8 +259,8 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	text := strings.Join(rows, "\n") + "\nStanding rules:\n" + rules
 	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
 	if err != nil {
-		for _, id := range ids {
-			os.Remove(handoutPath(hdir, id, "judge"))
+		for _, j := range out.Judge {
+			os.Remove(handoutPath(hdir, cmp.Or(j.key, j.ID), "judge"))
 		}
 		out.Errors = append(out.Errors, "judge: "+err.Error())
 		return
@@ -305,7 +322,8 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// A died run's bot learns of it through pickup, which resumes it; a
 	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
-		if !idle {
+		// Once per promise: a missed date stays missed every look.
+		if !idle && claimHandout(o.handouts, fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix()), "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
 			out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
 		}
 	}
@@ -386,13 +404,20 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			return
 		}
 		fp = fmt.Sprintf("%s v%d %d %s", row, t.Version, t.UpdatedAt.UnixMilli(), fp)
-		if judged(o.handouts, t.ID.String(), fp, now) {
+		key := t.ID.String()
+		if row == "cause" {
+			key = "cause" // apart from that ticket's own row
+		}
+		if judged(o.handouts, key, fp, now) {
 			return
 		}
-		out.Judge = append(out.Judge, judgeRow{t.ID.String(), row, facts, fp})
+		out.Judge = append(out.Judge, judgeRow{t.ID.String(), row, facts, fp, key})
 	}
 	start := func(kind string, id ticket.ID, text string) {
-		if idle || !claimHandout(o.handouts, id.String(), "planner-job", kind, o.stall, now) {
+		// A planner job holds its ticket for hours: one that waits on the
+		// chief of staff mustn't start again each look; one that failed
+		// frees it in pickup.
+		if idle || !claimHandout(o.handouts, id.String(), "planner-job", kind, 6*time.Hour, now) {
 			return
 		}
 		k, _ := findJob(kind)
@@ -404,6 +429,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		}
 		r, _, _, err := c.startJob(ctx, req)
 		if err != nil {
+			os.Remove(handoutPath(o.handouts, id.String(), "planner-job"))
 			keep(fmt.Errorf("start %s %s: %w", kind, id, err))
 			return
 		}
@@ -494,7 +520,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		case ticket.StatusInProgress:
 			n.build++
 			if p == "Kickback:" {
-				trouble = append(trouble, id.String())
+				if t.Tries >= 2 {
+					trouble = append(trouble, id.String()) // a first send-back is routine
+				}
 				eng := engineer(t)
 				switch {
 				case t.Tries <= 1:
@@ -594,9 +622,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				judgeIt(t, "hold", "held; is what lifts it true?", "")
 			case ticket.ParkedUnready, ticket.ParkedDeferred:
 				if strings.HasPrefix(t.Title, "Follow-ups: ") {
-					if d, ok := detail(id); ok && urgentText.MatchString(latest(d).Body) && !strings.HasPrefix(latest(d).Body, "Taken:") {
-						judgeIt(t, "urgent", "a follow-up marked urgent: "+trim(firstLine(latest(d).Body), 100), fmt.Sprint(latest(d).ID))
-						continue
+					if d, ok := detail(id); ok {
+						if u, ok := urgentSince(d); ok {
+							judgeIt(t, "urgent", "a follow-up marked urgent: "+trim(firstLine(u.Body), 100), fmt.Sprint(u.ID))
+							continue
+						}
 					}
 				}
 				if t.Goal != "" && !moving[t.Goal] {
@@ -607,6 +637,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	}
 	if len(trouble) >= 3 {
 		judgeIt(ticket.Ticket{ID: mustID(trouble[0])}, "cause", capped(trouble)+" are blocked or sent back: one cause?", strings.Join(trouble, " "))
+
 	}
 	out.Counts = fmt.Sprintf("open %d; building %d/%d; review %d; blocked %d (sent up %d); todo %d (ready %d); backlog %d; busy %d; waiting on deps or areas %d",
 		len(open), going, o.limit, n.review, n.blocked, n.sentUp, n.todo, n.ready, n.backlog, n.busy, n.waiting)
@@ -682,6 +713,9 @@ func (c *call) sendUpTries(ctx context.Context, s ticket.Store, t ticket.Ticket,
 	}
 	id, key := t.ID.String(), fmt.Sprintf("look-tries-%s-%d", t.ID, t.Tries)
 	q := "split, rewrite or drop " + id + "?"
+	if dir, err := c.besideStore("handouts"); err != nil || !claimHandout(dir, id, "chief-of-staff", key, 24*time.Hour, time.Now()) {
+		return // a look beside this one sends it
+	}
 	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInProgress, To: ticket.StatusBlocked,
 		ExpectVersion: t.Version, Actor: c.actor, Note: "sent back " + fmt.Sprint(t.Tries) + " times", IdempotencyKey: key + "-move"}); err != nil {
 		keep(fmt.Errorf("block %s: %w", id, err))

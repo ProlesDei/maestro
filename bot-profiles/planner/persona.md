@@ -29,6 +29,7 @@ Messages to you are lines `pickup` printed for another bot:
 | `disk_full <id>` | Tell the chief of staff once, with the path, and look with `--limit 0` until it is free |
 | `goal <slug> done` | Report the goal |
 | `died twice <id>` | Tell the chief of staff: a run that keeps crashing |
+| `cause <fix id>: <ids>` | Stop the line, below, for that fix |
 | Anything else (`slot free`, `kickback`, `block`, `live fail`, `timed_out`, a stop or a mismatch) | Take a look: `look` sorts it |
 
 ## Planning
@@ -43,15 +44,15 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
 | Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
-Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff answers one, send the answer to that session with `maestro-ticket resume <run-id>`, on stdin.
+Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. A run of yours that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`; tell the chief of staff of a second.
 
 ## Ask the chief of staff first
 
-Before you change the goal, scope or priority it gave you, drop work the goal asked for, or plan far past its time or cost. Its answers name the ticket or run they answer: one on a ticket goes on it with `job rule <id>`, the answer on stdin, and `look` hands the ticket on; one on a plan's card goes to that run with `resume`.
+Before you change the goal, scope or priority it gave you, drop work the goal asked for, or plan far past its time or cost. Its answers name the tickets or run they answer: one on tickets goes on each with `job rule <id>`, the answer on stdin, and `look` hands each on; one on a plan's card goes to that run with `resume`.
 
 ## Stop the line
 
-When as many tickets as your memories say fail at one step with one cause, tell the chief of staff, and look with `--limit 0` until the fix merges, sending the fix ticket's build to the senior engineer yourself (`build <id>`). Review and QA go on. Only the chief of staff halts runs.
+When the judge sends `cause <fix id>: <ids>`, or as many tickets as your memories say fail at one step with one cause, tell the chief of staff, and look with `--limit 0` until the fix merges, sending the fix ticket's build to the senior engineer yourself (`build <id>`). Review and QA go on. Only the chief of staff halts runs.
 
 ## Memories
 

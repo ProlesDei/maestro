@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // lookHarness runs look as the planner bot does, with a stand-in claude
@@ -346,5 +348,30 @@ func TestResumeUsesThisBinary(t *testing.T) {
 	got := resumeCommand(cmd, "S", false)
 	if got[2] != exe {
 		t.Fatalf("slot binary: %q", got)
+	}
+}
+
+// Three blocked tickets that never change are judged once, cause row and
+// all; a TRIES 3 card goes up once between two looks.
+func TestLookRoundTwo(t *testing.T) {
+	l := newLookHarness(t)
+	for i := 1; i <= 3; i++ {
+		id := "T-" + strconv.Itoa(i)
+		l.h.ok(nil, "create", "--title", "x")
+		l.move(id, "blocked")
+		l.comment(id, "Escalation: build at abc: which key?\nReturn-role: engineer")
+	}
+	first := with(l.look("", "--limit", "2", "--judge"), "judging: ")
+	if len(first) != 1 || !strings.HasSuffix(first[0], "on 4 rows") {
+		t.Fatalf("first: %q", first)
+	}
+	l.waitEnded(strings.Fields(strings.TrimPrefix(first[0], "judging: "))[0], 20*time.Second)
+	for range 3 {
+		if again := with(l.look("", "--limit", "2", "--judge"), "judg"); len(again) != 0 {
+			t.Fatalf("judged again with nothing changed: %q", again)
+		}
+	}
+	if _, ok := urgentSince(ticket.Detail{Comments: []ticket.Comment{{Body: "From T-1: urgent: x"}, {Body: "From T-2: logs"}}}); !ok {
+		t.Fatal("a later note hid the urgent one")
 	}
 }

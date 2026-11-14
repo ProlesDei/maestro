@@ -237,6 +237,9 @@ func runJob(ctx context.Context, c *call) error {
 	if len(c.args) == 0 {
 		return usagef("job: name the job: %s", jobNames())
 	}
+	if c.args[0] == "again" {
+		return c.runAgain(ctx, *limit, *full)
+	}
 	k, ok := findJob(c.args[0])
 	if !ok {
 		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
@@ -424,10 +427,22 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if k.ids {
 		rec.Tickets = ids
 	}
+	commit, abort := func(string) {}, func() {}
+	if ticketID != "" {
+		dir, err := c.besideStore("runs")
+		if err != nil {
+			return fail(err)
+		}
+		if commit, abort, err = takeActive(dir, activeFile(dir, ticketID, k.name)); err != nil {
+			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
+		}
+	}
 	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
 	if err != nil {
+		abort()
 		return fail(err)
 	}
+	commit(r.ID)
 	return r, m, why, nil
 }
 
@@ -459,17 +474,56 @@ func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 			return fmt.Errorf("%w: job %s: %s is %s, not %s: nothing to do", ticket.ErrStatusConflict, k.name, id, t.Status, joinStatuses(want))
 		}
 	}
-	dir, err := c.besideStore("runs")
-	if err != nil {
-		return err
-	}
-	list, _ := runs.List(dir, time.Now(), false)
-	for _, r := range list {
-		if !r.Ended() && r.Ticket == id && r.Job == k.name {
-			return fmt.Errorf("%w: job %s: run %s, %s's, already works on %s", ticket.ErrClaimed, k.name, r.ID, r.Launcher, id)
-		}
-	}
 	return nil
+}
+
+// activeFile marks the one live run of a job on a ticket: made with
+// O_EXCL before the run starts, it holds the run's id, and the run's end
+// removes it. Of starts at once only one makes it.
+func activeFile(dir, ticketID, job string) string {
+	return filepath.Join(dir, ticketID+"."+job+".active")
+}
+
+// takeActive makes the file at p for a run about to start, or names the
+// live run that holds it. A file left by a run that ended, or a start
+// that never wrote its id within startGrace, is taken over.
+func takeActive(dir, p string) (commit func(runID string), abort func(), err error) {
+	os.MkdirAll(dir, 0o755)
+	for range 2 {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.Close()
+			commit = func(id string) { os.WriteFile(p, []byte(id), 0o644) }
+			return commit, func() { os.Remove(p) }, nil
+		}
+		b, _ := os.ReadFile(p)
+		id := strings.TrimSpace(string(b))
+		if id == "" {
+			if fi, err := os.Stat(p); err == nil && time.Since(fi.ModTime()) < activeGrace {
+				return nil, nil, fmt.Errorf("%w: another start of this job is under way", ticket.ErrClaimed)
+			}
+		} else if r, err := runs.Get(dir, id, time.Now()); err == nil && !r.Ended() {
+			return nil, nil, fmt.Errorf("%w: run %s, %s's, already does it", ticket.ErrClaimed, r.ID, r.Launcher)
+		}
+		os.Rename(p, p+".stale"+newSessionID()[:8])
+	}
+	return nil, nil, fmt.Errorf("%w: another start of this job is under way", ticket.ErrClaimed)
+}
+
+// activeGrace is how long a start may hold an active file before it
+// writes its run's id.
+const activeGrace = 30 * time.Second
+
+// dropActive removes a run's active file when the run ends, if it is
+// still the run's.
+func dropActive(dir string, r runs.Record) {
+	if r.Ticket == "" || r.Job == "" {
+		return
+	}
+	p := activeFile(dir, r.Ticket, r.Job)
+	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == r.ID {
+		os.Remove(p)
+	}
 }
 
 func joinStatuses(st []ticket.Status) string {
@@ -584,6 +638,84 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 	})
 }
 
+// runAgain starts a run's job afresh: its prompt and command as they
+// were, a new session, and a new limit when given. With full, a light
+// review goes on the full model. A retry keeps every flag the bot gave
+// the first run (--approved, --drop, --slots).
+func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) error {
+	if len(c.args) != 2 || !runs.ValidID(c.args[1]) {
+		return usagef("job again: want one run id, such as R-abcdefgh")
+	}
+	if err := c.needActor("job"); err != nil {
+		return err
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	r, err := runs.Get(dir, c.args[1], time.Now())
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: run %s", ticket.ErrNotFound, c.args[1])
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case r.Launcher != c.actor:
+		return fmt.Errorf("%w: job again: run %s is %s's", ticket.ErrForbidden, r.ID, dash(r.Launcher))
+	case r.Job == "":
+		return usagef("job again: run %s isn't a job's", r.ID)
+	case !r.Ended():
+		return fmt.Errorf("%w: job again: run %s is %s", ticket.ErrStatusConflict, r.ID, r.State)
+	}
+	prompt, err := os.ReadFile(filepath.Join(dir, r.ID+".in"))
+	if err != nil {
+		return err
+	}
+	if err := c.mayStart(); err != nil {
+		return err
+	}
+	k, _ := findJob(r.Job)
+	if r.Ticket != "" {
+		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
+			return err
+		}
+	}
+	cmd := slices.Clone(r.Command)
+	for i := 0; i+1 < len(cmd); i++ {
+		switch {
+		case cmd[i] == "--session-id":
+			cmd[i+1] = newSessionID()
+		case cmd[i] == "--model" && full:
+			cmd[i+1] = modelOpus
+		}
+	}
+	if full {
+		prompt = []byte(strings.Replace(string(prompt), " --light", "", 1))
+	}
+	lim := r.LimitDuration()
+	if limit != 0 {
+		lim = limit
+	}
+	if lim < time.Second || lim > 24*time.Hour {
+		return usagef("job again: --limit %s: want 1s to 24h", lim)
+	}
+	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd}
+	commit, abort := func(string) {}, func() {}
+	if r.Ticket != "" {
+		if commit, abort, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job)); err != nil {
+			return fmt.Errorf("job again %s: %w", r.ID, err)
+		}
+	}
+	nr, err := c.startRun(rec, prompt, runs.DefaultRings)
+	if err != nil {
+		abort()
+		return err
+	}
+	commit(nr.ID)
+	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "again: "+r.ID)
+}
+
 // diedText is what a run that died is resumed with.
 const diedText = "Your run died. Go on from your last step."
 
@@ -684,16 +816,25 @@ func runResume(ctx context.Context, c *call) error {
 	}
 	cmd := resumeCommand(r.Command, session, *opus)
 	rec := runs.Record{
-		Ticket: r.Ticket, Limit: r.Limit, Job: r.Job, Command: cmd,
+		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
 		ResumeOf: r.ID, AfterDeath: *died,
 	}
 	if err := c.mayStart(); err != nil {
 		return err
 	}
+	// A run resumes once: of resumes at once, one makes its marker.
+	mark := filepath.Join(dir, r.ID+".resumed")
+	f, err := os.OpenFile(mark, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("%w: resume: run %s is being resumed already", ticket.ErrStatusConflict, r.ID)
+	}
+	f.Close()
 	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings)
 	if err != nil {
+		os.Remove(mark)
 		return err
 	}
+	os.WriteFile(mark, []byte(nr.ID), 0o644)
 	// Its result is acted on: pickup stops showing it, and its rings stop.
 	runs.Ack(dir, r.ID, c.actor, time.Now())
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)

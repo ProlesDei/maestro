@@ -100,9 +100,10 @@ Commands:
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
-              [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos)
-  resume      <run-id> [--opus] [--died]   (the run's session again, answer on stdin; --opus moves
-              it to Opus high; --died resumes a dead run once)
+              [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
+              design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
+  resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
+              answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)

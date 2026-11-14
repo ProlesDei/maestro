@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,5 +373,62 @@ func TestPickupRoutesAJob(t *testing.T) {
 	want := r.ID + " build done on T-1 (in_review): job: done: " + r.ID + "\nsend reviewer: review T-1\nack each once you have acted on it: maestro-ticket ack " + r.ID + "\n"
 	if string(out) != want {
 		t.Fatalf("pickup:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+// Of starts at once, one runs: a job on one ticket, a resume of one run.
+func TestJobAndResumeOneAtOnce(t *testing.T) {
+	j := newJobHarness(t, "junior-engineer")
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(strings.Replace(fakeClaude, "printf '{", "sleep 2; printf '{", 1)), 0o755)
+	race := func(args ...string) int {
+		var wg sync.WaitGroup
+		ok := make(chan bool, 8)
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ok <- j.cmd("", args...).Run() == nil
+			}()
+		}
+		wg.Wait()
+		close(ok)
+		n := 0
+		for o := range ok {
+			if o {
+				n++
+			}
+		}
+		return n
+	}
+	if n := race("job", "build", "T-1"); n != 1 {
+		t.Fatalf("%d of 8 builds started at once; want 1", n)
+	}
+	var p pickupResult
+	deadline := time.Now().Add(20 * time.Second)
+	for len(p.Ended) == 0 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		p = j.pickup()
+	}
+	if n := race("resume", p.Ended[0].ID, "--opus"); n != 1 {
+		t.Fatalf("%d of 8 resumes started at once; want 1", n)
+	}
+}
+
+// job again starts a run's job afresh with its prompt and flags.
+func TestJobAgain(t *testing.T) {
+	j := newJobHarness(t, "qa-lead")
+	j.h.ok(nil, "create", "--title", "a")
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	_, r := j.job("", "qa", "T-1", "--slots", "2")
+	s, nr := j.job("", "again", r.ID, "--limit", "4h")
+	got := j.seen(nr.ID)
+	if nr.Limit != "4h" || nr.Job != "qa" || got.stdin[0] != "/maestro-qa-lead T-1" || got.flag("--session-id") == r.SessionID || s.Model != "opus" {
+		t.Fatalf("again: %+v %q", nr, got.stdin)
+	}
+	if i := slices.Index(nr.Command, "slot"); i < 0 || nr.Command[i+4] != "2" {
+		t.Fatalf("again keeps --slots: %q", nr.Command)
 	}
 }

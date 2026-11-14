@@ -211,7 +211,7 @@ func TestRouteReview(t *testing.T) {
 
 	h.move("T-4", "in_progress", "in_review")
 	rt := h.route(runs.Record{Job: "review", Ticket: "T-4", Reply: "review: stopped: tier 1 needs the full model at abc"})
-	if !slices.Equal(rt.Do, []string{"maestro-ticket job review T-4 --full"}) {
+	if !slices.Equal(rt.Do, []string{"maestro-ticket job again R-aaaaaaaa --full"}) {
 		t.Fatalf("a light review that needs the full model: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "review", Ticket: "T-4", Reply: "review: refused: T-4 is claimed by reviewer/x"})
@@ -281,7 +281,7 @@ func TestRouteOutcomes(t *testing.T) {
 		t.Fatalf("a build about rate limits is no limit: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "review", Ticket: "T-1", Reply: "infra block: disk full at /tmp"})
-	if rt.Outcome != outDiskFull || !slices.Equal(sends(rt), []string{"send planner: disk_full T-1"}) {
+	if rt.Outcome != outDiskFull || !slices.Equal(sends(rt), []string{"send planner: disk_full T-1: infra block: disk full at /tmp"}) {
 		t.Fatalf("disk full: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "build", Ticket: "T-1", State: runs.Died})
@@ -389,7 +389,7 @@ func TestRouteTimeouts(t *testing.T) {
 	h.comment("T-1", "Handoff: PR https://x/pull/1 at "+sha)
 	first := runs.Record{ID: "R-tttttttt", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now().Add(-time.Minute), Command: opusCmd()}
 	rt := h.route(first)
-	if !slices.Equal(rt.Do, []string{"maestro-ticket job review T-1 --limit 1h30m"}) || len(rt.Wrote) != 0 {
+	if !slices.Equal(rt.Do, []string{"maestro-ticket job again R-tttttttt --limit 1h30m"}) || len(rt.Wrote) != 0 {
 		t.Fatalf("first timeout: %+v", rt)
 	}
 	h.timedOut("T-1", "review")
@@ -404,7 +404,7 @@ func TestRouteTimeouts(t *testing.T) {
 	h.move("T-2", "in_progress", "in_review")
 	h.comment("T-2", "Review: GO at "+sha)
 	q := runs.Record{ID: "R-vvvvvvvv", Job: "qa", Ticket: "T-2", State: runs.TimedOut, Limit: "2h", StartedAt: time.Now().Add(-time.Minute), Command: opusCmd()}
-	if rt := h.route(q); !slices.Equal(rt.Do, []string{"maestro-ticket job qa T-2 --limit 4h"}) {
+	if rt := h.route(q); !slices.Equal(rt.Do, []string{"maestro-ticket job again R-vvvvvvvv --limit 4h"}) {
 		t.Fatalf("QA's first timeout: %+v", rt)
 	}
 	h.timedOut("T-2", "qa")
@@ -450,5 +450,39 @@ func TestRouteNamesAKilledRun(t *testing.T) {
 	rt := h.route(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, Exit: &code, Command: opusCmd()})
 	if rt.First != "exit 137, no reply" || rt.Outcome != outFailed {
 		t.Fatalf("killed: %+v", rt)
+	}
+}
+
+func TestRouteRoundTwo(t *testing.T) {
+	h := newRouteHarness(t)
+	// Only Claude Code's own words are a usage limit.
+	for _, r := range []runs.Record{
+		{Job: "build", State: runs.Failed, Error: "gh: API rate limit exceeded", Reply: "build: failed"},
+		{Job: "build", Reply: "Handoff: the banner shows 'usage limit reached' when over"},
+	} {
+		if rt := h.route(r); rt.Outcome == outUsageLimit {
+			t.Fatalf("no limit: %+v", rt)
+		}
+	}
+	// A plan whose reply ends in a card sends it once, and decides nothing.
+	rt := h.route(runs.Record{ID: "R-pppppppp", Job: "plan", Reply: "plan: draft: demo\nup: What: x | Question: a or b?"})
+	if len(rt.Send) != 1 || len(rt.Do) != 0 {
+		t.Fatalf("a plan's last card: %+v", rt)
+	}
+	// A pause whose reset passed is set no more.
+	past := time.Now().Add(-time.Minute)
+	h.route(runs.Record{Job: "build", State: runs.Failed, IsError: true, EndedAt: &past, Reply: "Claude AI usage limit reached|" + strconv.FormatInt(past.Unix(), 10)})
+	if _, ok := readPause(h.dir, time.Now()); ok {
+		t.Fatal("paused after the reset")
+	}
+	// A claimed Follow-ups ticket doesn't stop the route.
+	h.ok(nil, "create", "--title", "a", "--areas", "api")
+	h.ok(nil, "create", "--title", "Follow-ups: api", "--status", "backlog", "--parked", "deferred", "--areas", "api")
+	h.ok(nil, "claim", "T-2", "--holder", "planner/s9", "--status", "backlog")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at "+sha)
+	rt = h.route(runs.Record{ID: "R-qqqqqqqq", Job: "review", Ticket: "T-1", Reply: "## Out of scope\n- logs print emails\n## Outcome"})
+	if !slices.Equal(sends(rt), []string{"send qa-lead: qa T-1"}) || len(rt.Wrote) != 1 || !strings.HasPrefix(rt.Wrote[0], "follow-ups not filed") {
+		t.Fatalf("follow-ups failed: %+v", rt)
 	}
 }

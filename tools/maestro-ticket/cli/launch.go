@@ -349,6 +349,7 @@ func runSupervise(ctx context.Context, c *call) error {
 // on its ticket, unless another run of that bot on that ticket still
 // goes. Neither may hold up the ring, so failures only warn on stderr.
 func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
+	dropActive(dir, r)
 	warn := func(err error) {
 		if err != nil {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: %v\n", r.ID, err)
@@ -531,9 +532,11 @@ func runPickup(ctx context.Context, c *call) error {
 				printRoute(w, rt, *full)
 			}
 		}
-		if len(ended) > 0 {
-			fmt.Fprintf(w, "ack each once you have acted on it: maestro-ticket ack %s\n", strings.Join(ids, " "))
-		}
+		defer func() {
+			if len(ended) > 0 { // last, as the team rules say
+				fmt.Fprintf(w, "ack each once you have acted on it: maestro-ticket ack %s\n", strings.Join(ids, " "))
+			}
+		}()
 		switch {
 		case len(ended) == 0 && len(running) == 0:
 			fmt.Fprintln(w, "no run of yours ended or running")

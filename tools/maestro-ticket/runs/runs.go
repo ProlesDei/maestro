@@ -373,7 +373,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -382,6 +382,12 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	for _, e := range ents {
 		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
 			os.Remove(filepath.Join(dir, e.Name()))
+		}
+		// An active-run mark a later start moved aside.
+		if strings.Contains(e.Name(), ".active.stale") {
+			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > keep {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
 		}
 	}
 	return nil

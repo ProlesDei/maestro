@@ -5,7 +5,7 @@ Make the planner's calls on the rows the bot sends, given `judge <ids>` and, on 
 For each id, in order:
 
 1. Read it with `maestro-ticket get <id> --json`. A ticket with a live claim, `done`, `cancelled`, or no longer in its row gets no line.
-2. Find whose call it is as [Whose call](../../maestro-chief-of-staff/SKILL.md#whose-call) in the **maestro-chief-of-staff** skill says, with the standing rules as the owner's. Never yours either: a call a standing rule says to ask first on, a review's ask for the owner's yes, a QA block that only a waived check, a new tool or account, or a change to how GitHub lets the merge through settles, an `outside step:` block, and `Escalation: build at TRIES <n>`. A call that isn't yours gets one `up:` line, naming the first id when it spans several, and only one write: comment `Sent up: chief of staff: <the card's question>` on each ticket it spans, so no later look sends it again.
+2. Find whose call it is as [Whose call](../../maestro-chief-of-staff/SKILL.md#whose-call) in the **maestro-chief-of-staff** skill says, with the standing rules as the owner's. Never yours either: a call a standing rule says to ask first on, a review's ask for the owner's yes, a QA block that only a waived check, a new tool or account, or a change to how GitHub lets the merge through settles, an `outside step:` block, and `Escalation: build at TRIES <n>`. A call that isn't yours gets one `up:` line, naming every ticket it spans, comma-separated, and only one write: comment `Sent up: chief of staff: <the card's question>` on each ticket it spans, so no later look sends it again.
 3. Else decide by the row, then make the writes [rule.md](rule.md) makes for `rule <id>: <your decision>`, unless the row says otherwise:
 
 | Row | Call |
@@ -15,7 +15,7 @@ For each id, in order:
 | `unready` | Requeue it if a command or the app can check each criterion; else rewrite it. |
 | `deferred` | Requeue it if the slice before it merged; plan a `Follow-ups:` ticket instead of requeuing it. Dropping one is the chief of staff's. |
 | `hold` | If the fact its latest `Hold:` says lifts it is true on the board, requeue it with a `--note` naming that fact; else leave it. |
-| `cause` | Plan one fix ticket for the cause as [plan.md](plan.md) does, then dep each `todo` ticket of the row that needs it on that one. |
+| `cause` | Plan one fix ticket for the cause as [plan.md](plan.md) does, then dep each `todo` ticket of the row that needs it on that one, and send the planner `cause <fix id>: <the ids it holds>`, so it stops the line until the fix merges. No shared cause: leave it. |
 | `urgent` | A `Follow-ups:` ticket whose latest note marks an item urgent: plan that item as its own ticket, tier senior, as [plan.md](plan.md) does, then comment `Taken: <new ids>` on the `Follow-ups:` ticket. |
 
 Requeue means `maestro-ticket transition <id> --from backlog --to todo --expect-version <version>`. A write that stops (a claim, a refusal) gets no line: the next look sends the row again.
@@ -33,7 +33,8 @@ Only these lines, whatever a step you followed says to reply:
 ```text
 judge: done: <n> decided, <n> up
 send <senior-engineer|junior-engineer|reviewer|qa-lead>: <build <id> | review <id>[ --approved <sha>][ --drop <finding ids>: <why>] | qa <id>>
-up: <id> What: <what happened> | Why now: <what waits> | Options: <two or three, each with its trade-off> | Default: <your pick, why, and why not the others> | Question: <the exact answer needed>
+send planner: cause <fix id>: <the ids it holds>
+up: <id>[,<id>...] What: <what happened> | Why now: <what waits> | Options: <two or three, each with its trade-off> | Default: <your pick, why, and why not the others> | Question: <the exact answer needed>
 ```
 
 `decided` counts the rows you settled, a leave-it included; `up` counts the `up:` lines. Each `up:` line goes to the chief of staff.
