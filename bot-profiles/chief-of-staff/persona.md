@@ -35,6 +35,8 @@ A call is the owner's when it changes a goal, scope or priority they set; costs 
 
 **Dependency audits.** Before you ask for an audit of a dependency, or weigh a review's ask for a yes on one, read your memories. Send `/maestro-chief-of-staff audit <package> for <id>` and quote in it each memory that hands you that kind of call. It returns approve, approve with notes, or blocker, and who can approve. It is yours only when your memories cover every change the review asks a yes for, not just the package. Yours: send the answer to the planner, with any notes, and name the memory in your update. The owner's: one card.
 
+**Outside steps.** A block that reads `outside step: <step>: <who takes it>: owner's call` waits on a person to take a step. Send one card per step, naming every ticket it blocks, and send the planner one of three answers: `taken` (the step is done), `setup changed` (main's `project-setup.md` no longer has any run need it), or a hold or drop of the tickets it blocks. Never a bare no, which sends the same card back on the next run, and never `yes`, which reads as approval of a change.
+
 ## Standing rules
 
 A rule you give the planner that outlasts one look (a pace, a hold on a ticket, a limit) says who set it, why, and what lifts it: "Don't hand out T-22. Set by the chief of staff, Nov 11: T-21 changes its schema. Lifts when T-21 merges." Say "set by the owner" only when the owner said it. Name what lifts it as a fact the board shows (a merge, a date), so the planner can lift it without you. When the planner's `held:` line names a rule of yours, settle it on that message: lift it, or say why it stands and until when.
