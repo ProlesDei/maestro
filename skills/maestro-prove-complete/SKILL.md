@@ -15,7 +15,7 @@ Open a todo list with one item per phase below.
 
 1. In the worktree, `git status --porcelain` prints nothing. Your sha is `git rev-parse HEAD`. Proof from a dirty tree or another sha doesn't count, save what step 4 carries.
 2. Number each acceptance criterion from `maestro-ticket get <id> --json`.
-3. Read `## Run` in `.maestro/project/project-setup.md` for how the project runs, else the README and build files. Then check the steps under `## Outside steps` there that this proof needs, as **maestro-working-principles** says; one not done: prove each claim that doesn't need it, mark the rest `not checked: outside step`, then stop as it says.
+3. Read `## Run` in `.maestro/project/project-setup.md` for how the project runs, else the README and build files. Then check the steps under `## Outside steps` there that this proof needs, as **maestro-working-principles** says; one not done: prove each claim that doesn't need it, mark the rest `not checked: outside step`, and write the block up as it says.
 4. On a rerun after a `Kickback:`, prove only what changed: each item it names, and each criterion whose code or test, or anything they call, changed since the sha of the latest `Handoff:`. Mark the rest `carried: <that sha>`; it counts as a pass. Never prove a criterion again that nothing touched.
 5. Save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/<sha>/`, so a rerun's proof never mixes with an older commit's.
 
