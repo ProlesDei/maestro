@@ -155,7 +155,10 @@ wait:
 		case <-timer.C:
 			credit = min(SlotWait(dir, r.ID, begun, time.Now()), maxSlotCredit)
 			if left := time.Until(begun.Add(limit + credit)); left > 0 {
-				timer.Reset(left)
+				// While a wait goes on, the deadline moves as fast as the
+				// clock: look again no sooner than liveWait, not in a spin,
+				// but never past the latest the deadline can be.
+				timer.Reset(min(max(left, liveWait), time.Until(begun.Add(limit+maxSlotCredit))))
 				continue
 			}
 			why = TimedOut

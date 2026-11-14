@@ -413,11 +413,53 @@ func TestSlotSkipsDeadWaiters(t *testing.T) {
 	if err := os.WriteFile(dead, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// One that died halfway through joining, a while ago.
+	joining := filepath.Join(dir, "checks.t.123")
+	if err := os.WriteFile(joining, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(joining, old, old); err != nil {
+		t.Fatal(err)
+	}
 	if code, _, errs := h.run("", "slot", "--max", "1", "--wait", "5s", "--", "true"); code != 0 {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	if _, err := os.Stat(dead); err == nil {
-		t.Fatal("the dead waiter's file is still in line")
+	for _, f := range []string{dead, joining} {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("%s is still in slots/", filepath.Base(f))
+		}
+	}
+}
+
+// A waiter for fewer slots at the head of the line doesn't hold back one
+// behind it that can use a slot it can't, as when lint runs with --max 1
+// and tests with --max 2 under one name. Line files are readable, so a
+// waiter of another user can test their locks.
+func TestSlotWaiterBehindUsesAFreeSlot(t *testing.T) {
+	h := newHarness(t)
+	held := holdSlot(t, h, "checks", 0)
+	done := make(chan int, 1)
+	go func() {
+		code, _, _ := h.run("", "slot", "--max", "1", "--", "true")
+		done <- code
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for countLine(t, h) < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	ents, _ := os.ReadDir(filepath.Join(h.dir, "slots"))
+	for _, e := range ents {
+		if info, err := e.Info(); err == nil && strings.HasPrefix(e.Name(), "checks.q.") && info.Mode().Perm()&0o044 != 0o044 {
+			t.Errorf("line file %s has mode %v; want readable by all", e.Name(), info.Mode().Perm())
+		}
+	}
+	if code, _, errs := h.run("", "slot", "--max", "2", "--wait", "5s", "--", "true"); code != 0 {
+		t.Fatalf("--max 2 behind a --max 1 waiter: exit %d: %s", code, errs)
+	}
+	held.Close()
+	if code := <-done; code != 0 {
+		t.Fatalf("--max 1 waiter: exit %d", code)
 	}
 }
 

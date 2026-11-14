@@ -349,6 +349,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	if err != nil {
 		return nil
 	}
+	pruned := map[string]bool{}
 	for _, e := range ents {
 		id, ok := strings.CutSuffix(e.Name(), ".acked")
 		if !ok || !ValidID(id) {
@@ -358,11 +359,18 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		if err != nil || now.Sub(info.ModTime()) < keep {
 			continue
 		}
+		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		removeWaits(dir, id)
 		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
 			os.Remove(path(dir, id, ext))
+		}
+	}
+	// Their slot wait marks, from the same listing: one listing per run
+	// would cost the square of the runs.
+	for _, e := range ents {
+		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
+			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 	return nil

@@ -110,14 +110,16 @@ func waits(dir, id string) map[string]bool {
 	ents, _ := os.ReadDir(dir)
 	out := map[string]bool{}
 	for _, e := range ents {
-		switch n := e.Name(); {
-		case strings.HasPrefix(n, id+".wait."):
-			out[n] = true
-		case strings.HasPrefix(n, id+".waited."):
-			out[n] = false
+		if n := e.Name(); isWait(n, id) {
+			out[n] = strings.HasPrefix(n, id+".wait.")
 		}
 	}
 	return out
+}
+
+// isWait reports whether name is one of run id's wait marks.
+func isWait(name, id string) bool {
+	return strings.HasPrefix(name, id+".wait.") || strings.HasPrefix(name, id+".waited.")
 }
 
 func later(a, b time.Time) time.Time {

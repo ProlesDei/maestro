@@ -150,17 +150,19 @@ func runSlot(ctx context.Context, c *call) error {
 // and returns it open; closing it frees the slot. With all busy, it says so
 // once on w, joins the line, and tries again every second or so until ctx
 // ends or wait passes, calling tick before each pause. Waiters take slots
-// in the order they came: one tries only once no one ahead of it waits.
+// in the order they came: one tries only while fewer than max live
+// waiters are ahead of it, so slots that free together fill together, and
+// no one is passed by a waiter more than max-1 places behind it.
 func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration, w io.Writer, tick func()) (*os.File, error) {
 	start := time.Now()
 	var place *waiter                // our place in line, once we wait
 	defer func() { place.leave() }() // place as it is at the end, not now
 	for {
-		ahead, err := waitsAhead(dir, name, place)
+		ahead, err := waitsAhead(dir, name, place, max)
 		if err != nil {
 			return nil, err
 		}
-		if !ahead {
+		if ahead < max {
 			if f, err := freeSlot(dir, name, max); f != nil || err != nil {
 				return f, err
 			}
@@ -225,7 +227,13 @@ func joinLine(dir, name string) (*waiter, error) {
 	if err != nil {
 		return nil, err
 	}
-	ok, err := tryLock(f)
+	// Readable, as the slot files are, so a waiter of another user can
+	// test its lock.
+	err = f.Chmod(0o644)
+	ok := false
+	if err == nil {
+		ok, err = tryLock(f)
+	}
 	if !ok && err == nil {
 		err = fmt.Errorf("slot: lock a new waiter's file %s: held elsewhere", f.Name())
 	}
@@ -249,43 +257,60 @@ func (p *waiter) leave() {
 	}
 }
 
-// waitsAhead reports whether a live waiter is ahead of place in name's
-// line, or in it at all when place is nil. It removes the files of dead
-// waiters it passes.
-func waitsAhead(dir, name string, place *waiter) (bool, error) {
+// waitsAhead counts the live waiters ahead of place in name's line, or
+// in it at all when place is nil, up to max. It removes the files of dead
+// waiters it passes, and the files of waiters that died while joining.
+func waitsAhead(dir, name string, place *waiter, max int) (int, error) {
 	ents, err := os.ReadDir(dir) // sorted by name, so oldest first
+	if err != nil {
+		return 0, err
+	}
+	line, joining := name+".q.", name+".t."
+	n := 0
+	for _, e := range ents {
+		base := e.Name()
+		if strings.HasPrefix(base, joining) {
+			// A join takes a moment; one a minute old died halfway.
+			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > time.Minute {
+				dropDead(filepath.Join(dir, base))
+			}
+			continue
+		}
+		if !strings.HasPrefix(base, line) {
+			continue
+		}
+		if place != nil && base >= place.name {
+			break
+		}
+		live, err := dropDead(filepath.Join(dir, base))
+		if err != nil {
+			return 0, err
+		}
+		if live {
+			if n++; n >= max {
+				break
+			}
+		}
+	}
+	return n, nil
+}
+
+// dropDead removes a waiter's file if no one holds its lock, and reports
+// whether someone does.
+func dropDead(file string) (live bool, err error) {
+	f, err := os.Open(file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil // it left since ReadDir
+	}
 	if err != nil {
 		return false, err
 	}
-	prefix := name + ".q."
-	for _, e := range ents {
-		n := e.Name()
-		if !strings.HasPrefix(n, prefix) {
-			continue
-		}
-		if place != nil && n >= place.name {
-			return false, nil
-		}
-		f, err := os.Open(filepath.Join(dir, n))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // it left since ReadDir
-		}
-		if err != nil {
-			return false, err
-		}
-		ok, err := tryLock(f)
-		if ok {
-			os.Remove(f.Name()) // a dead waiter's file
-		}
-		f.Close()
-		if err != nil {
-			return false, err
-		}
-		if !ok {
-			return true, nil
-		}
+	defer f.Close()
+	ok, err := tryLock(f)
+	if ok {
+		os.Remove(file)
 	}
-	return false, nil
+	return !ok && err == nil, err
 }
 
 // removeTemp removes the command's temp folder. A tree left read-only, such
