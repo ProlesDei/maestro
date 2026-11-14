@@ -244,8 +244,8 @@ func TestRouteQA(t *testing.T) {
 	h.ok(nil, "create", "--title", "b", "--goal", "demo")
 	h.ok(nil, "create", "--title", "c", "--tier", "junior")
 	h.move("T-1", "in_progress", "in_review", "done")
-	if got := sends(h.route(runs.Record{Job: "qa", Ticket: "T-1"})); len(got) != 0 {
-		t.Fatalf("a pass with the goal still open: %v", got)
+	if got := sends(h.route(runs.Record{Job: "qa", Ticket: "T-1"})); !slices.Equal(got, []string{"send planner: merged T-1"}) {
+		t.Fatalf("a pass with the goal still open wakes the planner: %v", got)
 	}
 	h.move("T-2", "cancelled")
 	if got := sends(h.route(runs.Record{Job: "qa", Ticket: "T-1"})); !slices.Equal(got, []string{"send planner: goal demo done"}) {
@@ -489,5 +489,23 @@ func TestRouteRoundTwo(t *testing.T) {
 	rt = h.route(runs.Record{ID: "R-qqqqqqqq", Job: "review", Ticket: "T-1", Reply: "## Out of scope\n- logs print emails\n## Outcome"})
 	if !slices.Equal(sends(rt), []string{"send qa-lead: qa T-1"}) || len(rt.Wrote) != 1 || !strings.HasPrefix(rt.Wrote[0], "follow-ups not filed") {
 		t.Fatalf("follow-ups failed: %+v", rt)
+	}
+}
+
+// A usage limit loses no work: the job runs again once it lifts, and the
+// stopped session's claim goes, counting no expiry.
+func TestRouteUsageLimitKeepsWork(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress")
+	h.ok(nil, "claim", "T-1", "--holder", "junior-engineer/s1", "--status", "in_progress")
+	future := time.Now().Add(time.Hour)
+	rt := h.route(runs.Record{ID: "R-llllllll", Job: "build", Ticket: "T-1", Launcher: "junior-engineer", State: runs.Failed, IsError: true, EndedAt: &future,
+		Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket job again R-llllllll"}) || !slices.Contains(rt.Wrote, "released T-1 till the limit lifts") {
+		t.Fatalf("usage limit: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 1); d.LiveClaim() != nil || d.LeaseExpiries != 0 {
+		t.Fatalf("claim: %+v, expiries %d", d.Claim, d.LeaseExpiries)
 	}
 }

@@ -258,6 +258,25 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 		}
 		planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
+		if r.Job != "" {
+			// The work isn't lost: once the pause lifts, the run's job
+			// starts again; job refuses it till then, and the bot leaves
+			// the run unacked.
+			out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
+		}
+		// A limit is no death: free the claim the stopped session left, so
+		// it counts no lease expiry and the rerun can take the ticket.
+		if id != "" {
+			if tid, err := ticket.ParseID(id); err == nil {
+				if d, err := s.Get(ctx, tid); err == nil {
+					if cl := d.LiveClaim(); cl != nil && ticket.HolderBot(cl.Holder) == ticket.HolderBot(r.Launcher) {
+						if _, err := s.Release(ctx, ticket.ReleaseRequest{ID: tid, Holder: cl.Holder, Token: cl.Token, Actor: c.actor, IdempotencyKey: r.ID + "-release"}); err == nil {
+							out.Wrote = append(out.Wrote, "released "+id+" till the limit lifts")
+						}
+					}
+				}
+			}
+		}
 		return out, nil
 	case outDiskFull:
 		planner(strings.Join(strings.Fields("disk_full "+id), " ") + ": " + out.First)
@@ -384,8 +403,16 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if err != nil {
 				return out, err
 			}
-			if done {
+			ready, err := readyWork(ctx, s)
+			if err != nil {
+				return out, err
+			}
+			switch {
+			case done:
 				planner("goal " + t.Goal + " done")
+			case ready || t.Goal != "":
+				// A merge frees what waited on it: the planner looks.
+				planner("merged " + id)
 			}
 		case t.Status == ticket.StatusInProgress && strings.HasPrefix(last.Body, "Kickback: QA fail"):
 			next, err := kickbackRoute(ctx, s, t)
@@ -615,9 +642,9 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 	if err != nil {
 		return err
 	}
-	mine := key + " " + sender
-	if !claimHandout(dir, d.ID.String(), "chief-of-staff", mine, 24*time.Hour, time.Now()) {
-		if b, _ := os.ReadFile(handoutPath(dir, d.ID.String(), "chief-of-staff")); strings.TrimSpace(string(b)) != mine {
+	mine, hid := key+" "+sender, fmt.Sprintf("%s-design%d", d.ID, e.ID)
+	if !claimHandout(dir, hid, "chief-of-staff", mine, 24*time.Hour, time.Now()) {
+		if b, _ := os.ReadFile(handoutPath(dir, hid, "chief-of-staff")); strings.TrimSpace(string(b)) != mine {
 			return nil // another look or pickup sends this card
 		}
 	}
@@ -629,7 +656,7 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 	}
 	card := strings.Join(strings.Fields(strings.Join(lines, " | ")), " ")
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: d.ID, Body: "Sent up: chief of staff: approve the design on " + d.ID.String() + "?", Actor: c.actor, IdempotencyKey: key}); err != nil {
-		os.Remove(handoutPath(dir, d.ID.String(), "chief-of-staff")) // the next one tries again
+		os.Remove(handoutPath(dir, hid, "chief-of-staff")) // the next one tries again
 		return err
 	}
 	out.Wrote = append(out.Wrote, d.ID.String()+" sent up: design ready")

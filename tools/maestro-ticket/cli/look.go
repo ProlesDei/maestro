@@ -375,8 +375,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	}
 	// What goals still have work moving, for "the goal needs it next".
 	moving := map[string]bool{}
-	going := 0
+	going, busyBoard := 0, false
 	for _, t := range open {
+		if t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview {
+			busyBoard = true
+		}
 		if t.Status == ticket.StatusInProgress && t.LiveClaim() != nil {
 			going++
 		}
@@ -601,7 +604,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			n.ready++
 			if !byRole(t) {
 				bot := "senior-engineer"
-				if t.Tier == ticket.TierJunior {
+				if t.Tier == ticket.TierJunior && t.Tries < 2 { // a split keeps its tries
 					bot = "junior-engineer"
 				}
 				build(bot, id)
@@ -639,8 +642,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 						}
 					}
 				}
-				if t.Goal != "" && !moving[t.Goal] {
+				switch {
+				case t.Goal != "" && !moving[t.Goal]:
 					judgeIt(t, string(t.Parked), "goal "+t.Goal+" has nothing else in todo, build or review", "")
+				case t.Goal == "" && !busyBoard && strings.HasPrefix(t.Title, "Follow-ups: "):
+					judgeIt(t, string(t.Parked), "follow-ups, and nothing else in todo, build or review", "")
 				}
 			}
 		}
@@ -724,11 +730,12 @@ func (c *call) sendUpTries(ctx context.Context, s ticket.Store, t ticket.Ticket,
 	id, key := t.ID.String(), fmt.Sprintf("look-tries-%s-%d", t.ID, t.Tries)
 	q := "split, rewrite or drop " + id + "?"
 	dir, err := c.besideStore("handouts")
-	if err != nil || !claimHandout(dir, id, "chief-of-staff", key, 24*time.Hour, time.Now()) {
+	hid := fmt.Sprintf("%s-tries%d", id, t.Tries)
+	if err != nil || !claimHandout(dir, hid, "chief-of-staff", key, 24*time.Hour, time.Now()) {
 		return // a look beside this one sends it
 	}
 	failed := func(what string, err error) {
-		os.Remove(handoutPath(dir, id, "chief-of-staff")) // the next look tries again
+		os.Remove(handoutPath(dir, hid, "chief-of-staff")) // the next look tries again
 		keep(fmt.Errorf("%s %s: %w", what, id, err))
 	}
 	// The note first, then the move: a stop between leaves an in_progress

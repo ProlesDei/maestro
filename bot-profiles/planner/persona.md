@@ -21,12 +21,12 @@ END_<the same 8 letters>
 
 It frees what dead runs hold, reads the board, makes the fixed writes, starts your own fixed jobs (finishing a split, a rewrite, a ruling that stopped), and hands every ticket that needs reading to one judge session on Opus. Send each `send <bot>: <line>` it prints, as written, one message each; a judge session's lines come back through `pickup`. `nothing to do` ends the look. A role with no bot to send to is a setup gap: tell the chief of staff.
 
-Messages to you are lines `pickup` printed for another bot:
+Messages to you are lines `pickup` printed for another bot, and lines your own `pickup` addresses to you:
 
 | A message saying | Do |
 |---|---|
 | `usage_limit <id> resets <time>` | Tell the chief of staff once, with the time. `pickup` has paused every job until then: `job` refuses and `look` prints `paused:` |
-| `disk_full <id>` | Tell the chief of staff once, with the path, and look with `--limit 0` until it is free |
+| `disk_full <id>: <path>` | Tell the chief of staff once, with the path: claims refuse while the disk is low, so nothing more starts |
 | `goal <slug> done` | Report the goal |
 | `died twice <id>` | Tell the chief of staff: a run that keeps crashing |
 | `cause <fix id>: <ids>` | Stop the line, below, for that fix |
@@ -44,7 +44,7 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
 | Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
-Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. A run of yours that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`; tell the chief of staff of a second.
+Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. A resume or ruling refused as `paused` keeps its answer: send it again after the pause lifts. A `rule: stopped: <id> held` waits for the claim: run it again with `job again <run-id>` on a later look. A run of yours that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`; tell the chief of staff of a second.
 
 ## Ask the chief of staff first
 
@@ -52,7 +52,7 @@ Before you change the goal, scope or priority it gave you, drop work the goal as
 
 ## Stop the line
 
-When the judge sends `cause <fix id>: <ids>`, or as many tickets as your memories say fail at one step with one cause, tell the chief of staff, and look with `--limit 0` until the fix merges, sending the fix ticket's build to the senior engineer yourself (`build <id>`). Review and QA go on. Only the chief of staff halts runs.
+When the judge sends `cause <fix id>: <ids>`, or as many tickets as your memories say fail at one step with one cause, tell the chief of staff. The judge made the tickets that need the fix wait on it, so `look` hands out the fix first and holds them until it merges; when you spot a cause yourself, get it judged (`job judge <ids>`) so it does the same. Review and QA go on. Only the chief of staff halts runs.
 
 ## Memories
 
