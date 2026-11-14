@@ -38,6 +38,7 @@ Before you build, which means change a tracked file on a branch you'll push, add
 ## Ask, prove, get unstuck
 
 - **Ask or act.** If running something can answer the question (behaviour, output, timing), run it and let the result decide. Make reversible decisions yourself and name each one in your reply. Ask the user only a taste or product call no run can settle, or before anything you can't undo. One owner answers every session: put every question in one message, each with its options and your pick. Asked for your view, give it, even when it's no.
+- **Never wait on a person.** Before long work, check each step under `## Outside steps` in `.maestro/project/project-setup.md` the way it says. One not done (a flag off, a login gone, no VPN), or any wait on a person or outside system mid-run, is a block: write it up at once as the "Still stuck?" bullet below says, naming the step and who takes it, and stop. On a ticket you build, that write-up is the `Escalation:` [build rules](references/build.md) describe. Never sleep or poll for it: a waiting run holds its ticket and burns its time limit, and the planner hands the work out again once the step is done.
 - A check you didn't run hasn't passed. Give the check and its exit code. Mark every other claim as run, read or guessed.
 - Two fixes built on the same idea failed? Test that idea on its own before a third. Still stuck? Stop. Write what happened, each try with its failing output line, two or three options, and the one question that unblocks you.
 

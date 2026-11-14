@@ -33,6 +33,10 @@ main
 
 qa
 
+## Outside steps
+
+<each step a person or outside system takes before the app can be tested, one per line, with the command or page that shows it's done, such as a feature flag turned on, a login, a VPN, or a reserved test host and how long to reserve it for; sessions check each before long work and stop, never wait, when one isn't done. Write none if there are none>
+
 ## Review
 
 <the paths or functions whose code every review treats as high risk, such as `src/auth/` or `redact()` in `src/log.py`; `/maestro-code-review` reviews a changed code line there at tier 2, with its red team, but not a test or comment change. Name the code that does the risky work, not every file near it>
