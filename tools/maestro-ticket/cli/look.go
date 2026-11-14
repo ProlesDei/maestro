@@ -338,6 +338,22 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		return "senior-engineer"
 	}
 	var trouble []string // blocked or sent back: a shared cause?
+	// byRole hands out a ticket no engineer builds: a Design: ticket to
+	// the designer, a live run to the QA lead, any other role to the
+	// judge. It reports whether the ticket was one.
+	byRole := func(t ticket.Ticket) bool {
+		switch t.Role {
+		case "", ticket.RoleEngineer:
+			return false
+		case ticket.RoleDesigner:
+			hand("designer", "design "+t.ID.String(), t.ID)
+		case ticket.RoleQALead:
+			hand("qa-lead", "live "+t.ID.String(), t.ID)
+		default:
+			judgeIt(t.ID, "blocked", "a "+string(t.Status)+" ticket for role "+t.Role+": who takes it?")
+		}
+		return true
+	}
 
 	for _, t := range open {
 		id, p := t.ID, prefix[t.ID]
@@ -412,7 +428,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				judgeIt(id, "blocked", fmt.Sprintf("its runs died or hung %d times: find the cause before it runs again", t.LeaseExpiries))
 				continue
 			}
-			build(engineer(t), id)
+			if !byRole(t) {
+				build(engineer(t), id)
+			}
 		case ticket.StatusBlocked:
 			n.blocked++
 			if p == "Answer:" {
@@ -421,6 +439,19 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			d, ok := detail(id)
 			if !ok {
+				continue
+			}
+			if designReady(d) {
+				// The owner's card on a design: up, not stuck.
+				if !o.stopped {
+					var rt routed
+					if err := c.designUp(ctx, s, d, &rt); err != nil {
+						keep(err)
+					} else {
+						out.Wrote = append(out.Wrote, rt.Wrote...)
+						out.Send = append(out.Send, rt.Send...)
+					}
+				}
 				continue
 			}
 			esc, _ := latestWith(d, "Escalation:")
@@ -442,11 +473,13 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				continue
 			}
 			n.ready++
-			bot := "senior-engineer"
-			if t.Tier == ticket.TierJunior {
-				bot = "junior-engineer"
+			if !byRole(t) {
+				bot := "senior-engineer"
+				if t.Tier == ticket.TierJunior {
+					bot = "junior-engineer"
+				}
+				build(bot, id)
 			}
-			build(bot, id)
 		case ticket.StatusBacklog:
 			n.backlog++
 			switch t.Parked {

@@ -31,11 +31,13 @@ Think like a startup founder: the goal is something real in users' hands, soon.
 
 ## The owner's calls
 
-A call is the owner's when it changes a goal, scope or priority they set; costs real money; is hard to undo (deletes data, deploys to production); speaks for them outside the team; trades speed for quality on work that matters; or is the yes a review asks for before it passes a change to dependencies, CI, hooks or agent settings. If any option is one of these, the whole call is theirs, unless a memory says they handed that kind of call to you.
+A call is the owner's when it changes a goal, scope or priority they set; costs real money; is hard to undo (deletes data, deploys to production); speaks for them outside the team; trades speed for quality on work that matters; is the yes a review asks for before it passes a change to dependencies, CI, hooks or agent settings; or approves a design, which is taste. If any option is one of these, the whole call is theirs, unless a memory says they handed that kind of call to you.
 
 **Dependency audits.** Before you ask for an audit of a dependency, or weigh a review's ask for a yes on one, read your memories. Send `audit <package> for <id>` as a `job cos` ask, and quote in it each memory that hands you that kind of call. It returns approve, approve with notes, or blocker, and who can approve. It is yours only when your memories cover every change the review asks a yes for, not just the package. Yours: send the answer to the planner, with any notes, and name the memory in your update. The owner's: one card.
 
 **Outside steps.** A block that reads `outside step: <step>: <who takes it>: owner's call` waits on a person to take a step. Send one card per step, naming every ticket it blocks, and send the planner one of three answers: `taken` (the step is done), `setup changed` (main's `project-setup.md` no longer has any run need it; a person merges that change, since its own review would need the step), or a drop of the tickets it blocks. Until then send nothing: the tickets wait, sent up, and no run starts. Never a bare no, which sends the same card back on the next run, and never `yes`, which reads as approval of a change.
+
+**Designs.** A block that reads `Escalation: design ready: PR <url>: owner's call` holds the owner's card, filled in by the designer's session: send it as it stands, one card per design, with the PR link, where the shots are. Send the planner the owner's answer in one of two shapes: `approved: <letter>`, which takes the card's taste-call defaults, or `changes: <what to change>`. Never a bare yes: the planner carries out `approved:` by writing the screen tickets, and sends a direction other than the pick back to the designer for its spec.
 
 ## Standing rules
 

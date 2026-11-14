@@ -140,7 +140,7 @@ func TestLookRows(t *testing.T) {
 	}
 	ruleRun := strings.Fields(strings.TrimPrefix(started[ri], "started: "))[0]
 	j := l.waitEnded(ruleRun, 20*time.Second)
-	if got := l.seen(j.ID); got.stdin[0] != "/maestro-planner rule T-11: again" || got.flag("--model") != "sonnet" {
+	if got := l.seen(j.ID); got.stdin[0] != "/maestro-planner rule T-11: again" || got.flag("--model") != "opus" {
 		t.Errorf("rule again: %q %q", got.stdin, got.args)
 	}
 	for _, w := range []string{"runs: 0/3", "held: T-10", "sent up: T-6"} {
@@ -170,6 +170,23 @@ func TestLookRows(t *testing.T) {
 	stopped := l.look("", "--limit", "3")
 	if stopped[0] != "stopped: maestro/STOP is set: look hands out, starts and writes nothing" || len(with(stopped, "send ")) != 0 || len(with(stopped, "judge: ")) != 0 {
 		t.Errorf("STOP: %q", stopped)
+	}
+}
+
+// Tickets no engineer builds go by role: a Design: ticket to the designer,
+// a live run to the QA lead, and neither takes a work slot.
+func TestLookByRole(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "Design: demo", "--type", "scout", "--role", "designer", "--owner", "planner")
+	l.h.ok(nil, "create", "--title", "Live run: demo", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead")
+	l.h.ok(nil, "create", "--title", "a")
+	got := with(l.look("", "--limit", "1"), "send ")
+	if !slices.Equal(got, []string{"send designer: design T-1", "send qa-lead: live T-2", "send senior-engineer: build T-3"}) {
+		t.Fatalf("by role: %q", got)
+	}
+	_, r := l.job("", "design", "T-1")
+	if got := l.seen(r.ID); got.stdin[0] != "/maestro-designer design T-1" || got.flag("--model") != "opus" {
+		t.Fatalf("design job: %q %q", got.stdin, got.args)
 	}
 }
 

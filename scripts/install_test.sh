@@ -696,7 +696,7 @@ skills-home: hidden|install.yaml:6: skills-home twice
 code-graph: mcp|install.yaml:6: code-graph twice
 browser: none|install.yaml:6: browser twice
 skip: maestro-recall|install.yaml:6: skip: is gone: every skill installs
-bots: designer|no bot profile designer
+bots: art-director|no bot profile art-director
 bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
 tickets: our-tickets|install.yaml:6: tickets: Maestro's bots run only on maestro-ticket
 EOF

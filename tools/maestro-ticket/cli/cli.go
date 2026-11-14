@@ -151,7 +151,7 @@ inodes free and under 1Mi, or under 10% of its space and under 10 GiB
 ($MAESTRO_TICKET_MIN_FREE sets the percent; 0 is off). A store write that
 runs out of disk fails with low_disk too.
 
-Roles: chief-of-staff planner engineer qa-lead reviewer
+Roles: chief-of-staff planner engineer qa-lead reviewer designer
 Statuses: backlog todo in_progress in_review blocked done cancelled
 Ship:  backlog -> todo -> in_progress -> in_review -> done (by the QA lead,
        or the planner when the PR merged outside QA)
@@ -162,8 +162,9 @@ In todo and in_progress, claim skips (--next) or refuses (by id) tickets
 whose dependencies aren't all done, and tickets whose areas overlap (equal,
 or one inside the other) an area of another todo or in_progress ticket under
 a live claim.
-Blocked returns only to the status it was blocked from. Send-backs from
-in_review to in_progress add one to a ship ticket's tries.
+Blocked returns only to the status it was blocked from, except that a
+designer's "Design:" scout ticket may go straight to done, by its owner.
+Send-backs from in_review to in_progress add one to a ship ticket's tries.
 Parked: every backlog ticket says why it waits: hold (someone said wait),
 deferred (cut from the current slice), unready (a criterion can't be
 checked yet) or planning (a planner session is splitting it). A ticket

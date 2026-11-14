@@ -40,6 +40,7 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 | Split or rewrite a ticket (add `--ticket <id>`) | `<id>` |
 | Find why little runs at once | `board` |
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
+| Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
 The ids a reply claims must show in `maestro-ticket list`. Answer a reply's question, or say "create them", with `maestro-ticket resume <run-id>`. Slice the goal so the first merges put something a user can see in their hands, and leave the rest parked.
 

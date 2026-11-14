@@ -274,6 +274,19 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		}
 	}
 	switch r.Job {
+	case "design":
+		switch {
+		case t.Status == ticket.StatusBlocked && strings.HasPrefix(last.Body, "Sent up:"):
+			// up already: the owner's answer comes back through the planner
+		case t.Status == ticket.StatusBlocked && designReady(d):
+			if err := c.designUp(ctx, s, d, &out); err != nil {
+				return out, err
+			}
+		case t.Status == ticket.StatusBlocked:
+			planner("block " + id + ": " + firstLine(last.Body))
+		default:
+			planner(out.Outcome + " " + id + ": " + out.First)
+		}
 	case "build":
 		return c.routeBuild(ctx, s, r, d, out)
 	case "review":
@@ -421,6 +434,37 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	out.Wrote = append(out.Wrote, id+" blocked: Escalation: review at "+sha+": ran past "+r.Limit)
 	planner("block " + id + ": review ran past " + r.Limit)
 	return out, nil
+}
+
+// designReady: the designer's session handed a design up as the
+// owner's card, and no answer or Sent up came after it.
+func designReady(d ticket.Detail) bool {
+	for i := len(d.Comments) - 1; i >= 0; i-- {
+		b := d.Comments[i].Body
+		switch {
+		case strings.HasPrefix(b, "Escalation: design ready"):
+			return true
+		case strings.HasPrefix(b, "Answer:"), strings.HasPrefix(b, "Sent up:"):
+			return false
+		}
+	}
+	return false
+}
+
+// designUp sends a ready design's card to the chief of staff as the
+// designer's session wrote it, one line, and marks the ticket Sent up so
+// no look sends it again. The write is keyed by the escalation, so pickup
+// and look never mark one twice.
+func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, out *routed) error {
+	e, _ := latestWith(d, "Escalation: design ready")
+	key := fmt.Sprintf("design-up-%s-%d", d.ID, e.ID)
+	card := strings.Join(strings.Fields(strings.ReplaceAll(e.Body, "\n", " | ")), " ")
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: d.ID, Body: "Sent up: chief of staff: approve the design on " + d.ID.String() + "?", Actor: c.actor, IdempotencyKey: key}); err != nil {
+		return err
+	}
+	out.Wrote = append(out.Wrote, d.ID.String()+" sent up: design ready")
+	out.Send = append(out.Send, send{"chief-of-staff", d.ID.String() + " " + card})
+	return nil
 }
 
 // judgeSends reads a judge reply's send and up lines; an up line goes to

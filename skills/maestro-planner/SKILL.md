@@ -25,7 +25,7 @@ Pick the row that fits the request. For several, do them in table order and answ
 
 | The request | Job | Creates tickets |
 |---|---|---|
-| `rule <id>: <decision>`: the bot's decision on a block or dispute | **Rule:** follow [references/rule.md](references/rule.md) | Only for a split or rewrite |
+| `rule <id>: <decision>`: the bot's decision on a block or dispute | **Rule:** follow [references/rule.md](references/rule.md) | Only for a split, a rewrite or an approved design |
 | `judge <ids>`, with `Rows:` and `Standing rules:` on stdin | **Judge:** follow [references/judge.md](references/judge.md) | Only for a split, rewrite or fix |
 | `finish <id>`: a split, drop or merge that stopped short | **Finish:** follow [references/finish.md](references/finish.md) | No |
 | A goal, or a ticket id to split or rewrite, outside `rule`, `judge` and `finish` | **Plan:** follow [references/plan.md](references/plan.md) | Yes, unless it says "draft" |

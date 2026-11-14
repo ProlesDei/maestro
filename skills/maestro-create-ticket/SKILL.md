@@ -28,7 +28,7 @@ Follow the **maestro-working-principles** skill.
    | parked | why a `backlog` ticket waits: `hold` (someone said wait), `deferred` (cut from this slice) or `unready` (a criterion can't be checked yet) | `unready` |
    | goal | slug of the goal it serves, so the board counts progress per goal | the goal you were given, else none |
    | tier | which engineer builds it: `junior` for a routine ticket (clear criteria, one area, easy to undo), else `senior` (security, money, data migrations, public APIs, concurrency, unclear scope) | your pick by that rule |
-   | role | who builds it: `engineer`, the one role the store takes that builds tickets. QA and review take only built tickets, so they are never a ticket's role | `engineer` |
+   | role | who builds it: `engineer`, the one role the store takes that builds tickets. QA and review take only built tickets, so they are never a ticket's role; `designer` works only a `Design:` ticket, which **maestro-planner** makes | `engineer` |
 
    Waiting on another ticket is a dep, never `blocked` or `backlog`.
 4. **Create.** Show the command, then run it:

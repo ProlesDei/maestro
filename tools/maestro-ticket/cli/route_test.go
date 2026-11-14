@@ -306,3 +306,25 @@ func TestRouteFilesFollowUps(t *testing.T) {
 		t.Fatalf("a QA run files only its own verdict's lines: %+v", rt)
 	}
 }
+
+// A ready design goes up as the card its session wrote, once.
+func TestRouteDesignReady(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "Design: demo", "--type", "scout", "--role", "designer", "--owner", "planner")
+	h.move("T-1", "in_progress", "blocked")
+	h.comment("T-1", "Design spec: pick B\nCriteria: ...")
+	h.comment("T-1", "Escalation: design ready: PR https://x/pull/9: owner's call\nWhat: two directions\nQuestion: approved: A or B, or changes?")
+	run := runs.Record{ID: "R-ffffffff", Job: "design", Ticket: "T-1", Reply: "design: ready: T-1 at abc1234"}
+	rt := h.route(run)
+	want := "send chief-of-staff: T-1 Escalation: design ready: PR https://x/pull/9: owner's call | What: two directions | Question: approved: A or B, or changes?"
+	if got := sends(rt); !slices.Equal(got, []string{want}) || len(rt.Wrote) != 1 {
+		t.Fatalf("design ready: %v %v", got, rt.Wrote)
+	}
+	if rt := h.route(run); len(rt.Send) != 0 {
+		t.Fatalf("sent up twice: %+v", rt)
+	}
+	d, _ := h.s.Get(context.Background(), 1)
+	if last := latest(d).Body; last != "Sent up: chief of staff: approve the design on T-1?" {
+		t.Fatalf("Sent up: %q", last)
+	}
+}

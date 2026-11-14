@@ -8,6 +8,7 @@ flowchart TD
         Jr["<b>Junior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Sonnet, high effort<br/>Junior-tier tickets"]
         Rev["<b>Reviewer</b><br/>job review &lt;id&gt; · /maestro-code-review<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
         QA["<b>QA Lead</b><br/>job qa &lt;id&gt; · /maestro-qa-lead<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>job design &lt;id&gt; · /maestro-designer<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -28,6 +29,9 @@ flowchart TD
     Planner -->|"junior-tier ticket"| Jr
     Planner -->|"a stalled review"| Rev
     Planner -->|"a stalled test,<br/>a goal's live run"| QA
+    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
+    Des -.->|"draft PR: pickup sends<br/>the owner's card up"| CoS
+    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -72,6 +76,6 @@ flowchart TD
     class Build,L1 session
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4

@@ -63,12 +63,16 @@ var jobKinds = []jobKind{
 		help: "qa-ask [--ticket T-1] < ask: a second look, a repro, a test plan"},
 	{name: "plan", skill: "/maestro-planner", text: "need", model: modelOpus, lean: true,
 		help: "plan [--ticket T-1] < ask: plan a goal, split or rewrite, read the board"},
-	{name: "rule", skill: "/maestro-planner", prefix: "rule", ticket: true, text: "need", model: modelSonnet, lean: true,
+	// A ruling may split, rewrite or plan an approved design's screens:
+	// planning, so Opus.
+	{name: "rule", skill: "/maestro-planner", prefix: "rule", ticket: true, text: "need", model: modelOpus, lean: true,
 		help: "rule <id> < decision: post the planner's ruling and move the ticket"},
 	{name: "finish", skill: "/maestro-planner", prefix: "finish", ticket: true, model: modelSonnet, lean: true,
 		help: "finish <id>: finish a split, drop or merge that stopped short"},
 	{name: "judge", skill: "/maestro-planner", prefix: "judge", ids: true, text: "need", model: modelOpus, lean: true,
 		help: "judge <id>... < rows and standing rules: the planner's calls that need reading"},
+	{name: "design", skill: "/maestro-designer", prefix: "design", ticket: true, model: modelOpus, lean: true,
+		help: "design <id>: a goal's Design: ticket, new or sent back with changes"},
 	{name: "cos", skill: "/maestro-chief-of-staff", text: "need", model: modelOpus, lean: true,
 		help: "cos [--ticket T-1] < ask: a check, second opinion, audit or card draft"},
 }

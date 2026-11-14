@@ -189,7 +189,7 @@ func TestJobTextJobs(t *testing.T) {
 	}
 
 	s, r = j.job("split it in two\n", "rule", "T-1")
-	if got := j.seen(r.ID); s.Model != "sonnet" || got.stdin[0] != "/maestro-planner rule T-1: split it in two" || r.Ticket != "T-1" {
+	if got := j.seen(r.ID); s.Model != "opus" || got.stdin[0] != "/maestro-planner rule T-1: split it in two" || r.Ticket != "T-1" {
 		t.Fatalf("rule: %+v %q", s, got.stdin)
 	}
 	s, r = j.job("", "finish", "T-1")
