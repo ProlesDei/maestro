@@ -268,6 +268,11 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	out.Status = string(t.Status)
 	last := latest(d)
 
+	if r.Job == "review" || r.Job == "qa" || r.Job == "live" {
+		if err := c.fileFollowUps(ctx, s, r, d, &out); err != nil {
+			return out, err
+		}
+	}
 	switch r.Job {
 	case "build":
 		return c.routeBuild(ctx, s, r, d, out)
@@ -455,4 +460,101 @@ func quoteFirst(body string) string {
 		return "with no note"
 	}
 	return "under " + strings.SplitN(firstLine(body), ":", 2)[0] + ":"
+}
+
+// followUpLines are the problems a review or QA run found outside its
+// ticket: a review's "## Out of scope" section, and the "New tickets:"
+// line of QA's verdict and the "Open:" line of its reply.
+func followUpLines(r runs.Record, d ticket.Detail) []string {
+	var out []string
+	keep := func(l string) {
+		l = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(l), "-*"))
+		if l != "" && !strings.EqualFold(l, "none") && !strings.HasPrefix(l, "(") {
+			out = append(out, l)
+		}
+	}
+	if r.Job == "review" {
+		in := false
+		for _, l := range strings.Split(r.Reply, "\n") {
+			switch {
+			case strings.HasPrefix(l, "## Out of scope"):
+				in = true
+			case strings.HasPrefix(l, "## "):
+				in = false
+			case in:
+				keep(l)
+			}
+		}
+		return out
+	}
+	for i := len(d.Comments) - 1; i >= 0; i-- {
+		b := d.Comments[i].Body
+		if !strings.HasPrefix(b, "QA:") && !strings.HasPrefix(b, "Kickback: QA fail") && !strings.HasPrefix(b, "Live run:") {
+			continue
+		}
+		if d.Comments[i].CreatedAt.Before(r.StartedAt) {
+			break
+		}
+		for _, l := range strings.Split(b, "\n") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(l), "New tickets:"); ok {
+				keep(v)
+			}
+		}
+		break
+	}
+	for _, l := range strings.Split(r.Reply, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "Open:"); ok && strings.TrimSpace(v) != "" && !strings.EqualFold(strings.TrimSpace(v), "none") {
+			keep("Open: " + strings.TrimSpace(v))
+		}
+	}
+	return out
+}
+
+// fileFollowUps puts what a run found outside its ticket on the
+// "Follow-ups: <area>" ticket of its first area, making that ticket, parked
+// deferred, when there is none: the planner's rule, done by code, so no bot
+// reads the lines. A follow-up marked urgent shows in the planner's look.
+// Idempotency keys make a second pickup of the run a replay.
+func (c *call) fileFollowUps(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out *routed) error {
+	lines := followUpLines(r, d)
+	if len(lines) == 0 {
+		return nil
+	}
+	area := "general"
+	if len(d.Areas) > 0 {
+		area = d.Areas[0]
+	}
+	title := "Follow-ups: " + area
+	list, err := s.List(ctx, ticket.ListFilter{Statuses: openStatuses})
+	if err != nil {
+		return err
+	}
+	var fu ticket.ID
+	for _, t := range list {
+		if t.Title == title {
+			fu = t.ID
+			break
+		}
+	}
+	if fu == 0 {
+		var areas []string
+		if area != "general" {
+			areas = []string{area}
+		}
+		t, err := s.Create(ctx, ticket.CreateRequest{
+			Title: title, Status: ticket.StatusBacklog, Parked: ticket.ParkedDeferred, Role: ticket.RoleEngineer,
+			Areas: areas, Goal: d.Goal, Actor: c.actor, IdempotencyKey: r.ID + "-followups-ticket",
+			Body: "Collects problems review and QA found in " + area + " outside their tickets. Plan it before it is built: it is never moved to todo as it is.",
+		})
+		if err != nil {
+			return err
+		}
+		fu = t.ID
+	}
+	body := fmt.Sprintf("From %s %s (%s):\n- %s", d.ID, r.Job, r.ID, strings.Join(lines, "\n- "))
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: fu, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-followups"}); err != nil {
+		return err
+	}
+	out.Wrote = append(out.Wrote, fmt.Sprintf("%d follow-ups from %s on %s", len(lines), d.ID, fu))
+	return nil
 }

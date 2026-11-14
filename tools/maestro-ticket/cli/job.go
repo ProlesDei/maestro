@@ -47,7 +47,7 @@ type jobKind struct {
 
 var jobKinds = []jobKind{
 	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier",
-		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior)"},
+		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior, until it is sent back twice)"},
 	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route",
 		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
 	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus,
@@ -292,11 +292,13 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		if err != nil {
 			return fail(err)
 		}
-		m = modelOpus
-		if t.Tier == ticket.TierJunior {
+		// A junior's ticket sent back twice goes to the senior, on Opus.
+		m, why = modelOpus, "tier "+dash(t.Tier)
+		if t.Tier == ticket.TierJunior && t.Tries < 2 {
 			m = modelSonnet
+		} else if t.Tier == ticket.TierJunior {
+			why += fmt.Sprintf(", sent back %d times", t.Tries)
 		}
-		why = "tier " + dash(t.Tier)
 	case "route":
 		if _, err := c.ticketForJob(ctx, ticketID); err != nil {
 			return fail(err)

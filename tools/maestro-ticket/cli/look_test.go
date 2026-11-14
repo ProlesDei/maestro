@@ -173,6 +173,21 @@ func TestLookRows(t *testing.T) {
 	}
 }
 
+// A follow-up marked urgent goes to the judge; the rest wait for their goal.
+func TestLookUrgentFollowUp(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "Follow-ups: api", "--status", "backlog", "--parked", "deferred", "--goal", "demo")
+	l.h.ok(nil, "create", "--title", "b", "--goal", "demo")
+	l.comment("T-1", "From T-9 review (R-x):\n- urgent: tokens never expire")
+	if j := with(l.look("", "--limit", "1"), "judge: "); len(j) != 1 || !strings.HasPrefix(j[0], "judge: T-1 urgent: a follow-up marked urgent") {
+		t.Fatalf("urgent: %q", j)
+	}
+	l.comment("T-1", "Taken: T-3")
+	if j := with(l.look("", "--limit", "1"), "judge: "); len(j) != 0 {
+		t.Fatalf("taken, and its goal still moving: %q", j)
+	}
+}
+
 func TestLookJudge(t *testing.T) {
 	l := newLookHarness(t)
 	l.h.ok(nil, "create", "--title", "x")

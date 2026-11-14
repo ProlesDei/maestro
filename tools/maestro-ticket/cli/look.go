@@ -22,7 +22,10 @@ import (
 // kept a while, one file per ticket and bot under handouts/ next to the
 // store, so the next look doesn't send the same job while the first is
 // still on its way to a claim.
-var ticketInLine = regexp.MustCompile(`\bT-[0-9]+\b`)
+var (
+	ticketInLine = regexp.MustCompile(`\bT-[0-9]+\b`)
+	urgentText   = regexp.MustCompile(`(?i)\burgent\b`)
+)
 
 func handoutPath(dir, id, bot string) string { return filepath.Join(dir, id+"."+bot) }
 
@@ -462,6 +465,12 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				held = append(held, id.String())
 				judgeIt(id, "hold", "held; is what lifts it true?")
 			case ticket.ParkedUnready, ticket.ParkedDeferred:
+				if strings.HasPrefix(t.Title, "Follow-ups: ") {
+					if d, ok := detail(id); ok && urgentText.MatchString(latest(d).Body) && !strings.HasPrefix(latest(d).Body, "Taken:") {
+						judgeIt(id, "urgent", "a follow-up marked urgent: "+trim(firstLine(latest(d).Body), 100))
+						continue
+					}
+				}
 				if t.Goal != "" && !moving[t.Goal] {
 					judgeIt(id, string(t.Parked), "goal "+t.Goal+" has nothing else in todo, build or review")
 				}

@@ -157,6 +157,14 @@ func TestJobBuildPicksTheModelByTier(t *testing.T) {
 		t.Fatalf("job lists the actor's ended runs it hasn't acked: %+v", s.Ended)
 	}
 
+	// Sent back twice, a junior's ticket goes to the senior, on Opus.
+	for _, st := range []string{"in_progress", "in_review", "in_progress", "in_review", "in_progress"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	if s, _ := j.job("", "build", "T-1"); s.Model != "opus" {
+		t.Fatalf("a junior's ticket at TRIES 2: %+v", s)
+	}
+
 	s, r = j.job("", "build", "T-1", "--model", "opus", "--limit", "30m")
 	if s.Model != "opus" || r.Limit != "30m" {
 		t.Fatalf("overrides: %+v %+v", s, r)

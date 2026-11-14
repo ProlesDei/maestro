@@ -261,3 +261,48 @@ func TestRouteOutcomes(t *testing.T) {
 		t.Fatalf("a text job's reply is the answer: %+v", rt)
 	}
 }
+
+// Review and QA put what they found outside the ticket on its area's
+// Follow-ups ticket, made once; no bot reads the lines.
+func TestRouteFilesFollowUps(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a", "--areas", "api/auth,web", "--goal", "demo")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at "+sha)
+	reply := "# Code review: T-1 a\nVerdict: GO\n## Findings\n| F1 | minor |\n## Out of scope   (already on the base)\napi/auth:\n- urgent: tokens never expire (api/auth/token.go:40)\n- logs print emails\n## Outcome  comment 4"
+	run := runs.Record{ID: "R-cccccccc", Job: "review", Ticket: "T-1", Reply: reply}
+	rt := h.route(run)
+	if len(rt.Wrote) != 1 || rt.Wrote[0] != "3 follow-ups from T-1 on T-2" {
+		t.Fatalf("follow-ups: %+v", rt)
+	}
+	var d struct {
+		Title, Status, Parked, Goal string
+		Areas                       []string
+		Comments                    []struct{ Body string }
+	}
+	h.ok(&d, "get", "T-2", "--full")
+	if d.Title != "Follow-ups: api/auth" || d.Status != "backlog" || d.Parked != "deferred" || d.Goal != "demo" || len(d.Areas) != 1 {
+		t.Fatalf("follow-ups ticket: %+v", d)
+	}
+	want := "From T-1 review (R-cccccccc):\n- api/auth:\n- urgent: tokens never expire (api/auth/token.go:40)\n- logs print emails"
+	if len(d.Comments) != 1 || d.Comments[0].Body != want {
+		t.Fatalf("follow-ups note: %q", d.Comments)
+	}
+	h.route(run) // a second pickup
+	h.ok(&d, "get", "T-2", "--full")
+	if len(d.Comments) != 1 {
+		t.Fatalf("a second pickup filed again: %q", d.Comments)
+	}
+
+	// QA: the verdict's New tickets line and the reply's Open line, on the
+	// same Follow-ups ticket.
+	h.move("T-1", "done")
+	h.comment("T-1", "QA: pass at "+sha+"\n- 1 pass: ok\nNew tickets: the login page flickers on Safari")
+	rt = h.route(runs.Record{ID: "R-dddddddd", Job: "qa", Ticket: "T-1", Reply: "test: pass: T-1 at x\nOpen: none\nNext: none"})
+	if len(rt.Wrote) != 1 || rt.Wrote[0] != "1 follow-ups from T-1 on T-2" {
+		t.Fatalf("QA follow-ups: %+v", rt)
+	}
+	if rt := h.route(runs.Record{ID: "R-eeeeeeee", Job: "qa", Ticket: "T-1", Reply: "test: pass\nOpen: none", StartedAt: time.Now().Add(time.Hour)}); len(rt.Wrote) != 0 {
+		t.Fatalf("a QA run files only its own verdict's lines: %+v", rt)
+	}
+}
