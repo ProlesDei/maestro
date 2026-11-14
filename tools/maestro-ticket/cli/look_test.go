@@ -416,3 +416,37 @@ func TestLookHoldsByDepsAndLimits(t *testing.T) {
 		t.Fatalf("a limited run's ticket handed out afresh: %q", s)
 	}
 }
+
+// A held ticket that never changes is judged once, not every look.
+func TestLookJudgesAHoldOnce(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "x")
+	l.h.ok(nil, "transition", "T-1", "--to", "backlog", "--parked", "hold")
+	first := with(l.look("", "--limit", "1", "--judge"), "judging: ")
+	if len(first) != 1 {
+		t.Fatalf("first: %q", first)
+	}
+	l.waitEnded(strings.Fields(strings.TrimPrefix(first[0], "judging: "))[0], 20*time.Second)
+	for range 3 {
+		if again := with(l.look("", "--limit", "1", "--judge"), "judg"); len(again) != 0 {
+			t.Fatalf("a hold judged again: %q", again)
+		}
+	}
+}
+
+// pickup drops a send a look made lately, and shows its own again.
+func TestPickupSendsDedupe(t *testing.T) {
+	dir, now := t.TempDir(), time.Now()
+	claimHandout(dir, "T-1", "qa-lead", "qa T-1", time.Minute, now) // a look's
+	got := pickupSends(dir, "R-aaaaaaaa", []send{{"qa-lead", "qa T-1"}, {"reviewer", "review T-2"}, {"planner", "slot free T-3"}}, now)
+	if len(got) != 2 || got[0].Bot != "reviewer" || got[1].Bot != "planner" {
+		t.Fatalf("first pickup: %+v", got)
+	}
+	again := pickupSends(dir, "R-aaaaaaaa", []send{{"reviewer", "review T-2"}}, now)
+	if len(again) != 1 {
+		t.Fatalf("a second pickup of the run drops its own send: %+v", again)
+	}
+	if other := pickupSends(dir, "R-bbbbbbbb", []send{{"reviewer", "review T-2"}}, now); len(other) != 0 {
+		t.Fatalf("another run's pickup sends it again: %+v", other)
+	}
+}

@@ -625,10 +625,10 @@ func (c *call) mayStart() error {
 		return err
 	}
 	if fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)) {
-		return fmt.Errorf("%w: maestro/STOP is set: start no run", ticket.ErrStopped)
+		return fmt.Errorf("%w: stopped: maestro/STOP is set: start no run", ticket.ErrStopped)
 	}
 	if p, ok := readPause(filepath.Dir(store), time.Now()); ok {
-		return fmt.Errorf("%w: %s, until %s: start no run until then", ticket.ErrPaused, p.Why, p.Until.Format(time.RFC3339))
+		return fmt.Errorf("%w: paused: %s, until %s: start no run until then", ticket.ErrPaused, p.Why, p.Until.Format(time.RFC3339))
 	}
 	return nil
 }

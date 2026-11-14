@@ -445,7 +445,8 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		if idle {
 			return
 		}
-		fp = fmt.Sprintf("%s v%d %d %s", row, t.Version, t.UpdatedAt.UnixMilli(), fp)
+		// Trimmed: the file it is checked against is read back trimmed.
+		fp = strings.TrimSpace(fmt.Sprintf("%s v%d %d %s", row, t.Version, t.UpdatedAt.UnixMilli(), fp))
 		key := t.ID.String()
 		if row == "cause" {
 			key = "cause" // apart from that ticket's own row
