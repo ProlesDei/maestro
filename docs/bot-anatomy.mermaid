@@ -1,5 +1,5 @@
 flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Thinks and decides. Never edits their code<br/>Runs claude -p /maestro-&lt;skill&gt; for each job<br/><i>How Grok Bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
 
     subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR
@@ -21,9 +21,9 @@ flowchart TD
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
-    Runtime ==>|"claude -p in their repo"| H
+    Runtime ==>|"maestro-ticket job in their repo"| H
     Installed --> H
-    H -.->|"result, read by Grok Bot"| Runtime
+    H -.->|"pickup: what to send, read by Grok Bot"| Runtime
     Guard -.-> H
     H ~~~ Roles
 

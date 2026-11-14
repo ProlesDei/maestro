@@ -2,12 +2,14 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -42,6 +44,9 @@ type jobKind struct {
 	// lean runs run none of the project's checks, so a 5-minute cache
 	// costs less (team rules).
 	lean bool
+	// slot names the slot the run waits in, at most --slots at once: each
+	// QA run holds its own copy of the app and a browser.
+	slot string
 	help string
 }
 
@@ -50,11 +55,11 @@ var jobKinds = []jobKind{
 		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior, until it is sent back twice)"},
 	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route",
 		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
-	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus,
+	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa",
 		help: "qa <id>: test the reviewed PR and merge it on a pass"},
-	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus,
+	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa",
 		help: "live <id>: a goal's live run"},
-	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus,
+	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus, slot: "qa",
 		help: "qa-ask [--ticket T-1] < ask: a second look, a repro, a test plan"},
 	{name: "plan", skill: "/maestro-planner", text: "need", model: modelOpus, lean: true,
 		help: "plan [--ticket T-1] < ask: plan a goal, split or rewrite, read the board"},
@@ -94,6 +99,24 @@ func claudeCommand(session, model, effort string, lean bool) []string {
 	}
 	return append(cmd, "claude", "-p", "--session-id", session, "--model", model, "--effort", effort,
 		"--permission-mode", "bypassPermissions", "--output-format", "json")
+}
+
+// defaultQASlots is how many QA runs go at once on one store unless the
+// QA lead's memory sets another.
+const defaultQASlots = 6
+
+// inSlot runs claude through maestro-ticket slot, after the environment
+// words, so a run waits in line for one of max slots; its time limit
+// leaves out the wait.
+func inSlot(cmd []string, name string, max int) []string {
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "maestro-ticket"
+	}
+	i := slices.Index(cmd, "claude")
+	out := slices.Clone(cmd[:i])
+	out = append(out, exe, "slot", "--name", name, "--max", strconv.Itoa(max), "--")
+	return append(out, cmd[i:]...)
 }
 
 // newSessionID is a random UUID, version 4, for claude --session-id: each
@@ -173,6 +196,7 @@ type jobReq struct {
 	full          bool     // review
 	model, effort string   // overrides
 	limit         time.Duration
+	slots         int // QA runs at once; 0 for the default
 }
 
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
@@ -187,6 +211,7 @@ func runJob(ctx context.Context, c *call) error {
 	drop := c.fs.String("drop", "", "review: the finding ids a ruling dropped; the reason comes from --drop-file")
 	dropFile := c.fs.String("drop-file", "", "review: read why the findings dropped from this file, or - for stdin")
 	full := c.fs.Bool("full", false, "review: on the full model, whatever the route")
+	slots := c.fs.Int("slots", 0, "qa, live, qa-ask: QA runs at once on this store (default 6); the rest wait in line")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -197,7 +222,13 @@ func runJob(ctx context.Context, c *call) error {
 	if !ok {
 		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
 	}
-	req := jobReq{kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit}
+	req := jobReq{kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit, slots: *slots}
+	if *slots != 0 && k.slot == "" {
+		return usagef("job %s: --slots is for qa, live and qa-ask", k.name)
+	}
+	if *slots < 0 {
+		return usagef("job: --slots must be 1 or more")
+	}
 	if !runs.Supported {
 		return usagef("job needs a unix system")
 	}
@@ -355,9 +386,13 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if runLimit < time.Second || runLimit > 24*time.Hour {
 		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
+	cmd := claudeCommand(newSessionID(), m, e, k.lean)
+	if k.slot != "" {
+		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, defaultQASlots))
+	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
-		Command: withEnv(claudeCommand(newSessionID(), m, e, k.lean)),
+		Command: withEnv(cmd),
 	}
 	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
 	if err != nil {

@@ -59,13 +59,14 @@ sha=$(git -C "$m" rev-parse --short HEAD)
 skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 nskills=$(echo "$skills" | wc -l)
 
-# A stand-in maestro-ticket: prints a help that lists launch, unless
+# A stand-in maestro-ticket: prints a help that lists launch, job,
+# resume and look (only launch with STUB_NOJOB), unless
 # STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
 # is set, and otherwise makes the store as doctor does.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
-	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || printf "Commands:\n  launch      [--ticket T-1]\n"; exit 0; }' \
+	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || { printf "Commands:\n  launch      [--ticket T-1]\n"; [ -n "${STUB_NOJOB:-}" ] || printf "  job         <job>\n  resume      <run-id>\n  look        --limit N\n"; }; exit 0; }' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
@@ -172,6 +173,8 @@ cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
 for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
 # A maestro-ticket built before launch would start no bot's runs.
 STUB_OLD=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no launch" "$r" check "$r"
+# One built before job and look would leave the bots routing by hand.
+STUB_NOJOB=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no look" "$r" check "$r"
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
 says "problem: git user.email isn't set"
 # A name of spaces commits nothing; an identity from the environment does.
@@ -448,6 +451,13 @@ bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "a sh
 for p in $all; do
 	n=$(sed '/^## Where you work$/,$d' "$r/.maestro/bots/$p.md" | wc -c)
 	[ "$n" -le 19700 ] || fail "$p: persona and team rules are $n bytes; keep them under 19,700 so the block fits Grok's 20,000 with a repo path up to about 190 characters"
+	# Grok rereads the block at every step: keep the routing bots' small.
+	case $p in
+	chief-of-staff) max=16000 ;;
+	planner) max=12000 ;;
+	*) max=8500 ;;
+	esac
+	[ "$n" -le "$max" ] || fail "$p: persona and team rules are $n bytes; a router's block stays under $max, since Grok rereads it at every step"
 done
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }

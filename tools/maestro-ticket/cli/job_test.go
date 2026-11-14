@@ -208,6 +208,14 @@ func TestJobTextJobs(t *testing.T) {
 	if got := j.seen(r.ID); got.flag("--model") != "opus" || got.stdin[0] != "/maestro-qa-lead T-1" {
 		t.Fatalf("qa runs on Opus: %q", got.args)
 	}
+	if i := slices.Index(r.Command, "slot"); i < 0 || !slices.Equal(r.Command[i:i+6], []string{"slot", "--name", "qa", "--max", "6", "--"}) {
+		t.Fatalf("a QA run waits for one of 6 QA slots: %q", r.Command)
+	}
+	_, r = j.job("why is the login slow?\n", "qa-ask", "--slots", "2")
+	if i := slices.Index(r.Command, "slot"); i < 0 || r.Command[i+4] != "2" {
+		t.Fatalf("--slots: %q", r.Command)
+	}
+	j.fails(2, "", "job", "build", "T-1", "--slots", "2")
 	_, r = j.job("", "live", "T-1")
 	if got := j.seen(r.ID); got.stdin[0] != "/maestro-qa-lead live T-1" {
 		t.Fatalf("live: %q", got.stdin)

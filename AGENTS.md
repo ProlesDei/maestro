@@ -12,13 +12,13 @@ The infrastructure under that workflow, which a team installs into its own repo:
 
 That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the six profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
-How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays:
+How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot plays. A bot only routes: it reads state from `maestro-ticket look` and `pickup`, starts Claude sessions with `maestro-ticket job`, and sends the lines they print; Claude reads and decides ([decisions](docs/decisions.md), 18):
 1. The chief of staff talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
-2. The planner runs the team day to day, as product owner and project manager in one. It turns goals into tickets in `maestro-ticket`, hands each ticket's build, review and QA to the right bot ([its persona](bot-profiles/planner/persona.md)), and reports status and the blocks it can't settle to the chief of staff.
-3. An engineer takes one ticket to an open PR in a Claude Code session running `/maestro-software-engineer`: the senior engineer (top model, high effort) on risky or broad tickets, the junior engineer (a cheaper model) on routine ones.
-4. The reviewer, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
+2. The planner runs the team day to day, as product owner and project manager in one. Planning sessions turn its goals into tickets in `maestro-ticket`, each tagged junior or senior; each `look` hands out builds by tier up to its run limit, and a judge session settles what needs reading ([its persona](bot-profiles/planner/persona.md)). It reports status and the blocks it can't settle to the chief of staff.
+3. An engineer takes one ticket to an open PR in a Claude Code session running `/maestro-software-engineer`: the senior engineer (Opus) on senior-tier tickets and a junior's ticket sent back twice, the junior engineer (Sonnet) on junior-tier ones. When a build ends in review, `pickup` hands it straight to the reviewer.
+4. The reviewer, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO goes straight to QA with a `Review: GO` note; NO-GO goes straight back to the engineer with a `Kickback:` note.
 5. The QA lead is the last line of defence before production: it tests the reviewed PR in the running app, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
-6. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
+6. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus, in the senior's place; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
 What we hold to:
 - Least friction for the team that installs it. Every bot's sessions run with all permissions, and Maestro offers no limit to set ([decisions](docs/decisions.md), 12).
