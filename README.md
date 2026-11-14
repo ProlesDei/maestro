@@ -5,22 +5,23 @@ Maestro is infrastructure for a fully agentic workflow: a swarm of up to hundred
 A team installs it into its own repo and gets:
 
 - `maestro-ticket`, a ticket store and CLI.
-- 18 `maestro-*` skills, and six bot profiles.
+- 19 `maestro-*` skills, and seven bot profiles.
 
 Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts every job; the one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md)).
 
 ## Who drives it
 
-Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the six profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the seven profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
 ## How work moves
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
 2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, hands each ticket's build, review and QA to the right bot, and reports status and the blocks it can't settle to the chief of staff.
-3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree.
-4. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
-5. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
-6. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
+3. When a goal changes screens, the **designer** runs `/maestro-designer` on its `Design:` ticket first: two or three directions in code, one pick and a spec, handed up as a draft PR. The owner approves it or asks for changes; only then does the planner write the screen tickets, with criteria from the spec.
+4. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree.
+5. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
+6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
+7. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
 
 Every role follows the [team rules](bot-profiles/team-rules.md).
 
@@ -36,6 +37,7 @@ flowchart TD
         Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>/maestro-designer design &lt;id&gt;<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -56,6 +58,9 @@ flowchart TD
     Planner -->|"routine ticket"| Jr
     Planner -->|"review a PR"| Rev
     Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
+    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
+    Des -.->|"draft PR, the owner's card"| Planner
+    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -100,7 +105,7 @@ flowchart TD
     class Build,L1 session
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
 ```
@@ -148,7 +153,7 @@ Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-rev
 
 ## Your own skills
 
-Maestro ships 18 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
+Maestro ships 19 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
 
 ## How a bot works
 
@@ -166,16 +171,16 @@ flowchart TD
 
     subgraph Installed ["Their repo after INSTALL.md"]
         direction LR
-        S1["<b>18 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>19 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]
 
     Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
 
-    subgraph Roles ["One Grok Bot, six profiles: what each role does"]
+    subgraph Roles ["One Grok Bot, seven profiles: what each role does"]
         direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"]
+        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"] ~~~ E7["<b>Designer</b><br/>/maestro-designer ·<br/>screens the owner approves"]
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
@@ -196,7 +201,7 @@ flowchart TD
     class P1,P2 profile
     class H harness
     class S1,S2,S3 ours
-    class E1,E2,E3,E6,E4,E5 role
+    class E1,E2,E3,E6,E4,E5,E7 role
     class Guard note
 ```
 

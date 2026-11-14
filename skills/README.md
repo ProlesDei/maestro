@@ -1,11 +1,11 @@
 # Skills
 
-Maestro ships 18 skills. Each has the `maestro-` prefix, so none clashes with a team's own skills. Call any of them by name: `/maestro-tdd` in Claude Code, `$maestro-tdd` in Codex.
+Maestro ships 19 skills. Each has the `maestro-` prefix, so none clashes with a team's own skills. Call any of them by name: `/maestro-tdd` in Claude Code, `$maestro-tdd` in Codex.
 
 | Group | Skills |
 |---|---|
 | Ticket to merge | `maestro-create-ticket` (one ticket), `maestro-code-review` (pass to QA, or kick back) |
-| Roles | `maestro-planner`, `maestro-qa-lead` (the last check: merge and close, or kick back), `maestro-chief-of-staff` |
+| Roles | `maestro-planner`, `maestro-qa-lead` (the last check: merge and close, or kick back), `maestro-chief-of-staff`, `maestro-designer` (a goal's screens, for the owner's yes) |
 | Working tools | `maestro-figure-it-out`, `maestro-swarm`, `maestro-sharpen`, `maestro-recall`, `maestro-unslop`, `maestro-prune`, `maestro-refactor-code`, `maestro-technical-writing`, `maestro-create-edit-skill` |
 | How to build | `maestro-working-principles`, `maestro-software-engineer`, `maestro-tdd`, `maestro-prove-complete` |
 

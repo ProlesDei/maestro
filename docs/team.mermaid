@@ -8,6 +8,7 @@ flowchart TD
         Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
         Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
         QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>/maestro-designer design &lt;id&gt;<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -28,6 +29,9 @@ flowchart TD
     Planner -->|"routine ticket"| Jr
     Planner -->|"review a PR"| Rev
     Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
+    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
+    Des -.->|"draft PR, the owner's card"| Planner
+    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
     Planner -->|"writes tickets"| Tickets
@@ -72,6 +76,6 @@ flowchart TD
     class Build,L1 session
     class Tickets,L4 storage
     class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,L6 bot
+    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
     class L5 note
     style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4

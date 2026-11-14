@@ -51,6 +51,8 @@ func TestTransitions(t *testing.T) {
 		{scout(StatusInProgress), StatusInReview}, {scout(StatusInReview), StatusDone}, {scout(StatusInReview), StatusInProgress},
 		{blocked(TypeScout, StatusInReview), StatusInReview},
 		{blocked(TypeShip, ""), StatusTodo}, // a blocked ticket with no origin returns to todo
+		// The owner's yes closes a blocked design in one move.
+		{Ticket{Type: TypeScout, Role: RoleDesigner, Title: "Design: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
 	}
 	for _, p := range allowed {
 		if !p.t.CanMove(p.to) {
@@ -70,6 +72,11 @@ func TestTransitions(t *testing.T) {
 		{blocked(TypeShip, StatusInProgress), StatusInReview}, {blocked(TypeShip, StatusInReview), StatusDone},
 		{blocked(TypeShip, StatusInProgress), StatusTodo}, {blocked(TypeShip, StatusInReview), StatusInProgress},
 		{scout(StatusInProgress), StatusDone}, {blocked(TypeScout, StatusInReview), StatusDone},
+		// Only a designer's scout ticket skips back from blocked to done.
+		{Ticket{Type: TypeScout, Role: RoleQALead, Title: "Design: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeScout, Role: RoleDesigner, Title: "Scout: pricing", Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeShip, Role: RoleDesigner, Status: StatusBlocked, BlockedFrom: StatusInProgress}, StatusDone},
+		{Ticket{Type: TypeScout, Role: RoleDesigner, Status: StatusInProgress}, StatusDone},
 		// Unknown statuses, such as removed ones, have no moves.
 		{ship("released"), StatusDone}, {ship("released"), StatusCancelled},
 		{Ticket{Status: StatusTodo}, StatusInProgress}, // unknown type has no moves
@@ -114,7 +121,7 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestValidateRole(t *testing.T) {
-	for _, r := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead", "reviewer"} {
+	for _, r := range []string{"", "chief-of-staff", "planner", "engineer", "qa-lead", "reviewer", "designer"} {
 		if err := ValidateRole(r); err != nil {
 			t.Errorf("ValidateRole(%q) = %v", r, err)
 		}
@@ -277,6 +284,9 @@ func TestCheckGate(t *testing.T) {
 		{"scout owner", scout, StatusDone, "chief-of-staff", "", true},
 		{"reviewer can't close a scout", scout, StatusDone, "rev", RoleReviewer, false},
 		{"scout with no owner", Ticket{Type: TypeScout, Owner: "unknown"}, StatusDone, "unknown", "", false},
+		{"designer can't close the planner's design", Ticket{Type: TypeScout, Owner: "planner"}, StatusDone, "designer", RoleDesigner, false},
+		{"planner closes its design", Ticket{Type: TypeScout, Owner: "planner"}, StatusDone, "planner", RolePlanner, true},
+		{"designer can't set a ship ticket done", ship, StatusDone, "designer", RoleDesigner, false},
 	}
 	for _, c := range cases {
 		err := c.t.CheckGate(c.to, c.actor, c.role)

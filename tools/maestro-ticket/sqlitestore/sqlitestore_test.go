@@ -939,7 +939,7 @@ func TestMigrateV5(t *testing.T) {
 		`INSERT INTO tickets (title, status, role, priority, created_by, version, created_at, updated_at) VALUES
 			('qa', 'in_qa', 'qa-lead', 2, 'cos', 2, 1, 1),
 			('rel', 'ready_to_release', 'operations-manager', 2, 'cos', 1, 1, 1),
-			('custom', 'todo', 'designer', 2, 'cos', 1, 1, 1),
+			('custom', 'todo', 'art-director', 2, 'cos', 1, 1, 1),
 			('old', 'done', 'junior-software-engineer', 2, 'cos', 1, 1, 1)`,
 		`INSERT INTO tickets (title, status, blocked_from, role, priority, created_by, created_at, updated_at)
 			VALUES ('blk', 'blocked', 'in_qa', 'senior-software-engineer', 2, 'cos', 1, 1)`,
@@ -970,7 +970,7 @@ func TestMigrateV5(t *testing.T) {
 	}{
 		{ticket.StatusInReview, "", ticket.RoleQALead, 3},
 		{ticket.StatusInReview, "", ticket.RoleReviewer, 2},
-		{ticket.StatusTodo, "", "designer", 1},
+		{ticket.StatusTodo, "", "art-director", 1},
 		{ticket.StatusDone, "", ticket.RoleEngineer, 1},
 		{ticket.StatusBlocked, ticket.StatusInReview, ticket.RoleEngineer, 1},
 		{ticket.StatusTodo, "", ticket.RolePlanner, 1},
