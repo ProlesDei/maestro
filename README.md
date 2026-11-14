@@ -17,10 +17,11 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
 2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, hands each ticket's build, review and QA to the right bot, and reports status and the blocks it can't settle to the chief of staff.
-3. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree.
-4. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
-5. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
-6. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
+3. When a goal changes screens, the **designer** runs `/maestro-designer` on its `Design:` ticket first: two or three directions in code, one pick and a spec, handed up as a draft PR. The owner approves it or asks for changes; only then does the planner write the screen tickets, with criteria from the spec.
+4. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree.
+5. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
+6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
+7. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
 
 Every role follows the [team rules](bot-profiles/team-rules.md).
 

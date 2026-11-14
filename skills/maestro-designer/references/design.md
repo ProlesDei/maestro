@@ -12,7 +12,7 @@ A goal that changes screens starts with a `Design:` ticket, and no screen ticket
 
 ## Phase B: Frame
 
-1. Fetch, and read from the remote main branch, never from the checkout: `## Design` in `.maestro/project/project-setup.md` (the rules file, and whether the app has a dark theme), that rules file, and the code of each screen the ticket names and of the screens next to it.
+1. Fetch, and read from the remote main branch, never from the checkout: `## Design` in `.maestro/project/project-setup.md` (the rules file, and whether the app has a dark theme; no section means none of either), that rules file, and the code of each screen the ticket names and of the screens next to it.
 2. Find the app's look in that code: its colours, type, spacing and the components those screens use. Write down the few you'll reuse.
 3. Write the problem in a line or two: who has it, what they're trying to do, what happens if nothing is built.
 4. Breadboard it in text before you draw: each place (a page, dialog or panel) with its route or file, what a person can do there, and where each action goes. Walk the ticket's use case through it and fix what doesn't hold.
