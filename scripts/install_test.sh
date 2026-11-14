@@ -775,6 +775,13 @@ says "warn: project-setup.md: ## Run still holds"
 printf '## Project\n\n- Name: <name>\n- Summary: a shop\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: ## Project still holds"
+# ## Proof takes qa or engineer, in any case; anything else is a problem.
+grep -qx $'qa\r' "$r7/.maestro/project/project-setup.md" || fail "the template's ## Proof isn't qa"
+sed -i 's/^qa\r$/`engineers`\r/' "$r7/.maestro/project/project-setup.md"
+if run check "$r7"; then fail "check passed ## Proof: engineers"; fi
+says "problem: project-setup.md: ## Proof says engineers; want qa or engineer"
+sed -i 's/^`engineers`\r$/Engineer\r/' "$r7/.maestro/project/project-setup.md"
+ok check "$r7"
 # An older install's ## Tickets section, CRLF or not: one warn to delete it.
 printf ' ## Tickets\r\n\n<or your own tool>\n' >>"$r7/.maestro/project/project-setup.md"
 ok check "$r7"

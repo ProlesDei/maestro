@@ -512,6 +512,13 @@ if [ "$cmd" = check ]; then
 		elif [ -n "$main" ]; then
 			warn "no origin/$main ref as of the last fetch: each ticket's worktree branches from there, and QA merges into it; check that origin is the GitHub repo and that a fetch brings its $main in as origin/$main"
 		fi
+		# Engineers skip the full proof unless ## Proof says engineer, so a
+		# typo there must not quietly hand it to QA.
+		proof=$(awk -F'\t' "$line"' $1=="proof" {t=line(); sub(/^[-* ]+/, "", t); gsub(/^[`* ]+|[`* ]+$/, "", t); print tolower(t); exit}' <<<"$sections")
+		case $proof in
+		'' | qa | engineer) ;;
+		*) problem "project-setup.md: ## Proof says $proof; want qa or engineer" ;;
+		esac
 		awk -F'\t' "$line"' $1=="checks" && line() ~ /^[-*][ \t]+[^:`]+:[ \t]*`[^`]+`$/ {f=1} END{exit !f}' <<<"$sections" ||
 			warn "project-setup.md lists no checks: the engineers run none"
 		# Any other bullet there isn't a check an engineer can run.
