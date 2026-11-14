@@ -39,7 +39,11 @@ type Options struct {
 	// OnEnd, if set, runs once the result is saved, before the first ring:
 	// to log the run's cost and free a ticket it left claimed.
 	OnEnd func(Record)
-	Now   func() time.Time
+	// RingAgain, when set, names a time to ring once more while the run
+	// isn't acked, such as the end of the usage limit that stopped it, so
+	// its bot learns its run can go on; zero for none, 24h out at most.
+	RingAgain func(Record) time.Time
+	Now       func() time.Time
 }
 
 // Supervise runs the command of a starting record to its end within its
@@ -274,6 +278,27 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 		if err != nil {
 			r.RingError = err.Error()
 		}
+		Save(dir, r)
+	}
+	if o.RingAgain == nil {
+		return
+	}
+	at := o.RingAgain(r)
+	if at.IsZero() || time.Until(at) > 24*time.Hour {
+		return
+	}
+	for !Acked(dir, r.ID) && time.Now().Before(at) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(min(time.Until(at), pickPoll)):
+		}
+	}
+	if Acked(dir, r.ID) {
+		return
+	}
+	if err := Ring(ctx, h, Notice(r)); err == nil && ctx.Err() == nil {
+		r.Rings++
 		Save(dir, r)
 	}
 }

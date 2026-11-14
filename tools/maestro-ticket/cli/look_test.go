@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -390,5 +391,28 @@ func TestPruneKeepsEtaMarks(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "T-1.reviewer")); err == nil {
 		t.Fatal("a day-old handout stayed")
+	}
+}
+
+// A sent-back ticket a fix's dep holds waits; a usage-limited run's
+// ticket stays its own.
+func TestLookHoldsByDepsAndLimits(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "fix")
+	l.h.ok(nil, "create", "--title", "a")
+	l.claimed("T-2", "junior-engineer")
+	l.move("T-2", "in_progress", "in_review", "in_progress")
+	l.comment("T-2", "Kickback: at abc1234")
+	l.h.ok(nil, "update", "T-2", "--add-deps", "T-1")
+	if s := with(l.look("", "--limit", "5"), "send junior-engineer: build T-2"); len(s) != 0 {
+		t.Fatalf("handed out past its dep: %q", s)
+	}
+	dir := filepath.Join(l.h.dir, "runs")
+	r, _ := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "2h", Command: []string{"true"}}, nil)
+	ended := time.Now().Add(-time.Hour)
+	r.State, r.Ticket, r.Job, r.EndedAt, r.IsError, r.Reply = runs.Failed, "T-1", "build", &ended, true, "Claude AI usage limit reached|1"
+	runs.Save(dir, r)
+	if s := with(l.look("", "--limit", "5"), "send senior-engineer: build T-1"); len(s) != 0 {
+		t.Fatalf("a limited run's ticket handed out afresh: %q", s)
 	}
 }

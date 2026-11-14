@@ -453,7 +453,7 @@ for p in $all; do
 	[ "$n" -le 19700 ] || fail "$p: persona and team rules are $n bytes; keep them under 19,700 so the block fits Grok's 20,000 with a repo path up to about 190 characters"
 	# Grok rereads the block at every step: keep the routing bots' small.
 	case $p in
-	chief-of-staff) max=16000 ;;
+	chief-of-staff) max=16500 ;; # fewer turns than the routers: it talks to the owner
 	planner) max=12000 ;;
 	*) max=8500 ;;
 	esac

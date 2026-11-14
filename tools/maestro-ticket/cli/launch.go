@@ -341,6 +341,14 @@ func runSupervise(ctx context.Context, c *call) error {
 			return c.startLaunch(ctx, runTicket(r))
 		},
 		OnEnd: func(r runs.Record) { c.endRun(context.WithoutCancel(ctx), dir, r) },
+		// A run a usage limit stopped rings once more as the limit lifts:
+		// nothing else wakes its bot then.
+		RingAgain: func(r runs.Record) time.Time {
+			if out, reset := outcomeOf(r); out == outUsageLimit {
+				return limitLifts(r, reset).Add(30 * time.Second)
+			}
+			return time.Time{}
+		},
 	})
 }
 
@@ -520,7 +528,11 @@ func runPickup(ctx context.Context, c *call) error {
 	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList}, func(w io.Writer) {
 		ids := []string{}
 		for _, r := range ended {
-			ids = append(ids, r.ID)
+			// A run with a do: line is acked by that command when it
+			// starts; one it refused stays for the next pickup.
+			if rt, ok := routes[r.ID]; !ok || len(rt.Do) == 0 {
+				ids = append(ids, r.ID)
+			}
 			rt, ok := routes[r.ID]
 			if !ok || *full {
 				printRun(w, r, now)
@@ -533,7 +545,7 @@ func runPickup(ctx context.Context, c *call) error {
 			}
 		}
 		defer func() {
-			if len(ended) > 0 { // last, as the team rules say
+			if len(ids) > 0 { // last, as the team rules say
 				fmt.Fprintf(w, "ack each once you have acted on it: maestro-ticket ack %s\n", strings.Join(ids, " "))
 			}
 		}()

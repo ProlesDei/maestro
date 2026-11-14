@@ -15,7 +15,7 @@ For each id, in order:
 | `unready` | Requeue it if a command or the app can check each criterion; else rewrite it. |
 | `deferred` | Requeue it if the slice before it merged; plan a `Follow-ups:` ticket instead of requeuing it. Dropping one is the chief of staff's. |
 | `hold` | If the fact its latest `Hold:` says lifts it is true on the board, requeue it with a `--note` naming that fact; else leave it. |
-| `cause` | Plan one fix ticket for the cause as [plan.md](plan.md) does, then dep each `todo` ticket of the row that needs it on that one, and send the planner `cause <fix id>: <the ids it holds>`, so it stops the line until the fix merges. No shared cause: leave it. |
+| `cause` | Plan one fix ticket for the cause as [plan.md](plan.md) does, then dep on it every open ticket of the row and each `todo` ticket the cause would fail too, so none builds again before the fix merges, and send the planner `cause <fix id>: <the ids it holds>`, so it stops the line until the fix merges. No shared cause: leave it. |
 | `urgent` | A `Follow-ups:` ticket whose latest note marks an item urgent: plan that item as its own ticket, tier senior, as [plan.md](plan.md) does, then comment `Taken: <new ids>` on the `Follow-ups:` ticket. |
 
 Requeue means `maestro-ticket transition <id> --from backlog --to todo --expect-version <version>`. A write that stops (a claim, a refusal) gets no line: the next look sends the row again.

@@ -492,6 +492,31 @@ func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 	return nil
 }
 
+// resumeFits refuses to resume a session whose ticket moved on without
+// it: a build or design whose ticket is in review or closed, a review or
+// QA run whose ticket left review. A blocked ticket is fine: a session
+// that asked resumes on it.
+func (c *call) resumeFits(ctx context.Context, r runs.Record) error {
+	if r.Ticket == "" {
+		return nil
+	}
+	t, err := c.ticketForJob(ctx, r.Ticket)
+	if err != nil {
+		return err
+	}
+	moved := t.Status.Terminal()
+	switch r.Job {
+	case "build", "design":
+		moved = moved || t.Status == ticket.StatusInReview
+	case "review", "qa":
+		moved = moved || (t.Status != ticket.StatusInReview && t.Status != ticket.StatusBlocked)
+	}
+	if moved {
+		return fmt.Errorf("%w: resume: %s is %s now: run %s's session has nothing left to do there: maestro-ticket ack %s", ticket.ErrStatusConflict, r.Ticket, t.Status, r.ID, r.ID)
+	}
+	return nil
+}
+
 // detailForJob reads a job's ticket with its notes.
 func (c *call) detailForJob(ctx context.Context, id string) (ticket.Detail, error) {
 	tid, err := ticket.ParseID(id)
@@ -787,6 +812,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		return err
 	}
 	commit(nr.ID)
+	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
 		// The rerun holds the ticket, as look's start would, so no look
 		// starts a second planner run beside it.
@@ -922,6 +948,9 @@ func runResume(ctx context.Context, c *call) error {
 		ResumeOf: r.ID, AfterDeath: *died, Nudge: nudge,
 	}
 	if err := c.mayStart(); err != nil {
+		return err
+	}
+	if err := c.resumeFits(ctx, r); err != nil {
 		return err
 	}
 	// A run resumes once: of resumes at once, one makes its marker.

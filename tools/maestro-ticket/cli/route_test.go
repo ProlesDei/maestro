@@ -547,3 +547,22 @@ func TestRouteUsageLimitGoesOn(t *testing.T) {
 		t.Fatal("a limited judge freed its rows")
 	}
 }
+
+// Three builds that stop with nothing to show block the ticket.
+func TestRouteStoppedBuilds(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress")
+	dir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(dir, 0o755)
+	for range 2 {
+		r, _ := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "2h", Command: []string{"true"}}, nil)
+		now := time.Now()
+		r.State, r.Ticket, r.Job, r.StartedAt, r.EndedAt = runs.Done, "T-1", "build", now, &now
+		runs.Save(dir, r)
+	}
+	rt := h.route(runs.Record{ID: "R-ssssssss", Job: "build", Ticket: "T-1", StartedAt: time.Now(), Command: opusCmd(), Reply: "build: waiting_on_deps: T-1"})
+	if rt.Status != "blocked" || !slices.Equal(sends(rt), []string{"send planner: block T-1: builds stopped 3 times"}) {
+		t.Fatalf("stopped thrice: %+v", rt)
+	}
+}

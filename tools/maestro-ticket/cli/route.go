@@ -247,14 +247,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	case outUsageLimit:
 		// The limit is the team's plan's: no bot starts a run until it
 		// lifts. A reset pickup can't read waits an hour.
-		ended := time.Now()
-		if r.EndedAt != nil {
-			ended = *r.EndedAt // so a second pickup of the run sets the same pause
-		}
-		until := ended.Add(time.Hour)
-		if t, err := time.Parse(time.RFC3339, out.Reset); err == nil {
-			until = t
-		}
+		until := limitLifts(r, out.Reset)
 		if store, _, err := c.storePath(); err == nil && until.After(time.Now()) {
 			// One line to the planner per pause, not one per stopped run.
 			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
@@ -518,6 +511,12 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		planner("question " + id + ": " + q)
 	case out.Outcome == outRefused:
 		planner("refused " + id + ": " + out.First)
+	case t.Status == ticket.StatusInProgress && c.stoppedBuilds(r, d) >= 2:
+		// The third build since its last handoff or send-back that stopped
+		// with nothing to show: no fourth by rote. The judge looks.
+		if err := c.blockStopped(ctx, s, r, d, &out); err != nil {
+			return out, err
+		}
 	default:
 		out.Mismatch = "in_review with a Handoff:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 		planner("build " + id + " stopped " + string(t.Status) + ": " + out.First)
@@ -581,6 +580,68 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	out.Wrote = append(out.Wrote, id+" blocked: Escalation: review at "+sha+": ran past "+r.Limit)
 	planner("block " + id + ": review ran past " + r.Limit)
 	return out, nil
+}
+
+// limitLifts is when the usage limit that stopped r lifts: the reset its
+// reply named, or an hour after it ended, so every pickup of the run
+// reads the same time.
+func limitLifts(r runs.Record, reset string) time.Time {
+	if t, err := time.Parse(time.RFC3339, reset); err == nil {
+		return t
+	}
+	ended := time.Now()
+	if r.EndedAt != nil {
+		ended = *r.EndedAt
+	}
+	return ended.Add(time.Hour)
+}
+
+// stoppedBuilds counts the other build runs on r's ticket that ended
+// with no handoff since its latest Handoff:, Kickback: or Answer:.
+func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
+	since := d.CreatedAt
+	for _, p := range []string{"Handoff:", "Kickback:", "Answer:"} {
+		if cm, ok := latestWith(d, p); ok && cm.CreatedAt.After(since) {
+			since = cm.CreatedAt
+		}
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return 0
+	}
+	list, _ := runs.List(dir, time.Now(), true)
+	n := 0
+	for _, o := range list {
+		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// blockStopped blocks a ticket whose builds keep stopping short, with an
+// Escalation the judge reads.
+func (c *call) blockStopped(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out *routed) error {
+	t, id := d.Ticket, d.ID.String()
+	body := fmt.Sprintf("Escalation: build stopped 3 times with no handoff; the last said: %s\nReturn-role: engineer", trim(out.First, 200))
+	req := ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-stopped"}
+	move := ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInProgress, To: ticket.StatusBlocked, Actor: c.actor, Note: "its builds keep stopping", IdempotencyKey: r.ID + "-stopped-move"}
+	if cl := t.LiveClaim(); cl != nil {
+		req.Holder, req.Token = cl.Holder, cl.Token
+		move.Holder, move.Token, move.Release = cl.Holder, cl.Token, true
+	}
+	if _, err := s.Comment(ctx, req); err != nil {
+		return err
+	}
+	if _, err := s.Transition(ctx, move); err != nil {
+		return err
+	}
+	out.Status = string(ticket.StatusBlocked)
+	out.Wrote = append(out.Wrote, id+" blocked: its builds stopped 3 times")
+	out.Send = append(out.Send, send{"planner", "block " + id + ": builds stopped 3 times"})
+	return nil
 }
 
 // nudged reports whether r's session had the fixed resume nudge once.

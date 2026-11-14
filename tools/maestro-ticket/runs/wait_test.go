@@ -5,9 +5,12 @@ package runs
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -118,5 +121,29 @@ func TestSuperviseLeavesOutSlotWaits(t *testing.T) {
 	}
 	if n := len(waits(dir, r.ID)); n != 0 {
 		t.Fatalf("%d wait marks left after the run", n)
+	}
+}
+
+// A run that stopped on a limit rings its bot once more as it lifts.
+func TestSuperviseRingsAgain(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"true"}, Dir: dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rings atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { rings.Add(1) }))
+	defer srv.Close()
+	begun := time.Now()
+	err = Supervise(context.Background(), dir, r.ID, Options{
+		Rings:     []time.Duration{0},
+		Hook:      func(string) (Hook, error) { return Hook{URL: srv.URL}, nil },
+		RingAgain: func(Record) time.Time { return begun.Add(1500 * time.Millisecond) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := rings.Load(); n != 2 || time.Since(begun) < 1500*time.Millisecond {
+		t.Fatalf("%d rings after %s; want the first and one more at the lift", n, time.Since(begun))
 	}
 }

@@ -393,7 +393,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			// A job run that ended lately and isn't acked is its bot's to
 			// route: its pickup sends what comes next.
 			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
-			if (!r.Ended() || fresh) && r.Ticket != "" {
+			// One a usage limit stopped goes on when it lifts: its ticket
+			// waits for it, however long that takes.
+			limited := r.Ended() && r.Job != "" && func() bool { out, _ := outcomeOf(r); return out == outUsageLimit }()
+			if (!r.Ended() || fresh || limited) && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
 			if !r.Ended() {
@@ -563,6 +566,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					trouble = append(trouble, id.String()) // a first send-back is routine
 				}
 				eng := engineer(t)
+				if !readyGo[id] && t.Tries < 3 {
+					n.waiting++ // a dep holds it, such as a shared cause's fix
+					continue
+				}
 				switch {
 				case t.Tries <= 1:
 					build(eng, id)

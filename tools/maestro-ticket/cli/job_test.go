@@ -510,3 +510,25 @@ func TestJobHonoursOlderRuns(t *testing.T) {
 		t.Fatalf("a second review of a GO: %s", o)
 	}
 }
+
+// A session isn't resumed on a ticket that moved on; a run with a do:
+// line is left off pickup's ack line, its command acks it.
+func TestResumeFitsAndAckLine(t *testing.T) {
+	j := newJobHarness(t, "senior-engineer")
+	j.h.ok(nil, "create", "--title", "a")
+	_, r := j.job("", "build", "T-1")
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	if o := j.fails(4, "go on\n", "resume", r.ID); !strings.Contains(o, "is in_review now") || !strings.Contains(o, "maestro-ticket ack "+r.ID) {
+		t.Fatalf("resume on a ticket in review: %s", o)
+	}
+	dir := filepath.Join(j.h.dir, "runs")
+	dead := r
+	dead.State, dead.Reply = runs.Died, ""
+	runs.Save(dir, dead)
+	out, _ := j.cmd("", "pickup").Output()
+	if strings.Contains(string(out), "maestro-ticket ack "+r.ID) || !strings.Contains(string(out), "do: maestro-ticket resume "+r.ID+" --died") {
+		t.Fatalf("pickup:\n%s", out)
+	}
+}
