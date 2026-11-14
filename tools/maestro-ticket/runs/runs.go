@@ -6,9 +6,10 @@
 // A run is a few files in one directory, which every worktree shares (runs/
 // next to the ticket store): <id>.json, the record; <id>.in, .out and .err,
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
-// holds while it lives; and <id>.acked, made once when the launcher says it
-// acted on the result. Only one process writes a record at a time: launch
-// until the supervisor starts, then whoever holds <id>.lock: the
+// holds while it lives; <id>.acked, made once when the launcher says it
+// acted on the result; and <id>.wait.* and <id>.waited.*, the slot waits
+// its command marked (wait.go). Only one process writes a record at a
+// time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
 package runs
 
@@ -359,6 +360,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		}
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
+		removeWaits(dir, id)
 		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
