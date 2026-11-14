@@ -80,7 +80,7 @@ pr() { # pr <n> <branch> <head> <fork> <[CHANGETYPE:]file...>
 	shift 4
 	jq -n --argjson n "$n" --arg b "$b" --arg h "$h" --argjson fork "$fork" --args \
 		'{number: $n, url: "https://github.com/o/r/pull/\($n)", title: "PR \($n)", body: "", state: "OPEN", isDraft: false,
-		  headRefName: $b, headRefOid: $h, baseRefName: "main", isCrossRepository: $fork,
+		  headRefName: $b, headRefOid: $h, baseRefName: "main", isCrossRepository: $fork, additions: 410, deletions: 5,
 		  files: [$ARGS.positional[] | if test("^[A-Z]+:") then {changeType: sub(":.*"; ""), path: sub("^[A-Z]+:"; "")}
 		           else {changeType: "MODIFIED", path: .} end]}' "$@" >"$FX/pr-$n.json"
 }
@@ -99,6 +99,8 @@ comments T-7 "Handoff: PR 7 at $H"
 pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md docs/sub/a.rst .gitignore LICENSE .mailmap DELETED:docs/old.md
 bash "$prep" --route 8 >"$tmp/out" || fail "route light exited $?"
 has route=light
+has pr=8
+has lines=415
 # Agents obey what the root rules name, and code hides in docs-like names.
 for f in skills/x/SKILL.md AGENTS.md .github/workflows/ci.yml go.sum db/migrations/1.sql src/a.go tests/a.md \
 	.maestro/project/project-setup.md bot-profiles/qa/persona.md INSTALL.md docs/rules.md Claude.md \

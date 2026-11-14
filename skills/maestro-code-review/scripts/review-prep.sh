@@ -13,7 +13,8 @@
 #   review-prep.sh --route <target>
 #     Reads only the PR's file list, writes nothing, and prints
 #     route=light when every changed file is docs or inert config that no
-#     agent reads as instructions, else route=full.
+#     agent reads as instructions, else route=full, with pr= and lines=,
+#     its added plus deleted lines.
 #
 # Run it inside the repo, any worktree. Needs git 2.38+, gh and jq, and
 # maestro-ticket for a ticket's verdicts. Exit 2: bad target; 3: no PR or
@@ -167,12 +168,17 @@ T-[0-9]* | maestro/T-[0-9]*)
 esac
 
 if [ -n "$route" ]; then
+	# One read of the PR: its files, and its changed lines, which size the
+	# review's time limit.
+	pv=$(gh pr view "$pr" --json files,additions,deletions) || die 3 "gh found no PR $pr"
+	echo "pr=$pr"
+	echo "lines=$(jq -r '(.additions // 0) + (.deletions // 0)' <<<"$pv")"
 	full() { echo route=full; echo "why=$1"; exit 0; }
 	# With no main or no rules to read, nothing says which docs agents obey.
 	[ -n "$main" ] || full "no ## Main branch in the main checkout's project-setup.md"
 	load_rules
 	[ -n "$rules" ] || full "no AGENTS.md, CLAUDE.md or project-setup.md to read"
-	files=$(gh pr view "$pr" --json files --jq '.files[] | "\(.changeType)\t\(.path)"') || die 3 "gh found no PR $pr"
+	files=$(jq -r '.files[] | "\(.changeType)\t\(.path)"' <<<"$pv")
 	n=$(printf '%s\n' "$files" | grep -c . || true)
 	# gh lists at most 100 files; a PR that big is no light review anyway.
 	[ "$n" -gt 0 ] && [ "$n" -lt 100 ] || full "$n files"

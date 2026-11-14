@@ -1,0 +1,544 @@
+package cli
+
+import (
+	"bufio"
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
+)
+
+// Models a job runs on. Every job runs at high effort: the two settings a
+// team tests and pays for (owner's ruling, Nov 14 2026).
+const (
+	modelOpus   = "opus"
+	modelSonnet = "sonnet"
+	effortHigh  = "high"
+)
+
+// jobKind is one kind of work a bot hands to Claude Code.
+type jobKind struct {
+	name string
+	// skill and prompt build the prompt: the skill's command, then the
+	// ticket id, then the bot's text from stdin when text is set.
+	skill  string
+	prefix string // words between the skill and the ticket id
+	ticket bool   // takes one ticket id
+	ids    bool   // takes one or more ticket ids (judge)
+	text   string // "need": stdin text is required; "" for none
+	model  string
+	// lean runs run none of the project's checks, so a 5-minute cache
+	// costs less (team rules).
+	lean bool
+	help string
+}
+
+var jobKinds = []jobKind{
+	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier",
+		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior)"},
+	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route",
+		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
+	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus,
+		help: "qa <id>: test the reviewed PR and merge it on a pass"},
+	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus,
+		help: "live <id>: a goal's live run"},
+	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus,
+		help: "qa-ask [--ticket T-1] < ask: a second look, a repro, a test plan"},
+	{name: "plan", skill: "/maestro-planner", text: "need", model: modelOpus, lean: true,
+		help: "plan [--ticket T-1] < ask: plan a goal, split or rewrite, read the board"},
+	{name: "rule", skill: "/maestro-planner", prefix: "rule", ticket: true, text: "need", model: modelSonnet, lean: true,
+		help: "rule <id> < decision: post the planner's ruling and move the ticket"},
+	{name: "finish", skill: "/maestro-planner", prefix: "finish", ticket: true, model: modelSonnet, lean: true,
+		help: "finish <id>: finish a split, drop or merge that stopped short"},
+	{name: "judge", skill: "/maestro-planner", prefix: "judge", ids: true, text: "need", model: modelOpus, lean: true,
+		help: "judge <id>... < rows and standing rules: the planner's calls that need reading"},
+	{name: "cos", skill: "/maestro-chief-of-staff", text: "need", model: modelOpus, lean: true,
+		help: "cos [--ticket T-1] < ask: a check, second opinion, audit or card draft"},
+}
+
+func findJob(name string) (jobKind, bool) {
+	for _, k := range jobKinds {
+		if k.name == name {
+			return k, true
+		}
+	}
+	return jobKind{}, false
+}
+
+func jobNames() string {
+	n := make([]string, len(jobKinds))
+	for i, k := range jobKinds {
+		n[i] = k.name
+	}
+	return strings.Join(n, ", ")
+}
+
+// claudeCommand is the claude -p command line of a job, with the
+// environment words the team rules ask of every run.
+func claudeCommand(session, model, effort string, lean bool) []string {
+	cmd := []string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"}
+	if lean {
+		cmd = append(cmd, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m")
+	}
+	return append(cmd, "claude", "-p", "--session-id", session, "--model", model, "--effort", effort,
+		"--permission-mode", "bypassPermissions", "--output-format", "json")
+}
+
+// newSessionID is a random UUID, version 4, for claude --session-id: each
+// run gets its own, so a run that dies with no reply can still be resumed.
+func newSessionID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// reviewLimit sizes a review's time limit to its diff: 45 minutes, plus 15
+// for each 200 changed lines, at most 2 hours.
+func reviewLimit(lines int) time.Duration {
+	return min(45*time.Minute+time.Duration(lines/200)*15*time.Minute, 2*time.Hour)
+}
+
+// route is what review-prep.sh --route printed.
+type route struct {
+	light bool
+	why   string
+	lines int // -1 when it didn't say
+}
+
+// reviewRoute runs the review skill's prep script in route mode, which
+// reads only the PR's file list: route=light when every file is docs or
+// inert config, and the PR's changed lines.
+func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
+	root, err := c.git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return route{}, fmt.Errorf("%w: job review: run it inside the repo: %v", ticket.ErrInvalid, err)
+	}
+	script := filepath.Join(strings.TrimSpace(root), ".claude", "skills", "maestro-code-review", "scripts", "review-prep.sh")
+	cmd := exec.CommandContext(ctx, "bash", script, "--route", target)
+	cmd.Dir = strings.TrimSpace(root)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 3 {
+			return route{}, fmt.Errorf("%w: job review %s: %s", ticket.ErrNotFound, target, msg)
+		}
+		if errors.Is(err, fs.ErrNotExist) || strings.Contains(msg, "No such file") {
+			return route{}, fmt.Errorf("%w: job review: no %s: install Maestro's skills in this repo", ticket.ErrInvalid, script)
+		}
+		return route{}, fmt.Errorf("%w: job review %s: review-prep.sh --route: %v: %s", ticket.ErrInvalid, target, err, msg)
+	}
+	r := route{lines: -1}
+	sc := bufio.NewScanner(strings.NewReader(string(out)))
+	for sc.Scan() {
+		k, v, _ := strings.Cut(sc.Text(), "=")
+		switch k {
+		case "route":
+			r.light = v == "light"
+		case "why":
+			r.why = v
+		case "lines":
+			if n, err := strconv.Atoi(v); err == nil {
+				r.lines = n
+			}
+		}
+	}
+	return r, nil
+}
+
+// runJob starts one bot job as a Claude Code run: it builds the prompt,
+// picks the model, effort and time limit, gives the run a session id,
+// and launches it as launch does. A bot spends one step on it.
+func runJob(ctx context.Context, c *call) error {
+	model := c.fs.String("model", "", "override the job's model (opus or sonnet as a rule)")
+	effort := c.fs.String("effort", "", "override the effort (default high)")
+	limit := c.fs.Duration("limit", 0, "override the time limit (default 2h; a review's is sized to its diff)")
+	tk := c.fs.String("ticket", "", "the ticket a text job (qa-ask, plan, cos) works on")
+	approved := c.fs.String("approved", "", "review: the head sha the owner said yes to")
+	drop := c.fs.String("drop", "", "review: the finding ids a ruling dropped; the reason comes from --drop-file")
+	dropFile := c.fs.String("drop-file", "", "review: read why the findings dropped from this file, or - for stdin")
+	full := c.fs.Bool("full", false, "review: on the full model, whatever the route")
+	if err := c.parse(); err != nil {
+		return err
+	}
+	if len(c.args) == 0 {
+		return usagef("job: name the job: %s", jobNames())
+	}
+	k, ok := findJob(c.args[0])
+	if !ok {
+		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
+	}
+	ids := c.args[1:]
+	if !runs.Supported {
+		return usagef("job needs a unix system")
+	}
+	if err := c.needActor("job"); err != nil {
+		return err
+	}
+	switch {
+	case k.ticket && len(ids) != 1:
+		return usagef("job %s: want one ticket id", k.name)
+	case k.ids && len(ids) == 0:
+		return usagef("job %s: want one or more ticket ids", k.name)
+	case !k.ticket && !k.ids && len(ids) > 0:
+		return usagef("job %s: takes no ticket id; give it as --ticket, and the ask on stdin", k.name)
+	}
+	if k.name != "review" && (*approved != "" || *drop != "" || *dropFile != "" || *full) {
+		return usagef("job %s: --approved, --drop, --drop-file and --full are for review", k.name)
+	}
+	if (*drop == "") != (*dropFile == "") {
+		return usagef("job review: --drop names the findings and --drop-file gives why: pass both")
+	}
+	if *approved != "" && !shaPattern.MatchString(*approved) {
+		return usagef("job review: --approved %q: want a commit sha", *approved)
+	}
+	if *drop != "" && !dropPattern.MatchString(*drop) {
+		return usagef("job review: --drop %q: want finding ids such as F1,F3", *drop)
+	}
+	for i, id := range ids {
+		t, err := ticket.ParseID(id)
+		if err != nil {
+			return err
+		}
+		ids[i] = t.String()
+	}
+	ticketID := ""
+	switch {
+	case k.ticket:
+		ticketID = ids[0]
+	case *tk != "":
+		if k.ids {
+			return usagef("job %s: the ids name its tickets; drop --ticket", k.name)
+		}
+		t, err := ticket.ParseID(*tk)
+		if err != nil {
+			return err
+		}
+		ticketID = t.String()
+	}
+
+	var text string
+	if k.text != "" || *dropFile == "-" {
+		b, err := c.readStdin()
+		if err != nil {
+			return err
+		}
+		text = strings.TrimSpace(string(b))
+		if k.text == "need" && text == "" {
+			return usagef("job %s: send the ask on stdin, in a quoted heredoc", k.name)
+		}
+	}
+	dropWhy := ""
+	if *dropFile != "" {
+		if *dropFile == "-" {
+			dropWhy = text
+		} else {
+			b, err := c.readBody("", *dropFile)
+			if err != nil {
+				return err
+			}
+			dropWhy = b
+		}
+		if dropWhy = oneLineText(dropWhy); dropWhy == "" {
+			return usagef("job review: --drop-file is empty: say why the findings dropped")
+		}
+	}
+
+	m, why := k.model, ""
+	runLimit := 2 * time.Hour
+	words := []string{k.skill}
+	if k.prefix != "" {
+		words = append(words, k.prefix)
+	}
+	switch k.model {
+	case "tier":
+		t, err := c.ticketForJob(ctx, ticketID)
+		if err != nil {
+			return err
+		}
+		m = modelOpus
+		if t.Tier == ticket.TierJunior {
+			m = modelSonnet
+		}
+		why = "tier " + dash(t.Tier)
+	case "route":
+		if _, err := c.ticketForJob(ctx, ticketID); err != nil {
+			return err
+		}
+		r, err := c.reviewRoute(ctx, ticketID)
+		if err != nil {
+			return err
+		}
+		m, why = modelOpus, "full review"
+		if r.light && !*full {
+			m, why = modelSonnet, "light review: "+r.why
+		}
+		if r.lines >= 0 {
+			runLimit = reviewLimit(r.lines)
+		}
+	default:
+		if ticketID != "" {
+			if _, err := c.ticketForJob(ctx, ticketID); err != nil {
+				return err
+			}
+		}
+	}
+	words = append(words, ids...)
+	if k.name == "review" {
+		if m == modelSonnet {
+			words = append(words, "--light")
+		}
+		if *approved != "" {
+			words = append(words, "--approved", *approved)
+		}
+		if *drop != "" {
+			words = append(words, "--drop", *drop+":", dropWhy)
+		}
+	}
+	prompt := strings.Join(words, " ")
+	if k.text != "" && text != "" {
+		sep := " "
+		if k.ids {
+			sep = "\n" // judge: the rows and rules follow the ids
+		}
+		prompt += sep + text
+	}
+	if k.name == "rule" {
+		prompt = strings.Join(words, " ") + ": " + text
+	}
+	if *model != "" {
+		m = *model
+	}
+	e := effortHigh
+	if *effort != "" {
+		e = *effort
+	}
+	if *limit != 0 {
+		runLimit = *limit
+	}
+	if runLimit < time.Second || runLimit > 24*time.Hour {
+		return usagef("job: --limit %s: want 1s to 24h", runLimit)
+	}
+	rec := runs.Record{
+		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
+		Command: withEnv(claudeCommand(newSessionID(), m, e, k.lean)),
+	}
+	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
+	if err != nil {
+		return err
+	}
+	return c.printStarted(r, m, why)
+}
+
+var (
+	shaPattern  = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+	dropPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$`)
+)
+
+// ticketForJob reads the ticket a job names, so a typo fails here and not
+// in a session that already spent its start.
+func (c *call) ticketForJob(ctx context.Context, id string) (ticket.Ticket, error) {
+	tid, err := ticket.ParseID(id)
+	if err != nil {
+		return ticket.Ticket{}, err
+	}
+	s, err := c.open(ctx)
+	if err != nil {
+		return ticket.Ticket{}, err
+	}
+	defer s.Close()
+	d, err := s.Get(ctx, tid)
+	return d.Ticket, err
+}
+
+// oneLineText joins text onto one line, for a reason that goes in a
+// prompt's flag.
+func oneLineText(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// printStarted prints a started run in one line, then one line for each
+// of the actor's runs that ended and aren't acked, so a turn that starts
+// a run needs no pickup to learn of them.
+func (c *call) printStarted(r runs.Record, model, why string) error {
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	list, _ := runs.List(dir, time.Now(), false)
+	ended := []string{}
+	for _, o := range list {
+		if o.Launcher == c.actor && o.Ended() && o.ID != r.ID {
+			ended = append(ended, o.ID)
+		}
+	}
+	res := map[string]any{"run": r, "model": model, "ended": ended}
+	return c.out(res, func(w io.Writer) {
+		on := ""
+		if r.Ticket != "" {
+			on = " " + r.Ticket
+		}
+		extra := ""
+		if why != "" {
+			extra = ", " + why
+		}
+		fmt.Fprintf(w, "%s started: %s%s on %s, limit %s%s\n", r.ID, dash(r.Job), on, model, r.Limit, extra)
+		for _, id := range ended {
+			fmt.Fprintf(w, "%s ended: run maestro-ticket pickup\n", id)
+		}
+	})
+}
+
+// diedText is what a run that died is resumed with.
+const diedText = "Your run died. Go on from your last step."
+
+// opusText is what a junior build's stuck session is resumed with, once
+// it moves to Opus in the senior engineer's place.
+const opusText = "You are now on Opus, in the senior engineer's place. Settle your question yourself if the ticket and the repo settle it, and go on. If they don't, send it up as your skill says."
+
+// runResume resumes a run's session as a new run with the same command,
+// ticket and limit: with the answer on stdin; with --died, once, after
+// the run died; with --opus, on Opus at high effort.
+func runResume(ctx context.Context, c *call) error {
+	died := c.fs.Bool("died", false, "the run died: resume it once with \""+diedText+"\"")
+	opus := c.fs.Bool("opus", false, "resume on Opus at high effort, as for a junior build's stuck session")
+	if err := c.parse(); err != nil {
+		return err
+	}
+	if len(c.args) != 1 || !runs.ValidID(c.args[0]) {
+		return usagef("resume: want one run id, such as R-abcdefgh")
+	}
+	if !runs.Supported {
+		return usagef("resume needs a unix system")
+	}
+	if err := c.needActor("resume"); err != nil {
+		return err
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	r, err := runs.Get(dir, c.args[0], now)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: run %s", ticket.ErrNotFound, c.args[0])
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case r.Launcher != c.actor:
+		return fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher))
+	case !r.Ended():
+		return fmt.Errorf("%w: resume: run %s is %s", ticket.ErrStatusConflict, r.ID, r.State)
+	case *died && r.State != runs.Died:
+		return fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State)
+	}
+	session := r.SessionID
+	if session == "" {
+		session = flagValue(r.Command, "--session-id")
+	}
+	if session == "" {
+		session = flagValue(r.Command, "--resume")
+	}
+	if session == "" {
+		return fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID)
+	}
+	if *died {
+		list, err := runs.List(dir, now, true)
+		if err != nil {
+			return err
+		}
+		for _, o := range list {
+			if o.AfterDeath && flagValue(o.Command, "--resume") == session {
+				return fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, o.ID)
+			}
+		}
+	}
+	text := ""
+	switch {
+	case *died:
+		text = diedText
+	default:
+		b, err := c.readStdin()
+		if err != nil {
+			return err
+		}
+		text = strings.TrimSpace(string(b))
+		if text == "" && *opus {
+			text = opusText
+		}
+		if text == "" {
+			return usagef("resume: send the answer on stdin, in a quoted heredoc")
+		}
+	}
+	cmd := resumeCommand(r.Command, session, *opus)
+	rec := runs.Record{
+		Ticket: r.Ticket, Limit: r.Limit, Job: r.Job, Command: cmd,
+		ResumeOf: r.ID, AfterDeath: *died,
+	}
+	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings)
+	if err != nil {
+		return err
+	}
+	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)
+}
+
+// flagValue is the word after flag in a command line, or "".
+func flagValue(cmd []string, flag string) string {
+	for i, w := range cmd {
+		if w == flag && i+1 < len(cmd) {
+			return cmd[i+1]
+		}
+		if v, ok := strings.CutPrefix(w, flag+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// resumeCommand is a run's command made to resume session: its own
+// --session-id or --resume goes, --resume <session> comes after -p, and
+// with opus the model and effort become Opus at high.
+func resumeCommand(cmd []string, session string, opus bool) []string {
+	out := []string{}
+	for i := 0; i < len(cmd); i++ {
+		w := cmd[i]
+		name, _, eq := strings.Cut(w, "=")
+		switch {
+		case w == "--session-id" || w == "--resume" || (opus && (w == "--model" || w == "--effort")):
+			i++ // and its value
+			continue
+		case strings.HasPrefix(w, "--") && eq && (name == "--session-id" || name == "--resume" || (opus && (name == "--model" || name == "--effort"))):
+			continue
+		}
+		out = append(out, w)
+		if w == "-p" || w == "--print" {
+			out = append(out, "--resume", session)
+			if opus {
+				out = append(out, "--model", modelOpus, "--effort", effortHigh)
+			}
+		}
+	}
+	if !slices.Contains(out, "--resume") {
+		out = append(out, "--resume", session)
+		if opus {
+			out = append(out, "--model", modelOpus, "--effort", effortHigh)
+		}
+	}
+	return out
+}

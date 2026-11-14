@@ -241,24 +241,39 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	dir, err := c.besideStore("runs")
-	if err != nil {
-		return err
-	}
-	store, _, err := c.storePath()
-	if err != nil {
-		return err
-	}
 	stdin, err := c.readStdin()
 	if err != nil {
 		return err
 	}
-	r, err := runs.Create(dir, runs.Record{
-		Launcher: c.actor, Ticket: ticketID, Limit: short(*limit),
-		Command: command, Dir: c.env.Dir, StartedAt: time.Now().UTC().Round(time.Millisecond),
-	}, stdin)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings)
 	if err != nil {
 		return err
+	}
+	return c.out(r, func(w io.Writer) {
+		on := ""
+		if r.Ticket != "" {
+			on = " on " + r.Ticket
+		}
+		fmt.Fprintf(w, "%s %s%s, limit %s. maestro-ticket pickup shows it once it ends.\n", r.ID, r.State, on, r.Limit)
+	})
+}
+
+// startRun records a run for the actor and hands it to a detached
+// supervisor, and returns once its command runs. launch, job and resume
+// all start runs here.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (runs.Record, error) {
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return runs.Record{}, err
+	}
+	store, _, err := c.storePath()
+	if err != nil {
+		return runs.Record{}, err
+	}
+	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.env.Dir, time.Now().UTC().Round(time.Millisecond)
+	r, err := runs.Create(dir, rec, stdin)
+	if err != nil {
+		return runs.Record{}, err
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
@@ -275,7 +290,7 @@ func runLaunch(ctx context.Context, c *call) error {
 		r.State, r.Error = runs.Failed, "start the supervisor: "+err.Error()
 		runs.Save(dir, r)
 		runs.Ack(dir, r.ID, c.actor, time.Now())
-		return fmt.Errorf("%w: launch: %s", ticket.ErrInvalid, r.Error)
+		return runs.Record{}, fmt.Errorf("%w: launch: %s", ticket.ErrInvalid, r.Error)
 	}
 	// Wait until the command runs, so a command that can't start fails
 	// here and not in a later pickup.
@@ -288,16 +303,10 @@ func runLaunch(ctx context.Context, c *call) error {
 	}
 	if r.Ended() && r.PID == 0 {
 		if ok, _ := runs.Ack(dir, r.ID, c.actor, time.Now()); ok {
-			return fmt.Errorf("%w: launch %s: %s", ticket.ErrInvalid, r.ID, r.Error)
+			return runs.Record{}, fmt.Errorf("%w: launch %s: %s", ticket.ErrInvalid, r.ID, r.Error)
 		}
 	}
-	return c.out(r, func(w io.Writer) {
-		on := ""
-		if r.Ticket != "" {
-			on = " on " + r.Ticket
-		}
-		fmt.Fprintf(w, "%s %s%s, limit %s. maestro-ticket pickup shows it once it ends.\n", r.ID, r.State, on, r.Limit)
-	})
+	return r, nil
 }
 
 // runSupervise is the background half of launch. launch starts it; nothing

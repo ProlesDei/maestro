@@ -94,6 +94,12 @@ Commands:
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
+  job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
+              run: the prompt, model, effort, limit and session id set for it; text jobs read the
+              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos)
+  resume      <run-id> [--opus] [--died]   (the run's session again, answer on stdin; --opus moves
+              it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
@@ -184,6 +190,8 @@ var commands = []command{
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
 	{"launch", runLaunch},
+	{"job", runJob},
+	{"resume", runResume},
 	{"supervise", runSupervise},
 	{"pickup", runPickup},
 	{"ack", runAck},

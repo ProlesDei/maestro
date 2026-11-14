@@ -53,23 +53,31 @@ const startGrace = 30 * time.Second
 
 // Record is one run.
 type Record struct {
-	ID        string     `json:"id"`
-	Launcher  string     `json:"launcher"`
-	Ticket    string     `json:"ticket,omitempty"`
-	Limit     string     `json:"limit"`
-	Command   []string   `json:"command"`
-	Dir       string     `json:"dir"`
-	StartedAt time.Time  `json:"started_at"`
-	State     string     `json:"state"`
-	PID       int        `json:"pid,omitempty"`
-	EndedAt   *time.Time `json:"ended_at,omitempty"`
-	Exit      *int       `json:"exit,omitempty"`
-	SessionID string     `json:"session_id,omitempty"`
-	IsError   bool       `json:"is_error,omitempty"`
-	Reply     string     `json:"reply,omitempty"`
-	Error     string     `json:"error,omitempty"`
-	Rings     int        `json:"rings,omitempty"`
-	RingError string     `json:"ring_error,omitempty"`
+	ID       string   `json:"id"`
+	Launcher string   `json:"launcher"`
+	Ticket   string   `json:"ticket,omitempty"`
+	Limit    string   `json:"limit"`
+	Command  []string `json:"command"`
+	// Job is the kind of work maestro-ticket job started (build, review,
+	// qa, ...), which pickup reads to say what the result means; empty for
+	// a plain launch.
+	Job string `json:"job,omitempty"`
+	// ResumeOf is the run whose session this one resumed; AfterDeath marks
+	// the one resume a session gets after its run died.
+	ResumeOf   string     `json:"resume_of,omitempty"`
+	AfterDeath bool       `json:"after_death,omitempty"`
+	Dir        string     `json:"dir"`
+	StartedAt  time.Time  `json:"started_at"`
+	State      string     `json:"state"`
+	PID        int        `json:"pid,omitempty"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	Exit       *int       `json:"exit,omitempty"`
+	SessionID  string     `json:"session_id,omitempty"`
+	IsError    bool       `json:"is_error,omitempty"`
+	Reply      string     `json:"reply,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	Rings      int        `json:"rings,omitempty"`
+	RingError  string     `json:"ring_error,omitempty"`
 	// Rang is true once a ring reached the webhook; OrphanTries counts the
 	// rings readers tried for a run whose supervisor went away first.
 	Rang        bool `json:"rang,omitempty"`
