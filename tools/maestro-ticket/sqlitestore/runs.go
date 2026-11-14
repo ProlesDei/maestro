@@ -166,35 +166,49 @@ WHERE type IN (?, ?) AND json_extract(data, '$.split_from') IS NOT NULL`, ticket
 }
 
 // linkSplit checks that t may be linked to from, the cancelled ticket it
-// replaces, and returns t's tries with from's added.
-func linkSplit(ctx context.Context, tx *sql.Tx, t ticket.Ticket, from ticket.ID) (int, error) {
+// replaces, and returns t's tries with from's added; or, when t is linked
+// to from already, as a retry finds it, t's tries and again true.
+func linkSplit(ctx context.Context, tx *sql.Tx, t ticket.Ticket, from ticket.ID) (tries int, again bool, err error) {
 	var status string
-	var tries int
-	err := tx.QueryRowContext(ctx, "SELECT status, tries FROM tickets WHERE id = ?", from).Scan(&status, &tries)
+	err = tx.QueryRowContext(ctx, "SELECT status, tries FROM tickets WHERE id = ?", from).Scan(&status, &tries)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, from)
+		return 0, false, fmt.Errorf("%w: split from %s", ticket.ErrNotFound, from)
 	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if ticket.Status(status) != ticket.StatusCancelled {
-		return 0, fmt.Errorf("%w: %s is %s; link only a cancelled ticket to the one that replaced it (to split an open ticket, create the new ones with --split-from)",
+		return 0, false, fmt.Errorf("%w: %s is %s; link only a cancelled ticket to the one that replaced it (to split an open ticket, create the new ones with --split-from)",
 			ticket.ErrInvalid, from, status)
 	}
 	parents, err := splitParents(ctx, tx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if p, ok := parents[t.ID]; ok {
-		return 0, fmt.Errorf("%w: %s is already split from %s", ticket.ErrInvalid, t.ID, p)
+		if p == from {
+			return t.Tries, true, nil
+		}
+		return 0, false, fmt.Errorf("%w: %s is already split from %s", ticket.ErrInvalid, t.ID, p)
+	}
+	// A second replacement would take the first one's runs away from it,
+	// and count from's tries twice.
+	var kid ticket.ID
+	for k, p := range parents {
+		if p == from && (kid == 0 || k < kid) {
+			kid = k
+		}
+	}
+	if kid != 0 {
+		return 0, false, fmt.Errorf("%w: %s already has %s split from it", ticket.ErrInvalid, from, kid)
 	}
 	for p, seen := from, map[ticket.ID]bool{}; p != 0 && !seen[p]; p = parents[p] {
 		seen[p] = true
 		if p == t.ID {
-			return 0, fmt.Errorf("%w: %s comes from %s, so %s can't be split from it", ticket.ErrInvalid, from, t.ID, t.ID)
+			return 0, false, fmt.Errorf("%w: %s comes from %s, so %s can't be split from it", ticket.ErrInvalid, from, t.ID, t.ID)
 		}
 	}
-	return t.Tries + tries, nil
+	return t.Tries + tries, false, nil
 }
 
 // scanRun reads runCols, then any extra columns into extra.

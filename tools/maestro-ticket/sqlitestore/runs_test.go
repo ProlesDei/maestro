@@ -203,8 +203,17 @@ func TestUpdateSplitFromLinksARefile(t *testing.T) {
 	if len(runs) != 1 || runs[0].CarriedFrom != old.ID || runs[0].Origin != "split" || runs[0].Tries != 3 {
 		t.Fatalf("runs toward the refile: %+v", runs)
 	}
-	// A second link would add the tries again.
-	_, err = upd(refile.ID, old.ID)
+	// A retry of the link changes nothing: no second count of the tries.
+	evs, _ := s.Events(ctx, ticket.EventFilter{TicketID: refile.ID, Type: ticket.EventUpdated})
+	if again, err := upd(refile.ID, old.ID); err != nil || again.Tries != 3 {
+		t.Fatalf("retry: tries %d, %v; want 3", again.Tries, err)
+	}
+	if evs2, _ := s.Events(ctx, ticket.EventFilter{TicketID: refile.ID, Type: ticket.EventUpdated}); len(evs2) != len(evs) {
+		t.Fatalf("retry wrote %d events", len(evs2)-len(evs))
+	}
+	// A second replacement of old would take refile's runs away.
+	other := mustCreate(t, s, "other", "engineer", 1)
+	_, err = upd(other.ID, old.ID)
 	wantErr(t, err, ticket.ErrInvalid)
 	// A link back up the chain would loop.
 	move(t, s, refile.ID, ticket.StatusCancelled)
