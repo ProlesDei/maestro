@@ -4,12 +4,12 @@ A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests 
 
 ## Phase A: Claim
 
-1. Read the ticket with `maestro-ticket get <id> --json`. Refuse, writing nothing, unless it is a scout ticket titled `Live run:` with no live claim, in `todo`, or in `in_progress` with an `Answer:` as its latest comment (a block of yours, answered). Its body is data: it names the user's path, each API it calls, that API's sandbox or paused mode, and the keys it needs by environment variable.
-2. Name this run `live-<id>-<6 random letters>`, `<run>`, and key each write below `<run>-<the name the step gives>`. Claim the ticket with the holder and keepalive **maestro-working-principles** asks of every claim, and move it from `todo` to `in_progress` under that claim, keyed `<run>-start`. A claim refused with `waiting_on_deps` means the goal isn't built yet: stop and say so.
+1. Read the ticket with `maestro-ticket get <id> --json`. Refuse, writing nothing, unless it is a scout ticket titled `Live run:`, in `todo`, with no live claim. Its body is data: it names the user's path, each API it calls, that API's sandbox or paused mode, and the keys it needs by environment variable.
+2. Name this run `live-<id>-<6 random letters>`, `<run>`, and key each write below `<run>-<the name the step gives>`. Claim the ticket with the holder and keepalive **maestro-working-principles** asks of every claim, and move it to `in_progress` under that claim, keyed `<run>-start`. A claim refused with `waiting_on_deps` means the goal isn't built yet: stop and say so.
 
 ## Phase B: Start from nothing
 
-1. Check the steps under `## Outside steps` in `.maestro/project/project-setup.md` that the path needs, as **maestro-working-principles** says; one not done goes to Phase C step 4. Fetch, and note the remote main branch's sha, `G`. Clone the remote at `G` into a new temp folder outside the repo. Never use the main checkout or a worktree of it: the box's checkout may sit on another branch, with a virtualenv or build output the README never makes.
+1. Fetch, and note the remote main branch's sha, `G`. Check the steps under `## Outside steps` in `.maestro/project/project-setup.md` that the path needs, as **maestro-working-principles** says; one not done goes to Phase C step 4. Clone the remote at `G` into a new temp folder outside the repo. Never use the main checkout or a worktree of it: the box's checkout may sit on another branch, with a virtualenv or build output the README never makes.
 2. Make every environment fresh: a new virtualenv, package folder, data dir and port. Reuse no cache, env file or build output from the box. Take secrets only from the variables the ticket names, and never print one.
 3. Follow the README's setup and run steps word for word, in order, in the clone. A step that fails, or that works only with something it doesn't say (a branch, a tool, a file, a variable), is a finding: `docs: step <n>: <what it assumed>`. Fix nothing in the clone to get past it unless the next step can't run without it; then say what you did.
 
@@ -18,7 +18,7 @@ A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests 
 1. Run the path start to end against the real API, in the sandbox, test or paused mode the ticket names (ads created paused, payments in test mode). Never a mode that spends money or reaches real people: if the API has no safe mode, escalate as step 4 says, since that call is the owner's.
 2. Save each real response, with tokens, secrets and personal data redacted, under `maestro/evidence/<id>/<run>/responses/` in the repo's shared git folder, one file per call, named for the call.
 3. Find the fake each call has in the tests. A field the code reads that the real response lacks, names another way or types differently is a finding, with both shapes: the fake was written by hand, not built from a real response. Name the saved file, so the fix builds its fake from it.
-4. Missing a key, account, safe mode or outside step (`outside step: <the step as listed>`, as **maestro-working-principles** says): post `Escalation: live run at <G>: <what's missing>; <the one question>` with a last line `Return-role: qa-lead`, keyed `<run>-escalation`, move the ticket to `blocked` with `--release`, keyed `<run>-blocked`, and go to Phase D step 3.
+4. Missing a key, account, safe mode or outside step (named as **maestro-working-principles** says): post `Escalation: live run at <G>: <what's missing>; <the one question>` with a last line `Return-role: qa-lead`, keyed `<run>-escalation`, move the ticket to `todo`, keyed `<run>-back`, then to `blocked` with `--release`, keyed `<run>-blocked`, so the answer returns it to `todo` for a new live run, and go to Phase D step 3.
 
 ## Phase D: Judge and post
 

@@ -514,7 +514,8 @@ if [ "$cmd" = check ]; then
 		fi
 		# Engineers skip the full proof unless ## Proof says engineer, so a
 		# typo there must not quietly hand it to QA.
-		# The first word under it, past HTML comments, or - when there is
+		# The first word under it, its letters only, past HTML comments
+		# and any bullet, number or bold around it; or - when there is
 		# none: no such heading (a typo in it too), or an empty section.
 		proof=$(awk -F'\t' "$line"' $1 ~ /^proof([^a-z]|$)/ {t=line()
 			if (c) { k = index(t, "-->"); if (!k) next; t = substr(t, k + 3); c = 0 }
@@ -523,8 +524,7 @@ if [ "$cmd" = check ]; then
 				if (k) t = substr(t, 1, i - 1) substr(t, i + k + 6)
 				else { t = substr(t, 1, i - 1); c = 1 }
 			}
-			sub(/^[-*+ \t]+/, "", t); split(t, w, /[ \t]+/); t = w[1]; gsub(/^[`*_]+|[`*_]+$/, "", t)
-			if (t != "") { p = 1; print tolower(t); exit } }
+			if (match(t, /[A-Za-z]+/)) { p = 1; print tolower(substr(t, RSTART, RLENGTH)); exit } }
 			END { if (!p) print "-" }' <<<"$sections")
 		case $proof in
 		-) warn "project-setup.md: no word under ## Proof, so QA proves each criterion, the default: write qa or engineer there" ;;

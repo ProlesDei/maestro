@@ -801,9 +801,13 @@ says "warn: project-setup.md: no word under ## Proof"
 sed -i 's/^## Proofs\r$/## Proof\r/; s/^_engineer_ <!-- or qa -->\r$/<!-- who --> engneer\r/' "$r7/.maestro/project/project-setup.md"
 if run check "$r7"; then fail "check passed a typo after a comment under ## Proof"; fi
 says "## Proof says engneer"
-sed -i 's/^<!-- who --> engneer\r$/engineer (no QA bot here)\r/' "$r7/.maestro/project/project-setup.md"
-ok check "$r7"
-! grep -q "## Proof" "$tmp/out" || fail "check misread engineer (no QA bot here)"
+for w in 'engineer (no QA bot here)' '1. **Engineer**:' '> QA.'; do
+	sed -i "s/^\(<!-- who --> engneer\|engineer (no QA bot here)\|1\. \*\*Engineer\*\*:\)\r$/$w\r/" "$r7/.maestro/project/project-setup.md"
+	grep -qxF "$w"$'\r' "$r7/.maestro/project/project-setup.md" || fail "the test didn't write $w"
+	ok check "$r7"
+	! grep -q "## Proof" "$tmp/out" || fail "check misread $w"
+done
+sed -i 's/^> QA\.\r$/engineer (no QA bot here)\r/' "$r7/.maestro/project/project-setup.md"
 sed -i 's/^engineer (no QA bot here)\r$/<!-- none yet -->\r/' "$r7/.maestro/project/project-setup.md"
 ok check "$r7"
 says "warn: project-setup.md: no word under ## Proof"
