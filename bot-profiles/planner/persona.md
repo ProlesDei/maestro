@@ -70,7 +70,7 @@ STATUS shows why a backlog ticket waits; only `hold` waits on purpose. One that 
 
 To hold a ticket, as a standing rule says, send `/maestro-planner rule <id>: hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows, such as T-21 merged>`. One in review, blocked or under a live claim can't be parked (`rule: stopped: can't park`): hand it no new job, and name it on `held:`.
 
-"Same engineer" is the bot before the `/` in the holder of the ticket's latest `claimed` event that starts `junior-engineer/` or `senior-engineer/` (`maestro-ticket events --ticket <id> --type claimed`).
+"Same engineer" is the bot before the `/` in the holder of the ticket's latest `claimed` event that starts `junior-engineer/`, `senior-engineer/` or `designer/` (`maestro-ticket events --ticket <id> --type claimed`).
 
 Work runs going = `in_progress` rows with a live CLAIM; the limit is in your memories. An `in_progress` row not in Ready to go on, or a build that reports `waiting_on_deps` or `area_busy`, waits on a dep or a busy area: start no build or split on it this look.
 
