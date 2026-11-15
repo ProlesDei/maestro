@@ -19,6 +19,7 @@ import (
 type checkPass struct {
 	Name    string    `json:"name"`
 	Tree    string    `json:"tree"`
+	Dir     string    `json:"dir,omitempty"` // where it ran, from the repo root
 	Head    string    `json:"head"`
 	Command []string  `json:"command"`
 	At      time.Time `json:"at"`
@@ -73,9 +74,12 @@ func runCheck(ctx context.Context, c *call) error {
 		return err
 	}
 	tree, head, why := c.cleanTree()
-	key := checkKey(name, tree, command)
+	// The same command in another folder runs other tests: a monorepo's
+	// make test in a/ says nothing of b/.
+	sub, _ := c.git("rev-parse", "--show-prefix")
+	key := checkKey(name, tree, sub, command)
 	if why == "" && !*fresh {
-		if p, ok := loadCheckPass(dir, key); ok && p.Tree == tree && slices.Equal(p.Command, command) {
+		if p, ok := loadCheckPass(dir, key); ok && p.Tree == tree && p.Dir == sub && slices.Equal(p.Command, command) {
 			fmt.Fprintf(c.env.Stdout, "check %s: carried: passed on tree %s (head %s) %s ago, by %s, in %s; not run again (--fresh runs it)\n",
 				name, abbrev(tree), abbrev(p.Head), roundMin(time.Since(p.At)), p.who(), p.Took)
 			return nil
@@ -83,6 +87,11 @@ func runCheck(ctx context.Context, c *call) error {
 	}
 	begun := time.Now()
 	err = c.inSlot(ctx, *slot, *max, *wait, command)
+	if _, failed := err.(silentExit); failed && why == "" {
+		// It failed on this tree: a pass kept from before, which --fresh
+		// passed over, must not carry to the next session.
+		os.Remove(filepath.Join(dir, key+".json"))
+	}
 	if err != nil {
 		return err
 	}
@@ -99,7 +108,7 @@ func runCheck(ctx context.Context, c *call) error {
 		fmt.Fprintf(c.env.Stderr, "maestro-ticket: check %s: passed, not recorded: the run changed the checkout\n", name)
 		return nil
 	}
-	p := checkPass{Name: name, Tree: tree, Head: head, Command: command, At: time.Now().UTC(),
+	p := checkPass{Name: name, Tree: tree, Dir: sub, Head: head, Command: command, At: time.Now().UTC(),
 		Took: roundSec(time.Since(begun)), Run: u.Run, Ticket: u.Ticket, Job: u.Job, Actor: u.Actor}
 	if err := saveCheckPass(dir, key, p); err != nil {
 		// The check passed: a lost record costs the next session a run.
@@ -130,9 +139,9 @@ func (c *call) cleanTree() (tree, head, why string) {
 	return tree, head, ""
 }
 
-func checkKey(name, tree string, command []string) string {
+func checkKey(name, tree, sub string, command []string) string {
 	h := sha256.New()
-	h.Write([]byte(name + "\x00" + tree))
+	h.Write([]byte(name + "\x00" + tree + "\x00" + sub))
 	for _, a := range command {
 		h.Write([]byte("\x00" + a))
 	}

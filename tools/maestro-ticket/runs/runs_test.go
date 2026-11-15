@@ -152,7 +152,44 @@ func TestAdoptOnce(t *testing.T) {
 	if ids, _ := Orphans(dir, later); len(ids) != 0 {
 		t.Fatalf("orphans after the ring: %v", ids)
 	}
+}
 
+// A record under another host name is this machine's under an old name,
+// unless the store may sit on a shared disk: its free lock means its
+// supervisor is gone, at once.
+func TestRenamedHostReadsByItsLock(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	later := now.Add(time.Minute)
+	old, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
+	old.Host, old.State = "old-name.local", Running
+	Save(dir, old)
+	if g, _ := Get(dir, old.ID, later); g.State != Died {
+		t.Fatalf("a dead run under an old host name read as %s", g.State)
+	}
+	got, release, ok := Adopt(dir, old.ID, later)
+	if !ok || got.State != Died || got.Host != hostname() {
+		t.Fatalf("adopt: %+v %v", got, ok)
+	}
+	// A ring that failed is tried again, as any run's.
+	got.OrphanTries = 1
+	Save(dir, got)
+	release()
+	if _, release, ok := Adopt(dir, old.ID, later); !ok {
+		t.Fatal("a failed ring isn't tried again")
+	} else {
+		release()
+	}
+}
+
+// On a store that may sit on a shared disk, a run on another machine is
+// alive, its lock out of reach, until no supervisor would still run it.
+func TestRunElsewhereOnASharedStore(t *testing.T) {
+	sharedStore = func() bool { return true }
+	t.Cleanup(func() { sharedStore = func() bool { return false } })
+	dir := t.TempDir()
+	now := time.Now()
+	later := now.Add(time.Minute)
 	far, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
 	far.Host = "another-machine"
 	far.State = Running
@@ -162,5 +199,27 @@ func TestAdoptOnce(t *testing.T) {
 	}
 	if _, _, ok := Adopt(dir, far.ID, later); ok {
 		t.Fatal("adopted a run on another machine")
+	}
+	gone := now.Add(2*time.Hour + maxSlotCredit + KillGrace + 2*time.Hour)
+	// A lock held here is a supervisor here, alive, whatever the clock
+	// says: a laptop that slept past the deadline.
+	lf, err := os.OpenFile(path(dir, far.ID, ".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lockFile(lf); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := Get(dir, far.ID, gone); g.State != Running {
+		t.Fatalf("a run whose supervisor holds its lock here read as %s", g.State)
+	}
+	lf.Close()
+	if g, _ := Get(dir, far.ID, gone); g.State != Died {
+		t.Fatalf("an overdue run on another machine read as %s", g.State)
+	}
+	if _, release, ok := Adopt(dir, far.ID, gone); !ok {
+		t.Fatal("didn't adopt an overdue run on another machine")
+	} else {
+		release()
 	}
 }

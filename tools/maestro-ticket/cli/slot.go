@@ -25,6 +25,10 @@ import (
 
 var slotName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// slotKillGrace is how long a stopped slot command has between SIGTERM
+// and SIGKILL: under a supervisor's grace, so the group dies first.
+const slotKillGrace = runs.KillGrace / 2
+
 // runSlot runs a command once one of --max slots named --name is free, so
 // hundreds of sessions sharing one ticket store don't run a heavy check at
 // once and fail it under load. A slot is a file lock in slots/ next to the
@@ -159,9 +163,11 @@ func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Durat
 	// everything it started (make, a test runner and its workers), not just
 	// its first process. On SIGINT, SIGTERM or SIGHUP the group gets
 	// SIGTERM, then SIGKILL once the command is gone or WaitDelay passes.
+	// WaitDelay stays under a supervisor's grace, so a run's stop kills
+	// the group before it kills this process and frees the slot.
 	ownGroup(cmd)
 	cmd.Cancel = func() error { return signalGroup(cmd.Process.Pid, syscall.SIGTERM) }
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = slotKillGrace
 	err = cmd.Run()
 	if ctx.Err() != nil && cmd.Process != nil {
 		signalGroup(cmd.Process.Pid, syscall.SIGKILL)

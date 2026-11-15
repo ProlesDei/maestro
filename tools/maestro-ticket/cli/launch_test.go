@@ -342,6 +342,39 @@ func TestLaunchTimeLimit(t *testing.T) {
 	}
 }
 
+// The time limit also ends what left the run's group: a tool command in a
+// session of its own, as Claude Code starts them, and a slot's command,
+// which ignores SIGTERM in a group of its own. The slot then frees.
+func TestLaunchTimeLimitKillsWhatLeftTheGroup(t *testing.T) {
+	if !runs.CanScan {
+		t.Skip("finding a run's processes needs /proc")
+	}
+	setsid, err := exec.LookPath("setsid")
+	if err != nil {
+		t.Skip("needs setsid")
+	}
+	l := newLauncher(t, "qa-lead")
+	script := fmt.Sprintf(`%s sleep 301 & echo $! > own; %s slot --name tl --max 1 -- sh -c 'echo $$ > slotted; trap "" TERM; exec sleep 302' & wait`, setsid, l.exe)
+	r := l.launch("", "--limit", "2s", "--", "sh", "-c", script)
+	if e := l.waitEnded(r.ID, 30*time.Second); e.State != runs.TimedOut {
+		t.Fatalf("run: %+v", e)
+	}
+	time.Sleep(300 * time.Millisecond)
+	for _, f := range []string{"own", "slotted"} {
+		b, err := os.ReadFile(filepath.Join(l.h.dir, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pid int
+		fmt.Sscan(string(b), &pid)
+		if syscall.Kill(pid, 0) == nil && !zombie(pid) {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("%s: process %d outlived its run's limit", f, pid)
+		}
+	}
+	l.waitSupervisors()
+}
+
 // A run that crashes is failed with its exit code. One whose supervisor
 // is killed, as a restart kills it, is died: on Linux the command goes
 // with it, and the first pickup or doctor, whoever runs it, rings its

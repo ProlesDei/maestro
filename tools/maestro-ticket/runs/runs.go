@@ -29,6 +29,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 )
 
@@ -92,8 +93,8 @@ type Record struct {
 	// LaunchID is the run's row in the store's launches, which alerts
 	// and export read; 0 for none.
 	LaunchID int64 `json:"launch_id,omitempty"`
-	// Host is the machine the supervisor runs on: only there can a reader
-	// tell whether it still lives.
+	// Host is the machine the supervisor runs on. It matters only where
+	// the store may sit on a disk machines share: see elsewhere.
 	Host string `json:"host,omitempty"`
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
@@ -207,25 +208,50 @@ func Get(dir, id string, now time.Time) (Record, error) {
 // supervisorGone reports whether a live record has no supervisor. The
 // supervisor locks <id>.lock before it writes running and holds it until
 // it exits, however it exits, so a lock anyone can take means it is gone.
-// A lock on another machine can't be tested, so that supervisor counts as
-// alive.
+// A lock on another machine can't be tested, so a supervisor that may be
+// elsewhere counts as alive until the run is overdue.
 func supervisorGone(dir string, r Record, now time.Time) bool {
 	if r.State == Starting && now.Sub(r.StartedAt) < startGrace {
 		return false
 	}
-	if r.Host != "" && r.Host != hostname() {
-		return false
-	}
+	far := elsewhere(r)
 	f, err := os.OpenFile(path(dir, r.ID, ".lock"), os.O_RDWR, 0)
 	if errors.Is(err, fs.ErrNotExist) {
-		return true
+		return !far || overdue(r, now)
 	}
 	if err != nil {
 		return false
 	}
 	defer f.Close()
 	ok, err := tryLock(f)
-	return ok && err == nil
+	if err != nil {
+		return false
+	}
+	// A lock held here is a live supervisor here, whatever the record's
+	// host; a free one may only mean the lock is on another machine.
+	return ok && (!far || overdue(r, now))
+}
+
+// elsewhere reports whether r's supervisor may run on another machine,
+// where its lock can't be tested. The store sits on a disk machines share
+// only when envcheck.AllowEnv lets it. Otherwise every supervisor is here,
+// and a host that differs is this machine under an old name: a Mac's
+// changes with its network, a container's on a restart.
+func elsewhere(r Record) bool {
+	return r.Host != "" && r.Host != hostname() && sharedStore()
+}
+
+// sharedStore reports whether the store may be on a shared disk. Tests
+// replace it.
+var sharedStore = func() bool { return os.Getenv(envcheck.AllowEnv) == "1" }
+
+// overdue reports whether a run started long enough ago that no
+// supervisor, on any machine, would still let it run: past its limit, the
+// most slot wait the limit leaves out and its kill grace, with an hour
+// for clocks that differ between machines.
+func overdue(r Record, now time.Time) bool {
+	limit := r.LimitDuration()
+	return limit > 0 && now.Sub(r.StartedAt) > limit+maxSlotCredit+KillGrace+time.Hour
 }
 
 // List reads the records in dir, oldest first; with acked false, only
@@ -339,13 +365,16 @@ func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
 	r, err = Load(dir, id)
 	switch {
 	case err != nil, Acked(dir, id), r.Rang, r.OrphanTries >= orphanTries,
-		r.Host != "" && r.Host != hostname(), // its lock is on another machine
+		// Its lock may be on another machine: it rings its own result,
+		// and a live one is its own until it is overdue.
+		elsewhere(r) && (r.Ended() || !overdue(r, now)),
 		r.State == Starting && now.Sub(r.StartedAt) < startGrace:
 		release()
 		return r, nil, false
 	case !r.Ended():
 		r.State, r.EndedAt = Died, &now
 		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
+		r.Host = hostname() // ours from here on: a failed ring is tried again
 	}
 	return r, release, true
 }

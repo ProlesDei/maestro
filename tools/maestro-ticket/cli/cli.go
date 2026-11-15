@@ -128,8 +128,9 @@ Commands:
   slot        --status [--name N]   (who holds each group's slots and who waits, oldest first)
   check       <name> [--slot checks] [--max 4] [--wait D] [--fresh] -- <command> [args]
               (runs the command as slot does, unless a review or QA run passed the same
-              command on the same git tree: then it prints where, and exits 0; a pass
-              is recorded only from a clean checkout the run left clean)
+              command in the same folder on the same git tree: then it prints where, and
+              exits 0; a pass is recorded only from a clean checkout the run left clean, a
+              failure drops it, and env vars and gitignored files are not compared)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)

@@ -438,16 +438,32 @@ func TestLookJudgesAHoldOnce(t *testing.T) {
 func TestPickupSendsDedupe(t *testing.T) {
 	dir, now := t.TempDir(), time.Now()
 	claimHandout(dir, "T-1", "qa-lead", "qa T-1", time.Minute, now) // a look's
-	got := pickupSends(dir, "R-aaaaaaaa", []send{{"qa-lead", "qa T-1"}, {"reviewer", "review T-2"}, {"planner", "slot free T-3"}}, now)
+	got := pickupSends(dir, "R-aaaaaaaa", now.Add(-time.Hour), []send{{"qa-lead", "qa T-1"}, {"reviewer", "review T-2"}, {"planner", "slot free T-3"}}, now)
 	if len(got) != 2 || got[0].Bot != "reviewer" || got[1].Bot != "planner" {
 		t.Fatalf("first pickup: %+v", got)
 	}
-	again := pickupSends(dir, "R-aaaaaaaa", []send{{"reviewer", "review T-2"}}, now)
+	again := pickupSends(dir, "R-aaaaaaaa", now.Add(-time.Hour), []send{{"reviewer", "review T-2"}}, now)
 	if len(again) != 1 {
 		t.Fatalf("a second pickup of the run drops its own send: %+v", again)
 	}
-	if other := pickupSends(dir, "R-bbbbbbbb", []send{{"reviewer", "review T-2"}}, now); len(other) != 0 {
+	if other := pickupSends(dir, "R-bbbbbbbb", now.Add(-time.Hour), []send{{"reviewer", "review T-2"}}, now); len(other) != 0 {
 		t.Fatalf("another run's pickup sends it again: %+v", other)
+	}
+}
+
+// A run that began after a handout was made sends the next step: a second
+// review after a quick kickback isn't held as the first one's.
+func TestPickupSendsNextCycle(t *testing.T) {
+	dir, now := t.TempDir(), time.Now()
+	if s := pickupSends(dir, "R-build111", now.Add(-time.Hour), []send{{"reviewer", "review T-1"}}, now); len(s) != 1 {
+		t.Fatalf("first build's pickup: %+v", s)
+	}
+	later := now.Add(15 * time.Minute)
+	if s := pickupSends(dir, "R-build222", now.Add(5*time.Minute), []send{{"reviewer", "review T-1"}}, later); len(s) != 1 {
+		t.Fatalf("second build's pickup dropped its review: %+v", s)
+	}
+	if s := pickupSends(dir, "R-build111", now.Add(-time.Hour), []send{{"reviewer", "review T-1"}}, later); len(s) != 0 {
+		t.Fatalf("the first build's pickup sends its review again: %+v", s)
 	}
 }
 
@@ -461,5 +477,40 @@ func TestLookLeavesSentUp(t *testing.T) {
 	got := l.look("", "--limit", "3")
 	if len(with(got, "send ")) != 0 || !strings.Contains(strings.Join(got, "\n"), "sent up 1") {
 		t.Fatalf("a sent-up ticket handed out: %q", got)
+	}
+}
+
+// A build holds its work slot from its handout to its claim: a second
+// look before the session claims hands out no more than the limit.
+func TestLookLimitHoldsBeforeClaim(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "a")
+	l.h.ok(nil, "create", "--title", "b")
+	l.h.ok(nil, "create", "--title", "c")
+	if s := with(l.look("", "--limit", "1"), "send "); len(s) != 1 || !strings.Contains(s[0], "build T-1") {
+		t.Fatalf("first look: %q", s)
+	}
+	if s := with(l.look("", "--limit", "1"), "send senior-engineer: build"); len(s) != 0 {
+		t.Fatalf("a second look before the job starts went past the limit: %q", s)
+	}
+	// The job started; its session hasn't claimed yet.
+	dir := filepath.Join(l.h.dir, "runs")
+	r, err := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "2h", Command: []string{"true"}, Ticket: "T-1", Job: "build"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf, err := os.OpenFile(filepath.Join(dir, r.ID+".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if ok, err := tryLock(lf); !ok {
+		t.Fatal(err)
+	}
+	r.State, r.StartedAt = runs.Running, time.Now()
+	runs.Save(dir, r)
+	os.RemoveAll(filepath.Join(l.h.dir, "handouts")) // even once the handout is gone
+	if s := with(l.look("", "--limit", "1"), "send senior-engineer: build"); len(s) != 0 {
+		t.Fatalf("a look while the build runs unclaimed went past the limit: %q", s)
 	}
 }
