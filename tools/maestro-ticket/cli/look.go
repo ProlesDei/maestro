@@ -388,8 +388,12 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		return out, err
 	}
 	liveRun := map[string]bool{}
+	building := map[string]bool{} // tickets with a live build run
 	if list, err := runs.List(o.runs, now, false); err == nil {
 		for _, r := range list {
+			if !r.Ended() && r.Job == "build" && r.Ticket != "" {
+				building[r.Ticket] = true
+			}
 			// A job run that ended lately and isn't acked is its bot's to
 			// route: its pickup sends what comes next.
 			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
@@ -418,7 +422,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		if t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview {
 			busyBoard = true
 		}
-		if t.Status == ticket.StatusInProgress && t.LiveClaim() != nil {
+		// A build run holds its slot before its session claims, too: the
+		// busy check below skips its ticket, so build never counts it.
+		if t.Status == ticket.StatusInProgress && t.LiveClaim() != nil || building[t.ID.String()] {
 			going++
 		}
 		if t.Goal != "" && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview) {

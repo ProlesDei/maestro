@@ -51,11 +51,29 @@ func Untracked(roots []string) ([]Session, error) {
 
 // KillRun kills every process launch started for run id, and every one
 // they started, found by RunIDEnv in its environment: what is left of a
-// run whose supervisor went away, even outside its process group.
+// run whose supervisor went away, even outside its process group. A
+// process can fork between a scan and its kill, so it scans again until a
+// scan finds none.
 func KillRun(id string) {
+	for range 20 {
+		if signalRun(id, syscall.SIGKILL) == 0 {
+			return
+		}
+	}
+}
+
+// termRun asks every process of run id to stop, as KillRun finds them.
+func termRun(id string) { signalRun(id, syscall.SIGTERM) }
+
+// runAlive reports whether any process of run id is left.
+func runAlive(id string) bool { return signalRun(id, 0) > 0 }
+
+// signalRun sends sig to every process with run id in its environment,
+// but this one, and returns how many took it.
+func signalRun(id string, sig syscall.Signal) (n int) {
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
-		return
+		return 0
 	}
 	for _, e := range ents {
 		pid, err := strconv.Atoi(e.Name())
@@ -64,11 +82,14 @@ func KillRun(id string) {
 		}
 		for _, kv := range procList(pid, "environ") {
 			if kv == RunIDEnv+"="+id {
-				syscall.Kill(pid, syscall.SIGKILL)
+				if syscall.Kill(pid, sig) == nil {
+					n++
+				}
 				break
 			}
 		}
 	}
+	return n
 }
 
 func procList(pid int, name string) []string {

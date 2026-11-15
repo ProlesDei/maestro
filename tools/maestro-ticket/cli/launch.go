@@ -281,6 +281,9 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (r
 	if err == nil {
 		sup := exec.Command(exe, "supervise", r.ID, "--store", store, "--rings", ringsText(rings))
 		sup.Dir = c.env.Dir
+		// Not tagged with the run this launch runs in, if any: when that
+		// run ends, what carries its id is killed, and this run isn't its.
+		sup.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, runs.RunIDEnv+"=") })
 		sup.SysProcAttr = runs.Detach()
 		if err = sup.Start(); err == nil {
 			sup.Process.Release()
@@ -542,7 +545,7 @@ func runPickup(ctx context.Context, c *call) error {
 		if rt, ok := routes[r.ID]; ok {
 			// A job a look handed out lately goes out once: pickup drops
 			// its own line for it, and holds the rest from the next look.
-			rt.Send = pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, rt.Send, now)
+			rt.Send = pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
 			routes[r.ID] = rt
 			routeList = append(routeList, rt)
 		}
@@ -667,8 +670,10 @@ const maxPickup = 20
 
 // pickupSends keeps the sends a look hasn't made lately. Each it keeps is
 // marked as this run's, so a second pickup of the run shows it again and
-// the next look sends none of them.
-func pickupSends(dir, runID string, sends []send, now time.Time) []send {
+// the next look sends none of them. A handout made before the run began
+// was for the step before it, such as the review a kickback answered, so
+// this run's send takes its place.
+func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time) []send {
 	out := []send{}
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
@@ -681,7 +686,13 @@ func pickupSends(dir, runID string, sends []send, now time.Time) []send {
 			out = append(out, s)
 			continue
 		}
-		if b, _ := os.ReadFile(handoutPath(dir, id, s.Bot)); strings.TrimSpace(string(b)) == mine {
+		p := handoutPath(dir, id, s.Bot)
+		if fi, err := os.Stat(p); err == nil && fi.ModTime().Before(since) && moveStale(p, fi) &&
+			claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
+			out = append(out, s)
+			continue
+		}
+		if b, _ := os.ReadFile(p); strings.TrimSpace(string(b)) == mine {
 			out = append(out, s)
 		}
 	}

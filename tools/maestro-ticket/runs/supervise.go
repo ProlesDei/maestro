@@ -16,9 +16,9 @@ import (
 // outside launch.
 const RunIDEnv = "MAESTRO_RUN_ID"
 
-// killGrace is how long a stopped command's group has between SIGTERM and
+// KillGrace is how long a stopped command's group has between SIGTERM and
 // SIGKILL.
-const killGrace = 10 * time.Second
+const KillGrace = 10 * time.Second
 
 // pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
@@ -159,6 +159,11 @@ wait:
 			break wait
 		case <-timer.C:
 			credit, capped = Credit(dir, r.ID, begun, time.Now(), limit)
+			if left := time.Until(begun.Add(limit + credit)); left <= 0 {
+				// Read once more before it ends the run: a read that
+				// raced a wait's rename can miss that wait.
+				credit, capped = Credit(dir, r.ID, begun, time.Now(), limit)
+			}
 			if left := time.Until(begun.Add(limit + credit)); left > 0 {
 				// While a wait goes on, the deadline moves as fast as the
 				// clock: look again no sooner than liveWait, not in a spin,
@@ -178,8 +183,15 @@ wait:
 		// Anything the command left in its group goes with it on a stop,
 		// even when the command exits on SIGTERM and a child ignores it;
 		// on a normal exit its children are its own business.
+		// What left the group goes too, found by the run's id in its
+		// environment: Claude Code starts each tool command in a session
+		// of its own, and slot puts its command in a group of its own, so
+		// a hung test or server would outlive the limit, holding its port
+		// or its slot's work. It gets the same SIGTERM and grace, so a git
+		// stopped mid-write removes its lock.
 		killGroup(r.PID, syscall.SIGTERM)
-		grace := time.After(killGrace)
+		termRun(r.ID)
+		grace := time.After(KillGrace)
 		select {
 		case <-done:
 		case <-grace:
@@ -187,7 +199,7 @@ wait:
 			<-done
 			grace = nil
 		}
-		for grace != nil && groupAlive(r.PID) {
+		for grace != nil && (groupAlive(r.PID) || runAlive(r.ID)) {
 			select {
 			case <-grace:
 				killGroup(r.PID, syscall.SIGKILL)
@@ -195,6 +207,7 @@ wait:
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
+		KillRun(r.ID)
 	}
 	now := o.Now()
 	r.EndedAt = &now

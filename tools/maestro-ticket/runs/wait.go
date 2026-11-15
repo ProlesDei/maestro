@@ -34,8 +34,9 @@ var maxSlotCredit = 8 * time.Hour
 // that waits hours outlives its prompt cache, and each turn after writes
 // it again. capped reports whether a cap cut it.
 func Credit(dir, id string, start, now time.Time, limit time.Duration) (credit time.Duration, capped bool) {
-	before := slotWait(dir, id, start, now, func(n string) bool { return strings.HasSuffix(n, startMark) })
-	inside := slotWait(dir, id, start, now, func(n string) bool { return !strings.HasSuffix(n, startMark) })
+	marks := waits(dir, id) // one read for both, so a wait ending between them counts once
+	before := slotWait(dir, marks, start, now, func(n string) bool { return strings.HasSuffix(n, startMark) })
+	inside := slotWait(dir, marks, start, now, func(n string) bool { return !strings.HasSuffix(n, startMark) })
 	most := min(2*limit, maxSlotCredit)
 	capped = before > maxSlotCredit || inside > most
 	credit = min(before, maxSlotCredit) + min(inside, most)
@@ -101,20 +102,25 @@ func (w *Wait) End(now time.Time) {
 // SlotWait is how long run id's commands waited for slots between start
 // and now, overlapping waits counted once.
 func SlotWait(dir, id string, start, now time.Time) time.Duration {
-	return slotWait(dir, id, start, now, func(string) bool { return true })
+	return slotWait(dir, waits(dir, id), start, now, func(string) bool { return true })
 }
 
-// slotWait is SlotWait over the marks keep picks.
-func slotWait(dir, id string, start, now time.Time, keep func(name string) bool) time.Duration {
+// slotWait is how long the marks keep picks waited.
+func slotWait(dir string, marks map[string]bool, start, now time.Time, keep func(name string) bool) time.Duration {
 	type span struct{ from, to time.Time }
 	var spans []span
-	for name, live := range waits(dir, id) {
+	for name, live := range marks {
 		if !keep(name) {
 			continue
 		}
 		nanos, _, ok := strings.Cut(name[strings.LastIndex(name, ".")+1:], "-")
 		n, err := strconv.ParseInt(nanos, 10, 64)
 		info, serr := os.Stat(filepath.Join(dir, name))
+		if serr != nil && live {
+			// It ended since the read: its end is under its new name.
+			info, serr = os.Stat(filepath.Join(dir, strings.Replace(name, ".wait.", ".waited.", 1)))
+			live = false
+		}
 		if !ok || err != nil || serr != nil {
 			continue
 		}
