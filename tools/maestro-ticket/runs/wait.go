@@ -12,19 +12,42 @@ import (
 
 // A launched command that waits for a maestro-ticket slot marks the wait in
 // the run's folder, and the supervisor leaves the wait out of the run's
-// time limit, up to maxSlotCredit: a run that spends its limit in a queue
+// time limit, as Credit says: a run that spends its limit in a queue
 // runs nothing and gives no result.
 //
-// Each wait is one empty file, <id>.wait.<start in unix nanoseconds>-<pid>,
+// Each wait is one empty file, <id>.wait.<start in unix nanoseconds>-<pid>
+// (with -s after a session's own wait to start),
 // whose mtime the waiter moves to now while it waits. Once it has a slot or
 // gives up, it renames the file to <id>.waited.<...>, so the mtime is the
 // end. A waiter killed mid-wait stops moving the mtime, so its wait counts
 // up to its last touch.
 
-// maxSlotCredit is the most slot waiting a run's time limit leaves out, so
-// a machine whose slots never free can't keep a run alive for good. A var
-// only so tests can shorten it.
+// maxSlotCredit is the most slot waiting any run's time limit leaves out,
+// so a machine whose slots never free can't keep a run alive for good. A
+// var only so tests can shorten it.
 var maxSlotCredit = 8 * time.Hour
+
+// Credit is how much slot waiting a run with this limit leaves out of it:
+// a wait for its session to start, up to maxSlotCredit, since nothing ran
+// yet; a wait inside the session, up to twice the limit, so a session
+// lasts at most three times its limit however long the line. A session
+// that waits hours outlives its prompt cache, and each turn after writes
+// it again. capped reports whether a cap cut it.
+func Credit(dir, id string, start, now time.Time, limit time.Duration) (credit time.Duration, capped bool) {
+	before := slotWait(dir, id, start, now, func(n string) bool { return strings.HasSuffix(n, startMark) })
+	inside := slotWait(dir, id, start, now, func(n string) bool { return !strings.HasSuffix(n, startMark) })
+	most := min(2*limit, maxSlotCredit)
+	capped = before > maxSlotCredit || inside > most
+	credit = min(before, maxSlotCredit) + min(inside, most)
+	if credit > maxSlotCredit {
+		credit, capped = maxSlotCredit, true
+	}
+	return credit, capped
+}
+
+// startMark ends the mark of a wait for a run's session to start, the
+// wait of a claude command in a slot.
+const startMark = "-s"
 
 // liveWait: a waiter that touched its file this recently still waits.
 const liveWait = 5 * time.Second
@@ -35,14 +58,19 @@ type Wait struct{ file string }
 // StartWait marks a slot wait for run id in dir. With no such run in dir,
 // it marks nothing and returns nil: the waiter wasn't launched from this
 // store, so no supervisor reads the mark.
-func StartWait(dir, id string, now time.Time) (*Wait, error) {
+// session says the waiter is the run's session itself, not yet started.
+func StartWait(dir, id string, now time.Time, session bool) (*Wait, error) {
 	if !ValidID(id) {
 		return nil, nil
 	}
 	if _, err := os.Stat(path(dir, id, ".json")); err != nil {
 		return nil, nil
 	}
-	name := path(dir, id, fmt.Sprintf(".wait.%d-%d", now.UnixNano(), os.Getpid()))
+	mark := ""
+	if session {
+		mark = startMark
+	}
+	name := path(dir, id, fmt.Sprintf(".wait.%d-%d%s", now.UnixNano(), os.Getpid(), mark))
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
@@ -73,9 +101,17 @@ func (w *Wait) End(now time.Time) {
 // SlotWait is how long run id's commands waited for slots between start
 // and now, overlapping waits counted once.
 func SlotWait(dir, id string, start, now time.Time) time.Duration {
+	return slotWait(dir, id, start, now, func(string) bool { return true })
+}
+
+// slotWait is SlotWait over the marks keep picks.
+func slotWait(dir, id string, start, now time.Time, keep func(name string) bool) time.Duration {
 	type span struct{ from, to time.Time }
 	var spans []span
 	for name, live := range waits(dir, id) {
+		if !keep(name) {
+			continue
+		}
 		nanos, _, ok := strings.Cut(name[strings.LastIndex(name, ".")+1:], "-")
 		n, err := strconv.ParseInt(nanos, 10, 64)
 		info, serr := os.Stat(filepath.Join(dir, name))

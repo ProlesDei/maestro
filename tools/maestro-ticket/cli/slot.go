@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -38,24 +39,50 @@ func runSlot(ctx context.Context, c *call) error {
 	name := c.fs.String("name", "checks", "slot group: commands that share a name share its slots")
 	max := c.fs.Int("max", 4, "how many commands in the group run at once")
 	wait := c.fs.Duration("wait", 0, "give up after this long with no free slot (0: wait until one frees)")
+	status := c.fs.Bool("status", false, "print who holds and who waits for each group's slots, and run nothing")
 	if err := c.parse(); err != nil {
 		return err
 	}
 	if err := c.noArgs(); err != nil {
 		return err
 	}
+	if *status {
+		if len(command) > 0 {
+			return usagef("slot: --status runs nothing: drop the command after --")
+		}
+		only := ""
+		c.fs.Visit(func(f *flag.Flag) {
+			if f.Name == "name" {
+				only = *name
+			}
+		})
+		return c.slotStatus(only)
+	}
 	if len(command) == 0 {
 		return usagef("slot: name the command to run after --")
 	}
-	if !slotName.MatchString(*name) {
-		return usagef("slot: --name %q: use lowercase letters, digits and single hyphens", *name)
+	if err := checkSlotFlags("slot", *name, *max, *wait); err != nil {
+		return err
 	}
-	if *max < 1 || *max > 256 {
-		return usagef("slot: --max %d: want 1 to 256", *max)
+	return c.inSlot(ctx, *name, *max, *wait, command)
+}
+
+func checkSlotFlags(cmd, name string, max int, wait time.Duration) error {
+	if !slotName.MatchString(name) {
+		return usagef("%s: --name %q: use lowercase letters, digits and single hyphens", cmd, name)
 	}
-	if *wait < 0 {
-		return usagef("slot: --wait %s: want 0 or more", *wait)
+	if max < 1 || max > 256 {
+		return usagef("%s: --max %d: want 1 to 256", cmd, max)
 	}
+	if wait < 0 {
+		return usagef("%s: --wait %s: want 0 or more", cmd, wait)
+	}
+	return nil
+}
+
+// inSlot runs command once one of max slots named name is free, as slot
+// does, and returns its exit as slot's.
+func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Duration, command []string) error {
 	min, err := c.minFree()
 	if err != nil {
 		return err
@@ -79,7 +106,7 @@ func runSlot(ctx context.Context, c *call) error {
 		now := time.Now()
 		if mark == nil {
 			// Best effort: a lost mark costs the run its credit, not its slot.
-			mark, _ = runs.StartWait(filepath.Join(filepath.Dir(path), "runs"), c.env.Getenv(runs.RunIDEnv), now)
+			mark, _ = runs.StartWait(filepath.Join(filepath.Dir(path), "runs"), c.env.Getenv(runs.RunIDEnv), now, filepath.Base(command[0]) == "claude")
 		}
 		mark.Touch(now)
 	}
@@ -93,10 +120,11 @@ func runSlot(ctx context.Context, c *call) error {
 		_, paused := readPause(sdir, time.Now())
 		return paused || fileExists(filepath.Join(sdir, "STOP"))
 	}
-	lock, err := takeSlot(ctx, dir, *name, *max, *wait, c.env.Stderr, tick, held)
+	use := c.slotUser(sdir, command)
+	lock, err := takeSlot(ctx, dir, name, max, wait, c.env.Stderr, tick, held, use)
 	mark.End(time.Now())
 	if err != nil && ctx.Err() != nil {
-		return fmt.Errorf("%w: stopped while waiting for a %q slot", ticket.ErrNoSlot, *name)
+		return fmt.Errorf("%w: stopped while waiting for a %q slot", ticket.ErrNoSlot, name)
 	}
 	if err != nil {
 		return err
@@ -163,7 +191,7 @@ func runSlot(ctx context.Context, c *call) error {
 // in the order they came: one tries only while fewer than max live
 // waiters are ahead of it, so slots that free together fill together, and
 // no one is passed by a waiter more than max-1 places behind it.
-func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration, w io.Writer, tick func(), held func() bool) (*os.File, error) {
+func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration, w io.Writer, tick func(), held func() bool, use slotUse) (*os.File, error) {
 	start := time.Now()
 	var place *waiter                // our place in line, once we wait
 	defer func() { place.leave() }() // place as it is at the end, not now
@@ -174,11 +202,16 @@ func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration
 		}
 		if ahead < max && (held == nil || !held()) {
 			if f, err := freeSlot(dir, name, max); f != nil || err != nil {
+				if f != nil {
+					use.Since = time.Now().UTC()
+					use.write(f)
+				}
 				return f, err
 			}
 		}
 		if place == nil {
-			if place, err = joinLine(dir, name); err != nil {
+			use.Since = time.Now().UTC()
+			if place, err = joinLine(dir, name, use); err != nil {
 				return nil, err
 			}
 			fmt.Fprintf(w, "maestro-ticket: slot: all %d %q slots busy; waiting\n", max, name)
@@ -232,7 +265,7 @@ type waiter struct {
 // joinLine adds a waiter to the end of name's line. It locks the file
 // under a name outside the line, then renames it in, which keeps the
 // lock, so no one finds the new waiter unlocked and takes it for dead.
-func joinLine(dir, name string) (*waiter, error) {
+func joinLine(dir, name string, use slotUse) (*waiter, error) {
 	f, err := os.CreateTemp(dir, name+".t.*")
 	if err != nil {
 		return nil, err
@@ -243,6 +276,9 @@ func joinLine(dir, name string) (*waiter, error) {
 	ok := false
 	if err == nil {
 		ok, err = tryLock(f)
+	}
+	if ok {
+		use.write(f)
 	}
 	if !ok && err == nil {
 		err = fmt.Errorf("slot: lock a new waiter's file %s: held elsewhere", f.Name())
