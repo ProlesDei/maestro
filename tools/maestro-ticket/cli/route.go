@@ -303,6 +303,13 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			// that name the run, and a question gets the session to decide.
 			sent := judgeSends(r.Reply, r.Job+" "+r.ID+": ")
 			out.Send = append(out.Send, sent...)
+			if len(sent) > 0 && r.Ticket != "" {
+				// Its ticket waits for the answer, sent up, so no look
+				// plans it again however long the owner takes.
+				if err := c.parkForAnswer(ctx, s, r, &out); err != nil {
+					out.Wrote = append(out.Wrote, "not parked for the answer: "+err.Error())
+				}
+			}
 			// A question beside cards waits on their answers; alone, the
 			// session decides.
 			switch {
@@ -310,7 +317,12 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			case !c.nudged(r, "decide"):
 				out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --decide")
 			default: // it asked again: the question goes up as a card
-				out.Send = append(out.Send, send{"chief-of-staff", r.Job + " " + r.ID + ": Question: " + headLine(lastLine(r.Reply))})
+				out.Send = append(out.Send, send{"chief-of-staff", r.Job + " " + r.ID + ": What: a planning session asked twice | Question: " + headLine(lastLine(r.Reply))})
+				if r.Ticket != "" {
+					if err := c.parkForAnswer(ctx, s, r, &out); err != nil {
+						out.Wrote = append(out.Wrote, "not parked for the answer: "+err.Error())
+					}
+				}
 			}
 		default: // cos, qa-ask: the asker reads the answer
 			out.Reply = r.Reply
@@ -380,6 +392,10 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("block " + id + ": " + firstLine(last.Body))
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Handoff:") >= 2:
+			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
+				return out, err
+			}
 		default:
 			out.Mismatch = "a Review: GO, a Kickback: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -420,6 +436,10 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Review: GO") >= 2:
+			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
+				return out, err
+			}
 		default:
 			out.Mismatch = "done, a Kickback: QA fail, a Rereview: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -614,6 +634,78 @@ func limitLifts(r runs.Record, reset string) time.Time {
 		ended = *r.EndedAt
 	}
 	return ended.Add(time.Hour)
+}
+
+// noVerdictRuns counts the other runs of r's job on its ticket since its
+// latest mark (a Handoff: for review, a Review: GO for QA) that ended
+// with no verdict, deaths and limits aside.
+func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
+	since := d.CreatedAt
+	if cm, ok := latestWith(d, mark); ok {
+		since = cm.CreatedAt
+	}
+	n := 0
+	for _, o := range c.allRuns() {
+		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// blockNoVerdict blocks a ticket whose review or QA keeps ending with no
+// verdict, for the judge, as blockStopped does for builds.
+func (c *call) blockNoVerdict(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out *routed) error {
+	t, id := d.Ticket, d.ID.String()
+	role := ticket.RoleReviewer
+	if r.Job == "qa" {
+		role = ticket.RoleQALead
+	}
+	body := fmt.Sprintf("Escalation: %s ended 3 times with no verdict; the last said: %s\n%s\nReturn-role: %s", r.Job, trim(out.First, 200), postedBy(r), role)
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-noverdict"}); err != nil {
+		return err
+	}
+	if _, err := s.Transition(ctx, ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInReview, To: ticket.StatusBlocked, Actor: c.actor,
+		Note: r.Job + " keeps ending with no verdict", IdempotencyKey: r.ID + "-noverdict-move"}); err != nil {
+		return err
+	}
+	out.Status = string(ticket.StatusBlocked)
+	out.Wrote = append(out.Wrote, id+" blocked: its "+r.Job+" ended 3 times with no verdict")
+	out.Send = append(out.Send, send{"planner", "block " + id + ": " + headLine(body)})
+	return nil
+}
+
+// parkForAnswer blocks a ticket a planner session sent a card up for,
+// and marks it Sent up, so it waits for the answer; keyed by the run.
+func (c *call) parkForAnswer(ctx context.Context, s ticket.Store, r runs.Record, out *routed) error {
+	tid, err := ticket.ParseID(r.Ticket)
+	if err != nil {
+		return err
+	}
+	d, err := s.Get(ctx, tid)
+	if err != nil {
+		return err
+	}
+	t := d.Ticket
+	if t.Status.Terminal() {
+		return nil
+	}
+	if cl := t.LiveClaim(); cl != nil && ticket.HolderBot(cl.Holder) != ticket.HolderBot(r.Launcher) {
+		return fmt.Errorf("%s is held by %s", r.Ticket, cl.Holder)
+	}
+	// The note alone parks it: look leaves a ticket under Sent up: be,
+	// and the session the answer resumes finds it as it left it.
+	req := ticket.CommentRequest{ID: tid, Body: "Sent up: chief of staff: the " + r.Job + " run " + r.ID + " waits on its card\n" + postedBy(r), Actor: c.actor, IdempotencyKey: r.ID + "-park"}
+	if cl := t.LiveClaim(); cl != nil {
+		req.Holder, req.Token = cl.Holder, cl.Token
+	}
+	if _, err := s.Comment(ctx, req); err != nil {
+		return err
+	}
+	out.Wrote = append(out.Wrote, r.Ticket+" waits on the card, sent up")
+	return nil
 }
 
 // stoppedBuilds counts the other build runs on r's ticket that ended

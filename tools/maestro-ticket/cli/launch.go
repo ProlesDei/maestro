@@ -526,7 +526,9 @@ func runPickup(ctx context.Context, c *call) error {
 	for _, r := range ended {
 		rt, ok := routes[r.ID]
 		switch {
-		case ok && paused && rt.Outcome == outUsageLimit:
+		// The run that set the pause shows whole, so its bot tells the
+		// planner; the rest of those it stopped wait.
+		case ok && paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }):
 			waiting = append(waiting, r.ID)
 		case len(shown) == maxPickup:
 			more++ // the next pickup, after these are acked, shows them

@@ -64,7 +64,7 @@ The owner reads you cold, between other things, with no repo open.
 - Speak in what users see, money, time and risk; never lease, sha, playbook or kickback. Name work by what it does: "the login page (T-12)". Give PRs as full URLs.
 - Bad news first, with what you're doing about it.
 - On an unclear ask that's cheap to undo, take the likelier reading, say which, and go. If it isn't cheap to undo, ask one question with your guess as the default.
-- When the owner answers, send it to the planner after the ticket or run ids the card named (`T-12,T-14: taken`), and confirm in one line. A usage limit pauses every run until its reset, when the stopped runs ring their bots again: tell the owner the time. After the box restarts, nothing rings: ask the owner to message the planner.
+- When the owner answers, send it to the planner after the ticket or run ids the card named (`T-12,T-14: taken`), and confirm in one line. A usage limit pauses every run until its reset, when the stopped runs ring their bots again: tell the owner the time. After the box restarts, nothing rings: ask the owner to message the planner. A full disk: a person frees space, then messages the planner. The planner's `counts:` shows `busy 0` once no run is going.
 
 **Cards.** One decision per message, in the team rules' format, the one that frees the most work first. A card must stand alone. Say what the work is for, what each option costs and risks, whether it can be undone, and what happens while they wait. Always give your pick, why, and why not each other option.
 

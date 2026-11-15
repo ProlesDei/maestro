@@ -450,3 +450,16 @@ func TestPickupSendsDedupe(t *testing.T) {
 		t.Fatalf("another run's pickup sends it again: %+v", other)
 	}
 }
+
+// A ticket under Sent up: waits, whatever its status.
+func TestLookLeavesSentUp(t *testing.T) {
+	l := newLookHarness(t)
+	l.h.ok(nil, "create", "--title", "x")
+	l.move("T-1", "in_progress", "in_review", "in_progress")
+	l.comment("T-1", "Kickback: at abc1234")
+	l.comment("T-1", "Sent up: chief of staff: the plan run R-x waits on its card")
+	got := l.look("", "--limit", "3")
+	if len(with(got, "send ")) != 0 || !strings.Contains(strings.Join(got, "\n"), "sent up 1") {
+		t.Fatalf("a sent-up ticket handed out: %q", got)
+	}
+}

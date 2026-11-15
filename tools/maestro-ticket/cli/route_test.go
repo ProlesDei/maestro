@@ -593,7 +593,7 @@ func TestRouteRoundFive(t *testing.T) {
 	}
 	// A planning session that asks again after --decide goes up.
 	rt = h.route(runs.Record{ID: "R-r3r3r3r3", Job: "plan", Nudge: "decide", Command: opusCmd(), Reply: "plan: stopped\nWhich area is the cart in?"})
-	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send chief-of-staff: plan R-r3r3r3r3: Question: Which area is the cart in?"}) {
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send chief-of-staff: plan R-r3r3r3r3: What: a planning session asked twice | Question: Which area is the cart in?"}) {
 		t.Fatalf("asked again after --decide: %+v", rt)
 	}
 	// pickup writes under no other bot's lease.
@@ -625,5 +625,33 @@ func TestRouteCrashedBuildsInTodo(t *testing.T) {
 	rt := h.route(runs.Record{ID: "R-cccccccc", Job: "build", Ticket: "T-1", State: runs.Failed, Exit: &code, StartedAt: time.Now(), Command: opusCmd(), Error: "boom"})
 	if rt.Status != "blocked" {
 		t.Fatalf("crashed thrice in todo: %+v", rt)
+	}
+}
+
+func TestRouteRoundSix(t *testing.T) {
+	h := newRouteHarness(t)
+	// A rewrite that sends a card up parks its ticket, sent up.
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review", "in_progress", "in_review", "in_progress")
+	h.comment("T-1", "Kickback: at abc1234")
+	rt := h.route(runs.Record{ID: "R-p6p6p6p6", Job: "plan", Ticket: "T-1", Launcher: "planner", Command: opusCmd(), Reply: "plan: draft: T-1\nup: What: x | Question: split or drop?"})
+	if d, _ := h.s.Get(context.Background(), 1); d.Status != ticket.StatusInProgress || !strings.HasPrefix(latest(d).Body, "Sent up:") || len(rt.Send) != 1 {
+		t.Fatalf("parked: %s %q %+v", d.Status, latest(d).Body, rt)
+	}
+	// Review runs that keep ending with no verdict block for the judge.
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.comment("T-2", "Handoff: PR x at "+sha)
+	dir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(dir, 0o755)
+	for range 2 {
+		r, _ := runs.Create(dir, runs.Record{Launcher: "reviewer", Limit: "45m", Command: []string{"true"}}, nil)
+		now := time.Now()
+		r.State, r.Ticket, r.Job, r.StartedAt, r.EndedAt, r.PID = runs.Failed, "T-2", "review", now, &now, 42
+		runs.Save(dir, r)
+	}
+	rt = h.route(runs.Record{ID: "R-v6v6v6v6", Job: "review", Ticket: "T-2", State: runs.Failed, PID: 42, StartedAt: time.Now(), Command: opusCmd(), Error: "boom"})
+	if rt.Status != "blocked" || !strings.HasPrefix(rt.Send[0].Line, "block T-2: Escalation: review ended 3 times") {
+		t.Fatalf("no verdict thrice: %+v", rt)
 	}
 }

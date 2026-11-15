@@ -395,7 +395,12 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
 			// One a usage limit stopped goes on when it lifts: its ticket
 			// waits for it, however long that takes.
-			limited := r.Ended() && r.Job != "" && func() bool { out, _ := outcomeOf(r); return out == outUsageLimit }()
+			// Until the limit is a --stall past lifting: a ring lost to a
+			// reboot must not hold it for good.
+			limited := r.Ended() && r.Job != "" && func() bool {
+				out, reset := outcomeOf(r)
+				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
+			}()
 			if (!r.Ended() || fresh || limited) && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
@@ -518,8 +523,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 
 	for _, t := range open {
 		id, p := t.ID, prefix[t.ID]
-		if t.Status == ticket.StatusBlocked && p == "Sent up:" {
-			n.blocked++
+		if p == "Sent up:" { // waits on the chief of staff, whatever its status
+			if t.Status == ticket.StatusBlocked {
+				n.blocked++
+			}
 			n.sentUp++
 			sentUp = append(sentUp, id.String())
 			continue

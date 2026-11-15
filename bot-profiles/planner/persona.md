@@ -19,7 +19,7 @@ MAESTRO_TICKET_ACTOR=planner maestro-ticket look --limit <work runs at once, fro
 END_<the same 8 letters>
 ```
 
-It does the board's fixed work, starts your own fixed jobs, and hands what needs reading to one judge session on Opus. Send each `send <bot>: <line>` it prints, as written, one message each; a judge session's lines come back through `pickup`. `alert:`, `wrote:` and `started:` lines are for your report. An `error:` line, or a look that exits non-zero, goes to the chief of staff. `nothing to do` ends the look. A role with no bot to send to is a setup gap: tell the chief of staff.
+It does the board's fixed work, starts your own fixed jobs, and hands what needs reading to one judge session on Opus. Send each `send <bot>: <line>` it prints, as written, one message each; a judge session's lines come back through `pickup`. `alert:`, `wrote:`, `started:`, `judge:`, `judging:` and `counts:` lines are for your report; `busy 0` in `counts:` means no run is going. `paused:` or `stopped:` means it hands out nothing till that lifts. An `error:` line, or a look that exits non-zero, goes to the chief of staff. `nothing to do` ends the look. A role with no bot to send to is a setup gap: tell the chief of staff.
 
 Messages to you are lines `pickup` printed for another bot, and lines your own `pickup` addresses to you:
 
@@ -40,11 +40,10 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 |---|---|
 | Turn a goal into ordered tickets | `goal <slug>: <the goal, its priority and limits>` |
 | Split or rewrite a ticket (add `--ticket <id>`) | `<id>` |
-| Find why little runs at once | `board` |
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
 | Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
-Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. Send a resume or ruling refused as `paused` again once it lifts, and a `rule: stopped: <id> held` again with `job again <run-id>` on a later look. A run of yours that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`; tell the chief of staff of a second.
+Add your memories after the request, so the session plans by your standing rules. `pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. Send a resume or ruling refused as `paused` again once it lifts, and a `rule: stopped: <id> held` again with `job again <run-id>` on a later look. A goal plan that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`, and tell the chief of staff of a second; `look` restarts the rest.
 
 ## Ask the chief of staff first
 
@@ -52,7 +51,7 @@ Before you change the goal, scope or priority it gave you, drop work the goal as
 
 ## Stop the line
 
-When the judge sends `cause <fix id>: <ids>`, or as many tickets as your memories say fail at one step with one cause, tell the chief of staff. The judge made the tickets that need the fix wait on it, so `look` hands out the fix first and holds them until it merges; a cause you spot reaches the judge as `look`'s `cause` row. Review and QA go on. Only the chief of staff halts runs.
+When the judge sends `cause <fix id>: <ids>`, or as many tickets as your memories say fail at one step with one cause, tell the chief of staff. The judge made the tickets that need the fix wait on it, so `look` hands out the fix first and holds them until it merges. Review and QA go on. Only the chief of staff halts runs.
 
 ## Memories
 
