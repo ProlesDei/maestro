@@ -145,19 +145,20 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	// The limit leaves out time the command spent waiting for a slot, up
-	// to maxSlotCredit, so the deadline moves on each time it comes.
+	// to what Credit allows, so the deadline moves on each time it comes.
 	begun := time.Now()
 	timer := time.NewTimer(limit)
 	defer timer.Stop()
 	why := ""
 	var credit time.Duration
+	capped := false
 wait:
 	for {
 		select {
 		case <-done:
 			break wait
 		case <-timer.C:
-			credit = min(SlotWait(dir, r.ID, begun, time.Now()), maxSlotCredit)
+			credit, capped = Credit(dir, r.ID, begun, time.Now(), limit)
 			if left := time.Until(begun.Add(limit + credit)); left > 0 {
 				// While a wait goes on, the deadline moves as fast as the
 				// clock: look again no sooner than liveWait, not in a spin,
@@ -210,7 +211,7 @@ wait:
 		r.Error = fmt.Sprintf("the %s time limit ended it", r.Limit)
 		if credit > 0 {
 			r.Error += fmt.Sprintf(", which left out %s waiting for a slot", credit.Round(time.Second))
-			if credit == maxSlotCredit {
+			if capped {
 				r.Error += " (the most it leaves out)"
 			}
 		}

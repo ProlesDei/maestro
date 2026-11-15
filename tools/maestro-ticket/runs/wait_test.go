@@ -60,10 +60,10 @@ func TestSlotWait(t *testing.T) {
 // closes the mark it made.
 func TestStartWaitNeedsTheRun(t *testing.T) {
 	dir := t.TempDir()
-	if w, err := StartWait(dir, "R-aaaaaaaa", time.Now()); w != nil || err != nil {
+	if w, err := StartWait(dir, "R-aaaaaaaa", time.Now(), false); w != nil || err != nil {
 		t.Fatalf("no record: %v, %v", w, err)
 	}
-	if w, err := StartWait(dir, "../../x", time.Now()); w != nil || err != nil {
+	if w, err := StartWait(dir, "../../x", time.Now(), false); w != nil || err != nil {
 		t.Fatalf("bad id: %v, %v", w, err)
 	}
 	r, err := Create(dir, Record{Launcher: "qa-lead", Limit: "1h"}, nil)
@@ -71,7 +71,7 @@ func TestStartWaitNeedsTheRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now().Add(-2 * time.Second)
-	w, err := StartWait(dir, r.ID, start)
+	w, err := StartWait(dir, r.ID, start, false)
 	if err != nil || w == nil {
 		t.Fatalf("StartWait: %v, %v", w, err)
 	}
@@ -92,7 +92,7 @@ func TestSuperviseLeavesOutSlotWaits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := StartWait(dir, r.ID, time.Now())
+	w, err := StartWait(dir, r.ID, time.Now(), false)
 	if err != nil || w == nil {
 		t.Fatalf("StartWait: %v, %v", w, err)
 	}
@@ -145,5 +145,31 @@ func TestSuperviseRingsAgain(t *testing.T) {
 	}
 	if n := rings.Load(); n != 2 || time.Since(begun) < 1500*time.Millisecond {
 		t.Fatalf("%d rings after %s; want the first and one more at the lift", n, time.Since(begun))
+	}
+}
+
+// A session's wait to start counts up to maxSlotCredit; a wait inside the
+// session only up to twice the limit, so a session that holds its context
+// in a queue ends at three times its limit.
+func TestCreditCapsWaitsInsideTheSession(t *testing.T) {
+	dir := t.TempDir()
+	id := "R-aaaaaaaa"
+	t0 := time.Now().Add(-10 * time.Hour).Truncate(time.Second)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	now := at(600)
+	start := filepath.Join(dir, fmt.Sprintf("%s.waited.%d-1%s", id, at(0).UnixNano(), startMark))
+	if err := os.WriteFile(start, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(start, at(180), at(180)); err != nil { // 3h to start
+		t.Fatal(err)
+	}
+	mark(t, dir, id, "waited", at(200), at(400)) // 200m inside
+	got, capped := Credit(dir, id, t0, now, time.Hour)
+	if want := 3*time.Hour + 2*time.Hour; got != want || !capped {
+		t.Fatalf("Credit = %s, capped %v; want %s, capped", got, capped, want)
+	}
+	if got, capped := Credit(dir, id, t0, now, 4*time.Hour); got != 3*time.Hour+200*time.Minute || capped {
+		t.Fatalf("4h limit: Credit = %s, capped %v; want all of it", got, capped)
 	}
 }

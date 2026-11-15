@@ -123,7 +123,13 @@ Commands:
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
               own that is removed when it ends; waiters go in the order they came,
-              and a launched run's limit leaves out the wait; exits with its code)
+              and a launched run's limit leaves out the wait, up to twice the limit;
+              exits with its code)
+  slot        --status [--name N]   (who holds each group's slots and who waits, oldest first)
+  check       <name> [--slot checks] [--max 4] [--wait D] [--fresh] -- <command> [args]
+              (runs the command as slot does, unless a review or QA run passed the same
+              command on the same git tree: then it prints where, and exits 0; a pass
+              is recorded only from a clean checkout the run left clean)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -214,6 +220,7 @@ var commands = []command{
 	{"render", runRender},
 	{"doctor", runDoctor},
 	{"slot", runSlot},
+	{"check", runCheck},
 }
 
 // call is one parsed invocation.
