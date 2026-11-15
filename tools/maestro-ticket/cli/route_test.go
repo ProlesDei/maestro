@@ -608,3 +608,22 @@ func TestRouteRoundFive(t *testing.T) {
 		t.Fatalf("another's claim was touched: %+v", d.Ticket)
 	}
 }
+
+// Builds that crash before a session claims the ticket count too.
+func TestRouteCrashedBuildsInTodo(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	dir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(dir, 0o755)
+	code := 1
+	for range 2 {
+		r, _ := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "2h", Command: []string{"true"}}, nil)
+		now := time.Now()
+		r.State, r.Ticket, r.Job, r.StartedAt, r.EndedAt, r.Exit, r.PID = runs.Failed, "T-1", "build", now, &now, &code, 4242
+		runs.Save(dir, r)
+	}
+	rt := h.route(runs.Record{ID: "R-cccccccc", Job: "build", Ticket: "T-1", State: runs.Failed, Exit: &code, StartedAt: time.Now(), Command: opusCmd(), Error: "boom"})
+	if rt.Status != "blocked" {
+		t.Fatalf("crashed thrice in todo: %+v", rt)
+	}
+}

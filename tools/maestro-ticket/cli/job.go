@@ -238,7 +238,10 @@ func runJob(ctx context.Context, c *call) error {
 		return usagef("job: name the job: %s", jobNames())
 	}
 	if c.args[0] == "again" {
-		return c.runAgain(ctx, *limit, *full)
+		if err := c.runAgain(ctx, *limit, *full); !c.goingOn(err) {
+			return err
+		}
+		return nil
 	}
 	k, ok := findJob(c.args[0])
 	if !ok {
@@ -289,6 +292,9 @@ func runJob(ctx context.Context, c *call) error {
 		}
 	}
 	r, m, why, err := c.startJob(ctx, req)
+	if c.goingOn(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -433,7 +439,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		if err != nil {
 			return fail(err)
 		}
-		if commit, abort, err = takeActive(dir, activeFile(dir, ticketID, k.name)); err != nil {
+		if commit, abort, err = takeActive(dir, activeFile(dir, ticketID, k.name), c.actor); err != nil {
 			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
 		}
 	}
@@ -485,6 +491,9 @@ func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 		list, _ := runs.List(dir, time.Now(), false)
 		for _, r := range list {
 			if !r.Ended() && r.Ticket == id && (r.Job == k.name || r.Job == "") {
+				if r.Launcher == c.actor && r.Job == k.name {
+					return alreadyGoing{r.ID}
+				}
 				return fmt.Errorf("%w: job %s: run %s, %s's, already works on %s", ticket.ErrClaimed, k.name, r.ID, r.Launcher, id)
 			}
 		}
@@ -540,13 +549,35 @@ func activeFile(dir, ticketID, job string) string {
 
 // takeActive makes the file at p for a run about to start, or names the
 // live run that holds it. A file left by a run that ended is taken over.
-func takeActive(dir, p string) (commit func(runID string), abort func(), err error) {
+func takeActive(dir, p, actor string) (commit func(runID string), abort func(), err error) {
 	return takeMark(dir, p, func(id string) error {
 		if r, err := runs.Get(dir, id, time.Now()); err == nil && !r.Ended() {
+			if r.Launcher == actor {
+				return alreadyGoing{r.ID}
+			}
 			return fmt.Errorf("%w: run %s, %s's, already does it", ticket.ErrClaimed, r.ID, r.Launcher)
 		}
 		return nil
 	})
+}
+
+// alreadyGoing is a start a session of the same bot already made: the
+// work goes on, so it is no failure, and the bot does nothing more.
+type alreadyGoing struct{ run string }
+
+func (a alreadyGoing) Error() string { return "already going as " + a.run }
+
+// goingOn prints a start another session of this bot made, and reports
+// whether err was one.
+func (c *call) goingOn(err error) bool {
+	var a alreadyGoing
+	if !errors.As(err, &a) {
+		return false
+	}
+	c.out(map[string]any{"already_going": a.run}, func(w io.Writer) {
+		fmt.Fprintf(w, "%s already going: nothing to do\n", a.run)
+	})
+	return true
 }
 
 // takeMark makes the mark file at p with O_EXCL, so of takers at once one
@@ -800,7 +831,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd}
 	commit, abort := func(string) {}, func() {}
 	if r.Ticket != "" {
-		if commit, abort, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job)); err != nil {
+		if commit, abort, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job), c.actor); err != nil {
 			return fmt.Errorf("job again %s: %w", r.ID, err)
 		}
 	}
@@ -839,10 +870,19 @@ const decideText = "Make each call you stopped on that is the planner's yourself
 // it moves to Opus in the senior engineer's place.
 const opusText = "You are now on Opus, in the senior engineer's place. Settle your question yourself if the ticket and the repo settle it, and go on. If they don't, send it up as your skill says."
 
-// runResume resumes a run's session as a new run with the same command,
+// runResume runs resume; a resume another session of this bot made is
+// already going, no failure.
+func runResume(ctx context.Context, c *call) error {
+	if err := resumeRun(ctx, c); !c.goingOn(err) {
+		return err
+	}
+	return nil
+}
+
+// resumeRun resumes a run's session as a new run with the same command,
 // ticket and limit: with the answer on stdin; with --died, once, after
 // the run died; with --opus, on Opus at high effort.
-func runResume(ctx context.Context, c *call) error {
+func resumeRun(ctx context.Context, c *call) error {
 	died := c.fs.Bool("died", false, "the run died: resume it once with \""+diedText+"\"")
 	opus := c.fs.Bool("opus", false, "resume on Opus at high effort, as for a junior build's stuck session")
 	escalate := c.fs.Bool("escalate", false, "resume a build that ended on a question with \""+escalateText+"\"")
@@ -911,7 +951,7 @@ func runResume(ctx context.Context, c *call) error {
 			return fmt.Errorf("%w: resume --%s: session %s had it once already (%s): it goes up instead", ticket.ErrStatusConflict, nudge, session, o.ID)
 		}
 		if o.ResumeOf == r.ID {
-			return fmt.Errorf("%w: resume: run %s was resumed already, as %s: act on that run's result", ticket.ErrStatusConflict, r.ID, o.ID)
+			return alreadyGoing{o.ID} // only its launcher resumes a run: this bot did
 		}
 		if *died && o.AfterDeath && flagValue(o.Command, "--resume") == session {
 			return fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, o.ID)
@@ -953,7 +993,7 @@ func runResume(ctx context.Context, c *call) error {
 	}
 	// A run resumes once: of resumes at once, one makes its marker.
 	commitMark, abortMark, err := takeMark(dir, filepath.Join(dir, r.ID+".resumed"), func(id string) error {
-		return fmt.Errorf("%w: resume: run %s was resumed already, as %s: act on that run's result", ticket.ErrStatusConflict, r.ID, id)
+		return alreadyGoing{id}
 	})
 	if err != nil {
 		return err
@@ -961,7 +1001,7 @@ func runResume(ctx context.Context, c *call) error {
 	// And one run of a job on a ticket at a time, resumed or not.
 	commitActive, abortActive := func(string) {}, func() {}
 	if r.Ticket != "" && r.Job != "" {
-		if commitActive, abortActive, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job)); err != nil {
+		if commitActive, abortActive, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job), c.actor); err != nil {
 			abortMark()
 			return fmt.Errorf("resume %s: %w", r.ID, err)
 		}

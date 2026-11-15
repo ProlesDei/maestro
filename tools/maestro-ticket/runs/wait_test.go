@@ -136,7 +136,7 @@ func TestSuperviseRingsAgain(t *testing.T) {
 	defer srv.Close()
 	begun := time.Now()
 	err = Supervise(context.Background(), dir, r.ID, Options{
-		Rings:     []time.Duration{0},
+		Rings:     []time.Duration{0, 300 * time.Millisecond, 600 * time.Millisecond}, // only the first, then the lift
 		Hook:      func(string) (Hook, error) { return Hook{URL: srv.URL}, nil },
 		RingAgain: func(Record) time.Time { return begun.Add(1500 * time.Millisecond) },
 	})

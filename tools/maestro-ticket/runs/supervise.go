@@ -252,7 +252,13 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 		return
 	}
 	end := *r.EndedAt
-	for _, at := range o.Rings {
+	rings := o.Rings
+	if o.RingAgain != nil && !o.RingAgain(r).IsZero() && len(rings) > 1 {
+		// It waits on a time: one ring now and one then, not a ring each
+		// few minutes that its bot can only answer with a refused retry.
+		rings = rings[:1]
+	}
+	for _, at := range rings {
 		// Look for an ack every few seconds while it waits, so a
 		// supervisor whose result was acked exits soon after.
 		for !Acked(dir, r.ID) {

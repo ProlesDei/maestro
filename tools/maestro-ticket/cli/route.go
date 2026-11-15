@@ -518,7 +518,9 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		planner("block " + id + ": " + headLine(body))
 	case out.Outcome == outRefused:
 		planner("refused " + id + ": " + out.First)
-	case t.Status == ticket.StatusInProgress && c.stoppedBuilds(r, d) >= 2 && (t.LiveClaim() == nil || ownClaim() != nil):
+	// A build that crashed before its session claimed the ticket leaves it
+	// in todo: those count too.
+	case (t.Status == ticket.StatusInProgress || t.Status == ticket.StatusTodo) && c.stoppedBuilds(r, d) >= 2 && (t.LiveClaim() == nil || ownClaim() != nil):
 		// The third build since its last handoff or send-back that stopped
 		// with nothing to show: no fourth by rote. The judge looks.
 		if err := c.blockStopped(ctx, s, r, d, &out); err != nil {
@@ -640,7 +642,7 @@ func (c *call) blockStopped(ctx context.Context, s ticket.Store, r runs.Record, 
 	t, id := d.Ticket, d.ID.String()
 	body := fmt.Sprintf("Escalation: build stopped 3 times with no handoff; the last said: %s\n%s\nReturn-role: engineer", trim(out.First, 200), postedBy(r))
 	req := ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-stopped"}
-	move := ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInProgress, To: ticket.StatusBlocked, Actor: c.actor, Note: "its builds keep stopping", IdempotencyKey: r.ID + "-stopped-move"}
+	move := ticket.TransitionRequest{ID: t.ID, From: t.Status, To: ticket.StatusBlocked, Actor: c.actor, Note: "its builds keep stopping", IdempotencyKey: r.ID + "-stopped-move"}
 	if cl := t.LiveClaim(); cl != nil && ticket.HolderBot(cl.Holder) == ticket.HolderBot(r.Launcher) {
 		req.Holder, req.Token = cl.Holder, cl.Token
 		move.Holder, move.Token, move.Release = cl.Holder, cl.Token, true

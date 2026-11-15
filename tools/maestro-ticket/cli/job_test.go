@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -298,8 +299,8 @@ func TestResume(t *testing.T) {
 		t.Fatalf("resumed record: %+v (%s)", nr, s.Model)
 	}
 
-	if out := j.fails(4, "x", "resume", r.ID); !strings.Contains(out, "resumed already, as "+nr.ID) {
-		t.Fatalf("a run resumed twice: %s", out)
+	if out, err := j.cmd("x", "resume", r.ID).Output(); err != nil || !strings.Contains(string(out), nr.ID+" already going") {
+		t.Fatalf("a run resumed twice is already going: %v %s", err, out)
 	}
 	if p := j.pickup(); slices.ContainsFunc(p.Ended, func(x runs.Record) bool { return x.ID == r.ID }) {
 		t.Fatalf("a resumed run is acked: pickup still shows it")
@@ -381,6 +382,7 @@ func TestJobAndResumeOneAtOnce(t *testing.T) {
 	j := newJobHarness(t, "junior-engineer")
 	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
 	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(strings.Replace(fakeClaude, "printf '{", "sleep 2; printf '{", 1)), 0o755)
+	// Of 8 starts at once one starts; the rest find it already going.
 	race := func(args ...string) int {
 		var wg sync.WaitGroup
 		ok := make(chan bool, 8)
@@ -388,7 +390,8 @@ func TestJobAndResumeOneAtOnce(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				ok <- j.cmd("", args...).Run() == nil
+				out, err := j.cmd("", args...).Output()
+				ok <- err == nil && strings.Contains(string(out), " started: ")
 			}()
 		}
 		wg.Wait()
@@ -447,8 +450,8 @@ func TestResumeRoundThree(t *testing.T) {
 		t.Fatalf("resume: %v %s", err, out)
 	}
 	json.Unmarshal(out, &s)
-	if o := j.fails(4, "", "job", "build", "T-1"); !strings.Contains(o, "already") {
-		t.Fatalf("a build beside a resumed one: %s", o)
+	if o, err := j.cmd("", "job", "build", "T-1").Output(); err != nil || !strings.Contains(string(o), s.Run.ID+" already going") {
+		t.Fatalf("a build beside a resumed one by the same bot is already going: %v %s", err, o)
 	}
 	nr := j.waitEnded(s.Run.ID, 20*time.Second)
 	os.WriteFile(filepath.Join(j.bin, "claude"), []byte(fakeClaude), 0o755)
@@ -530,5 +533,29 @@ func TestResumeFitsAndAckLine(t *testing.T) {
 	out, _ := j.cmd("", "pickup").Output()
 	if strings.Contains(string(out), "maestro-ticket ack "+r.ID) || !strings.Contains(string(out), "do: maestro-ticket resume "+r.ID+" --died") {
 		t.Fatalf("pickup:\n%s", out)
+	}
+}
+
+// While a usage limit holds, pickup shows the runs it stopped as one line,
+// with nothing to retry or ack; the slot line holds a Claude session.
+func TestPickupWaitsOutALimit(t *testing.T) {
+	j := newJobHarness(t, "qa-lead")
+	j.h.ok(nil, "create", "--title", "a")
+	for _, st := range []string{"in_progress", "in_review"} {
+		j.h.ok(nil, "transition", "T-1", "--to", st)
+	}
+	_, r := j.job("", "qa", "T-1")
+	dir := filepath.Join(j.h.dir, "runs")
+	lifts := time.Now().Add(time.Hour)
+	r.State, r.IsError, r.Reply = runs.Failed, true, "Claude AI usage limit reached|"+strconv.FormatInt(lifts.Unix(), 10)
+	runs.Save(dir, r)
+	setPause(j.h.dir, pause{Until: lifts, Why: "usage limit"}, time.Now())
+	out, _ := j.cmd("", "pickup").Output()
+	if !strings.Contains(string(out), "1 runs wait for the usage limit to lift") || strings.Contains(string(out), "do: ") || strings.Contains(string(out), "ack "+r.ID) {
+		t.Fatalf("pickup during a limit:\n%s", out)
+	}
+	slot := j.cmd("", "slot", "--name", "qa", "--max", "6", "--wait", "2s", "--", "claude", "-p")
+	if o, err := slot.CombinedOutput(); err == nil || !strings.Contains(string(o), "busy") {
+		t.Fatalf("a Claude session started in the slot line during a limit: %v %s", err, o)
 	}
 }

@@ -471,6 +471,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			req.ticket = id.String()
 		}
 		r, _, _, err := c.startJob(ctx, req)
+		var going alreadyGoing
+		if errors.As(err, &going) {
+			return // the planner's own job runs already
+		}
 		if err != nil {
 			os.Remove(handoutPath(o.handouts, id.String(), "planner-job"))
 			keep(fmt.Errorf("start %s %s: %w", kind, id, err))

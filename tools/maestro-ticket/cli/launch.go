@@ -485,14 +485,11 @@ func runPickup(ctx context.Context, c *call) error {
 		return err
 	}
 	ended, running := []runs.Record{}, []runs.Record{}
-	more := 0
 	for _, r := range list {
 		switch {
 		case r.Launcher != c.actor:
 		case !r.Ended():
 			running = append(running, r)
-		case len(ended) == maxPickup:
-			more++ // the next pickup, after these are acked, shows them
 		default:
 			ended = append(ended, r)
 		}
@@ -520,6 +517,24 @@ func runPickup(ctx context.Context, c *call) error {
 			s.Close()
 		}
 	}
+	// While a usage limit holds, the runs it stopped wait: no do: line
+	// to retry, no ack, one line for all; they ring again as it lifts.
+	// The rest come first, 20 at most a call.
+	pause, paused := readPause(filepath.Dir(dir), now)
+	waiting, shown := []string{}, []runs.Record{}
+	more := 0
+	for _, r := range ended {
+		rt, ok := routes[r.ID]
+		switch {
+		case ok && paused && rt.Outcome == outUsageLimit:
+			waiting = append(waiting, r.ID)
+		case len(shown) == maxPickup:
+			more++ // the next pickup, after these are acked, shows them
+		default:
+			shown = append(shown, r)
+		}
+	}
+	ended = shown
 	routeList := []routed{}
 	for _, r := range ended {
 		if rt, ok := routes[r.ID]; ok {
@@ -530,7 +545,7 @@ func runPickup(ctx context.Context, c *call) error {
 			routeList = append(routeList, rt)
 		}
 	}
-	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList}, func(w io.Writer) {
+	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting}, func(w io.Writer) {
 		ids := []string{}
 		for _, r := range ended {
 			// A run with a do: line is acked by that command when it
@@ -550,6 +565,9 @@ func runPickup(ctx context.Context, c *call) error {
 			}
 		}
 		defer func() {
+			if len(waiting) > 0 {
+				fmt.Fprintf(w, "%d runs wait for the usage limit to lift at %s: nothing to do till then; they ring you as it lifts\n", len(waiting), pause.Until.Format(time.RFC3339))
+			}
 			if more > 0 {
 				fmt.Fprintf(w, "and %d more ended: run pickup again once these are acked\n", more)
 			}
