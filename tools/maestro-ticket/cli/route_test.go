@@ -91,6 +91,7 @@ func (h *routeHarness) route(r runs.Record) routed {
 	if r.StartedAt.IsZero() {
 		r.StartedAt = time.Now().Add(-time.Hour)
 	}
+	h.c.runCache = nil // as each pickup lists the runs afresh
 	rt, err := h.c.route(context.Background(), h.s, r)
 	if err != nil {
 		h.t.Fatalf("route %+v: %v", r, err)
@@ -271,7 +272,7 @@ func TestRouteOutcomes(t *testing.T) {
 
 	rt := h.route(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Reply: "Claude AI usage limit reached|1763150400"})
 	// The reset passed long ago: no pause, and the job simply runs again.
-	if rt.Outcome != outUsageLimit || rt.Reset != "2025-11-14T20:00:00Z" || len(rt.Send) != 0 || !slices.Equal(rt.Do, []string{"maestro-ticket job again R-aaaaaaaa"}) {
+	if rt.Outcome != outUsageLimit || rt.Reset != "2025-11-14T20:00:00Z" || len(rt.Send) != 0 || !slices.Equal(rt.Do, []string{"maestro-ticket resume R-aaaaaaaa --go-on"}) {
 		t.Fatalf("usage limit: %+v", rt)
 	}
 	rt = h.route(runs.Record{Job: "build", Ticket: "T-1", Reply: "You've hit your limit · resets 3pm (UTC)"})
@@ -503,7 +504,7 @@ func TestRouteUsageLimitKeepsWork(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	rt := h.route(runs.Record{ID: "R-llllllll", Job: "build", Ticket: "T-1", Launcher: "junior-engineer", State: runs.Failed, IsError: true, EndedAt: &future,
 		Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)})
-	if !slices.Equal(rt.Do, []string{"maestro-ticket job again R-llllllll"}) || !slices.Contains(rt.Wrote, "released T-1 till the limit lifts") {
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-llllllll --go-on"}) || !slices.Contains(rt.Wrote, "released T-1 till the limit lifts") {
 		t.Fatalf("usage limit: %+v", rt)
 	}
 	if d, _ := h.s.Get(context.Background(), 1); d.LiveClaim() != nil || d.LeaseExpiries != 0 {
@@ -517,11 +518,16 @@ func TestRouteNudgeOnce(t *testing.T) {
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress")
 	rt := h.route(runs.Record{ID: "R-nnnnnnnn", Job: "build", Ticket: "T-1", Nudge: "escalate", Command: opusCmd(), Reply: "Which key should I use?"})
-	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send planner: question T-1: Which key should I use?"}) || rt.Status != "blocked" {
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send planner: block T-1: Escalation: build: Which key should I use?"}) || rt.Status != "blocked" {
 		t.Fatalf("asked again: %+v", rt)
 	}
-	if d, _ := h.s.Get(context.Background(), 1); latest(d).Body != "Escalation: build: Which key should I use?\nReturn-role: engineer" {
+	if d, _ := h.s.Get(context.Background(), 1); latest(d).Body != "Escalation: build: Which key should I use?\nPosted-by: pickup R-nnnnnnnn\nReturn-role: engineer" {
 		t.Fatalf("posted: %q", latest(d).Body)
+	}
+	// A second pickup of the run routes the same, and resumes nothing.
+	again := h.route(runs.Record{ID: "R-nnnnnnnn", Job: "build", Ticket: "T-1", Nudge: "escalate", Command: sonnetCmd(), Reply: "Which key should I use?"})
+	if len(again.Do) != 0 || !slices.Equal(sends(again), sends(rt)) {
+		t.Fatalf("second pickup: %+v", again)
 	}
 	h.ok(nil, "create", "--title", "b")
 	h.move("T-2", "in_progress")
@@ -562,7 +568,43 @@ func TestRouteStoppedBuilds(t *testing.T) {
 		runs.Save(dir, r)
 	}
 	rt := h.route(runs.Record{ID: "R-ssssssss", Job: "build", Ticket: "T-1", StartedAt: time.Now(), Command: opusCmd(), Reply: "build: waiting_on_deps: T-1"})
-	if rt.Status != "blocked" || !slices.Equal(sends(rt), []string{"send planner: block T-1: builds stopped 3 times"}) {
+	if rt.Status != "blocked" || len(rt.Send) != 1 || !strings.HasPrefix(rt.Send[0].Line, "block T-1: Escalation: build stopped 3 times") {
 		t.Fatalf("stopped thrice: %+v", rt)
+	}
+}
+
+func TestRouteRoundFive(t *testing.T) {
+	h := newRouteHarness(t)
+	// A review that timed out after its verdict sends nothing to rerun.
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review", "in_progress")
+	h.comment("T-1", "Kickback: at abc1234")
+	rt := h.route(runs.Record{ID: "R-r1r1r1r1", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now().Add(-time.Hour), Command: opusCmd()})
+	if len(rt.Do) != 0 {
+		t.Fatalf("a rerun after the verdict: %+v", rt)
+	}
+	// With no Handoff:, the second timeout stops rerunning.
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.timedOut("T-2", "review")
+	rt = h.route(runs.Record{ID: "R-r2r2r2r2", Job: "review", Ticket: "T-2", State: runs.TimedOut, Limit: "45m", StartedAt: time.Now(), Command: opusCmd()})
+	if len(rt.Do) != 0 {
+		t.Fatalf("no Handoff:, timed out twice: %+v", rt)
+	}
+	// A planning session that asks again after --decide goes up.
+	rt = h.route(runs.Record{ID: "R-r3r3r3r3", Job: "plan", Nudge: "decide", Command: opusCmd(), Reply: "plan: stopped\nWhich area is the cart in?"})
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send chief-of-staff: plan R-r3r3r3r3: Question: Which area is the cart in?"}) {
+		t.Fatalf("asked again after --decide: %+v", rt)
+	}
+	// pickup writes under no other bot's lease.
+	h.ok(nil, "create", "--title", "c")
+	h.move("T-3", "in_progress")
+	h.ok(nil, "claim", "T-3", "--holder", "senior-engineer/other", "--status", "in_progress")
+	rt = h.route(runs.Record{ID: "R-r4r4r4r4", Job: "build", Ticket: "T-3", Launcher: "junior-engineer", Nudge: "escalate", Command: opusCmd(), Reply: "Which key?"})
+	if len(rt.Wrote) != 0 {
+		t.Fatalf("wrote under another's lease: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 3); d.LiveClaim() == nil || d.Status != ticket.StatusInProgress {
+		t.Fatalf("another's claim was touched: %+v", d.Ticket)
 	}
 }

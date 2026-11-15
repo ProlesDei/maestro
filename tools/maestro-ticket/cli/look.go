@@ -879,13 +879,6 @@ func printLook(w io.Writer, o lookOut) {
 	fmt.Fprintf(w, "counts: %s\n", o.Counts)
 }
 
-func ticketOrNone(id ticket.ID) string {
-	if id == 0 {
-		return "no ticket"
-	}
-	return id.String()
-}
-
 // capped names up to 10, then how many more, so a line stays short on a
 // board of hundreds.
 func capped(xs []string) string {

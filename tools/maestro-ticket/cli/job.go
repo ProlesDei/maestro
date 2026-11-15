@@ -778,11 +778,9 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		}
 	}
 	cmd := slices.Clone(first.Command)
-	exe, exeErr := os.Executable()
+	cmd = thisSlotBinary(cmd)
 	for i := 0; i+1 < len(cmd); i++ {
 		switch {
-		case exeErr == nil && cmd[i+1] == "slot" && filepath.Base(cmd[i]) == filepath.Base(exe):
-			cmd[i] = exe // this binary as it is now
 		case cmd[i] == "--session-id":
 			cmd[i+1] = newSessionID()
 		case cmd[i] == "--model" && (full || flagValue(r.Command, "--model") == modelOpus):
@@ -981,6 +979,22 @@ func runResume(ctx context.Context, c *call) error {
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)
 }
 
+// thisSlotBinary is cmd with its slot wrapper on this binary as it is now,
+// not the path the run started from, which an upgrade may have moved.
+func thisSlotBinary(cmd []string) []string {
+	cmd = slices.Clone(cmd)
+	exe, err := os.Executable()
+	if err != nil {
+		return cmd
+	}
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i+1] == "slot" && filepath.Base(cmd[i]) == filepath.Base(exe) {
+			cmd[i] = exe
+		}
+	}
+	return cmd
+}
+
 // flagValue is the word after flag in a command line, or "".
 func flagValue(cmd []string, flag string) string {
 	for i, w := range cmd {
@@ -999,15 +1013,9 @@ func flagValue(cmd []string, flag string) string {
 // with opus the model and effort become Opus at high.
 func resumeCommand(cmd []string, session string, opus bool) []string {
 	out := []string{}
-	exe, exeErr := os.Executable()
+	cmd = thisSlotBinary(cmd)
 	for i := 0; i < len(cmd); i++ {
 		w := cmd[i]
-		// The slot wrapper runs this binary as it is now, not the path the
-		// run started from, which an upgrade may have moved.
-		if exeErr == nil && i+1 < len(cmd) && cmd[i+1] == "slot" && filepath.Base(w) == filepath.Base(exe) {
-			out = append(out, exe)
-			continue
-		}
 		name, _, eq := strings.Cut(w, "=")
 		switch {
 		case w == "--session-id" || w == "--resume" || (opus && (w == "--model" || w == "--effort")):

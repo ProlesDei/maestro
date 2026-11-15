@@ -24,6 +24,7 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -223,8 +224,9 @@ type call struct {
 	storeFlag string
 	actor     string
 	idemKey   string
-	args      []string // positional arguments
-	store     struct { // storePath's answer, so git runs once a call
+	args      []string       // positional arguments
+	runCache  *[]runs.Record // every run, listed once a call (allRuns)
+	store     struct {       // storePath's answer, so git runs once a call
 		done         bool
 		path, source string
 		err          error
