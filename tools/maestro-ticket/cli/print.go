@@ -66,6 +66,9 @@ func printDetail(w io.Writer, d ticket.Detail, keep []bool) {
 	if d.Goal != "" {
 		fmt.Fprintf(w, "goal:     %s\n", d.Goal)
 	}
+	if d.Tier != "" {
+		fmt.Fprintf(w, "tier:     %s\n", d.Tier)
+	}
 	fmt.Fprintf(w, "role:     %s\n", dash(d.Role))
 	fmt.Fprintf(w, "owner:    %s\n", dash(d.Owner))
 	fmt.Fprintf(w, "tries:    %d\n", d.Tries)
@@ -141,10 +144,10 @@ func printList(w io.Writer, list []ticket.Ticket) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tTYPE\tSTATUS\tP\tROLE\tCLAIM\tTRIES\tV\tTITLE")
+	fmt.Fprintln(tw, "ID\tTYPE\tSTATUS\tP\tROLE\tTIER\tCLAIM\tTRIES\tV\tTITLE")
 	for _, t := range list {
-		fmt.Fprintf(tw, "%s\t%s\t%s\tP%d\t%s\t%s\t%d\t%d\t%s\n",
-			t.ID, t.Type, statusText(t), t.Priority, dash(t.Role), claimText(t.Claim), t.Tries, t.Version, t.Title)
+		fmt.Fprintf(tw, "%s\t%s\t%s\tP%d\t%s\t%s\t%s\t%d\t%d\t%s\n",
+			t.ID, t.Type, statusText(t), t.Priority, dash(t.Role), dash(t.Tier), claimText(t.Claim), t.Tries, t.Version, t.Title)
 	}
 	tw.Flush()
 }

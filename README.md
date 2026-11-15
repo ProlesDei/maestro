@@ -16,14 +16,14 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 ## How work moves
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
-2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, hands each ticket's build, review and QA to the right bot, and reports status and the blocks it can't settle to the chief of staff.
+2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, each tagged junior or senior, hands out builds by tier with one `maestro-ticket look` per wake, sends what needs reading to a judge session, and reports status and the blocks it can't settle to the chief of staff.
 3. When a goal changes screens, the **designer** runs `/maestro-designer` on its `Design:` ticket first: two or three directions in code, one pick and a spec, handed up as a draft PR. The owner approves it or asks for changes; only then does the planner write the screen tickets, with criteria from the spec.
-4. The **senior engineer** (top model, high effort) takes risky or broad tickets; the **junior engineer** (a cheaper model) takes routine ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree.
-5. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO hands the ticket to QA with a `Review: GO` note; NO-GO sends it back with a `Kickback:` note.
+4. The **senior engineer** (Opus) takes senior-tier tickets and a junior's ticket sent back twice; the **junior engineer** (Sonnet) takes junior-tier ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree; a build in review goes straight to the reviewer.
+5. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO goes straight to QA with a `Review: GO` note; NO-GO goes straight back to the engineer with a `Kickback:` note.
 6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
-7. A block climbs one rung at a time (junior engineer, senior engineer, planner, chief of staff, owner) until someone can answer it. A review's block leaves an `Escalation:` note; the planner posts the answer and the ticket goes back to review.
+7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
-Every role follows the [team rules](bot-profiles/team-rules.md).
+Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot rereads its whole chat at every step.
 
 <!-- Source: docs/team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
@@ -32,12 +32,12 @@ flowchart TD
 
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, review and QA"]
-        Sr["<b>Senior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
-        Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
-        Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
-        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
-        Des["<b>Designer</b><br/>/maestro-designer design &lt;id&gt;<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
+        Planner["<b>Planner</b><br/>maestro-ticket look · job plan<br/>Product owner and project manager<br/>Turns goals into tickets, tagged by tier<br/>Hands out builds; a judge session settles blocks"]
+        Sr["<b>Senior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Opus, high effort<br/>Senior-tier tickets, a junior's sent back twice"]
+        Jr["<b>Junior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Sonnet, high effort<br/>Junior-tier tickets"]
+        Rev["<b>Reviewer</b><br/>job review &lt;id&gt; · /maestro-code-review<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
+        QA["<b>QA Lead</b><br/>job qa &lt;id&gt; · /maestro-qa-lead<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>job design &lt;id&gt; · /maestro-designer<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -53,13 +53,13 @@ flowchart TD
     CoS -->|"goals, answers"| Planner
     Planner -.->|"board status, blocks it can't settle"| CoS
 
-    %% The Planner hands out each job
-    Planner -->|"risky ticket"| Sr
-    Planner -->|"routine ticket"| Jr
-    Planner -->|"review a PR"| Rev
-    Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
+    %% The Planner hands out builds, and what stalled
+    Planner -->|"senior-tier ticket"| Sr
+    Planner -->|"junior-tier ticket"| Jr
+    Planner -->|"a stalled review"| Rev
+    Planner -->|"a stalled test,<br/>a goal's live run"| QA
     Planner -->|"a goal's screens:<br/>Design: ticket"| Des
-    Des -.->|"draft PR, the owner's card"| Planner
+    Des -.->|"draft PR: pickup sends<br/>the owner's card up"| CoS
     CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
@@ -72,15 +72,15 @@ flowchart TD
     Jr --> Build
     Build -.->|"a question it can't settle"| Sr
     Build -.->|"a question it can't settle"| Jr
-    Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
-    Sr -.->|"handoff: PR in review,<br/>what the ticket can't settle"| Planner
-    Jr -.->|"handoff: PR in review"| Planner
-    QA -.->|"test report, a criterion to rewrite"| Planner
-    Rev -.->|"verdict, a block to settle"| Planner
-    Planner -.->|"Answer note, unblock"| Tickets
+    Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
+    Sr -.->|"what the ticket can't settle,<br/>a slot free"| Planner
+    Jr -.->|"a slot free"| Planner
+    QA -.->|"a block, a goal done"| Planner
+    Rev -.->|"a block to settle"| Planner
+    Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"ticket in_review"| Rev
+    Build -->|"in_review: pickup hands it on"| Rev
     Rev -->|"GO: Review: GO comment"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done
@@ -144,7 +144,7 @@ For an app with screens: [Playwright CLI](https://playwright.dev/agent-cli/intro
 
 Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --permission-mode bypassPermissions --output-format json`):
 
-- `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets and creates them. Given a ticket id, it splits or rewrites that ticket. It also carries out the planner bot's rulings on blocks, finishes a split, drop or merge that stopped short, checks a plan, finds what keeps the board from running in parallel, or answers a code question a plan turns on, for the planner bot, which can't read the repo.
+- `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets, tags each junior or senior, and creates them. Given a ticket id, it splits or rewrites that ticket. `judge <ids>` makes the planner bot's calls that need reading: blocks, disputes, parked tickets, a shared cause. It also carries out the planner bot's rulings on blocks, finishes a split, drop or merge that stopped short, checks a plan, finds what keeps the board from running in parallel, or answers a code question a plan turns on, for the planner bot, which can't read the repo.
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-qa-lead <id or pr>` is the last check before production, and it tests only a head sha that review passed. It builds that sha on today's main the way production does, walks each criterion and the critical flows in a browser, tries harder angles as the risk goes up (upgrade from old data, rollback, a second user, a dependency down), and reruns the project's checks. A pass adds a `QA: pass` comment with evidence, merges the PR and moves the ticket to `done`. A fail moves it back to `in_progress` with a `Kickback: QA fail` note. It blocks a ticket when it can't test it, GitHub refuses the merge, or the PR already merged. `/maestro-qa-lead <ask>` does the QA lead's other jobs: a second look at a verdict, a bug reproduced, a ticket checked before it's built, a test plan.
 - `/maestro-code-review <pr>` reviews the PR at its head sha, in a fresh session apart from the author. GO adds a `Review: GO` comment and leaves the ticket in `in_review` for QA; review never merges. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the engineer runs the ticket again with that feedback. ESCALATE blocks the ticket with an `Escalation:` note when the change needs the owner's yes (a dependency, CI or hook change, or one a revert can't undo) or a third kickback would repeat the last two. The review's depth follows the PR's risk: a docs fix gets one pass, an auth or migration change all ten. Add `--report-only` for the report alone.
@@ -162,7 +162,7 @@ What a bot loads and what the installer leaves in your repo:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Thinks and decides. Never edits their code<br/>Runs claude -p /maestro-&lt;skill&gt; for each job<br/><i>How Grok Bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
 
     subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR
@@ -184,9 +184,9 @@ flowchart TD
     end
 
     Runtime -->|"loads the profile for the role it plays"| Profile
-    Runtime ==>|"claude -p in their repo"| H
+    Runtime ==>|"maestro-ticket job in their repo"| H
     Installed --> H
-    H -.->|"result, read by Grok Bot"| Runtime
+    H -.->|"pickup: what to send, read by Grok Bot"| Runtime
     Guard -.-> H
     H ~~~ Roles
 

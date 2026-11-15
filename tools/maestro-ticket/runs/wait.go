@@ -24,7 +24,7 @@ import (
 // maxSlotCredit is the most slot waiting a run's time limit leaves out, so
 // a machine whose slots never free can't keep a run alive for good. A var
 // only so tests can shorten it.
-var maxSlotCredit = time.Hour
+var maxSlotCredit = 8 * time.Hour
 
 // liveWait: a waiter that touched its file this recently still waits.
 const liveWait = 5 * time.Second

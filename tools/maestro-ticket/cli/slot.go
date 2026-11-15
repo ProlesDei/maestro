@@ -83,7 +83,17 @@ func runSlot(ctx context.Context, c *call) error {
 		}
 		mark.Touch(now)
 	}
-	lock, err := takeSlot(ctx, dir, *name, *max, *wait, c.env.Stderr, tick)
+	// A Claude session waiting in line holds while the line is stopped or
+	// a usage limit holds: started then, it only stops or fails again.
+	sdir := filepath.Dir(path)
+	held := func() bool {
+		if filepath.Base(command[0]) != "claude" {
+			return false
+		}
+		_, paused := readPause(sdir, time.Now())
+		return paused || fileExists(filepath.Join(sdir, "STOP"))
+	}
+	lock, err := takeSlot(ctx, dir, *name, *max, *wait, c.env.Stderr, tick, held)
 	mark.End(time.Now())
 	if err != nil && ctx.Err() != nil {
 		return fmt.Errorf("%w: stopped while waiting for a %q slot", ticket.ErrNoSlot, *name)
@@ -153,7 +163,7 @@ func runSlot(ctx context.Context, c *call) error {
 // in the order they came: one tries only while fewer than max live
 // waiters are ahead of it, so slots that free together fill together, and
 // no one is passed by a waiter more than max-1 places behind it.
-func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration, w io.Writer, tick func()) (*os.File, error) {
+func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration, w io.Writer, tick func(), held func() bool) (*os.File, error) {
 	start := time.Now()
 	var place *waiter                // our place in line, once we wait
 	defer func() { place.leave() }() // place as it is at the end, not now
@@ -162,7 +172,7 @@ func takeSlot(ctx context.Context, dir, name string, max int, wait time.Duration
 		if err != nil {
 			return nil, err
 		}
-		if ahead < max {
+		if ahead < max && (held == nil || !held()) {
 			if f, err := freeSlot(dir, name, max); f != nil || err != nil {
 				return f, err
 			}

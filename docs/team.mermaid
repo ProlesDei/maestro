@@ -3,12 +3,12 @@ flowchart TD
 
     subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
         CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>/maestro-planner<br/>Product owner and project manager<br/>Turns goals into tickets<br/>Hands out builds, review and QA"]
-        Sr["<b>Senior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Top model, high effort<br/>Risky or broad tickets, what the junior hands up"]
-        Jr["<b>Junior Engineer</b><br/>claude -p /maestro-software-engineer &lt;id&gt;<br/>Cheaper model<br/>Routine tickets"]
-        Rev["<b>Reviewer</b><br/>/maestro-code-review &lt;pr&gt;<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
-        QA["<b>QA Lead</b><br/>/maestro-qa-lead &lt;id&gt;<br/>Last check before production<br/>Tests the reviewed head in the running app"]
-        Des["<b>Designer</b><br/>/maestro-designer design &lt;id&gt;<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
+        Planner["<b>Planner</b><br/>maestro-ticket look · job plan<br/>Product owner and project manager<br/>Turns goals into tickets, tagged by tier<br/>Hands out builds; a judge session settles blocks"]
+        Sr["<b>Senior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Opus, high effort<br/>Senior-tier tickets, a junior's sent back twice"]
+        Jr["<b>Junior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Sonnet, high effort<br/>Junior-tier tickets"]
+        Rev["<b>Reviewer</b><br/>job review &lt;id&gt; · /maestro-code-review<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
+        QA["<b>QA Lead</b><br/>job qa &lt;id&gt; · /maestro-qa-lead<br/>Last check before production<br/>Tests the reviewed head in the running app"]
+        Des["<b>Designer</b><br/>job design &lt;id&gt; · /maestro-designer<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
     end
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
@@ -24,13 +24,13 @@ flowchart TD
     CoS -->|"goals, answers"| Planner
     Planner -.->|"board status, blocks it can't settle"| CoS
 
-    %% The Planner hands out each job
-    Planner -->|"risky ticket"| Sr
-    Planner -->|"routine ticket"| Jr
-    Planner -->|"review a PR"| Rev
-    Planner -->|"test a reviewed PR,<br/>a goal's live run"| QA
+    %% The Planner hands out builds, and what stalled
+    Planner -->|"senior-tier ticket"| Sr
+    Planner -->|"junior-tier ticket"| Jr
+    Planner -->|"a stalled review"| Rev
+    Planner -->|"a stalled test,<br/>a goal's live run"| QA
     Planner -->|"a goal's screens:<br/>Design: ticket"| Des
-    Des -.->|"draft PR, the owner's card"| Planner
+    Des -.->|"draft PR: pickup sends<br/>the owner's card up"| CoS
     CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
 
     %% Planning
@@ -43,15 +43,15 @@ flowchart TD
     Jr --> Build
     Build -.->|"a question it can't settle"| Sr
     Build -.->|"a question it can't settle"| Jr
-    Jr -.->|"a block it can't settle,<br/>a second Kickback"| Sr
-    Sr -.->|"handoff: PR in review,<br/>what the ticket can't settle"| Planner
-    Jr -.->|"handoff: PR in review"| Planner
-    QA -.->|"test report, a criterion to rewrite"| Planner
-    Rev -.->|"verdict, a block to settle"| Planner
-    Planner -.->|"Answer note, unblock"| Tickets
+    Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
+    Sr -.->|"what the ticket can't settle,<br/>a slot free"| Planner
+    Jr -.->|"a slot free"| Planner
+    QA -.->|"a block, a goal done"| Planner
+    Rev -.->|"a block to settle"| Planner
+    Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"ticket in_review"| Rev
+    Build -->|"in_review: pickup hands it on"| Rev
     Rev -->|"GO: Review: GO comment"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done

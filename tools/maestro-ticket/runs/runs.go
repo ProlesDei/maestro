@@ -53,11 +53,26 @@ const startGrace = 30 * time.Second
 
 // Record is one run.
 type Record struct {
-	ID        string     `json:"id"`
-	Launcher  string     `json:"launcher"`
-	Ticket    string     `json:"ticket,omitempty"`
-	Limit     string     `json:"limit"`
-	Command   []string   `json:"command"`
+	ID       string   `json:"id"`
+	Launcher string   `json:"launcher"`
+	Ticket   string   `json:"ticket,omitempty"`
+	Limit    string   `json:"limit"`
+	Command  []string `json:"command"`
+	// Job is the kind of work maestro-ticket job started (build, review,
+	// qa, ...), which pickup reads to say what the result means; empty for
+	// a plain launch.
+	Job string `json:"job,omitempty"`
+	// Tickets are the tickets a job names beyond Ticket, as a judge run
+	// names every ticket it judges, so look counts them busy meanwhile.
+	Tickets []string `json:"tickets,omitempty"`
+	// ResumeOf is the run whose session this one resumed; AfterDeath marks
+	// the one resume a session gets after its run died.
+	ResumeOf   string `json:"resume_of,omitempty"`
+	AfterDeath bool   `json:"after_death,omitempty"`
+	// Nudge is the fixed resume a run began with (opus, escalate,
+	// decide): each comes once per session, so a session that asks again
+	// goes up instead of round and round.
+	Nudge     string     `json:"nudge,omitempty"`
 	Dir       string     `json:"dir"`
 	StartedAt time.Time  `json:"started_at"`
 	State     string     `json:"state"`
@@ -362,7 +377,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -371,6 +386,13 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	for _, e := range ents {
 		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
 			os.Remove(filepath.Join(dir, e.Name()))
+		}
+		// An active-run mark a later start moved aside, or one whose run
+		// ended a day ago.
+		if strings.Contains(e.Name(), ".active.stale") || strings.HasSuffix(e.Name(), ".active") || strings.HasSuffix(e.Name(), ".takeover") {
+			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > keep {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
 		}
 	}
 	return nil

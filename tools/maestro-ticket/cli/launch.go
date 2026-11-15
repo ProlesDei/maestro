@@ -241,24 +241,39 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	dir, err := c.besideStore("runs")
-	if err != nil {
-		return err
-	}
-	store, _, err := c.storePath()
-	if err != nil {
-		return err
-	}
 	stdin, err := c.readStdin()
 	if err != nil {
 		return err
 	}
-	r, err := runs.Create(dir, runs.Record{
-		Launcher: c.actor, Ticket: ticketID, Limit: short(*limit),
-		Command: command, Dir: c.env.Dir, StartedAt: time.Now().UTC().Round(time.Millisecond),
-	}, stdin)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings)
 	if err != nil {
 		return err
+	}
+	return c.out(r, func(w io.Writer) {
+		on := ""
+		if r.Ticket != "" {
+			on = " on " + r.Ticket
+		}
+		fmt.Fprintf(w, "%s %s%s, limit %s. maestro-ticket pickup shows it once it ends.\n", r.ID, r.State, on, r.Limit)
+	})
+}
+
+// startRun records a run for the actor and hands it to a detached
+// supervisor, and returns once its command runs. launch, job and resume
+// all start runs here.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (runs.Record, error) {
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return runs.Record{}, err
+	}
+	store, _, err := c.storePath()
+	if err != nil {
+		return runs.Record{}, err
+	}
+	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.env.Dir, time.Now().UTC().Round(time.Millisecond)
+	r, err := runs.Create(dir, rec, stdin)
+	if err != nil {
+		return runs.Record{}, err
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
@@ -275,7 +290,7 @@ func runLaunch(ctx context.Context, c *call) error {
 		r.State, r.Error = runs.Failed, "start the supervisor: "+err.Error()
 		runs.Save(dir, r)
 		runs.Ack(dir, r.ID, c.actor, time.Now())
-		return fmt.Errorf("%w: launch: %s", ticket.ErrInvalid, r.Error)
+		return runs.Record{}, fmt.Errorf("%w: launch: %s", ticket.ErrInvalid, r.Error)
 	}
 	// Wait until the command runs, so a command that can't start fails
 	// here and not in a later pickup.
@@ -288,16 +303,10 @@ func runLaunch(ctx context.Context, c *call) error {
 	}
 	if r.Ended() && r.PID == 0 {
 		if ok, _ := runs.Ack(dir, r.ID, c.actor, time.Now()); ok {
-			return fmt.Errorf("%w: launch %s: %s", ticket.ErrInvalid, r.ID, r.Error)
+			return runs.Record{}, fmt.Errorf("%w: launch %s: %s", ticket.ErrInvalid, r.ID, r.Error)
 		}
 	}
-	return c.out(r, func(w io.Writer) {
-		on := ""
-		if r.Ticket != "" {
-			on = " on " + r.Ticket
-		}
-		fmt.Fprintf(w, "%s %s%s, limit %s. maestro-ticket pickup shows it once it ends.\n", r.ID, r.State, on, r.Limit)
-	})
+	return r, nil
 }
 
 // runSupervise is the background half of launch. launch starts it; nothing
@@ -332,6 +341,14 @@ func runSupervise(ctx context.Context, c *call) error {
 			return c.startLaunch(ctx, runTicket(r))
 		},
 		OnEnd: func(r runs.Record) { c.endRun(context.WithoutCancel(ctx), dir, r) },
+		// A run a usage limit stopped rings once more as the limit lifts:
+		// nothing else wakes its bot then.
+		RingAgain: func(r runs.Record) time.Time {
+			if out, reset := outcomeOf(r); out == outUsageLimit {
+				return limitLifts(r, reset).Add(30 * time.Second)
+			}
+			return time.Time{}
+		},
 	})
 }
 
@@ -340,6 +357,7 @@ func runSupervise(ctx context.Context, c *call) error {
 // on its ticket, unless another run of that bot on that ticket still
 // goes. Neither may hold up the ring, so failures only warn on stderr.
 func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
+	dropActive(dir, r)
 	warn := func(err error) {
 		if err != nil {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: %v\n", r.ID, err)
@@ -446,6 +464,7 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 // end a turn. It shows a result again until the bot acks it, so a bot that
 // stopped before it acted on one loses nothing.
 func runPickup(ctx context.Context, c *call) error {
+	full := c.fs.Bool("full", false, "print every ended job's whole reply")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -476,13 +495,88 @@ func runPickup(ctx context.Context, c *call) error {
 		}
 	}
 	runs.Prune(dir, keepAcked, now)
-	return c.out(map[string]any{"ended": ended, "running": running}, func(w io.Writer) {
+	// A job's result is sorted and routed, so the bot reads a few lines
+	// and sends what they say; a plain launch prints as it ran.
+	routes, routeErr := map[string]routed{}, map[string]error{}
+	if slices.ContainsFunc(ended, func(r runs.Record) bool { return r.Job != "" }) {
+		s, err := c.open(ctx)
 		for _, r := range ended {
-			printRun(w, r, now)
+			switch {
+			case r.Job == "":
+			case err != nil:
+				routeErr[r.ID] = err
+			default:
+				if rt, err := c.route(ctx, s, r); err != nil {
+					routeErr[r.ID] = err
+				} else {
+					routes[r.ID] = rt
+				}
+			}
 		}
-		if len(ended) > 0 {
-			fmt.Fprintln(w, "ack each once you have acted on it: maestro-ticket ack <run-id>")
+		if err == nil {
+			s.Close()
 		}
+	}
+	// While a usage limit holds, the runs it stopped wait: no do: line
+	// to retry, no ack, one line for all; they ring again as it lifts.
+	// The rest come first, 20 at most a call.
+	pause, paused := readPause(filepath.Dir(dir), now)
+	waiting, shown := []string{}, []runs.Record{}
+	more := 0
+	for _, r := range ended {
+		rt, ok := routes[r.ID]
+		switch {
+		// The run that set the pause shows whole, so its bot tells the
+		// planner; the rest of those it stopped wait.
+		case ok && paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }):
+			waiting = append(waiting, r.ID)
+		case len(shown) == maxPickup:
+			more++ // the next pickup, after these are acked, shows them
+		default:
+			shown = append(shown, r)
+		}
+	}
+	ended = shown
+	routeList := []routed{}
+	for _, r := range ended {
+		if rt, ok := routes[r.ID]; ok {
+			// A job a look handed out lately goes out once: pickup drops
+			// its own line for it, and holds the rest from the next look.
+			rt.Send = pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, rt.Send, now)
+			routes[r.ID] = rt
+			routeList = append(routeList, rt)
+		}
+	}
+	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting}, func(w io.Writer) {
+		ids := []string{}
+		for _, r := range ended {
+			// A run with a do: line is acked by that command when it
+			// starts; one it refused stays for the next pickup.
+			if rt, ok := routes[r.ID]; !ok || len(rt.Do) == 0 {
+				ids = append(ids, r.ID)
+			}
+			rt, ok := routes[r.ID]
+			if !ok || *full {
+				printRun(w, r, now)
+			}
+			if err := routeErr[r.ID]; err != nil {
+				fmt.Fprintf(w, "route: %v\n", err)
+			}
+			if ok {
+				printRoute(w, rt, *full)
+			}
+		}
+		defer func() {
+			if len(waiting) > 0 {
+				fmt.Fprintf(w, "%d runs wait for the usage limit to lift at %s: nothing to do till then; they ring you as it lifts\n", len(waiting), pause.Until.Format(time.RFC3339))
+			}
+			if more > 0 {
+				fmt.Fprintf(w, "and %d more ended: run pickup again once these are acked\n", more)
+			}
+			if len(ids) > 0 { // last, as the team rules say
+				fmt.Fprintf(w, "ack each once you have acted on it: maestro-ticket ack %s\n", strings.Join(ids, " "))
+			}
+		}()
 		switch {
 		case len(ended) == 0 && len(running) == 0:
 			fmt.Fprintln(w, "no run of yours ended or running")
@@ -491,9 +585,13 @@ func runPickup(ctx context.Context, c *call) error {
 			if len(ended) == 0 {
 				fmt.Fprint(w, "no run of yours ended; ")
 			}
-			s := make([]string, len(running))
+			s := []string{}
 			for i, r := range running {
-				s[i] = fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), ago(now.Sub(r.StartedAt)))
+				if i == 10 { // a bot reads this every turn: keep it short
+					s = append(s, fmt.Sprintf("and %d more", len(running)-10))
+					break
+				}
+				s = append(s, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), ago(now.Sub(r.StartedAt))))
 			}
 			fmt.Fprintf(w, "running: %s\n", strings.Join(s, ", "))
 		}
@@ -561,6 +659,66 @@ func runAck(ctx context.Context, c *call) error {
 			}
 		}
 	})
+}
+
+// maxPickup is how many ended runs one pickup shows: after a reboot a bot
+// can have a hundred, and it reads every line.
+const maxPickup = 20
+
+// pickupSends keeps the sends a look hasn't made lately. Each it keeps is
+// marked as this run's, so a second pickup of the run shows it again and
+// the next look sends none of them.
+func pickupSends(dir, runID string, sends []send, now time.Time) []send {
+	out := []send{}
+	for _, s := range sends {
+		id := ticketInLine.FindString(s.Line)
+		if id == "" || s.Bot == "planner" || !runs.BotPattern.MatchString(s.Bot) {
+			out = append(out, s)
+			continue
+		}
+		mine := "pickup " + runID
+		if claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
+			out = append(out, s)
+			continue
+		}
+		if b, _ := os.ReadFile(handoutPath(dir, id, s.Bot)); strings.TrimSpace(string(b)) == mine {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// printRoute prints a routed job: one line for what happened, then each
+// message to send, command to run and write made, and the reply only
+// when the bot has to read it.
+func printRoute(w io.Writer, rt routed, full bool) {
+	on, st := "", ""
+	if rt.Ticket != "" {
+		on = " on " + rt.Ticket
+	}
+	if rt.Status != "" {
+		st = " (" + rt.Status + ")"
+	}
+	reset := ""
+	if rt.Reset != "" {
+		reset = ", resets " + rt.Reset
+	}
+	fmt.Fprintf(w, "%s %s %s%s%s%s: %s\n", rt.Run, rt.Job, rt.Outcome, on, st, reset, dash(rt.First))
+	if rt.Mismatch != "" {
+		fmt.Fprintf(w, "mismatch: want %s\n", rt.Mismatch)
+	}
+	for _, x := range rt.Wrote {
+		fmt.Fprintf(w, "wrote: %s\n", x)
+	}
+	for _, x := range rt.Do {
+		fmt.Fprintf(w, "do: %s\n", x)
+	}
+	for _, x := range rt.Send {
+		fmt.Fprintln(w, x.String())
+	}
+	if rt.Reply != "" && !full {
+		fmt.Fprintf(w, "reply:\n%s\n", indent(rt.Reply))
+	}
 }
 
 // printRun prints one run's result: a header line, then the reply and any

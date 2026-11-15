@@ -184,35 +184,8 @@ func runAlerts(ctx context.Context, c *call) error {
 		if *stall <= 0 {
 			return usagef("alerts: --stall must be more than 0")
 		}
-		rep := alertReport{Died: []diedRun{}, Expired: []expiredLease{}, ETAMissed: []etaState{}, Revived: []revivedClaim{}, Stalled: []stalledTicket{}, Errors: []string{}}
-		// Each step goes on past another's error: what an earlier step
-		// freed or ended is printed once, here, and must not be lost.
-		var errs []error
-		keep := func(err error) {
-			if err != nil {
-				errs = append(errs, err)
-				rep.Errors = append(rep.Errors, err.Error())
-			}
-		}
-		keep(reapReport(ctx, s, &rep))
-		keep(diedReport(ctx, s, c.actor, &rep))
 		now := c.now()
-		keep(etaReport(ctx, s, now, &rep))
-		yes, no := true, false
-		held, err := s.List(ctx, ticket.ListFilter{Claimed: &yes})
-		keep(err)
-		for _, t := range held {
-			if cl := t.LiveClaim(); cl != nil && cl.Revivals > 0 {
-				rep.Revived = append(rep.Revived, revivedClaim{t.ID, cl.Holder, cl.Revivals})
-			}
-		}
-		idle, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusInReview}, Claimed: &no})
-		keep(err)
-		for _, t := range idle {
-			if d := now.Sub(t.UpdatedAt); d >= *stall {
-				rep.Stalled = append(rep.Stalled, stalledTicket{t.ID, t.Status, t.UpdatedAt, roundMin(d)})
-			}
-		}
+		rep, errs := c.collectAlerts(ctx, s, now, *stall)
 		if err := c.out(rep, func(w io.Writer) { printAlerts(w, rep, now) }); err != nil {
 			return err
 		}
@@ -224,6 +197,40 @@ func runAlerts(ctx context.Context, c *call) error {
 		}
 		return errors.Join(errs...)
 	})
+}
+
+// collectAlerts is alerts' work, which look runs too: free what dead runs
+// and expired leases hold, mark met ETAs, and list what needs a look.
+// Each step goes on past another's error: what an earlier step freed or
+// ended is reported once, here, and must not be lost.
+func (c *call) collectAlerts(ctx context.Context, s ticket.Store, now time.Time, stall time.Duration) (alertReport, []error) {
+	rep := alertReport{Died: []diedRun{}, Expired: []expiredLease{}, ETAMissed: []etaState{}, Revived: []revivedClaim{}, Stalled: []stalledTicket{}, Errors: []string{}}
+	var errs []error
+	keep := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+			rep.Errors = append(rep.Errors, err.Error())
+		}
+	}
+	keep(reapReport(ctx, s, &rep))
+	keep(diedReport(ctx, s, c.actor, &rep))
+	keep(etaReport(ctx, s, now, &rep))
+	yes, no := true, false
+	held, err := s.List(ctx, ticket.ListFilter{Claimed: &yes})
+	keep(err)
+	for _, t := range held {
+		if cl := t.LiveClaim(); cl != nil && cl.Revivals > 0 {
+			rep.Revived = append(rep.Revived, revivedClaim{t.ID, cl.Holder, cl.Revivals})
+		}
+	}
+	idle, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusInReview}, Claimed: &no})
+	keep(err)
+	for _, t := range idle {
+		if d := now.Sub(t.UpdatedAt); d >= stall {
+			rep.Stalled = append(rep.Stalled, stalledTicket{t.ID, t.Status, t.UpdatedAt, roundMin(d)})
+		}
+	}
+	return rep, errs
 }
 
 func etaReport(ctx context.Context, s ticket.Store, now time.Time, rep *alertReport) error {

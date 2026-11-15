@@ -236,6 +236,23 @@ func ValidateGoal(g string) error {
 	return nil
 }
 
+// Tiers say which engineer builds a ticket: the junior engineer takes
+// routine work (clear criteria, one area, easy to undo), the senior the
+// rest. Empty means senior, so a ticket planned before tiers goes to the
+// safer hand.
+const (
+	TierSenior = "senior"
+	TierJunior = "junior"
+)
+
+// ValidateTier checks a tier, empty allowed.
+func ValidateTier(t string) error {
+	if t != "" && t != TierSenior && t != TierJunior {
+		return fmt.Errorf("%w: tier %q: want senior or junior", ErrInvalid, t)
+	}
+	return nil
+}
+
 // Type is a ticket's shape. Ship tickets deliver changes and go through
 // review. Scout tickets end at an evidenced report.
 type Type string
@@ -386,7 +403,10 @@ type Ticket struct {
 	// holds.
 	Parked Parked `json:"parked,omitempty"`
 	// Goal is the slug of the goal the ticket serves.
-	Goal      string    `json:"goal,omitempty"`
+	Goal string `json:"goal,omitempty"`
+	// Tier is which engineer builds it: senior, junior, or empty for
+	// senior.
+	Tier      string    `json:"tier"`
 	Version   int64     `json:"version"`
 	Claim     *Claim    `json:"claim"`
 	CreatedAt time.Time `json:"created_at"`
@@ -535,7 +555,9 @@ type CreateRequest struct {
 	// Parked is required for a backlog ticket and refused for any other.
 	Parked Parked `json:"parked,omitempty"`
 	// Goal defaults to SplitFrom's goal.
-	Goal           string `json:"goal,omitempty"`
+	Goal string `json:"goal,omitempty"`
+	// Tier defaults to SplitFrom's tier.
+	Tier           string `json:"tier,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
 }
@@ -585,6 +607,9 @@ func (r *CreateRequest) Validate() error {
 		return err
 	}
 	if err := ValidateGoal(r.Goal); err != nil {
+		return err
+	}
+	if err := ValidateTier(r.Tier); err != nil {
 		return err
 	}
 	r.Actor = actorFor(r.Actor, "")
@@ -732,6 +757,7 @@ type UpdateRequest struct {
 	Areas          *[]string `json:"areas,omitempty"`
 	Parked         Parked    `json:"parked,omitempty"` // a new reason for a parked ticket
 	Goal           *string   `json:"goal,omitempty"`   // when not nil, replaces the goal; "" clears it
+	Tier           *string   `json:"tier,omitempty"`   // when not nil, replaces the tier; "" clears it
 	Holder         string    `json:"holder,omitempty"`
 	Token          int64     `json:"-"`
 	Actor          string    `json:"actor"`
@@ -745,13 +771,13 @@ type UpdateRequest struct {
 // ChangesBesidesLink reports whether the request changes anything but
 // SplitFrom.
 func (r *UpdateRequest) ChangesBesidesLink() bool {
-	return len(r.AddDeps) > 0 || len(r.RemoveDeps) > 0 || r.Areas != nil || r.Parked != "" || r.Goal != nil
+	return len(r.AddDeps) > 0 || len(r.RemoveDeps) > 0 || r.Areas != nil || r.Parked != "" || r.Goal != nil || r.Tier != nil
 }
 
 // Validate checks the request and fills defaults.
 func (r *UpdateRequest) Validate() error {
 	if !r.ChangesBesidesLink() && r.SplitFrom == 0 {
-		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked, --goal or --split-from)", ErrInvalid)
+		return fmt.Errorf("%w: nothing to update (pass --add-deps, --remove-deps, --areas, --parked, --goal, --tier or --split-from)", ErrInvalid)
 	}
 	switch {
 	case r.SplitFrom < 0:
@@ -764,6 +790,11 @@ func (r *UpdateRequest) Validate() error {
 	}
 	if r.Goal != nil {
 		if err := ValidateGoal(*r.Goal); err != nil {
+			return err
+		}
+	}
+	if r.Tier != nil {
+		if err := ValidateTier(*r.Tier); err != nil {
 			return err
 		}
 	}
@@ -811,6 +842,9 @@ type ListFilter struct {
 	Parked []Parked
 	// Goal keeps only the tickets of this goal.
 	Goal string
+	// Tier keeps only the tickets of this tier; "senior" also keeps
+	// those with no tier, since empty means senior.
+	Tier string
 	// LatestPrefix keeps only tickets whose latest comment starts with it;
 	// NotLatestPrefix keeps tickets with no comment, or whose latest
 	// comment doesn't start with it. Both match case-sensitively.
