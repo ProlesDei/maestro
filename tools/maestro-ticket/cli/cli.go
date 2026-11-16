@@ -107,6 +107,8 @@ Commands:
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
+  stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
+              by you; its launcher or the planner)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -209,6 +211,7 @@ var commands = []command{
 	{"supervise", runSupervise},
 	{"pickup", runPickup},
 	{"ack", runAck},
+	{"stop", runStop},
 	{"runs", runRuns},
 	{"notify", runNotify},
 	{"release", runRelease},

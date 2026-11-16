@@ -388,7 +388,8 @@ func TestRouteDesignReady(t *testing.T) {
 }
 
 // A run out of time goes again once with twice the time; a second at the
-// same head blocks the ticket for the planner.
+// same head blocks the ticket for the planner. One only a freeze ended
+// goes again at its limit.
 func TestRouteTimeouts(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
@@ -400,6 +401,11 @@ func TestRouteTimeouts(t *testing.T) {
 		t.Fatalf("first timeout: %+v", rt)
 	}
 	h.timedOut("T-1", "review")
+	// One a freeze ended goes again at its limit, whatever came before.
+	frozen := runs.Record{ID: "R-ffffffff", Job: "review", Ticket: "T-1", State: runs.TimedOut, Frozen: true, Limit: "1h30m", StartedAt: time.Now(), Command: opusCmd()}
+	if rt := h.route(frozen); !slices.Equal(rt.Do, []string{"maestro-ticket job again R-ffffffff"}) || rt.Status == "blocked" {
+		t.Fatalf("frozen timeout: %+v", rt)
+	}
 	second := runs.Record{ID: "R-uuuuuuuu", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "1h30m", StartedAt: time.Now(), Command: opusCmd()}
 	rt = h.route(second)
 	if rt.Status != "blocked" || len(rt.Wrote) != 1 {
