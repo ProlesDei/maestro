@@ -163,6 +163,7 @@ func TestCacheSaveAndRestore(t *testing.T) {
 	d := filepath.Join(t.TempDir(), "d")
 	git(root, "worktree", "add", "-q", "--detach", d, head)
 	os.WriteFile(filepath.Join(d, "package-lock.json"), []byte("lock 3\n"), 0o644)
+	runCacheIn(build, d, "restore")
 	fill(t, d, "v3")
 	os.Symlink(filepath.Join(d, "package-lock.json"), filepath.Join(d, "node_modules", "abs"))
 	git(d, "commit", "-qam", "lock 3")
@@ -181,7 +182,7 @@ func TestCacheSaveAndRestore(t *testing.T) {
 	}
 	os.Remove(filepath.Join(d, "package-lock.json"))
 	os.Symlink("/dev/zero", filepath.Join(d, "package-lock.json"))
-	if code, out := runCacheIn(build, d, "restore"); code != 0 || !strings.Contains(out, "skipped: package-lock.json is no plain file") {
+	if code, out := runCacheIn(build, d, "restore"); code != 0 || !strings.Contains(out, "skipped: package-lock.json is a link") {
 		t.Fatalf("a key file that is a link: %d %s", code, out)
 	}
 	// drop removes what is kept, so a bad copy can go.
@@ -193,43 +194,90 @@ func TestCacheSaveAndRestore(t *testing.T) {
 	}
 }
 
-// A folder whose path runs through a link is skipped: a PR's tree can
-// point one anywhere, to read on save or to write on restore.
-func TestCacheSkipsALinkedParent(t *testing.T) {
-	root, git, env := cacheRepo(t, "- web: `package-lock.json` -> `web/node_modules`")
+// A folder or key file whose path runs through a link, at any depth, is
+// skipped: a PR's tree can point one anywhere, to read on save or to
+// write on restore.
+func TestCacheSkipsAPathThroughALink(t *testing.T) {
+	root, git, env := cacheRepo(t, "- web: `package-lock.json` -> `apps/web/node_modules`\n- cfg: `cfg/lock` -> `vendor`")
+	// Something kept under web's key, so a restore would have a copy to write.
+	seed := filepath.Join(t.TempDir(), "seed")
+	git(root, "worktree", "add", "-q", "--detach", seed)
+	runCacheIn(env, seed, "restore")
+	os.MkdirAll(filepath.Join(seed, "apps", "web", "node_modules"), 0o755)
+	os.WriteFile(filepath.Join(seed, "apps", "web", "node_modules", "f"), []byte("x"), 0o644)
+	if code, out := runCacheIn(env, seed, "save"); code != 0 || !strings.Contains(out, "cache web: saved (") {
+		t.Fatalf("seed: %d %s", code, out)
+	}
 	wt, outside := filepath.Join(t.TempDir(), "wt"), t.TempDir()
 	git(root, "worktree", "add", "-q", "--detach", wt)
-	os.Symlink(outside, filepath.Join(wt, "web"))
+	os.Symlink(outside, filepath.Join(wt, "apps"))
+	os.Symlink(outside, filepath.Join(wt, "cfg"))
+	os.WriteFile(filepath.Join(outside, "lock"), []byte("l"), 0o644)
 	for _, verb := range []string{"restore", "save"} {
 		code, out := runCacheIn(env, wt, verb)
-		if verb == "restore" && (code != 0 || !strings.Contains(out, "cache web: skipped: a folder above it is a link")) {
+		if verb == "restore" && (code != 0 || !strings.Contains(out, "cache web: skipped: apps is a link") || !strings.Contains(out, "cache cfg: skipped: cfg is a link")) {
 			t.Fatalf("%s through a link: %d %s", verb, code, out)
 		}
 	}
-	if ents, _ := os.ReadDir(outside); len(ents) != 0 {
+	if ents, _ := os.ReadDir(outside); len(ents) != 1 {
 		t.Fatalf("wrote outside the worktree: %v", ents)
 	}
 }
 
-// The list comes from the main checkout, never the worktree's tree, and a
-// line that leaves the worktree, or names .git or .maestro, is skipped.
-func TestCacheReadsMainSetupAndRefusesUnsafePaths(t *testing.T) {
-	root, git, env := cacheRepo(t, "<the folders an install fills>")
-	if code, out := runCacheIn(env, root, "restore"); code != 0 || !strings.Contains(out, "nothing listed under ## Cache") {
-		t.Fatalf("an empty section: %d %s", code, out)
-	}
-	wt := filepath.Join(t.TempDir(), "pr")
+// A folder is kept only under the key it was filled for: after a merge
+// that moves the lockfile, with the install skipped because the folder
+// is there, a save keeps nothing. So does a save where restore never ran.
+func TestCacheSaveWantsTheKeyItWasFilledFor(t *testing.T) {
+	root, git, env := cacheRepo(t, nodeLine)
+	wt := filepath.Join(t.TempDir(), "w")
 	git(root, "worktree", "add", "-q", "--detach", wt)
-	os.WriteFile(filepath.Join(wt, ".maestro", "project", "project-setup.md"), []byte("## Cache\n\n"+nodeLine+"\n"), 0o644)
-	fill(t, wt, "planted")
-	if code, out := runCacheIn(env, wt, "save"); code != 0 || !strings.Contains(out, "nothing listed under ## Cache") {
-		t.Fatalf("the PR's own setup was read: %d %s", code, out)
+	fill(t, wt, "no restore ran")
+	if code, out := runCacheIn(env, wt, "save"); code != 0 || !strings.Contains(out, "not saved: its key files changed since the folder was filled, or cache restore never ran") {
+		t.Fatalf("a save with no restore: %d %s", code, out)
 	}
-	lines := []string{nodeLine, "- up: package-lock.json -> ../out", "- git: package-lock.json -> .git/hooks", "- abs: /etc/passwd -> node_modules",
-		"- maestro: package-lock.json -> .maestro/skills", "- node: package-lock.json -> other", "- Bad Name: a -> b", "- nokey: -> node_modules", "- dots: a/../../b -> c"}
-	entries, bad := cacheEntries("## cache\n" + strings.Join(lines, "\n") + "\n## Next\n- later: a -> b\n")
-	if len(entries) != 1 || entries[0].Name != "node" || entries[0].Dir != "node_modules" || len(bad) != len(lines)-1 {
-		t.Fatalf("entries %+v, %d bad: %v", entries, len(bad), bad)
+	os.RemoveAll(filepath.Join(wt, "node_modules"))
+	runCacheIn(env, wt, "restore")
+	fill(t, wt, "installed for lock 1")
+	// main moves the lockfile; the worktree merges it and keeps its folder.
+	os.WriteFile(filepath.Join(root, "package-lock.json"), []byte("lock 2\n"), 0o644)
+	git(root, "commit", "-qam", "lock 2")
+	git(root, "push", "-q", "origin", "main")
+	git(wt, "fetch", "-q", "origin")
+	git(wt, "merge", "-q", "--ff", "origin/main")
+	if code, out := runCacheIn(env, wt, "restore"); code != 0 || !strings.Contains(out, "kept: the folder is there") {
+		t.Fatalf("restore over the old folder: %d %s", code, out)
+	}
+	if code, out := runCacheIn(env, wt, "save"); code != 0 || !strings.Contains(out, "not saved: its key files changed since the folder was filled") {
+		t.Fatalf("an old folder under a new lockfile's key: %d %s", code, out)
+	}
+	// From a subfolder, a folder git tracks files in is still refused.
+	os.RemoveAll(filepath.Join(wt, "node_modules"))
+	runCacheIn(env, wt, "restore")
+	fill(t, wt, "v")
+	git(wt, "add", "-f", "node_modules/pkg/index.js")
+	git(wt, "commit", "-qm", "planted")
+	git(wt, "push", "-q", "origin", "HEAD:main")
+	git(wt, "fetch", "-q", "origin")
+	os.MkdirAll(filepath.Join(wt, "sub"), 0o755)
+	if code, out := runCacheIn(env, filepath.Join(wt, "sub"), "save"); code != 0 || !strings.Contains(out, "not saved: git tracks files in the folder") {
+		t.Fatalf("a tracked folder, from a subfolder: %d %s", code, out)
+	}
+}
+
+// A copy still on its way in is taken out of its name before it is
+// removed, so the save that is writing it keeps nothing, never half.
+func TestCacheDropTakesACopyOutOfItsName(t *testing.T) {
+	dir := t.TempDir()
+	tmp, kept := filepath.Join(dir, ".tmp-0123-abc"), filepath.Join(dir, "0123456789abcdef0123456789abcdef")
+	os.MkdirAll(filepath.Join(tmp, "half"), 0o755)
+	if err := removeTree(tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, kept); err == nil {
+		t.Fatal("a dropped copy could still be kept")
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
+		t.Fatalf("left behind: %v", ents)
 	}
 }
 
@@ -241,6 +289,7 @@ func TestCacheSavesAtOnceAndPrunes(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		wt := filepath.Join(t.TempDir(), "w")
 		git(root, "worktree", "add", "-q", "--detach", wt)
+		runCacheIn(env, wt, "restore")
 		fill(t, wt, "same")
 		wts = append(wts, wt)
 	}
@@ -263,7 +312,7 @@ func TestCacheSavesAtOnceAndPrunes(t *testing.T) {
 			t.Errorf("a save at once: %s", o)
 		}
 	}
-	dir := filepath.Join(filepath.Dir(env["MAESTRO_TICKET_STORE"]), "cache", "node")
+	dir := filepath.Join(filepath.Dir(env["MAESTRO_TICKET_STORE"]), "dep-cache", "node")
 	ents, _ := os.ReadDir(dir)
 	if saved < 1 || len(ents) != 1 || strings.HasPrefix(ents[0].Name(), ".tmp-") {
 		t.Fatalf("%d saved, %d folders kept: %v", saved, len(ents), ents)
@@ -272,7 +321,7 @@ func TestCacheSavesAtOnceAndPrunes(t *testing.T) {
 	// with a dead session's copy from two hours ago gone too.
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		p := filepath.Join(dir, "old"+string(rune('a'+i)))
+		p := filepath.Join(dir, strings.Repeat(string(rune('a'+i)), 32))
 		os.MkdirAll(p, 0o755)
 		os.Chtimes(p, now, now.Add(-time.Duration(i+1)*time.Hour))
 	}
@@ -285,18 +334,26 @@ func TestCacheSavesAtOnceAndPrunes(t *testing.T) {
 	for _, e := range ents {
 		names = append(names, e.Name())
 	}
-	if len(names) != 3 || !strings.Contains(strings.Join(names, " "), "olda") || !strings.Contains(strings.Join(names, " "), "oldb") {
+	if len(names) != 3 || !strings.Contains(strings.Join(names, " "), strings.Repeat("a", 32)) || !strings.Contains(strings.Join(names, " "), strings.Repeat("b", 32)) {
 		t.Fatalf("after prune: %v", names)
 	}
 	// A folder with a read-only folder in it goes whole, never by half,
 	// and a name ## Cache no longer lists goes with all it kept.
-	ro := filepath.Join(filepath.Dir(dir), "gone", "k1", "ro")
+	ro := filepath.Join(filepath.Dir(dir), "gone", strings.Repeat("f", 32), "ro")
+	// What this command didn't name stays, whatever the list says.
+	os.MkdirAll(filepath.Join(filepath.Dir(dir), "gone", "theirs"), 0o755)
 	os.MkdirAll(ro, 0o755)
 	os.WriteFile(filepath.Join(ro, "f"), []byte("x"), 0o444)
 	os.Chmod(ro, 0o555)
 	pruneCache(filepath.Dir(dir), map[string]bool{"node": true}, now)
-	if ents, _ := os.ReadDir(filepath.Join(filepath.Dir(dir), "gone")); len(ents) != 0 {
-		t.Fatalf("a retired name kept: %v", ents)
+	if ents, _ := os.ReadDir(filepath.Join(filepath.Dir(dir), "gone")); len(ents) != 1 || ents[0].Name() != "theirs" {
+		t.Fatalf("a retired name's folders: %v", ents)
+	}
+	// With a line that didn't parse, no name counts as retired.
+	os.MkdirAll(filepath.Join(filepath.Dir(dir), "odd", strings.Repeat("e", 32)), 0o755)
+	pruneCache(filepath.Dir(dir), nil, now)
+	if ents, _ := os.ReadDir(filepath.Join(filepath.Dir(dir), "odd")); len(ents) != 1 {
+		t.Fatalf("an unparsed name's folders went: %v", ents)
 	}
 }
 
@@ -304,15 +361,16 @@ func TestCacheSavesAtOnceAndPrunes(t *testing.T) {
 // was last used, never the time cp carried over from the source.
 func TestCacheSaveSurvivesPrune(t *testing.T) {
 	root, git, env := cacheRepo(t, nodeLine)
-	dir := filepath.Join(filepath.Dir(env["MAESTRO_TICKET_STORE"]), "cache", "node")
+	dir := filepath.Join(filepath.Dir(env["MAESTRO_TICKET_STORE"]), "dep-cache", "node")
 	now := time.Now()
 	for i := 0; i < 3; i++ {
-		p := filepath.Join(dir, "used"+string(rune('a'+i)))
+		p := filepath.Join(dir, strings.Repeat(string(rune('a'+i)), 32))
 		os.MkdirAll(p, 0o755)
 		os.Chtimes(p, now, now.Add(-time.Minute))
 	}
 	wt := filepath.Join(t.TempDir(), "w")
 	git(root, "worktree", "add", "-q", "--detach", wt)
+	runCacheIn(env, wt, "restore")
 	fill(t, wt, "new")
 	old := now.Add(-20 * 24 * time.Hour)
 	os.Chtimes(filepath.Join(wt, "node_modules"), old, old)

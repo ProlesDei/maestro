@@ -96,6 +96,8 @@ func TestVerdictRefuses(t *testing.T) {
 		"a short head":    {"QA: pass at abc1234 (PR u), tier 1, on main at " + vsha, "wants the head's full sha right after"},
 		"a bold major":    {"Kickback: 1 blockers at " + vsha + "\n- **F1** [blocker, auto-fix] a.go:1: x\n* **F2** [Major, auto-fix] a.go:2: y", "take F2 (major) off the Kickback"},
 		"a reason unread": {"Kickback: 1 blockers at " + vsha + "\nGates: red: make test", "no finding line follows"},
+		"a zero count":    {"Kickback: 0 blockers at " + vsha + "\nGates: red: make test", "no finding line follows"},
+		"no bracket":      {"Kickback: 1 blockers at " + vsha + "\n- F1 [blocker, auto-fix] a.go:1: x\n- F2 major, auto-fix: y", "can't read the severity of F2"},
 		"no return role":  {"Escalation: review at " + vsha + "\nWhat happened", "an Escalation: ends with a line"},
 		"an unknown note": {"Looks good to me", "want Review: GO at, Kickback:"},
 		"a build's note":  {"Handoff: PR u at " + vsha, "the note opens"},

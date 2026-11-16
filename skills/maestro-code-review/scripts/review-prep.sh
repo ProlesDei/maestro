@@ -60,12 +60,14 @@ gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}
 
 # The main branch, from the main checkout's project-setup.md, never the
 # PR's tree. Where the main repo is bare, the install sits in the linked
-# worktree that holds .maestro/src/ (install.sh allows only one).
+# worktree that holds .maestro/src/ (install.sh allows only one), a clone
+# of Maestro: its .git is looked for, since git tracks no path of that
+# name, so no PR's tree can pass for the install.
 wts=$(git worktree list --porcelain)
 mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
 if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
 	while IFS= read -r w; do
-		[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
 	done < <(sed -n 's/^worktree //p' <<<"$wts")
 fi
 setup=$mainwt/.maestro/project/project-setup.md

@@ -57,7 +57,7 @@ func runCache(ctx context.Context, c *call) error {
 		return usagef("cache: want restore, save [--at SHA] or drop [<name>]")
 	}
 	verb := c.args[0]
-	dir, err := c.besideStore("cache")
+	dir, err := c.besideStore("dep-cache")
 	if err != nil {
 		return err
 	}
@@ -78,6 +78,9 @@ func runCache(ctx context.Context, c *call) error {
 			if filepath.Dir(p) == dir && target == dir {
 				return nil // a name's folder: its keys are one level down
 			}
+			if !ours(e.Name()) {
+				return filepath.SkipDir // not a folder this command made
+			}
 			if removeTree(p) == nil && !strings.HasPrefix(e.Name(), ".tmp-") {
 				n++
 			}
@@ -92,6 +95,10 @@ func runCache(ctx context.Context, c *call) error {
 	}
 	if r, err := filepath.EvalSymlinks(root); err == nil {
 		root = r
+	}
+	gitDir, err := c.git("rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return fmt.Errorf("%w: cache: %v", ticket.ErrInvalid, err)
 	}
 	setup, err := c.mainSetup()
 	if err != nil {
@@ -115,31 +122,56 @@ func runCache(ctx context.Context, c *call) error {
 	}
 	for _, e := range entries {
 		folder := filepath.Join(root, filepath.FromSlash(e.Dir))
-		key, why := cacheKey(root, e)
+		why := ""
+		for _, p := range append(slices.Clone(e.Keys), e.Dir) {
+			if l := linkOnPath(root, p); l != "" && why == "" {
+				why = l + " is a link"
+			}
+		}
+		key := ""
 		if why == "" {
-			why = strayParent(root, folder)
+			key, why = cacheKey(root, e)
 		}
 		if why != "" {
 			fmt.Fprintf(c.env.Stdout, "cache %s: skipped: %s\n", e.Name, why)
 			continue
 		}
 		kept := filepath.Join(dir, e.Name, key)
+		// The key this worktree's folder was filled for: restore notes it
+		// before any install runs, and save keeps the folder only under
+		// that key. Else a merge of main that moves the lockfile, with the
+		// install skipped because the folder is there, would keep an old
+		// folder under the new lockfile's key.
+		stamp := filepath.Join(gitDir, "maestro-cache-"+e.Name)
 		var msg string
 		if verb == "save" {
-			if tracked, _ := c.git("ls-files", "--", e.Dir); tracked != "" {
+			filled, _ := os.ReadFile(stamp)
+			tracked, _ := c.git("-C", root, "ls-files", "--", e.Dir)
+			switch {
+			case tracked != "":
 				msg = "not saved: git tracks files in the folder"
-			} else {
+			case strings.TrimSpace(string(filled)) != key:
+				msg = "not saved: its key files changed since the folder was filled, or cache restore never ran here before the install"
+			default:
 				msg = cacheSave(ctx, folder, kept)
 			}
 		} else {
 			msg = cacheRestore(ctx, folder, kept)
+			if !strings.HasPrefix(msg, "kept:") {
+				os.WriteFile(stamp, []byte(key+"\n"), 0o644)
+			}
 		}
 		fmt.Fprintf(c.env.Stdout, "cache %s: %s (%s, key %s)\n", e.Name, msg, e.Dir, key[:12])
 	}
 	if verb == "save" {
-		names := map[string]bool{}
-		for _, e := range entries {
-			names[e.Name] = true
+		// With a line that didn't parse, its name can't be told from a
+		// retired one: keep every name's folders this time.
+		var names map[string]bool
+		if len(bad) == 0 {
+			names = map[string]bool{}
+			for _, e := range entries {
+				names[e.Name] = true
+			}
 		}
 		pruneCache(dir, names, time.Now())
 	}
@@ -206,18 +238,37 @@ func setupLine(setup, heading string) string {
 	return ""
 }
 
-// strayParent says why a folder's path can't be trusted: a part of it
-// above the folder is a link, which a PR's tree can point anywhere.
-func strayParent(root, folder string) string {
-	parent := filepath.Dir(folder)
-	real, err := filepath.EvalSymlinks(parent)
-	if errors.Is(err, os.ErrNotExist) {
-		return "" // restore makes it
-	}
-	if err != nil || real != parent {
-		return "a folder above it is a link"
+// linkOnPath names the first part of rel, from the worktree's root down,
+// that is a link, or "" when none is. A PR's tree can point a link
+// anywhere, so a path through one is read from, or written to, a place
+// outside the worktree. The last part counts too: a key file or a folder
+// that is itself a link.
+func linkOnPath(root, rel string) string {
+	p := root
+	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(filepath.FromSlash(rel))), "/") {
+		p = filepath.Join(p, part)
+		st, err := os.Lstat(p)
+		if err != nil {
+			return "" // not there yet: restore makes plain folders
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			r, _ := filepath.Rel(root, p)
+			return filepath.ToSlash(r)
+		}
 	}
 	return ""
+}
+
+// ours reports a name this command gives a kept folder or a copy on its
+// way in or out: a key, 32 hex digits, or a .tmp- name.
+func ours(name string) bool {
+	if strings.HasPrefix(name, ".tmp-") {
+		return true
+	}
+	if len(name) != 32 {
+		return false
+	}
+	return strings.Trim(name, "0123456789abcdef") == ""
 }
 
 // mainSetup reads project-setup.md from the main checkout, never this
@@ -428,7 +479,9 @@ func absLink(folder string) string {
 
 // pruneCache drops, for each name ## Cache lists, the folders unused past
 // cacheKeep and all but the cacheMax used last; every folder of a name it
-// no longer lists; and copies a session that died left an hour ago.
+// no longer lists (names nil: of none); and copies a session that died
+// left an hour ago. It touches only folders named as this command names
+// them.
 func pruneCache(dir string, names map[string]bool, now time.Time) {
 	nameDirs, _ := os.ReadDir(dir)
 	for _, nd := range nameDirs {
@@ -448,6 +501,9 @@ func pruneCache(dir string, names map[string]bool, now time.Time) {
 				continue
 			}
 			p := filepath.Join(parent, e.Name())
+			if !ours(e.Name()) {
+				continue
+			}
 			if strings.HasPrefix(e.Name(), ".tmp-") {
 				if now.Sub(info.ModTime()) > time.Hour {
 					removeTree(p)
@@ -458,19 +514,21 @@ func pruneCache(dir string, names map[string]bool, now time.Time) {
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].used.After(all[j].used) })
 		for i, k := range all {
-			if !names[nd.Name()] || i >= cacheMax || now.Sub(k.used) > cacheKeep {
+			if (names != nil && !names[nd.Name()]) || i >= cacheMax || now.Sub(k.used) > cacheKeep {
 				removeTree(k.path)
 			}
 		}
 	}
 }
 
-// removeTree deletes a folder so that no reader ever finds half of it: it
-// goes out of its name first, by rename, then is made writable (a module
-// cache holds read-only folders) and removed.
+// removeTree deletes a folder so that no reader ever finds half of it,
+// and no writer publishes half of it: it goes out of its name first, by
+// rename, so a save still copying into it finds its copy gone when it
+// comes to keep it. Then it is made writable (a module cache holds
+// read-only folders) and removed.
 func removeTree(path string) error {
 	gone := path
-	if base := filepath.Base(path); !strings.HasPrefix(base, ".tmp-") {
+	if base := filepath.Base(path); !strings.HasPrefix(base, ".tmp-drop-") {
 		gone = filepath.Join(filepath.Dir(path), ".tmp-drop-"+randHex())
 		if err := os.Rename(path, gone); err != nil {
 			if errors.Is(err, os.ErrNotExist) {

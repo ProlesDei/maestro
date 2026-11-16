@@ -57,7 +57,7 @@ Open a todo list with one item per phase below.
 
 1. Read [references/passes.md](references/passes.md) and run the tier's passes in order. A pass the tier skips is `not run: tier <n>`.
 2. At tier 2, run pass 9 in a new subagent at full reasoning effort, and pass 10 in another when the diff has more than 150 changed lines (`lines=`); at 150 or fewer, run pass 10 inline, and keep Confidence as it is. The red team must never have seen passes 1-8, whatever the size; the skeptic checks your findings, which a small diff keeps few. Pass 9 gets only `$C` and its pass text; it reads `code.md` before it opens a file, may open any file it has a reason to, and lists in its report each file it read beyond the pack. Pass 10 gets `$C`, the findings as claims (no reasoning) and its pass text. With no subagent tool, start a fresh headless session (`claude -p` or `codex exec`) the same way, with all permissions, at the repo's root, never in `$R`. Never resume an earlier review session or reuse your notes. If no fresh session can run, say so and drop Confidence one step.
-3. A subagent stops at about 25 tool calls, reports what it has and lists what it didn't check. Unchecked tier-2 scope is NO-GO.
+3. A subagent stops at about 25 tool calls, reports what it has and lists what it didn't check. Check what it left yourself before Phase F: the engineer can't fix a line that says a reviewer ran out of calls.
 4. Rate the findings and merge them into one list, as [passes.md](references/passes.md#rate-each-finding) says.
 
 ## Phase E: Run the gates
@@ -95,7 +95,7 @@ Otherwise **NO-GO**. In report-only mode, stop here.
    Verified: criteria <numbers checked at H>; carried <numbers> from <comment id> | none
    For QA: <what the diff puts most at risk in the running app, one line each> | none
    ```
-   **NO-GO.** One line per surviving blocker, and nothing else: a line the engineer must fix or answer costs a round. Every reason for the NO-GO is such a line, a red gate, a conflict, a missing PR, unchecked tier-2 scope or an owner's no included, and `<n>` counts them. `ask-user` findings last, each as a question.
+   **NO-GO.** One line per surviving blocker, and nothing else: a line the engineer must fix or answer costs a round. Every reason for the NO-GO is such a line, a red gate, a conflict, a missing PR or an owner's no included, and `<n>` counts them. `ask-user` findings last, each as a question.
    ```text
    Kickback: <n> blockers at <H>
    Verified: criteria <numbers checked and passing at H>; carried <numbers> from <comment id> | none
@@ -117,7 +117,7 @@ Skeptic: short inline | full inline | fresh session
 ## Findings       | id | sev | action | pass | file:line | evidence | fix |
 ## Passes         1-10: findings, "clean, checked: ...", or "not run: ..."
 ## Dropped        | id | why |
-## Earlier feedback   <item>: fixed in <sha> | refuted: <evidence> | still present
+## Earlier feedback   <item>: fixed in <sha> | refuted: <evidence> | moved to Follow-ups | still present
 ## Follow-ups     (each major, then what was already on the base, as passes.md rates them: one line each with its file:line, `urgent` first, for the planner)
 ## Outcome        the Review, Kickback or Escalation comment id and any ticket move, or "none: report only"
 ```

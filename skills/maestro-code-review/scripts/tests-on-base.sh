@@ -76,7 +76,9 @@ else
 	mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
 	if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
 		while IFS= read -r w; do
-			[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+			# Its .git: git tracks no path of that name, so no change's
+			# tree can pass for the install.
+			[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
 		done < <(sed -n 's/^worktree //p' <<<"$wts")
 	fi
 	setup=$mainwt/.maestro/project/project-setup.md
@@ -154,9 +156,24 @@ for p in "${gone[@]}"; do
 		fi
 	done
 done
-# A submodule's files aren't in this tree to swap.
-! g diff --no-renames --raw "$B" "$head" | grep -Eq '^:(160000 [0-7]+|[0-7]+ 160000) ' ||
+# A submodule's files aren't in this tree to swap. The diff is read
+# whole first: a grep that stops at its first match would end git with a
+# broken pipe, and pipefail would read that as no match.
+raw=$(g diff --no-renames --raw "$B" "$head")
+if grep -Eq '^:(160000 [0-7]+|[0-7]+ 160000) ' <<<"$raw"; then
 	die 1 "the change adds, removes or moves a submodule: this can't swap it, so check these tests by hand"
+fi
+# The folders above a base-only path that are here now, empty or holding
+# ignored files: git removes an empty one on the way back, so they are
+# made again.
+keepdirs=()
+for p in "${gone[@]}"; do
+	d=$p
+	while [[ $d == */* ]]; do
+		d=${d%/*}
+		[ ! -d "$top/$d" ] || keepdirs+=("$d")
+	done
+done
 
 echo "base_sha=$B"
 echo "head_sha=$head"
@@ -269,6 +286,8 @@ back() {
 		shielded g restore --source="$head" --staged --worktree --pathspec-file-nul \
 			--pathspec-from-file="$tmp/code.paths" >>"$log" 2>&1 || true
 	fi
+	local d
+	for d in "${keepdirs[@]}"; do mkdir -p "$top/$d" 2>/dev/null || true; done
 	at_head && return 0
 	{
 		echo "$me: THE TREE IS NOT BACK AT ITS HEAD $head ($ref)."

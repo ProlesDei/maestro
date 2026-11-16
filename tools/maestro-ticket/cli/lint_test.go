@@ -38,6 +38,10 @@ func TestCreateLint(t *testing.T) {
 	if code, stdout, _ := h.run(md, "create", "--title", "c", "--areas", "src/c", "--lint", "--body-file", "-", "--json"); code != 0 {
 		t.Fatalf("a Markdown body: %d %s", code, stdout)
 	}
+	// Prose that only says the words is no list.
+	if code, stdout, _ := h.run("1. it works\n\n- not handled by the caller today\n", "create", "--title", "d", "--areas", "src/d", "--lint", "--body-file", "-", "--json"); code != 2 || !strings.Contains(stdout, "Not handled:") {
+		t.Fatalf("prose for a list: %d %s", code, stdout)
+	}
 	// A scout and another role's ticket have no such shape.
 	h.ok(nil, "create", "--title", "Design: x", "--type", "scout", "--role", "designer", "--owner", "planner", "--lint")
 	h.ok(nil, "create", "--title", "Live run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead", "--lint")

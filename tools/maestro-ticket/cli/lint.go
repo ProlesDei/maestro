@@ -14,7 +14,7 @@ var (
 	// A bullet, a checkbox or bold before the number doesn't hide it.
 	criterionLine = regexp.MustCompile(`(?m)^\s*(?:[-*+>]\s*)?(?:\[[ xX]\]\s*)?[*_]*[0-9]+[.)][*_]*\s+\S`)
 	// "Not handled:", as a line of its own or a heading.
-	notHandledLine = regexp.MustCompile(`(?im)^[#*_>\s-]*not handled\b`)
+	notHandledLine = regexp.MustCompile(`(?im)^[#*_>\s-]*not handled[*_]*\s*(:|$)`)
 )
 
 // maxCriteria is where a ticket is likely two: each criterion costs a

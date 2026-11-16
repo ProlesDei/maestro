@@ -29,7 +29,10 @@ var (
 	// "- F3 [major, auto-fix] file:line: ...": a finding and its severity,
 	// as a bullet or a numbered line, in any case, bold or not.
 	findingLine = regexp.MustCompile(`(?i)^\s*(?:[-*+]|[0-9]+[.)])\s+[*_]*(F[0-9]+)[*_:]*\s*[\[(]\s*[*_]*([a-z]+)`)
-	fullSHA     = regexp.MustCompile(`^[0-9a-f]{40}(\W|$)`)
+	// A bullet that opens with a finding's id, whatever follows.
+	findingID = regexp.MustCompile(`(?i)^\s*(?:[-*+]|[0-9]+[.)])\s+[*_]*(F[0-9]+)\b`)
+	redGates  = regexp.MustCompile(`(?im)^\s*Gates:\s*(red|not run)`)
+	fullSHA   = regexp.MustCompile(`^[0-9a-f]{40}(\W|$)`)
 )
 
 // verdictKind sorts a review's or QA's note by its first line and checks
@@ -68,23 +71,28 @@ func verdictKind(body string) (noteKind, error) {
 			return bad("a review's kickback opens %q, with the head's full sha or none; majors and minors go under ## Follow-ups in the report, not here", "Kickback: <n> blockers at <sha>")
 		}
 		n, _ := strconv.Atoi(m[1])
-		var found, slid []string
+		var found, slid, unread []string
 		for _, l := range strings.Split(lineBreaks.Replace(body), "\n") {
 			if f := findingLine.FindStringSubmatch(l); f != nil {
 				found = append(found, strings.ToUpper(f[1]))
 				if sev := strings.ToLower(f[2]); sev != "blocker" {
 					slid = append(slid, strings.ToUpper(f[1])+" ("+sev+")")
 				}
+			} else if f := findingID.FindStringSubmatch(l); f != nil {
+				unread = append(unread, strings.ToUpper(f[1]))
 			}
 		}
+		line := "- F1 [blocker, auto-fix] file:line: what's wrong. Fix: ..."
 		switch {
+		case len(unread) > 0:
+			return bad("can't read the severity of %s: write each finding as %q", strings.Join(unread, ", "), line)
 		case len(slid) > 0:
 			return bad("only a blocker sends a change back: take %s off the Kickback and list them under ## Follow-ups in the report", strings.Join(slid, ", "))
-		case n == 0:
+		case n == 0 && len(found) == 0 && !redGates.MatchString(body):
 			return bad("a Kickback with no blocker is a GO: post %q instead", "Review: GO at <sha>")
 		case len(found) == 0:
-			// Never a hint to post a GO: the first line says blockers stand.
-			return bad("the first line counts %d blockers, and no finding line follows: give each reason for the NO-GO, a red gate or a conflict too, a line %q", n, "- F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...")
+			// Never a hint to post a GO here: the note says something stands.
+			return bad("the first line counts %d blockers, and no finding line follows: give each reason for the NO-GO, a red gate or a conflict too, a line %q, and count them", n, line)
 		case n != len(found):
 			return bad("the first line counts %d blockers, and %d finding lines follow (%s)", n, len(found), strings.Join(found, ", "))
 		}

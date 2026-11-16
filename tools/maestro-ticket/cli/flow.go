@@ -198,11 +198,15 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 			leave(e.CreatedAt)
 			if status == ticket.StatusInReview && data.To == ticket.StatusInProgress {
 				// A send-back, counted once however often its note was
-				// posted: QA's when the newest Kickback: by then is a QA fail.
-				by := &review
+				// posted: by whoever posted the newest Kickback: of this
+				// stay. A move back with none was no verdict.
+				var by *int
 				for _, cm := range d.Comments {
 					if cm.CreatedAt.After(e.CreatedAt) {
 						break
+					}
+					if cm.CreatedAt.Before(at) {
+						continue
 					}
 					if l := firstLine(cm.Body); strings.HasPrefix(l, "Kickback: QA fail") {
 						by = &qa
@@ -210,7 +214,9 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 						by = &review
 					}
 				}
-				*by++
+				if by != nil {
+					*by++
+				}
 			}
 			fromBlocked = status == ticket.StatusBlocked
 			status, at = data.To, e.CreatedAt

@@ -291,7 +291,7 @@ git -C "$tmp/bare.git" config remote.origin.fetch '+refs/heads/*:refs/remotes/or
 git -C "$tmp/bare.git" fetch -q origin
 git -C "$tmp/bare.git" worktree add -q "$tmp/bare-other" -b other origin/main
 git -C "$tmp/bare.git" worktree add -q "$tmp/bare-main" main
-mkdir -p "$tmp/bare-main/.maestro/src"
+mkdir -p "$tmp/bare-main/.maestro/src/.git"
 git -C "$tmp/bare.git" worktree add -q "$tmp/bare-wt" -b change "$F"
 (
 	cd "$tmp/bare-other"
@@ -324,8 +324,12 @@ new() { # new <name>: a change's worktree from main, in $wt
 	cd "$wt"
 }
 new keep
-echo 'secret=1' >.env && git add -f .env && git commit -qm "track .env"
+mkdir build && echo out >build/out.js
+echo 'secret=1' >.env && git add -f .env build && git commit -qm "track .env"
 B0=$(git rev-parse HEAD)
+# The folder stays, empty, where the base had a file in it: it must be
+# there after the run too.
+git rm -q build/out.js && mkdir -p build
 git rm -q --cached .env && echo .env >.gitignore && echo 'echo k' >src/k.sh
 # shellcheck disable=SC2016
 echo 'cd "$(dirname "$0")/.." && [ "$(sh src/k.sh)" = k ]' >tests/k_test.sh
