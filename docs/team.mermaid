@@ -13,7 +13,7 @@ flowchart TD
 
     Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
 
-    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · test first · project checks ·<br/>tests and a real run per criterion · open PR · ticket to in_review"]
+    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · build · project checks ·<br/>a real run per criterion · open PR · ticket to in_review"]
 
     Done([Merged · ticket done])
 
@@ -51,8 +51,8 @@ flowchart TD
     Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"in_review: pickup hands it on"| Rev
-    Rev -->|"GO: Review: GO comment"| QA
+    Build -->|"in_review: its end starts the review"| Rev
+    Rev -->|"GO: its end starts QA"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done
     Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr

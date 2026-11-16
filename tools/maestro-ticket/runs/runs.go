@@ -106,6 +106,18 @@ type Record struct {
 	// Host is the machine the supervisor runs on. It matters only where
 	// the store may sit on a disk machines share: see elsewhere.
 	Host string `json:"host,omitempty"`
+	// ChainOf is the run whose end started this one as its fixed next
+	// step, and Hops how many such ends in a row led here (cli/chain.go).
+	ChainOf string `json:"chain_of,omitempty"`
+	Hops    int    `json:"hops,omitempty"`
+	// Chained are the handoffs this run's end started itself, each as
+	// "<bot>: <line>". Routed is what its end routed, as pickup shows it,
+	// kept when the end handed some of it on: pickup shows that and
+	// doesn't route again, since the ticket has moved on since. Notify is
+	// the bot its end left the rest to, when not its launcher.
+	Chained []string        `json:"chained,omitempty"`
+	Routed  json.RawMessage `json:"routed,omitempty"`
+	Notify  string          `json:"notify,omitempty"`
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
 	AckedBy string     `json:"acked_by,omitempty"`
@@ -135,6 +147,16 @@ type EndFacts struct {
 	// Escaped counts the run's processes outside its group that the stop
 	// sent SIGTERM: what slot or Claude Code started in a group of its own.
 	Escaped int
+}
+
+// Owner is the bot whose pickup shows the run once it ends, who acks it
+// and whose webhook rings for it: its launcher, unless its end named
+// another in Notify.
+func (r Record) Owner() string {
+	if r.Notify != "" {
+		return r.Notify
+	}
+	return r.Launcher
 }
 
 // Ended reports whether the run is over.

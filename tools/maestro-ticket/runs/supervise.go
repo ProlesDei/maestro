@@ -55,7 +55,8 @@ type Options struct {
 	// says running: it returns the run's launch id in the store.
 	OnStart func(Record) int64
 	// OnEnd, if set, runs once the result is saved, before the first ring:
-	// to log the run's cost and free a ticket it left claimed.
+	// to log the run's cost, free a ticket it left claimed, and start the
+	// fixed next step. It may save the record; the rings read it after.
 	OnEnd func(Record)
 	// RingAgain, when set, names a time to ring once more while the run
 	// isn't acked, such as the end of the usage limit that stopped it, so
@@ -112,6 +113,10 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 	}
 	if o.OnEnd != nil {
 		o.OnEnd(r)
+		// It may have handed the result on: ring as it left the record.
+		if got, err := Load(dir, r.ID); err == nil {
+			r = got
+		}
 	}
 	DropStream(dir, id)
 	// Stopped, as at a shutdown: leave the ring to the first reader after,
@@ -388,7 +393,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	if o.Hook == nil {
 		return
 	}
-	h, err := o.Hook(r.Launcher)
+	h, err := o.Hook(r.Owner())
 	if err != nil {
 		r.RingError = err.Error()
 		Save(dir, r)

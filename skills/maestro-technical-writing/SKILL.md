@@ -32,7 +32,7 @@ Open a todo list with one item per phase below.
 1. **Lead with the point.** Put the conclusion, the decision or the action first. Detail comes after.
 2. **Cut every word you can.** If a sentence survives without a word, cut the word.
 3. **Use the short, everyday word.** No jargon, foreign phrase or science word where a common word works. Keep a technical term when no everyday word means the same. Name the real file, flag or command, not a synonym for it.
-4. **Write in the active voice.** Name who acts: "the server sends the request". Write steps as commands: "Run `make test`."
+4. **Write in the active voice.** Name who acts: "the server sends the request". Write steps as commands: "Run `make build`."
 5. **Drop stock figures of speech.** No metaphor, simile or idiom you have seen in print. State the plain fact.
 6. **Be concrete.** Give numbers, names, paths and examples, not adjectives or praise: not "the change can cause issues" but "renaming the column fails the build".
 7. **Use strong verbs,** not nouns made from verbs: "decide", not "make a decision".

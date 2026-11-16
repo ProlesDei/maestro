@@ -16,7 +16,7 @@ ok    statuses           every open ticket has a known status
 ok    roles              every open ticket has a known role or none
 ok    parked             every backlog ticket says why it waits, and no other does
 ok    events             last seq 15; append-only triggers 2/2
-warn  runs               7 ended runs not acked by their launcher (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)
+warn  runs               7 ended runs not acked by the bot they were left to (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)
 $ maestro-ticket doctor --json
 exit 0
 stdout:
@@ -100,7 +100,7 @@ stdout:
     {
       "name": "runs",
       "ok": true,
-      "detail": "7 ended runs not acked by their launcher (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)",
+      "detail": "7 ended runs not acked by the bot they were left to (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)",
       "warn": true
     }
   ],

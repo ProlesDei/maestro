@@ -38,18 +38,18 @@ If no row fits, say what you can do and stop.
 ## Phase B: Check a plan
 
 1. Read the plan, the code each ticket names, and the open board as Phase C step 1 reads it.
-2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order or a test fixture; a format, schema or fixture several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; two criteria that pull against each other or against the code on the main branch; a case that would lose data or money with no criterion, or a ticket with no `Not handled:` list; more than about six criteria; areas that leave out a file or test the criteria need; a path that doesn't exist; a ticket the board already has.
+2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order; a format or schema several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; two criteria that pull against each other or against the code on the main branch; a case that would lose data or money with no criterion, or a ticket with no `Not handled:` list; more than about six criteria; areas that leave out a file the criteria need; a path that doesn't exist; a ticket the board already has.
 3. Give each finding as ticket, problem, evidence (a path or command) and fix. With none, say "no findings".
 
 ## Phase C: Read the board
 
 1. Read the open board without the bodies: `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,status,parked,goal,priority,tries,areas,depends_on,claim}'`. A dep missing from it is `done` or `cancelled`; `maestro-ticket get` tells which.
-2. Count the `todo` tickets that can start now (deps `done`, no area shared with a live claim on a `todo` or `in_progress` ticket; a claim on one in review holds no area) and the longest dep chain. Then find why the rest wait: a dep that is `cancelled` (it blocks for ever), `blocked`, or high in `tries`; a dep only for order or a test fixture; an area many tickets share; a ticket that holds an area and too much work; a `backlog` ticket whose reason no longer holds.
-3. For each, give the ids, how many tickets wait on it, and the fix: `/maestro-planner <id>` to split it, a dep to drop, an area to narrow, a shared format, fixture or hook ticket to add, or a parked ticket to move to `todo`. Change nothing.
+2. Count the `todo` tickets that can start now (deps `done`, no area shared with a live claim on a `todo` or `in_progress` ticket; a claim on one in review holds no area) and the longest dep chain. Then find why the rest wait: a dep that is `cancelled` (it blocks for ever), `blocked`, or high in `tries`; a dep only for order; an area many tickets share; a ticket that holds an area and too much work; a `backlog` ticket whose reason no longer holds.
+3. For each, give the ids, how many tickets wait on it, and the fix: `/maestro-planner <id>` to split it, a dep to drop, an area to narrow, a shared format or hook ticket to add, or a parked ticket to move to `todo`. Change nothing.
 
 ## Phase D: Answer a question
 
-1. Find out from the repo, not memory: search and read the code, run the tests or the app on the main branch.
+1. Find out from the repo, not memory: search and read the code, run the app on the main branch.
 2. Answer in a sentence or two, then the evidence: paths with line numbers, commands with exit codes.
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 

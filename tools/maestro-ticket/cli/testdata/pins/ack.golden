@@ -14,7 +14,7 @@ maestro-ticket: status conflict: ack: run R-3 is running: ack it once pickup sho
 $ maestro-ticket ack R-4
 exit 2
 stderr:
-maestro-ticket: not allowed for this actor: ack: run R-4 is reviewer's: only the bot that launched it acks it
+maestro-ticket: not allowed for this actor: ack: run R-4 is reviewer's: only the bot it was left to acks it
 $ maestro-ticket ack R-zzzzzzzz
 exit 3
 stderr:
@@ -74,7 +74,7 @@ stdout:
 {
   "error": {
     "code": "forbidden",
-    "message": "not allowed for this actor: ack: run R-4 is reviewer's: only the bot that launched it acks it"
+    "message": "not allowed for this actor: ack: run R-4 is reviewer's: only the bot it was left to acks it"
   }
 }
 $ maestro-ticket ack R-zzzzzzzz --json

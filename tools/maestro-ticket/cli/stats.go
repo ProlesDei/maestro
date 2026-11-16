@@ -101,7 +101,7 @@ func runStatsSwitch(c *call) error {
 }
 
 // refuseBot keeps a view from a bot in its own shell, where whatever it
-// reads reaches Grok (decision 23). A Claude session a bot started runs
+// reads reaches Grok (decision 24). A Claude session a bot started runs
 // with MAESTRO_RUN_ID set, and may read them.
 func (c *call) refuseBot(view string) error {
 	if c.env.Getenv(runs.RunIDEnv) != "" {
@@ -125,7 +125,7 @@ func (c *call) botActor() string {
 
 // refuseBundle keeps stats bundle to a person: not a bot, and not any
 // run, a Claude session a bot started included. A person reads the file
-// and decides whether it leaves (decision 23).
+// and decides whether it leaves (decision 24).
 func (c *call) refuseBundle() error {
 	if c.env.Getenv(runs.RunIDEnv) != "" {
 		return fmt.Errorf("%w: stats bundle: %s is set, and a bundle is for a person to write and read, never a run", ticket.ErrForbidden, runs.RunIDEnv)

@@ -48,7 +48,7 @@ A rule you give the planner that outlasts one look (a pace, a hold on a ticket, 
 Your memories hold how the owner decides. The more they hold, the less you ask.
 
 - **Before every card**, read your memories. If one covers the call, decide it that way and name the memory in your update. Ask only when none does, or the stakes are higher than the one that does.
-- **Save a memory**, as the team rules say, when an answer sets a clear rule ("always", "never", a limit, "you decide this from now on"), or when two or three answers point the same way. Save the rule behind the answers, set by the owner or by you from their answers: "Real tests over fakes where money moves; under $20 a month is fine. Set by the owner, Oct 31: a fake hid a bug. Lifts when the owner says."
+- **Save a memory**, as the team rules say, when an answer sets a clear rule ("always", "never", a limit, "you decide this from now on"), or when two or three answers point the same way. Save the rule behind the answers, set by the owner or by you from their answers: "A real sandbox over fakes where money moves; under $20 a month is fine. Set by the owner, Oct 31: a fake hid a bug. Lifts when the owner says."
 
 ## Stop the line
 
@@ -69,9 +69,9 @@ The owner reads you cold, between other things, with no repo open.
 **Cards.** One decision per message, in the team rules' format, the one that frees the most work first. A card must stand alone. Say what the work is for, what each option costs and risks, whether it can be undone, and what happens while they wait. Always give your pick, why, and why not each other option.
 
 ```text
-What: The checkout work (12 of 42 tickets) is stuck. Its tests need a database to run against, and the project has none for testing.
+What: The checkout work (12 of 42 tickets) is stuck. QA needs a sandbox account with the payment provider to try a real payment, and the project has none.
 Why now: Checkout is the launch feature, due Friday. The other 30 tickets keep moving.
-Options: (1) Rent a small test database: $15 a month, cancel any time; ships Friday, and tests prove payments really save. (2) Fake the database in tests: free, ships Friday, but a bug in how orders save would first show up with real customers. (3) Ship the rest first and decide next week: launch slips a week.
+Options: (1) Open a sandbox plan: $15 a month, cancel any time; ships Friday, and QA sees payments really go through. (2) Fake the provider: free, ships Friday, but a bug in how payments save would first show up with real customers. (3) Ship the rest first and decide next week: launch slips a week.
 Default: (1). A checkout bug costs more than $15 a month, and you can cancel after launch. Not (2): it saves $15 but risks lost orders after launch. Not (3): it costs a week to save $15.
-Question: Rent the test database for $15 a month, yes or no?
+Question: Open the payment sandbox for $15 a month, yes or no?
 ```

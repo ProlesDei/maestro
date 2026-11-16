@@ -8,7 +8,7 @@
 1. Go code that already runs writes typed facts to `stats.db`, beside the ticket store: each run's supervisor at the run's end, and `pickup` or `doctor` for a run whose supervisor died. It costs 0 model tokens and 0 Grok tokens. Output pins taken from main before any stats code hold every byte a bot or a session reads (10.2).
 2. Most of the data existed and got thrown away: the result object's turns, subtype and spend per model; the run's outcome, why it got its model, its slot wait, how it was stopped. We keep it. One source is new: Claude's `stream-json` output. On Linux the supervisor sends it to `runs/<id>.stream`, reads that file once the command exits, and removes it once the run's row is written.
 3. Free text can't reach `stats.db`. Every table is `STRICT`. Enum columns hold integer ids into a `codes` table that only Go's lists fill, and each TEXT column has a GLOB check on its shape. Marker tests plant words, hex, model ids and numbers (a ticket id, an epoch) everywhere, then grep `stats.db`, its WAL and every bundle.
-4. Nothing leaves the machine on its own. Maestro has no send code ([decision 23](../decisions.md)). `stats bundle --case T` writes one ticket's runs to a file, with labels for ids and 15-minute offsets for times, and prints only its path, size, sha256 and row counts. Only a person runs it, and a person sends the file after the owner's yes.
+4. Nothing leaves the machine on its own. Maestro has no send code ([decision 24](../decisions.md)). `stats bundle --case T` writes one ticket's runs to a file, with labels for ids and 15-minute offsets for times, and prints only its path, size, sha256 and row counts. Only a person runs it, and a person sends the file after the owner's yes.
 5. v1 shipped on one branch as one probe (R0), seven build steps (C0-C6) and a merge of main, with three views (`stats case`, `stats health`, `stats costs`) and the case bundle.
 
 ```mermaid
@@ -45,7 +45,7 @@ This section links each rule and says how the design keeps it. It does not resta
 | [Decision 15](../decisions.md) | Capture follows `job`, `job again` and `resume` under `launch`, keyed on the run ids `launch` issues. |
 | [Decision 17](../decisions.md) | A bundle carries versions, so maintainers can tell teams' releases apart. A case bundle shows one team's case as a case. |
 | [Decision 19](../decisions.md) | No bot step is added. `pickup`, `doctor`, `runs`, `job`, `job again`, `resume`, `look`, `check`, `ack`, `costs` and `--help` print the same bytes, text and `--json`, against masked goldens taken from main (C0): `pickup`, `doctor`, `runs`, `ack`, `costs` and `check` under all seven stats states, and `job`, `job again`, `resume` and `look` under off and broken (10.2), and `--help` once (`TestPinUsage`). Records keep `--output-format json`; the supervisor swaps in `stream-json --verbose` only when it starts the command (section 4). Code refuses `stats` views to bots (section 8). |
-| [Decision 9](../decisions.md) | Enum lists live once, in Go. `stats.db` holds a copy that grows by insert, never by rebuild (5.0). The rule that stats stay local is [decision 23](../decisions.md), added in C1; this doc links to it. |
+| [Decision 9](../decisions.md) | Enum lists live once, in Go. `stats.db` holds a copy that grows by insert, never by rebuild (5.0). The rule that stats stay local is [decision 24](../decisions.md), added in C1; this doc links to it. |
 | [Decision 8](../decisions.md) | `install.sh check` stays read-only. `apply` gains one key, `stats:` (6.2). |
 | [Decision 12](../decisions.md) | All sessions run as one user with all permissions, so the bot and run checks on views and `bundle` guard only against slips. The real guards are the lack of send code and what a bundle can hold (9.6). |
 | Swarm scale (AGENTS.md) | No prompt, skill or persona grows. The only writer outside a supervisor is the orphan path in `pickup` and `doctor`: 250 ms, then drop. Create and migrate happen only in a supervisor. Prune runs after the first ring. |
@@ -505,6 +505,7 @@ sequenceDiagram
   S->>F: scan once: Summary, then .out gets pre-JSON text and the result
   S->>S: Credit, removeWaits, stop kind, Save record
   S->>D: OnEnd: endRun does the tickets.db work, frees the claim,<br/>then run_facts, run_models, run_steps, findings in one tx, 300 ms
+  S->>S: OnEnd: the chain starts the fixed next step
   S->>F: remove
   S->>W: first ring, unchanged
   S->>D: AfterRing: rang and ring_err, then the claimed prune
@@ -513,7 +514,7 @@ sequenceDiagram
 **Capture order:**
 - **Facts are held in memory.** The side file holds what the job knew at the start. The supervisor's end facts (wait, stop kind, escaped count) and the stream Summary sit on the record, tagged `json:"-"`, so they reach `endRun` and never a record byte (`TestEndFactsNotInRecordJSON`, `TestRecordJSONKeys`).
 - **Slot wait.** The supervisor reads `Credit` once more right before `removeWaits` **[code: runs/supervise.go:259-260]** (`TestWaitMsCredit`).
-- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`, within 300 ms. Prune waits for the first ring.
+- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`, within 300 ms, so the chain waits on it at most that long. Prune waits for the first ring.
 - **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too. There the stats write is 250 ms, then drop, no retries, and the row says `stream=lost` for a run that was streaming.
 - **The gap.** A run whose supervisor died between Save and `OnEnd`, or whose write was dropped, has no row. `stats health` counts ended runs on disk that have no `run_facts` row, so the gap shows (`TestStatsHealthMissingRows`).
 - **Stats errors print nothing.** `endRun`'s warnings reach the bot in `pickup`, so a stats error is swallowed, and `stats health` is where losses show.
@@ -598,7 +599,7 @@ flowchart TD
 | Share | job, model family, effort, tier, outcome, reason, step codes, verdict kinds, finding ids, counts, ms, bytes, checked versions, OS, arch, disk % | yes | yes |
 | Share, opt-in | USD, tokens and `ctx_peak`: spend shows team size and budget | yes | only with `--cost` |
 
-**A default bundle still shows run volume and rough session size**: how many runs a ticket took, how long they ran, and the size of their prompts and replies. Decision 23 says so, and the owner reads each bundle before it leaves.
+**A default bundle still shows run volume and rough session size**: how many runs a ticket took, how long they ran, and the size of their prompts and replies. Decision 24 says so, and the owner reads each bundle before it leaves.
 
 ### 9.2 Narrow decoders
 
@@ -752,7 +753,7 @@ sequenceDiagram
 ```
 
 - **Bundle header:** `bundle_schema`, `stats_schema`, the case label, `with_cost` and the span in days. Each run carries its checked `v_maestro` and `v_claude`.
-- **No send code**: [decision 23](../decisions.md), backed by the deps test (9.5, item 6).
+- **No send code**: [decision 24](../decisions.md), backed by the deps test (9.5, item 6).
 - **Maintainers treat bundles as data**, under AGENTS.md "Outside content".
 
 ---
@@ -764,7 +765,7 @@ One branch, a commit per step (C5 and the merge each have a fix commit after the
 ```mermaid
 flowchart LR
   R0["R0 probe on real Claude Code<br/>nothing ships"] --> C0["C0 output pins<br/>from main"]
-  C0 --> C1["C1 stats.db, codes, run_facts,<br/>run_models, off switch, prune,<br/>decision 23"]
+  C0 --> C1["C1 stats.db, codes, run_facts,<br/>run_models, off switch, prune,<br/>decision 24"]
   C1 --> C2["C2 side file, why, tier,<br/>wait, stop kind"]
   C2 --> C3["C3 review findings,<br/>head, verdict, causes"]
   C3 --> C4["C4 stream capture,<br/>run_steps, tail, open call"]
@@ -778,7 +779,7 @@ flowchart LR
 |---|---|---|
 | **R0** | Probes in a scratch repo, on today's argv against the swapped argv | Token totals, stderr and startup stdout equal; result keys; init version; per-turn usage; `is_error` on a Bash exit; `.stream` size against `FloorBytes` (section 11). Gate for C4: all pass. They did. |
 | **C0** | Masked goldens of every byte a bot or session reads; reflect pins on `Record` and `Notification`; argv pins | 10.2 |
-| **C1** | `stats` package, schema v1, `Prepare`, `Write`, `Prune`, `stats on\|off`, the `stats:` key in `install.sh`, INSTALL.md, decision 23 | schema lint, differential modes, marker test, deps and import scans, prepare race, prune claim, concurrency, `install_test.sh` |
+| **C1** | `stats` package, schema v1, `Prepare`, `Write`, `Prune`, `stats on\|off`, the `stats:` key in `install.sh`, INSTALL.md, decision 24 | schema lint, differential modes, marker test, deps and import scans, prepare race, prune claim, concurrency, `install_test.sh` |
 | **C2** | `runs/<id>.stats` from `startRun`; `why` at each decision site; `Credit` before `removeWaits`; stop kind and escaped count on `Record.End` | `TestSideFileBeforeSupervisor`, `TestWhyEveryDecision`, `TestWhyOverride`, `TestWhyAgainResume`, `TestEndFactsNotInRecordJSON`, C0 pins |
 | **C3** | Head codes, findings, verdict, tier, mode, dropped rows, escalation causes | `TestHeadCodes`, `TestFindingsFromReply`, `TestFindingsClamp`, `TestEscalateCause`, `TestFindingsMarkers`, `TestReviewDecoderFields` |
 | **M** | Merge main; review formats read through main's `followUpLines` and `noteOpening`; reasons `asked` and `frozen` | goldens follow main, proven on a detached main worktree |

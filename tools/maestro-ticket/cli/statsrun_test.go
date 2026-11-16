@@ -772,3 +772,44 @@ func TestStatsCLIImports(t *testing.T) {
 		t.Fatalf("read %d files", seen)
 	}
 }
+
+// A run main's chain starts at another run's end is a job run like a
+// bot's own start: it gets a side file, its stream is read, and its row
+// names the bot it was for. The ending run's row is in before the ring.
+func TestStatsChainedRun(t *testing.T) {
+	needStream(t)
+	j, hooks := newChainHarness(t, "junior-engineer", "reviewer")
+	prepareStatsAt(t, j.h.dir)
+	// The review passes; with no QA lead webhook, its QA stays for the
+	// reviewer's pickup, and the reviewer is rung.
+	if err := os.WriteFile(filepath.Join(j.out, "kicked"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	j.h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	if out, err := j.chainCmd("junior-engineer", "", "job", "build", "T-1").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	hooks["reviewer"].wait(t, 60*time.Second)
+	rs := ticketRuns(t, j.h.dir, "T-1")
+	if len(rs) != 2 || rs[1].Job != "review" || rs[1].ChainOf != rs[0].ID {
+		t.Fatalf("runs on T-1: %+v", rs)
+	}
+	for i, want := range [][4]string{{"junior-engineer", "build", "tier_junior", "ok"}, {"reviewer", "review", "route_full", "ok"}} {
+		var got [4]string
+		statsQuery(t, j.h.dir, `SELECT r.name, j.name, w.name, s.name FROM run_facts f JOIN codes r ON r.id = f.role
+			JOIN codes j ON j.id = f.job JOIN codes w ON w.id = f.why JOIN codes s ON s.id = f.stream
+			WHERE f.run = '`+rs[i].ID+`'`, &got[0], &got[1], &got[2], &got[3])
+		if got != want {
+			t.Errorf("run %d's row: role, job, why, stream %q; want %q", i, got, want)
+		}
+	}
+	for _, r := range ticketRuns(t, j.h.dir, "T-1") {
+		if !r.Ended() {
+			j.waitEnded(r.ID, 20*time.Second)
+		}
+		if out, err := j.chainCmd(r.Owner(), "", "ack", r.ID).CombinedOutput(); err != nil {
+			t.Fatalf("ack %s: %v\n%s", r.ID, err, out)
+		}
+	}
+}

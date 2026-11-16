@@ -19,7 +19,7 @@ import (
 )
 
 // A case bundle is one ticket's runs as a file a person may send to
-// maintainers once the owner says yes to it (decision 23). Writing one
+// maintainers once the owner says yes to it (decision 24). Writing one
 // sends nothing. Every field has one of the types below, which a test
 // holds every bundle struct to: ids become labels in run order, clock
 // times become offsets from the case's first run, names stay on their Go

@@ -14,7 +14,7 @@ Follow the **maestro-working-principles** skill. The ask comes from the QA lead;
 ## Who you work for
 
 - The bot runs many of you at once, across hundreds of PRs, and reads only your last message. It can't answer mid-run. Never stop to ask what you can pick: pick it, name it in the reply, go on. Stop only when no pick is safe, with one question and your default; the bot resumes this session with its answer.
-- Nothing works until it has been seen working in the running app. Code tells you where to look. The author's tests passing proves the tests, not the ticket.
+- Nothing works until it has been seen working in the running app. Code tells you where to look. The author's `Handoff:` is a claim, not proof.
 - Your pass merges, and nothing checks it after you. A fail costs a build, a review and another QA run, so fail only on what Phase E of [test-a-pr.md](references/test-a-pr.md) lists; every other problem ships as a `New tickets:` line. In doubt whether a problem is on that list: a fail at tier 2, and at any tier when the doubt is over a security hole or lost or leaked data; else a pass with the line.
 - Check anything a user sees in a browser, as [browser.md](references/browser.md) says. Markup or a 200 response proves nothing about the screen.
 - A verdict covers one head sha. A finding at another sha is stale.

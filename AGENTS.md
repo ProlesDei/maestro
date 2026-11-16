@@ -8,7 +8,7 @@ Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hun
 
 ## What we're building
 
-The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher; the one webhook rings a bot when a run it launched ends (the owner's ruling, `docs/decisions.md`). The orchestrator lives outside the repo.
+The infrastructure under that workflow, which a team installs into its own repo: a ticket tool, skills and personas. Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher; the one webhook rings a bot when a run left to it ends, and a run that ends done starts only its fixed next step on the same ticket (the owner's rulings, `docs/decisions.md`, 1). The orchestrator lives outside the repo.
 
 That orchestrator is Grok Bot. It takes the place of the person who prompts the harness. It runs outside the repo, takes on one of the seven profiles in `bot-profiles/`, comes into the repo, and drives the harness with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
 
@@ -16,7 +16,7 @@ How work moves (drawn in `docs/team.mermaid`). Each role below is one Grok Bot p
 1. The chief of staff talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
 2. The planner runs the team day to day, as product owner and project manager in one. Planning sessions turn its goals into tickets in `maestro-ticket`, each tagged junior or senior; each `look` hands out builds by tier up to its run limit, and a judge session settles what needs reading ([its persona](bot-profiles/planner/persona.md)). It reports status and the blocks it can't settle to the chief of staff.
 3. When a goal changes screens, the designer runs `/maestro-designer` on its `Design:` ticket first: two or three directions in code, one pick and a spec, handed up as a draft PR. The owner approves it or asks for changes; only then does the planner write the screen tickets, with criteria from the spec.
-4. An engineer takes one ticket to an open PR in a Claude Code session running `/maestro-software-engineer`: the senior engineer (Opus) on senior-tier tickets and a junior's ticket sent back twice, the junior engineer (Sonnet) on junior-tier ones. When a build ends in review, `pickup` hands it straight to the reviewer.
+4. An engineer takes one ticket to an open PR in a Claude Code session running `/maestro-software-engineer`: the senior engineer (Opus) on senior-tier tickets and a junior's ticket sent back twice, the junior engineer (Sonnet) on junior-tier ones. When a build ends in review, its end starts the review itself ([decisions](docs/decisions.md), 1).
 5. The reviewer, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO goes straight to QA with a `Review: GO` note; NO-GO goes straight back to the engineer with a `Kickback:` note.
 6. The QA lead is the last line of defence before production: it tests the reviewed PR in the running app, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
 7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus, in the senior's place; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
@@ -25,6 +25,7 @@ What we hold to:
 - Least friction for the team that installs it. Every bot's sessions run with all permissions, and Maestro offers no limit to set ([decisions](docs/decisions.md), 12).
 - Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
+- No tests out of the box. Shipped skills never write or judge tests unless a person asks, and run only those a team lists under `## Checks`; a team that wants them adds its own skills ([decisions](docs/decisions.md), 23).
 - Trade-offs, not perfection. Only a blocker sends a change back; every other real defect ships and goes on a follow-up. Settle the edge cases in the ticket, where one costs a line, not in review, where it costs a round ([decisions](docs/decisions.md), 22).
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch and checks from their `.maestro/project/project-setup.md`.
@@ -76,7 +77,7 @@ From `tools/maestro-ticket/`:
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 
-Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review and QA prep: `bash scripts/review_prep_test.sh`, `bash scripts/qa_prep_test.sh` and `bash scripts/tests_on_base_test.sh`, after changing `skills/maestro-code-review/scripts/` or `skills/maestro-qa-lead/scripts/qa-prep.sh`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
+Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review and QA prep: `bash scripts/review_prep_test.sh` and `bash scripts/qa_prep_test.sh`, after changing `skills/maestro-code-review/scripts/` or `skills/maestro-qa-lead/scripts/qa-prep.sh`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
 
 ## Changing shipped skills
 

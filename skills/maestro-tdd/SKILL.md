@@ -1,11 +1,11 @@
 ---
 name: maestro-tdd
-description: "Fix a bug or build a feature test first: write the failing test, watch it fail for the right reason, make it pass at the cause, then prove the test catches the change. Use for /maestro-tdd, 'fix this bug', 'X crashes' or 'X returns the wrong value', 'write a failing test', 'add a regression test', building a feature one criterion at a time, pinning behaviour before a refactor, or a Maestro build step. Load it with maestro-working-principles, not instead of it. Not for proving finished work (the maestro-prove-complete skill) or a change no test can show, such as docs."
+description: "Fix a bug or build a feature test first, only when a person asked for tests: write the failing test, watch it fail for the right reason, make it pass at the cause, then prove the test catches the change. Use for /maestro-tdd, 'write a failing test', 'add a regression test', 'write tests for X', or a ticket that asks for tests. Load it with maestro-working-principles, not instead of it. Not for a bug fix or feature where no one asked for tests (Maestro writes none by default), proving finished work (the maestro-prove-complete skill), or a change no test can show, such as docs."
 ---
 
 # Test first, then change
 
-Turn the behaviour you want into a test that fails before your change and passes after it. You hand back the test, its runs and the commits, and you never write a test that only looks like it covers the change.
+Turn the behaviour you want into a test that fails before your change and passes after it. You hand back the test, its runs and the commits, and you never write a test that only looks like it covers the change. Maestro writes no tests unless a person asks for them. No one asked? Stop, and build the change as the **maestro-software-engineer** skill says.
 
 ## Start
 

@@ -33,7 +33,7 @@ Open a todo list with one item per phase below.
 3. Add only what the agent doesn't know. Link a sibling skill (`../<name>/SKILL.md`) instead of restating its rules.
 4. Name the action, not the tool: "edit the file", not "use the Edit tool". Give a fallback for a feature one harness lacks, such as subagents or hooks.
 5. Keep `SKILL.md` under 60 lines. Move long detail to `references/<file>.md` and say when to read it. Check every link resolves.
-6. Put scripts in `scripts/`, in plain Bash with no agent APIs, and give them tests.
+6. Put scripts in `scripts/`, in plain Bash with no agent APIs.
 7. End with a bold `**Reply:**` line naming the parts of the answer, in order.
 8. Write in plain words per the **maestro-technical-writing** skill ([SKILL.md](../maestro-technical-writing/SKILL.md)).
 
@@ -45,7 +45,7 @@ Open a todo list with one item per phase below.
 
 ## Phase E: Test it
 
-1. Run the tests for any script you added or changed. Skill text gets no tests.
+1. Run each script you added or changed on a real input, and read its output.
 2. Trial it in a fresh, non-interactive session of each harness: one prompt that should load the skill, one nearby prompt that shouldn't. It passes when it loads on the first, stays out of the second, and the agent follows the steps without help. For a command, run `/<name>` once instead.
 3. If it never loads, sharpen the description's trigger phrases. If it loads too often, add to `Not for ...`. Trial it again.
 4. Put both prompts and their results in the PR body or commit message.

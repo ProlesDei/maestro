@@ -4,7 +4,7 @@
 
 - `## Main branch`: one line, the branch PRs merge into.
 - `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
-- `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove with tests and one real run of the changed path, and QA proves the rest before it merges, so engineers spend no build run on test-only work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
+- `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove each criterion with one real run, and QA proves the rest before it merges, so engineers spend no build run on QA's work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
 
 Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads.
 
@@ -25,7 +25,6 @@ main
 - install: `maestro-ticket slot --max 4 -- bash scripts/install_test.sh`
 - review-prep: `maestro-ticket slot --max 4 -- bash scripts/review_prep_test.sh`
 - qa-prep: `maestro-ticket slot --max 4 -- bash scripts/qa_prep_test.sh`
-- tests-on-base: `maestro-ticket slot --max 4 -- bash scripts/tests_on_base_test.sh`
 - screens: `maestro-ticket slot --max 4 -- bash scripts/screens_test.sh`
 - design-pr: `maestro-ticket slot --max 4 -- bash scripts/design_pr_test.sh`
 
@@ -74,7 +73,7 @@ none
 
 - `scripts/install.sh`: it writes into a team's repo and must never write over a file it didn't place.
 - `tools/maestro-ticket/sqlitestore/`: the one store hundreds of sessions write at once.
-- `skills/maestro-code-review/scripts/review-prep.sh` and `tests-on-base.sh`: the gates every review trusts.
+- `skills/maestro-code-review/scripts/review-prep.sh`: the gates every review trusts.
 
 ## Skills
 
