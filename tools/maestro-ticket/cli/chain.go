@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
@@ -28,6 +29,9 @@ var (
 // maxHops is how many ends in a row may each start the next step: past
 // it, a bot looks. A ticket's tries end a send-back loop well before.
 const maxHops = 10
+
+// chainLimit bounds a chain, so a start that hangs never holds the ring.
+const chainLimit = 2 * time.Minute
 
 // chainBy is who acks a run whose end left nothing for a bot to do.
 const chainBy = "chain"
@@ -67,7 +71,7 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		}
 	}
 	rt.Send = left
-	rest := len(rt.Do) > 0 || rt.Reply != ""
+	rest := leftForBot(rt)
 	done := len(left) == 0 && !rest
 	toPlanner := len(left) > 0 && !rest && r.Launcher != "planner" &&
 		!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
@@ -88,6 +92,15 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if runs.Save(dir, rec) == nil && done {
 		runs.Ack(dir, r.ID, chainBy, now)
 	}
+}
+
+// leftForBot reports whether a route holds more than sends for a bot to
+// act on: a command to run, a reply to read, or a write that failed, such
+// as follow-ups not filed, which would be lost in a run acked unseen.
+func leftForBot(rt routed) bool {
+	return len(rt.Do) > 0 || rt.Reply != "" || slices.ContainsFunc(rt.Wrote, func(w string) bool {
+		return strings.HasPrefix(w, "follow-ups not filed") || strings.HasPrefix(w, "not parked")
+	})
 }
 
 // handOn starts one send's job as the bot it was for, and reports whether

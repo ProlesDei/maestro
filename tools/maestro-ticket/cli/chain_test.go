@@ -177,11 +177,21 @@ func TestChainRunsTheHandoffs(t *testing.T) {
 			t.Fatalf("planner pickup:\n%s\nwant it to hold:\n%s", got, want)
 		}
 	}
-	if out, err := j.chainCmd("planner", "", "ack", build.ID, qa.ID).CombinedOutput(); err != nil {
-		t.Fatalf("planner ack: %v\n%s", err, out)
+	// A start lists the runs left to the planner, as its pickup does.
+	out, err = j.chainCmd("planner", "the board\n", "job", "plan").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), build.ID+" ended: run maestro-ticket pickup") {
+		t.Fatalf("planner's job: %v\n%s", err, out)
 	}
-	if out, err := j.chainCmd("junior-engineer", "", "ack", build.ID).CombinedOutput(); err == nil {
-		t.Fatalf("the launcher acked a run left to the planner: %s", out)
+	plan := strings.Fields(string(out))[0]
+	// The launcher's batch, listed before its end left it to the planner,
+	// goes on past it and acks nothing of the planner's.
+	out, err = j.chainCmd("junior-engineer", "", "ack", build.ID).CombinedOutput()
+	if err != nil || string(out) != build.ID+" is left to planner: nothing to do\n" || runs.Acked(filepath.Join(j.h.dir, "runs"), build.ID) {
+		t.Fatalf("launcher's ack: %v\n%s", err, out)
+	}
+	j.waitEnded(plan, 20*time.Second)
+	if out, err := j.chainCmd("planner", "", "ack", build.ID, qa.ID, plan).CombinedOutput(); err != nil {
+		t.Fatalf("planner ack: %v\n%s", err, out)
 	}
 }
 
@@ -301,5 +311,25 @@ func TestChainLeavesALimitToPickup(t *testing.T) {
 	}
 	if rt := h.route(r); len(sends(rt)) != 1 || !strings.HasPrefix(sends(rt)[0], "send planner: usage_limit T-1") {
 		t.Fatalf("pickup after: %+v", rt)
+	}
+}
+
+// Only sends may go unseen: a command, a reply or a failed write stays
+// for a bot.
+func TestChainLeftForBot(t *testing.T) {
+	for _, c := range []struct {
+		rt   routed
+		want bool
+	}{
+		{routed{Send: []send{{"planner", "merged T-1"}}}, false},
+		{routed{Wrote: []string{"released T-1 for the planner"}}, false},
+		{routed{Wrote: []string{"follow-ups not filed: T-9 is held"}}, true},
+		{routed{Wrote: []string{"not parked for the answer: locked"}}, true},
+		{routed{Do: []string{"maestro-ticket resume R-aaaaaaaa --opus"}}, true},
+		{routed{Reply: "the answer"}, true},
+	} {
+		if got := leftForBot(c.rt); got != c.want {
+			t.Errorf("%+v: %v; want %v", c.rt, got, c.want)
+		}
 	}
 }
