@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -348,6 +349,7 @@ func runSupervise(ctx context.Context, c *call) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP)
 	defer stop()
 	c.startStats(filepath.Dir(dir))
+	defer c.waitStats() // the row of a run whose first ring never came
 	return runs.Supervise(ctx, dir, c.args[0], runs.Options{
 		Env:    os.Environ(),
 		Rings:  rings,
@@ -398,8 +400,15 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		}
 	}
 	reply, replyErr := lastResult(out)
-	// Last, after the claim is freed, and silent whatever fails.
-	defer c.writeStats(dir, r, reply, replyErr)
+	// Last, after the claim is freed, and silent whatever fails. A died
+	// run's record holds no reply: its row reads the one its output does.
+	sr := r
+	if sr.State == runs.Died && sr.Reply == "" && replyErr == nil {
+		var session string
+		sr.Reply, session, sr.IsError = runs.ParseOutput(out)
+		sr.SessionID = cmp.Or(sr.SessionID, session)
+	}
+	defer c.writeStats(dir, sr, reply, replyErr)
 	s, err := c.open(ctx)
 	if err != nil {
 		warn(err)

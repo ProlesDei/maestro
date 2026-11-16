@@ -846,12 +846,20 @@ fi
 rm -f -- "$other"
 
 echo "ticket store ready"
-if [ -e "$marker" ]; then
-	echo "run stats off: no run is written to stats.db"
-else
+# Whether stats are on is maestro-ticket's to say: the marker, the shell's
+# MAESTRO_TICKET_STATS=off and an unsafe store each turn them off.
+health=$(cd "$target" && maestro-ticket stats health 2>/dev/null) || health=''
+case ${health%%$'\n'*} in
+"stats: on")
 	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
 	[ -z "$reon" ] || echo "stats: on in install.yaml turned run stats back on, over STATS_OFF; without that line, maestro-ticket stats off lasts through apply"
-fi
+	;;
+"stats: off ("*)
+	why=${health#stats: off (} why=${why%%): no run is written*}
+	echo "run stats off ($why): no run is written to stats.db"
+	;;
+*) echo "run stats: maestro-ticket stats health says whether they are on" ;;
+esac
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.

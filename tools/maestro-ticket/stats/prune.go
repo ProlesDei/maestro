@@ -115,15 +115,15 @@ const streamSrc = `(SELECT id FROM codes WHERE kind = 'cost_src' AND name = 'str
 // model, of the runs where picks (f is run_facts), which must take in the
 // rest of their sessions, so each finds the run before it. A run's spend is its session's total less the run
 // before it in that session: from run_facts, or, once that run is gone,
-// from pruned_cum. A fresh session's first run spent its whole total, as
-// did a run with no session; so did a model new to a known session. A
+// from pruned_cum. A run whose command resumed no session (resumed 0)
+// spent its whole total, as did a run with no session; so did a model new to a known session. A
 // resume with no trace of its session's past spent an unknown sum: NULL.
 // A run with no result (cost_src stream) holds its own turns' tokens, not
 // a total, and no dollars: it spent those tokens whole, and the next run
 // in its session, whose total takes in the dead run's, spent NULL.
 func spendCTE(where string) string {
 	return `x AS (
-			SELECT m.run, m.model, f.session, f.resume_of, f.ended_at, m.cost_cum,
+			SELECT m.run, m.model, f.session, f.resumed, f.ended_at, m.cost_cum,
 				m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum AS tok,
 				COALESCE(m.cost_src = ` + streamSrc + `, 0) AS own,
 				EXISTS (SELECT 1 FROM run_facts e WHERE e.session = f.session AND (e.ended_at, e.run) < (f.ended_at, f.run))
@@ -133,11 +133,11 @@ func spendCTE(where string) string {
 		),
 		d AS (
 			SELECT x.run, x.model,
-				x.cost_cum - CASE WHEN x.own OR x.resume_of IS NULL OR x.session IS NULL THEN 0
+				x.cost_cum - CASE WHEN x.own OR NOT x.resumed OR x.session IS NULL THEN 0
 					WHEN LAG(x.run) OVER w IS NOT NULL THEN LAG(x.cost_cum) OVER w
 					WHEN p.session IS NOT NULL THEN p.cost_cum
 					WHEN x.known THEN 0 END AS cost,
-				x.tok - CASE WHEN x.own OR x.resume_of IS NULL OR x.session IS NULL THEN 0
+				x.tok - CASE WHEN x.own OR NOT x.resumed OR x.session IS NULL THEN 0
 					WHEN LAG(x.run) OVER w IS NOT NULL THEN CASE WHEN LAG(x.own) OVER w THEN NULL ELSE LAG(x.tok) OVER w END
 					WHEN p.session IS NOT NULL THEN p.tok_cum
 					WHEN x.known THEN 0 END AS tok

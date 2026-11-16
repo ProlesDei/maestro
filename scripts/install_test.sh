@@ -65,8 +65,9 @@ nskills=$(echo "$skills" | wc -l)
 # A stand-in maestro-ticket: prints a help that lists launch, job,
 # resume and look (only launch with STUB_NOJOB), unless
 # STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
-# is set, and otherwise makes the store as doctor does, and the STATS_OFF
-# marker beside it as stats off does.
+# is set, and otherwise makes the store as doctor does, the STATS_OFF
+# marker beside it as stats off does, and says on or off as stats health
+# does, from the marker or MAESTRO_TICKET_STATS.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
@@ -74,7 +75,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' \
-	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
+	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; health) if [ "${MAESTRO_TICKET_STATS:-}" = off ]; then echo "stats: off (MAESTRO_TICKET_STATS=off): no run is written"; elif [ -e "$d/STATS_OFF" ]; then echo "stats: off (STATS_OFF sits beside the store): no run is written"; else echo "stats: on"; fi; echo "stats.db: none yet" ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 # check wants what the bots' runs need; stand-ins, so the test passes on a
 # machine without them.
@@ -150,7 +151,8 @@ seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
 [ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor
-$(cd "$r" && pwd -P) stats --maestro-sha $sha" ] || fail "doctor and stats --maestro-sha didn't run once each, in the repo: $(cat "$STUB_LOG")"
+$(cd "$r" && pwd -P) stats --maestro-sha $sha
+$(cd "$r" && pwd -P) stats health" ] || fail "doctor, stats --maestro-sha and stats health didn't run once each, in the repo: $(cat "$STUB_LOG")"
 # No stats: line asks nothing, and stats start on.
 [ ! -e "$r/.git/maestro/STATS_OFF" ] || fail "stats off with no stats: line"
 says "run stats on: numbers about each run in stats.db beside the store"
@@ -684,7 +686,7 @@ sed -i 's/^stats: on$/stats: off/' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: off wrote no marker"
 grep -qxF "$(cd "$r15" && pwd -P) stats off --maestro-sha $sha" "$STUB_LOG" || fail "apply didn't run stats off: $(cat "$STUB_LOG")"
-says "run stats off: no run is written to stats.db"
+says "run stats off (STATS_OFF sits beside the store): no run is written to stats.db"
 ! grep -qF "numbers about each run" "$tmp/out" || fail "stats off reads as if stats.db is still written"
 before=$(snap "$r15")
 ok check "$r15"
@@ -693,6 +695,11 @@ sed -i 's/^stats: off$/stats: on/' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ ! -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: on after off left the marker"
 says "stats: on in install.yaml turned run stats back on, over STATS_OFF"
+# Stats off in the shell: apply says so, as maestro-ticket does, though
+# no marker sits beside the store.
+MAESTRO_TICKET_STATS=off ok apply "$r15"
+says "run stats off (MAESTRO_TICKET_STATS=off): no run is written to stats.db"
+! grep -qF "numbers about each run" "$tmp/out" || fail "apply said stats are on, with MAESTRO_TICKET_STATS=off"
 # A person's maestro-ticket stats off under a stats: on line: apply
 # says it turned them back on; with the marker gone already, it doesn't.
 : >"$r15/.git/maestro/STATS_OFF"
@@ -708,7 +715,7 @@ sed -i '/^stats: on$/d' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "apply with no stats: line turned a person's stats off back on"
 grep -qxF "$(cd "$r15" && pwd -P) stats --maestro-sha $sha" "$STUB_LOG" || fail "apply didn't record the sha alone: $(cat "$STUB_LOG")"
-says "run stats off: no run is written to stats.db"
+says "run stats off (STATS_OFF sits beside the store): no run is written to stats.db"
 rm "$r15/.git/maestro/STATS_OFF"
 echo "stats: on" >>"$r15/.maestro/project/install.yaml"
 cp "$r15/.maestro/project/install.yaml" "$tmp/keep15"

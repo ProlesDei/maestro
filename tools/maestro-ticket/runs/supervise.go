@@ -382,6 +382,29 @@ func RecoverStream(dir, id string, n streamfilter.Names) *streamfilter.Summary {
 	return scanStream(dir, id, out, n)
 }
 
+// LastOutput is when a died run last wrote its stream, stderr or
+// stdout: as close to its death as its files tell, where the record's end
+// is when a reader found it. A streamed run writes as it goes; one that
+// printed nothing reads as ending at its start. A .out RecoverStream
+// wrote (r.Stream set) is the reader's write, left out. It lies between
+// the run's start and its recorded end.
+func LastOutput(dir string, r Record) time.Time {
+	exts := []string{streamExt, ".err"}
+	if r.Stream == nil {
+		exts = append(exts, ".out")
+	}
+	end := r.StartedAt
+	for _, ext := range exts {
+		if fi, err := os.Stat(path(dir, r.ID, ext)); err == nil && fi.ModTime().After(end) {
+			end = fi.ModTime()
+		}
+	}
+	if r.EndedAt != nil && end.After(*r.EndedAt) {
+		end = *r.EndedAt
+	}
+	return end
+}
+
 // DropStream removes a run's stream file: its supervisor once the run's
 // end is recorded, and the reader that writes a died run's end.
 func DropStream(dir, id string) { os.Remove(path(dir, id, streamExt)) }

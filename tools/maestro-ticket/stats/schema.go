@@ -46,7 +46,7 @@ var migrations = []string{
 		again_of TEXT ` + isRun("again_of") + `,
 		prompt_bytes INTEGER, drops INTEGER,
 		resume_of TEXT ` + isRun("resume_of") + `,
-		nudge INTEGER, after_death INTEGER,
+		nudge INTEGER, after_death INTEGER, resumed INTEGER,
 		started_at INTEGER, ended_at INTEGER, wall_ms INTEGER,
 		wait_ms INTEGER, wait_capped INTEGER, stop INTEGER, escaped INTEGER,
 		state INTEGER, exit INTEGER, outcome INTEGER, reason INTEGER,

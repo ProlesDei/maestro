@@ -249,7 +249,7 @@ func (f *scan) line(raw []byte) {
 	case "system":
 		switch l.Subtype {
 		case "init":
-			if f.s.Version == "" && version.MatchString(l.Version) {
+			if f.s.Version == "" && VersionShape.MatchString(l.Version) {
 				f.s.Version = l.Version
 			}
 		case "api_retry":
@@ -407,4 +407,5 @@ func (f *scan) finish() (Summary, []byte) {
 	return s, out
 }
 
-var version = regexp.MustCompile(`^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$`)
+// VersionShape is the shape a Claude Code version is kept in.
+var VersionShape = regexp.MustCompile(`^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$`)

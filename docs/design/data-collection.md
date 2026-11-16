@@ -242,7 +242,8 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 | `again_of`, `resume_of` | run id | side file, record | L |
 | `prompt_bytes`, `drops` | int: the prompt's size, the count of `--drop` ids | side file | S |
 | `nudge`, `after_death` | none, opus, escalate, decide; bool | S1 | S |
-| `started_at`, `ended_at`, `wall_ms` | unix ms, ms | S1 | L (bundles carry offsets and ms only) |
+| `resumed` | bool: the command has `--resume` or `--continue`, or the run a `resume_of`; its totals take in its session's past | S1 | S |
+| `started_at`, `ended_at`, `wall_ms` | unix ms, ms; a died run ends at its last write to its stream, stderr or stdout, its start at worst | S1 | L (bundles carry offsets and ms only) |
 | `wait_ms`, `wait_capped` | int, bool: `Credit` read once more before `removeWaits` | supervisor | S |
 | `stop`, `escaped` | none, term, kill; how many processes outside the group the SIGTERM reached, NULL off Linux, where no scan counts them | supervisor kill path | S |
 | `state`, `exit`, `outcome` | list; int; done, question, usage_limit, disk_full, timed_out, died, refused, failed (`outcomeOf`) | S1 | S |
@@ -251,9 +252,9 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 | `claude_ms`, `api_ms`, `turns` | int | S2 | S |
 | `head` | `<word>:<status>` from the first line the shipped skills ask a reply to open with (`review:go`, `test:pass`, `judge:done`, `design:ready`, ...), else `other`; NULL for no reply | reply first line | S |
 | `verdict`, `v_tier`, `mode` | go, nogo, escalate; 0-2; full, incremental, ruling | S4 | S |
-| `reply_bytes` | int | reply length | S |
+| `reply_bytes` | int | the result's whole length, though the record keeps 64 KB | S |
 | `stream` | ok, no_result, lost, off | S3 | S |
-| `ctx_peak`, `compactions`, `retries`, `subagents`, `tool_calls`, `tool_fails` | int | S3 | S; `ctx_peak` is opt-in in bundles |
+| `ctx_peak`, `compactions`, `retries`, `subagents`, `tool_calls`, `tool_fails` | int; `compactions` and `retries` NULL when none was seen, since their event names are a guess | S3 | S; `ctx_peak` is opt-in in bundles |
 | `open_code`, `open_ms` | step code id, int | S3 | S |
 | `tail` | the last 24 calls as code ids, `!` after a failed one: `12 7! 3` | S3 | S |
 | `rang`, `ring_err` | bool; none, timeout, dns, http4xx, http5xx, other: set after the first ring | supervisor | S |
@@ -344,12 +345,12 @@ Why a separate file and not new tables in `tickets.db`:
 3. `rm stats.db*` wipes collected data and leaves work state alone.
 4. Stats migrations take no snapshot. Losing stats is fine.
 
-**Who creates and migrates:** only a supervisor. It starts `Prepare` in a goroutine when it starts (2 s budget), and if that failed, tries once more at the run's end (300 ms), since the ring waits on it. `pickup` and `doctor` open the file only if it exists, is a regular file with data, and sits at their schema; they wait 250 ms at most, then drop the row (`TestOrphanPathNeverCreates`, `TestOrphanBusyDrops`). Views open it read-only.
+**Who creates and migrates:** only a supervisor. It starts `Prepare` in a goroutine when it starts (2 s budget), and if that failed, tries once more at the run's end (300 ms), in the background, so the ring never waits on it. `pickup` and `doctor` open the file only if it exists, is a regular file with data, and sits at their schema; they wait 250 ms at most, then drop the row (`TestOrphanPathNeverCreates`, `TestOrphanBusyDrops`). Views open it read-only.
 
 ### 6.2 The off switch
 
 - `install.yaml` gains `stats: on|off`. An absent key is never refused, and leaves the marker as it is: on at first, and off once a person ran `stats off`. Any other value, or the key twice, is refused. A key sets the marker at every `apply`, whoever made it; when `stats: on` removes one, `apply` says so.
-- `apply` runs `maestro-ticket stats on|off --maestro-sha <sha>` after `doctor`, or `stats --maestro-sha <sha>` with no key. `stats off` makes the `STATS_OFF` marker; `stats on` removes it; all three write `stats.sha`. `apply` says on or off from the marker. `check` doesn't touch stats.
+- `apply` runs `maestro-ticket stats on|off --maestro-sha <sha>` after `doctor`, or `stats --maestro-sha <sha>` with no key. `stats off` makes the `STATS_OFF` marker; `stats on` removes it; all three write `stats.sha`. `apply` says on or off, and why, from the first line of `maestro-ticket stats health`, so the shell's variable and an unsafe store read as off too. `check` doesn't touch stats.
 - Every write checks for the marker with one `Lstat`. Off stops every write, the side file and the stream included, and leaves `stats.db` as it is.
 - INSTALL.md writes no key without asking, so `maestro-ticket stats off` lasts, and tells the person what `stats.db` holds and how to turn it off. An update from before stats tells them too.
 - `install_test.sh` covers: no key (no refusal, no marker), on, off (marker made), off then on (marker gone), `maybe` and an empty value refused, the key twice refused, and uninstall leaving `stats.db` and the marker.
@@ -386,6 +387,7 @@ erDiagram
     INTEGER tries
     TEXT again_of
     TEXT resume_of
+    INTEGER resumed
     INTEGER prompt_bytes
     INTEGER started_at
     INTEGER ended_at
@@ -515,8 +517,8 @@ sequenceDiagram
 **Capture order:**
 - **Facts are held in memory.** The side file holds what the job knew at the start. The supervisor's end facts (wait, stop kind, escaped count) and the stream Summary sit on the record, tagged `json:"-"`, so they reach `endRun` and never a record byte (`TestEndFactsNotInRecordJSON`, `TestRecordJSONKeys`).
 - **Slot wait.** The supervisor reads `Credit` once more right before `removeWaits` **[code: runs/supervise.go:259-260]** (`TestWaitMsCredit`).
-- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`. The write takes 300 ms at most. A run that ends while its start's `Prepare` still retries a busy lock first waits for that (2 s at most), then a 300 ms retry, so the chain waits about 2.6 s at worst, and 300 ms once `stats.db` is ready. Prune waits for the first ring.
-- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too, after reading its stream as above. There the stats write is 250 ms, then drop, no retries. A run with no side file, a plain launch's included, started with stats off in its shell, so they write no row of it (`TestStatsOffFollowsOrphan`, `TestStatsOffFollowsLaunchOrphan`).
+- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`. In the supervisor that write runs in a goroutine, so neither the chain nor the first ring waits on `stats.db` (`TestStatsLockedRingsAtOnce`); it waits for its start's `Prepare` (2 s at most), retries once (300 ms), and writes (300 ms). `AfterRing` waits for it before it records the ring and prunes, and the supervisor waits for it before it exits.
+- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too, after reading its stream as above. There the stats write is 250 ms, then drop, no retries. A run with no side file, a plain launch's included, started with stats off in its shell, so no one writes a row of it, its supervisor included; a run that ends with stats off loses its side file, so `stats health` doesn't count it missing (`TestStatsOffFollowsOrphan`, `TestStatsOffFollowsLaunchOrphan`, `TestStatsOffAtStartOrEnd`). A died run's row reads the reply its `.out` holds, and ends when its stream, stderr or stdout last changed, not when the reader found it (`TestOrphanReviewFacts`, `TestDiedRunEndsAtLastOutput`).
 - **The gap.** A run whose supervisor died between Save and `OnEnd`, or whose write was dropped, has no row. `stats health` counts ended runs on disk that have no `run_facts` row, but a command that never started and a run started with stats off, so the gap shows (`TestStatsHealthMissingRows`).
 - **Stats errors print nothing.** `endRun`'s warnings reach the bot in `pickup`, so a stats error is swallowed, and `stats health` is where losses show.
 
@@ -845,7 +847,7 @@ flowchart LR
 | modernc.org/sqlite v1.61.0 supports STRICT | (R0): SQLite 3.54.1 |
 | `go build` stamps `vcs.revision` | (R0) |
 | `.stream` size at 300 sessions fits the disk floor | (R0): p99 5.0 MB, max 16.8 MB, from 568 local sessions |
-| The compaction event is `system/compact_boundary`, the retry event `system/api_retry` | (guess): neither seen; the counts stay 0 until one is |
+| The compaction event is `system/compact_boundary`, the retry event `system/api_retry` | (guess): neither seen; the counts stay NULL until one is |
 | A died run with a changed boot stamp means a reboot | (guess): `reboot` is listed but not set |
 | Row counts per run and growth per day | (guess) |
 
@@ -869,8 +871,8 @@ FROM run_facts r;
 
 **Q1 and Q11: each run's own spend.** `stats costs` answers Q1; its rule, with the cases a plain `LAG` misses (a pruned parent, a resume with no known past), is `spendCTE` in `stats/prune.go`. The core is:
 ```sql
-SELECT f.run, f.job_n, f.why_n, f.resume_of IS NOT NULL resumed, f.again_of IS NOT NULL again,
-  m.cost_src, m.cost_cum - CASE WHEN f.resume_of IS NULL OR f.session IS NULL THEN 0
+SELECT f.run, f.job_n, f.why_n, f.resumed, f.again_of IS NOT NULL again,
+  m.cost_src, m.cost_cum - CASE WHEN NOT f.resumed OR f.session IS NULL THEN 0
     ELSE LAG(m.cost_cum) OVER (PARTITION BY f.session, m.model ORDER BY f.ended_at, f.run) END usd
 FROM run_models m JOIN f USING (run) WHERE f.started_at > :since;
 ```

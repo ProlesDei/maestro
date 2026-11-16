@@ -278,7 +278,7 @@ type Run struct {
 	Role, Job, Model, Effort, Nudge, State, Outcome, Reason string
 	Subtype, StopReason, Stream, OS, Arch                   string
 	Why, Tier, Stop                                         string
-	Lean, AfterDeath                                        bool
+	Lean, AfterDeath, Resumed                               bool // Resumed, or a ResumeOf: totals take in the session's past
 	StartedAt, EndedAt                                      time.Time
 	Exit                                                    *int64
 	IsError                                                 *bool
@@ -321,7 +321,8 @@ type Step struct {
 	Calls, Fails, MsSum, MsMax int64
 }
 
-// Caps on a run's tail and step rows.
+// Caps on a run's tail and step rows. maxTail is streamfilter.TailLen,
+// which a test holds it to: this package imports no other of the module.
 const (
 	maxTail  = 24
 	maxSteps = 256
@@ -350,7 +351,8 @@ func tailText(tail []TailCall, code func(kind, name string) any) any {
 }
 
 // Finding is one row of a review's findings: a finding of its JSON, its
-// out-of-scope lines as one counted row, or a finding a ruling dropped.
+// ## Follow-ups lines as one counted follow_up row, or a finding a ruling
+// dropped.
 // Fid is F and 1 to 3 digits, Pass 1 to 10; any other is stored as NULL.
 type Finding struct {
 	Fid    string `json:"fid,omitempty"`
@@ -379,7 +381,7 @@ var (
 	uuidShape   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	sha40Shape  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	fidShape    = regexp.MustCompile(`^F[0-9]{1,3}$`)
-	semverShape = regexp.MustCompile(`^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$`)
+	semverShape = regexp.MustCompile(`^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$`) // streamfilter.VersionShape, held by a test
 )
 
 // shaped is s when it matches re, else NULL.
@@ -497,6 +499,7 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 	add("tail", tailText(r.Tail, code))
 	add("lean", boolInt(r.Lean))
 	add("after_death", boolInt(r.AfterDeath))
+	add("resumed", boolInt(r.Resumed || r.ResumeOf != ""))
 	add("resume_of", shaped(r.ResumeOf, runShape))
 	add("again_of", shaped(r.AgainOf, runShape))
 	add("started_at", ms(r.StartedAt))

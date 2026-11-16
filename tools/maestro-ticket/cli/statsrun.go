@@ -196,21 +196,19 @@ func whole(n looseNum) *int64 {
 }
 
 // vTool is the commit this binary was built from, or "" when the build
-// didn't stamp one.
+// didn't stamp one. stats.Write keeps it only in its shape.
 var vTool = sync.OnceValue(func() string {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return ""
 	}
 	for _, s := range bi.Settings {
-		if s.Key == "vcs.revision" && sha40.MatchString(s.Value) {
+		if s.Key == "vcs.revision" {
 			return s.Value
 		}
 	}
 	return ""
 })
-
-var sha40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // sideFacts are what job, again and resume know as they start a run that
 // its record doesn't hold: written to runs/<id>.stats before its
@@ -277,7 +275,8 @@ func readSide(runsDir, id string) (sideFacts, bool) {
 
 // startedOff reports a run that started with stats off, by the shell's
 // variable or the marker: a run with no side file. No row of it is
-// written after, and stats health doesn't count it.
+// written after, and stats health doesn't count it. A run that ends with
+// stats off loses its side file there, and reads the same.
 func startedOff(runsDir string, r runs.Record) bool {
 	_, err := os.Lstat(filepath.Join(runsDir, r.ID+sideExt))
 	return errors.Is(err, fs.ErrNotExist)
@@ -340,13 +339,21 @@ func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, i
 	default:
 		return
 	}
-	row.CtxPeak, row.Compactions, row.Retries = ptr(s.CtxPeak), ptr(s.Compactions), ptr(s.Retries)
+	row.CtxPeak = ptr(s.CtxPeak)
+	// No probe has seen a compaction or a retry, so their event names are
+	// a guess: none seen is unknown, NULL, not 0.
+	if s.Compactions > 0 {
+		row.Compactions = ptr(s.Compactions)
+	}
+	if s.Retries > 0 {
+		row.Retries = ptr(s.Retries)
+	}
 	row.Subagents, row.ToolCalls, row.ToolFails = ptr(s.Subagents), ptr(s.ToolCalls), ptr(s.ToolFails)
 	row.VClaude = s.Version
 	if s.OpenCode != "" {
 		row.OpenCode = s.OpenCode
-		if !s.OpenAt.IsZero() && r.EndedAt != nil {
-			row.OpenMs = ptr(max(0, r.EndedAt.Sub(s.OpenAt).Milliseconds()))
+		if !s.OpenAt.IsZero() && !row.EndedAt.IsZero() {
+			row.OpenMs = ptr(max(0, row.EndedAt.Sub(s.OpenAt).Milliseconds()))
 		}
 	}
 	for _, c := range s.Tail {
@@ -363,13 +370,21 @@ func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, i
 	}
 }
 
+// resumes says a command carries on a session, so its result's totals
+// take in the session's past runs: a launch of claude --resume too, which
+// has no resume_of.
+func resumes(cmd []string) bool {
+	return flagValue(cmd, "--resume") != "" || slices.Contains(cmd, "--continue")
+}
+
 // statsRow is the run's row: what its record, its side file, its
 // supervisor, its result and the machine say at its end.
 func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr error) stats.Run {
 	outcome, _ := outcomeOf(r)
 	row := stats.Run{
-		Run: r.ID, Session: sessionOf(r), ResumeOf: r.ResumeOf, Ticket: int64(runTicket(r)),
-		Role: statsRole(r.Launcher), Job: cmp.Or(r.Job, "launch"), Nudge: cmp.Or(r.Nudge, "none"),
+		Run: r.ID, Session: sessionOf(r), ResumeOf: r.ResumeOf, Resumed: resumes(r.Command),
+		Ticket: int64(runTicket(r)),
+		Role:   statsRole(r.Launcher), Job: cmp.Or(r.Job, "launch"), Nudge: cmp.Or(r.Nudge, "none"),
 		State: r.State, Outcome: outcome, Reason: reasonOf(r, outcome, res, resErr),
 		AfterDeath: r.AfterDeath, StartedAt: r.StartedAt, ReplyBytes: int64(len(r.Reply)),
 		Stream: "off", OS: runtime.GOOS, Arch: runtime.GOARCH, VTool: vTool(), VMaestro: c.statsSha,
@@ -378,7 +393,16 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 		row.VMaestro = stats.Sha(storeDir)
 	}
 	row.Model, row.Effort, row.Lean = argvFacts(r.Command)
-	sf, ok := readSide(filepath.Join(storeDir, "runs"), r.ID)
+	runsDir := filepath.Join(storeDir, "runs")
+	if r.EndedAt != nil {
+		row.EndedAt = *r.EndedAt
+		if r.State == runs.Died {
+			// A reader found it dead, maybe hours after: its end is when
+			// it last wrote, not when it was found.
+			row.EndedAt = runs.LastOutput(runsDir, r)
+		}
+	}
+	sf, ok := readSide(runsDir, r.ID)
 	if ok {
 		row.Why, row.Tier, row.AgainOf = sf.Why, sf.Tier, sf.AgainOf
 		if sf.PromptBytes != nil { // a job's, again's or resume's, not a launch's
@@ -397,13 +421,13 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 			row.Escaped = ptr(int64(e.Escaped))
 		}
 	}
-	if r.EndedAt != nil {
-		row.EndedAt = *r.EndedAt
-	}
 	if r.Exit != nil {
 		row.Exit = ptr(int64(*r.Exit))
 	}
 	if resErr == nil {
+		if res.Result.OK { // r.Reply is cut to its last 64 KB
+			row.ReplyBytes = res.Result.N
+		}
 		row.Session = cmp.Or(res.SessionID, row.Session)
 		row.Subtype, row.StopReason = res.Subtype.V, res.StopReason.V
 		if res.IsError.OK {
@@ -446,7 +470,7 @@ func (c *call) statsOpen(path string, create bool) (*sql.DB, error) {
 
 // statsPrepare is how long a supervisor gives the start of stats.db: a
 // goroutine at its start, while its command runs. statsRetry is all a
-// second try at run end gets, since the ring waits on it.
+// second try at run end gets, since afterRing and the exit wait on it.
 const (
 	statsPrepare = 2 * time.Second
 	statsRetry   = 300 * time.Millisecond
@@ -457,12 +481,13 @@ const (
 func (c *call) startStats(storeDir string) {
 	c.inSupervisor = true
 	c.statsSha = stats.Sha(storeDir)
-	c.statsPrep = make(chan error, 1)
+	prep := make(chan error, 1)
+	c.statsPrep = prep
 	if stats.Off(storeDir, c.env.Getenv, c.statsUnsafe()) != "" {
-		c.statsPrep <- nil
+		prep <- nil
 		return
 	}
-	go func() { c.statsPrep <- c.prepareStats(storeDir, statsPrepare) }()
+	go func() { prep <- c.prepareStats(storeDir, statsPrepare) }()
 }
 
 func (c *call) prepareStats(storeDir string, budget time.Duration) error {
@@ -481,23 +506,26 @@ func (c *call) prepareStats(storeDir string, budget time.Duration) error {
 const orphanWait = 250 * time.Millisecond
 
 // writeStats stores the run's row, after the rest of its end. In the
-// supervisor it creates or migrates stats.db first if it must; anywhere
-// else it writes only to a file that is there at this binary's schema,
-// within orphanWait, and drops the row otherwise. It never prints.
+// supervisor it creates or migrates stats.db first if it must, in the
+// background: the first ring never waits on stats.db, and afterRing and
+// the supervisor's exit wait for the row. Anywhere else it writes only to
+// a file that is there at this binary's schema, within orphanWait, and
+// drops the row otherwise. It never prints.
 func (c *call) writeStats(runsDir string, r runs.Record, res claudeReply, resErr error) {
+	// A run started with stats off gets no row, whoever ends it.
+	if startedOff(runsDir, r) {
+		return
+	}
 	storeDir := filepath.Dir(runsDir)
 	if stats.Off(storeDir, c.env.Getenv, c.statsUnsafe()) != "" {
+		// Off since it started: no row comes, so stats health, which
+		// counts runs by their side file, mustn't count it.
+		os.Remove(filepath.Join(runsDir, r.ID+sideExt))
 		return
 	}
 	path := filepath.Join(storeDir, stats.DBName)
 	row := c.statsRow(storeDir, r, res, resErr)
-	ctx := context.Background()
 	if !c.inSupervisor {
-		// Its supervisor dropped the row of a run started with stats off
-		// in its shell; this shell may have them on.
-		if startedOff(runsDir, r) {
-			return
-		}
 		// An empty file is one no supervisor prepared: opening it would
 		// set it up.
 		if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {
@@ -508,31 +536,45 @@ func (c *call) writeStats(runsDir string, r runs.Record, res claudeReply, resErr
 			return
 		}
 		defer db.Close()
-		ctx, cancel := context.WithTimeout(ctx, orphanWait)
+		ctx, cancel := context.WithTimeout(context.Background(), orphanWait)
 		defer cancel()
 		stats.Write(ctx, db, row)
 		return
 	}
-	if c.statsPrep != nil {
-		if err := <-c.statsPrep; err != nil {
-			c.prepareStats(storeDir, statsRetry) // once more: a busy start, or a file made since
+	prep, done := c.statsPrep, make(chan struct{})
+	c.statsPrep, c.statsWrote = nil, done
+	go func() {
+		defer close(done)
+		if prep != nil {
+			if err := <-prep; err != nil {
+				c.prepareStats(storeDir, statsRetry) // once more: a busy start, or a file made since
+			}
 		}
-		c.statsPrep = nil
+		db, err := c.statsOpen(path, false)
+		if err != nil {
+			return
+		}
+		defer db.Close()
+		stats.Write(context.Background(), db, row)
+	}()
+}
+
+// waitStats waits for the supervisor's row write, if one goes.
+func (c *call) waitStats() {
+	if c.statsWrote != nil {
+		<-c.statsWrote
+		c.statsWrote = nil
 	}
-	db, err := c.statsOpen(path, false)
-	if err != nil {
-		return
-	}
-	defer db.Close()
-	stats.Write(ctx, db, row)
 }
 
 // statsPruneLimit bounds the supervisor's work after its first ring.
 const statsPruneLimit = 3 * time.Second
 
-// afterRing records whether the run's first ring got through, then
-// prunes stats.db, if this supervisor claims this hour's prune.
+// afterRing records whether the run's first ring got through, once its
+// row is in, then prunes stats.db, if this supervisor claims this hour's
+// prune.
 func (c *call) afterRing(runsDir string, r runs.Record, ringErr error) {
+	c.waitStats()
 	storeDir := filepath.Dir(runsDir)
 	if stats.Off(storeDir, c.env.Getenv, c.statsUnsafe()) != "" {
 		return

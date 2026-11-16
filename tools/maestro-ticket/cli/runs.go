@@ -41,6 +41,7 @@ type claudeReply struct {
 	DurationAPIMS  looseNum  `json:"duration_api_ms"`
 	NumTurns       looseNum  `json:"num_turns"`
 	APIErrorStatus looseSet  `json:"api_error_status"`
+	Result         looseLen  `json:"result"`
 }
 
 // looseNum is a JSON number, or nothing: its decode never fails.
@@ -82,6 +83,21 @@ type looseSet struct{ Set bool }
 
 func (s *looseSet) UnmarshalJSON(b []byte) error {
 	s.Set = string(b) != "null"
+	return nil
+}
+
+// looseLen is a JSON string's length in bytes, or nothing; it keeps none
+// of the text, and its decode never fails.
+type looseLen struct {
+	N  int64
+	OK bool
+}
+
+func (l *looseLen) UnmarshalJSON(b []byte) error {
+	var s string
+	if string(b) != "null" && json.Unmarshal(b, &s) == nil {
+		l.N, l.OK = int64(len(s)), true
+	}
 	return nil
 }
 

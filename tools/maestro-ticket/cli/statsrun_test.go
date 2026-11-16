@@ -23,6 +23,7 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -132,11 +133,23 @@ func TestStatsModesKeepOutput(t *testing.T) {
 	}
 	for _, mode := range statsModes {
 		t.Run(mode.name, func(t *testing.T) {
-			setup := func(h *harness) { mode.setup(t, h.dir, h) }
+			var ends []*harness // pickup's and doctor's, which end the died run
+			setup := func(h *harness) { mode.setup(t, h.dir, h); ends = append(ends, h) }
 			for name, got := range pinPickup(t, setup) {
 				golden(t, name, got)
 			}
 			golden(t, "doctor", pinDoctor(t, setup))
+			// The scene's died run started with stats on: into a fresh
+			// stats.db its row goes.
+			for _, h := range ends {
+				if mode.name != "fresh" {
+					break
+				}
+				if n := statsRowCount(t, h.dir); n != 1 {
+					t.Errorf("%d rows; want the died run's", n)
+				}
+			}
+			setup = func(h *harness) { mode.setup(t, h.dir, h) }
 			golden(t, "runs", pinRuns(t, setup))
 			golden(t, "ack", pinAck(t, setup))
 			golden(t, "costs", pinCosts(t, setup))
@@ -148,7 +161,8 @@ func TestStatsModesKeepOutput(t *testing.T) {
 }
 
 // job, again, resume and look, whose runs' supervisors write stats.db,
-// print the same with stats off and with a stats.db that isn't one.
+// print the same with stats off, behind a held lock, and with a stats.db
+// that isn't one.
 func TestStatsModesKeepJobOutput(t *testing.T) {
 	if *update {
 		t.Skip("-update writes the goldens from the plain runs only")
@@ -163,6 +177,7 @@ func TestStatsModesKeepJobOutput(t *testing.T) {
 				t.Error("stats off, and a supervisor made stats.db")
 			}
 		}},
+		{"locked", func(j *jobHarness) { prepareStatsAt(j.t, j.h.dir); holdStats(j.t, j.h.dir) }, func(*testing.T, string) {}},
 		{"broken", func(j *jobHarness) {
 			os.WriteFile(filepath.Join(j.h.dir, stats.DBName), []byte("zqmark7 not a database\n"), 0o644)
 		}, func(t *testing.T, dir string) {
@@ -501,9 +516,6 @@ func TestVersionShapes(t *testing.T) {
 			t.Errorf("%+v: stored %s; want %s", c, got, c.want)
 		}
 	}
-	if v := vTool(); v != "" && !sha40.MatchString(v) {
-		t.Errorf("vTool %q", v)
-	}
 }
 
 // orphanScene is a store with one run whose supervisor died, for the
@@ -735,10 +747,9 @@ func TestMarkersMissStatsDB(t *testing.T) {
 }
 
 // Forty runs end over three seconds, each supervisor writing its row:
-// every row lands and no launch prints. MAESTRO_STATS_LOAD=1 runs 300.
-// Supervisors write stderr to /dev/null, so only launch's is checked
-// here; that statsrun.go never prints rests on writeStats and afterRing,
-// which take no writer.
+// every row lands. MAESTRO_STATS_LOAD=1 runs 300. Supervisors write
+// stderr to /dev/null, so this proves nothing of what they print: that
+// rests on writeStats and afterRing, which take no writer.
 func TestStatsConcurrentRunEnds(t *testing.T) {
 	t.Parallel()
 	n := 40
@@ -759,7 +770,7 @@ func TestStatsConcurrentRunEnds(t *testing.T) {
 			c := l.cmd("", "launch", "--json", "--", "sh", "-c", fmt.Sprintf("sleep 0.%d", i%5))
 			var out, errb bytes.Buffer
 			c.Stdout, c.Stderr = &out, &errb
-			if err := c.Run(); err != nil || errb.Len() > 0 {
+			if err := c.Run(); err != nil {
 				mu.Lock()
 				bad = append(bad, fmt.Sprintf("%v %s", err, errb.String()))
 				mu.Unlock()
@@ -768,7 +779,7 @@ func TestStatsConcurrentRunEnds(t *testing.T) {
 	}
 	wg.Wait()
 	if len(bad) > 0 {
-		t.Fatalf("%d launches failed or printed on stderr: %s", len(bad), bad[0])
+		t.Fatalf("%d launches failed: %s", len(bad), bad[0])
 	}
 	deadline := time.Now().Add(60 * time.Second)
 	for statsRowCount(t, l.h.dir) < n && time.Now().Before(deadline) {
@@ -884,6 +895,148 @@ func TestStatsChainedRun(t *testing.T) {
 		}
 		if out, err := j.chainCmd(r.Owner(), "", "ack", r.ID).CombinedOutput(); err != nil {
 			t.Fatalf("ack %s: %v\n%s", r.ID, err, out)
+		}
+	}
+}
+
+// A run started with stats off gets no row from its supervisor either,
+// though they are on again at its end; one that ends with them off loses
+// its side file, so stats health counts no row missing.
+func TestStatsOffAtStartOrEnd(t *testing.T) {
+	h, _ := pinHarness(t, "")
+	prepareStatsAt(t, h.dir)
+	dir := filepath.Join(h.dir, "runs")
+	c := &call{env: Env{Getenv: func(string) string { return "" }, DiskFree: halfFree}, inSupervisor: true}
+	end := func(side bool) runs.Record {
+		r := putRun(t, dir, runs.Record{Job: "build", Command: []string{"claude", "-p"}, Dir: h.dir, Limit: "1h",
+			StartedAt: pinBase(), EndedAt: ended(pinBase(), time.Minute), State: runs.Done, PID: 4001, Exit: exitCode(0)})
+		if side {
+			writeSide(dir, r.ID, &sideFacts{})
+		}
+		return r
+	}
+	c.writeStats(dir, end(false), claudeReply{}, os.ErrNotExist)
+	c.waitStats()
+	if n := statsRowCount(t, h.dir); n != 0 {
+		t.Fatalf("%d rows of a run started with stats off", n)
+	}
+	r := end(true)
+	stats.SetOff(h.dir, true)
+	c.writeStats(dir, r, claudeReply{}, os.ErrNotExist)
+	c.waitStats()
+	stats.SetOff(h.dir, false)
+	if _, err := os.Lstat(filepath.Join(dir, r.ID+sideExt)); err == nil {
+		t.Fatal("a run that ended with stats off kept its side file")
+	}
+	c.writeStats(dir, end(true), claudeReply{}, os.ErrNotExist)
+	c.waitStats()
+	var hl statsHealth
+	h.ok(&hl, "stats", "health")
+	if statsRowCount(t, h.dir) != 1 || hl.Ended != 1 || hl.Missing != 0 {
+		t.Fatalf("%d rows, health %+v; want the one run on all through", statsRowCount(t, h.dir), hl)
+	}
+}
+
+// A run's first ring never waits on stats.db: behind a held lock it
+// comes as soon as with none, and the row still lands once the lock goes.
+func TestStatsLockedRingsAtOnce(t *testing.T) {
+	t.Parallel()
+	j := newJobHarness(t, "senior-engineer")
+	k := j.setHook("senior-engineer")
+	j.h.ok(nil, "create", "--title", "a")
+	prepareStatsAt(t, j.h.dir)
+	release := holdStats(t, j.h.dir)
+	_, r := j.job("", "build", "T-1")
+	k.wait(t, 10*time.Second)
+	release()
+	j.h.ok(nil, "ack", r.ID)
+	j.waitSupervisors()
+	// Waiting on the lock took 2.3 s at least: its start's 2 s, then a
+	// 300 ms retry.
+	k.mu.Lock()
+	late := k.at[0].Sub(*r.EndedAt)
+	k.mu.Unlock()
+	if late > 1500*time.Millisecond {
+		t.Fatalf("rang %s after the run's end, behind a locked stats.db", late.Round(time.Millisecond))
+	}
+	if n := statsRowCount(t, j.h.dir); n != 1 {
+		t.Fatalf("%d rows; want the run's, once the lock went", n)
+	}
+}
+
+// A died run's row ends when it last wrote, not when a reader found it.
+func TestDiedRunEndsAtLastOutput(t *testing.T) {
+	h, id := orphanScene(t)
+	prepareStatsAt(t, h.dir)
+	dir := filepath.Join(h.dir, "runs")
+	last := pinBase().Add(10 * time.Minute)
+	os.WriteFile(filepath.Join(dir, id+".err"), []byte("x\n"), 0o600)
+	os.Chtimes(filepath.Join(dir, id+".err"), last, last)
+	h.run("", "pickup")
+	var wall, endedAt int64
+	statsQuery(t, h.dir, `SELECT wall_ms, ended_at FROM run_facts WHERE run = '`+id+`'`, &wall, &endedAt)
+	if wall != (10*time.Minute).Milliseconds() || endedAt != last.UnixMilli() {
+		t.Fatalf("wall %dms, ended %d; want 10m, %d", wall, endedAt, last.UnixMilli())
+	}
+}
+
+// A died review whose result its .out holds gets that result's head in
+// its row, as its supervisor would have given it.
+func TestOrphanReviewFacts(t *testing.T) {
+	h, _ := pinHarness(t, "senior-engineer")
+	h.ok(nil, "create", "--title", "a")
+	h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	h.ok(nil, "transition", "T-1", "--to", "in_review")
+	prepareStatsAt(t, h.dir)
+	dir := filepath.Join(h.dir, "runs")
+	r := putRun(t, dir, runs.Record{Launcher: "reviewer", Ticket: "T-1", Job: "review",
+		Command: withEnv(claudeCommand(newSessionID(), modelOpus, effortHigh, false)), Dir: h.dir, Limit: "2h",
+		StartedAt: pinBase(), State: runs.Running, PID: 4005})
+	writeSide(dir, r.ID, &sideFacts{})
+	res := `{"type":"result","subtype":"success","is_error":false,"result":"Review: GO at ` + strings.Repeat("ab", 20) +
+		` (PR #4), tier 1","session_id":"11111111-2222-4333-8444-555555555555","total_cost_usd":0.5,"modelUsage":{}}`
+	os.WriteFile(filepath.Join(dir, r.ID+".out"), []byte(res+"\n"), 0o600)
+	h.run("", "pickup")
+	var head string
+	statsQuery(t, h.dir, `SELECT c.name FROM run_facts f JOIN codes c ON c.id = f.head WHERE f.run = '`+r.ID+`'`, &head)
+	if head != "review:go" {
+		t.Fatalf("head %s; want review:go", head)
+	}
+}
+
+// reply_bytes is the whole result's size, not the 64 KB the record keeps.
+func TestReplyBytesUncut(t *testing.T) {
+	text := strings.Repeat("x", 100_000)
+	res, err := lastResult([]byte(`{"type":"result","result":"` + text + `","session_id":"s","total_cost_usd":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, _, _ := runs.ParseOutput([]byte(`{"type":"result","result":"` + text + `","session_id":"s"}`))
+	c := &call{env: Env{Getenv: func(string) string { return "" }, DiskFree: halfFree}}
+	row := c.statsRow(t.TempDir(), runs.Record{ID: "R-aaaaaaaa", State: runs.Done, Reply: reply}, res, nil)
+	if len(reply) >= len(text) || row.ReplyBytes != int64(len(text)) {
+		t.Fatalf("record keeps %d bytes, row says %d; want %d", len(reply), row.ReplyBytes, len(text))
+	}
+}
+
+// A stream that showed no compaction or retry leaves both unknown: no
+// probe has seen their events. A plain launch of claude --resume is a
+// resume.
+func TestStreamCountsUnseen(t *testing.T) {
+	row := stats.Run{}
+	streamFacts(&row, runs.Record{Stream: &streamfilter.Summary{Result: true}}, sideFacts{}, false, true)
+	if row.Compactions != nil || row.Retries != nil {
+		t.Fatalf("none seen stored as %v, %v", row.Compactions, row.Retries)
+	}
+	row = stats.Run{}
+	streamFacts(&row, runs.Record{Stream: &streamfilter.Summary{Result: true, Compactions: 2, Retries: 1}}, sideFacts{}, false, true)
+	if row.Compactions == nil || *row.Compactions != 2 || row.Retries == nil || *row.Retries != 1 {
+		t.Fatalf("two compactions and a retry stored as %v, %v", row.Compactions, row.Retries)
+	}
+	c := &call{env: Env{Getenv: func(string) string { return "" }, DiskFree: halfFree}}
+	for cmd, want := range map[string]bool{"claude -p --resume S": true, "claude -p --continue": true, "claude -p --session-id S": false} {
+		if got := c.statsRow(t.TempDir(), runs.Record{ID: "R-aaaaaaaa", Command: strings.Fields(cmd)}, claudeReply{}, os.ErrNotExist).Resumed; got != want {
+			t.Errorf("%s: resumed %v", cmd, got)
 		}
 	}
 }

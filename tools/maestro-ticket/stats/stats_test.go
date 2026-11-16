@@ -21,6 +21,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite" // the driver cli registers in the binary
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
 // childEnv makes the test binary one process of TestPrepareRace: it
@@ -1003,4 +1005,51 @@ func TestOpenNeverWritesAtConnect(t *testing.T) {
 	if err := db.QueryRow(`SELECT 1`).Scan(&one); err != nil {
 		t.Fatalf("an open behind a writer: %v", err)
 	}
+}
+
+// A command that resumed a session spent only what it added to it, with
+// or without a resume_of: a plain launch of claude --resume has none.
+func TestSpendOfResumedLaunch(t *testing.T) {
+	db, _ := fresh(t)
+	for i, c := range []struct {
+		cost     float64
+		resumeOf string
+		resumed  bool
+	}{{1, "", false}, {2, runID(1), false}, {3, "", true}} {
+		r := testRun(runID(i + 1))
+		r.StartedAt = r.StartedAt.Add(time.Duration(i) * time.Hour)
+		r.EndedAt = r.StartedAt.Add(time.Minute)
+		r.ResumeOf, r.Resumed = c.resumeOf, c.resumed
+		r.Models[0].CostCum = &c.cost
+		if err := Write(t.Context(), db, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	facts, err := Read(t.Context(), db, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range facts {
+		if s := f.Spend[0]; s.USD == nil || *s.USD != 1 {
+			t.Errorf("%s spent %s; want 1", f.Run, fmtUSD(s.USD))
+		}
+	}
+}
+
+// The copies of streamfilter's rules stay equal to them: this package
+// imports no other of the module.
+func TestShapesMatchStreamfilter(t *testing.T) {
+	if maxTail != streamfilter.TailLen {
+		t.Errorf("maxTail %d, streamfilter.TailLen %d", maxTail, streamfilter.TailLen)
+	}
+	if semverShape.String() != streamfilter.VersionShape.String() {
+		t.Errorf("semverShape %s, streamfilter.VersionShape %s", semverShape, streamfilter.VersionShape)
+	}
+}
+
+func fmtUSD(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return fmt.Sprint(*v)
 }

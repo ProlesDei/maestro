@@ -113,6 +113,7 @@ func endedScene(t *testing.T, h *harness) (dir string, ids map[string]string) {
 		}
 		r.Dir, r.Limit = h.dir, "2h"
 		ids[name] = putRun(t, dir, r).ID
+		writeSide(dir, ids[name], &sideFacts{}) // as a start with stats on writes it
 	}
 	put("done", runs.Record{Ticket: "T-1", Job: "build", Command: cmd("11111111-1111-4111-8111-111111111111", modelOpus),
 		StartedAt: at(0), EndedAt: ended(at(0), 90*time.Second), State: runs.Done, PID: 4001, Exit: exitCode(0),

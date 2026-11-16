@@ -551,6 +551,8 @@ func runStatsHealth(ctx context.Context, c *call) error {
 	return c.out(h, func(w io.Writer) { printHealth(w, h) })
 }
 
+// printHealth prints health as text. install.sh apply reads its first
+// line: "stats: on", or "stats: off (why): no run is written".
 func printHealth(w io.Writer, h statsHealth) {
 	if h.Why != "" {
 		fmt.Fprintf(w, "stats: off (%s): no run is written\n", h.Why)

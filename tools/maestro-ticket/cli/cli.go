@@ -272,8 +272,9 @@ type call struct {
 	storeChecks []ticket.Check // besideStore's checks of the store's dir
 	// Set in the supervisor: it alone creates or migrates stats.db.
 	inSupervisor bool
-	statsSha     string     // stats.sha, read once at its start
-	statsPrep    chan error // its start's Prepare
+	statsSha     string        // stats.sha, read once at its start
+	statsPrep    chan error    // its start's Prepare
+	statsWrote   chan struct{} // closed once its row write is over
 }
 
 // usageError marks errors caused by bad command-line input.

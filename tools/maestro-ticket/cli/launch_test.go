@@ -145,11 +145,13 @@ func (l *launcher) waitSupervisors() {
 	l.t.Error("a supervisor outlived the test")
 }
 
-// hook is a webhook that counts its rings and keeps the auth each sent.
+// hook is a webhook that counts its rings and keeps the auth each sent,
+// and when each came.
 type hook struct {
 	mu    sync.Mutex
 	rings []runs.Notification
 	auths []string
+	at    []time.Time
 	ch    chan struct{}
 }
 
@@ -162,6 +164,7 @@ func newHook(t *testing.T) (*hook, string) {
 		k.mu.Lock()
 		k.rings = append(k.rings, n)
 		k.auths = append(k.auths, r.Header.Get("Authorization"))
+		k.at = append(k.at, time.Now())
 		k.mu.Unlock()
 		k.ch <- struct{}{}
 	}))
