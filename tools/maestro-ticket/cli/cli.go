@@ -4,6 +4,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -44,6 +45,9 @@ type Env struct {
 	// DiskFree measures a directory's filesystem for claim and slot; nil
 	// means envcheck.DiskFree. Tests use it to fake a full disk.
 	DiskFree func(dir string) (envcheck.Free, bool, error)
+	// StatsOpen opens stats.db for one write; nil means stats.Open. Tests
+	// use it to fake a broken file.
+	StatsOpen func(path string, create bool) (*sql.DB, error)
 }
 
 // OSEnv returns an Env wired to the real process.
@@ -222,6 +226,8 @@ var commands = []command{
 	{"doctor", runDoctor},
 	{"slot", runSlot},
 	{"check", runCheck},
+	// Left out of the usage text: no bot reads it.
+	{"stats", runStats},
 }
 
 // call is one parsed invocation.
@@ -239,6 +245,11 @@ type call struct {
 		path, source string
 		err          error
 	}
+	storeChecks []ticket.Check // besideStore's checks of the store's dir
+	// Set in the supervisor: it alone creates or migrates stats.db.
+	inSupervisor bool
+	statsSha     string     // stats.sha, read once at its start
+	statsPrep    chan error // its start's Prepare
 }
 
 // usageError marks errors caused by bad command-line input.

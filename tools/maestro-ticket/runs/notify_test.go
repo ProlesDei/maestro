@@ -1,10 +1,17 @@
 package runs
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 )
 
 // A ring's body is what every bot's webhook reads: exactly these fields,
@@ -40,5 +47,45 @@ func TestNoticeGolden(t *testing.T) {
 		if string(b) != c.want {
 			t.Errorf("ring body:\n got %s\nwant %s", b, c.want)
 		}
+	}
+}
+
+// A ring's error sorts into a code, never its text.
+func TestRingErrCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/404":
+			w.WriteHeader(http.StatusNotFound)
+		case "/503":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/slow":
+			time.Sleep(300 * time.Millisecond)
+		case "/304":
+			w.WriteHeader(http.StatusNotModified)
+		}
+	}))
+	defer srv.Close()
+	ring := func(ctx context.Context, p string) error { return Ring(ctx, Hook{URL: srv.URL + p}, Notification{}) }
+	short, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{ring(t.Context(), "/ok"), "none"},
+		{ring(t.Context(), "/404"), "http4xx"},
+		{ring(t.Context(), "/503"), "http5xx"},
+		{ring(t.Context(), "/304"), "other"},
+		{ring(short, "/slow"), "timeout"},
+		{fmt.Errorf("ring %s: %w", "https://x/…", &net.DNSError{Err: "no such host", Name: "x"}), "dns"},
+		{errors.New("ring https://x/…: connection refused"), "other"},
+	} {
+		if got := RingErrCode(c.err); got != c.want {
+			t.Errorf("RingErrCode(%v) = %s; want %s", c.err, got, c.want)
+		}
+	}
+	// The text stays as it was.
+	if err := ring(t.Context(), "/404"); err.Error() != "ring "+Host(srv.URL)+": 404 Not Found" {
+		t.Errorf("ring error text: %q", err)
 	}
 }

@@ -28,6 +28,7 @@ type launcher struct {
 	h     *harness
 	exe   string
 	actor string
+	env   []string // added to every command's environment
 }
 
 func newLauncher(t *testing.T, actor string) *launcher {
@@ -49,6 +50,7 @@ func (l *launcher) cmd(stdin string, args ...string) *exec.Cmd {
 	cmd := exec.Command(l.exe, args...)
 	cmd.Dir = l.h.dir
 	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+l.h.env["MAESTRO_TICKET_STORE"], "MAESTRO_TICKET_ACTOR="+l.actor)
+	cmd.Env = append(cmd.Env, l.env...)
 	cmd.Stdin = strings.NewReader(stdin)
 	return cmd
 }

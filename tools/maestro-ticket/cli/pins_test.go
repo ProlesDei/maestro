@@ -422,7 +422,14 @@ func (j *jobHarness) pinCmd(m *masker, stdin string, args ...string) (got, stdou
 // and as JSON, with the line for an earlier run not yet acked.
 func TestPinJobStart(t *testing.T) {
 	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "job_start", pinJobStart(t, nil))
+}
+
+func pinJobStart(t *testing.T, setup func(*jobHarness)) string {
 	j, m := newPinJobs(t, "junior-engineer")
+	if setup != nil {
+		setup(j)
+	}
 	j.h.ok(nil, "create", "--title", "docs", "--tier", "junior")
 	j.h.ok(nil, "create", "--title", "auth")
 	var b strings.Builder
@@ -432,13 +439,20 @@ func TestPinJobStart(t *testing.T) {
 	b.WriteString(got)
 	got, _ = j.start(m, "", "job", "build", "T-1", "--model", "opus", "--limit", "30m")
 	b.WriteString(got)
-	golden(t, "job_start", b.String())
+	return b.String()
 }
 
 // TestPinJobAgain pins job again, as text and as JSON.
 func TestPinJobAgain(t *testing.T) {
 	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "job_again", pinJobAgain(t, nil))
+}
+
+func pinJobAgain(t *testing.T, setup func(*jobHarness)) string {
 	j, m := newPinJobs(t, "qa-lead")
+	if setup != nil {
+		setup(j)
+	}
 	j.h.ok(nil, "create", "--title", "a")
 	for _, st := range []string{"in_progress", "in_review"} {
 		j.h.ok(nil, "transition", "T-1", "--to", st)
@@ -450,13 +464,20 @@ func TestPinJobAgain(t *testing.T) {
 	b.WriteString(got)
 	got, _ = j.start(m, "", "job", "again", second, "--json")
 	b.WriteString(got)
-	golden(t, "job_again", b.String())
+	return b.String()
 }
 
 // TestPinResume pins resume with an answer and with each of its flags.
 func TestPinResume(t *testing.T) {
 	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "resume", pinResume(t, nil))
+}
+
+func pinResume(t *testing.T, setup func(*jobHarness)) string {
 	j, m := newPinJobs(t, "junior-engineer")
+	if setup != nil {
+		setup(j)
+	}
 	j.h.ok(nil, "create", "--title", "docs", "--tier", "junior")
 	dir := filepath.Join(j.h.dir, "runs")
 	var b strings.Builder
@@ -487,7 +508,7 @@ func TestPinResume(t *testing.T) {
 	// Each nudge comes once a session.
 	got, _ = j.pinCmd(m, "", "resume", id, "--opus")
 	b.WriteString(got)
-	golden(t, "resume", b.String())
+	return b.String()
 }
 
 // TestPinJobRefusals pins each refusal of job, job again and resume, as
@@ -604,6 +625,10 @@ func lookBoard(l *lookHarness) {
 // second look, the judge, an empty board and STOP.
 func TestPinLook(t *testing.T) {
 	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "look", pinLook(t, nil))
+}
+
+func pinLook(t *testing.T, setup func(*jobHarness)) string {
 	var b strings.Builder
 	for _, args := range [][]string{
 		{"look", "--limit", "3", "--report"},
@@ -611,6 +636,9 @@ func TestPinLook(t *testing.T) {
 	} {
 		l := &lookHarness{newJobHarness(t, "planner")}
 		l.h.checks = fixedChecks
+		if setup != nil {
+			setup(l.jobHarness)
+		}
 		m := newMasker(l.h.dir, "<DIR>", l.exe, "<exe>")
 		lookBoard(l)
 		got, _ := l.pinCmd(m, "", args...)
@@ -624,10 +652,13 @@ func TestPinLook(t *testing.T) {
 		b.WriteString(got)
 	}
 	l := &lookHarness{newJobHarness(t, "planner")}
+	if setup != nil {
+		setup(l.jobHarness)
+	}
 	m := newMasker(l.h.dir, "<DIR>", l.exe, "<exe>")
 	got, _ := l.pinCmd(m, "", "look", "--limit", "4")
 	b.WriteString(got)
 	got, _ = l.pinCmd(m, "", "look")
 	b.WriteString(got)
-	golden(t, "look", b.String())
+	return b.String()
 }

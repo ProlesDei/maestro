@@ -25,11 +25,64 @@ type claudeReply struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	// ModelUsage holds every model the session called, its subagents' too.
 	ModelUsage map[string]struct {
-		InputTokens              int64 `json:"inputTokens"`
-		OutputTokens             int64 `json:"outputTokens"`
-		CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
-		CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+		InputTokens              int64    `json:"inputTokens"`
+		OutputTokens             int64    `json:"outputTokens"`
+		CacheReadInputTokens     int64    `json:"cacheReadInputTokens"`
+		CacheCreationInputTokens int64    `json:"cacheCreationInputTokens"`
+		CostUSD                  looseNum `json:"costUSD"`
 	} `json:"modelUsage"`
+	// Read only for stats.db, each loose, so a field Claude Code renames
+	// or retypes never costs a reply its cost log. The two strings are
+	// mapped to a list before anything keeps them.
+	Subtype        looseStr  `json:"subtype"`
+	IsError        looseBool `json:"is_error"`
+	StopReason     looseStr  `json:"stop_reason"`
+	DurationMS     looseNum  `json:"duration_ms"`
+	DurationAPIMS  looseNum  `json:"duration_api_ms"`
+	NumTurns       looseNum  `json:"num_turns"`
+	APIErrorStatus looseSet  `json:"api_error_status"`
+}
+
+// looseNum is a JSON number, or nothing: its decode never fails.
+type looseNum struct {
+	V  float64
+	OK bool
+}
+
+func (n *looseNum) UnmarshalJSON(b []byte) error {
+	if string(b) != "null" && json.Unmarshal(b, &n.V) == nil {
+		n.OK = true
+	}
+	return nil
+}
+
+// looseStr is a short JSON string, or "": its decode never fails.
+type looseStr struct{ V string }
+
+func (s *looseStr) UnmarshalJSON(b []byte) error {
+	if len(b) <= 66 && json.Unmarshal(b, &s.V) != nil {
+		s.V = ""
+	}
+	return nil
+}
+
+// looseBool is a JSON bool, or nothing: its decode never fails.
+type looseBool struct{ V, OK bool }
+
+func (f *looseBool) UnmarshalJSON(b []byte) error {
+	if string(b) != "null" && json.Unmarshal(b, &f.V) == nil {
+		f.OK = true
+	}
+	return nil
+}
+
+// looseSet notes a field that holds anything but null, and keeps none
+// of it.
+type looseSet struct{ Set bool }
+
+func (s *looseSet) UnmarshalJSON(b []byte) error {
+	s.Set = string(b) != "null"
+	return nil
 }
 
 // lastResult finds the last result message in a reply: the one value

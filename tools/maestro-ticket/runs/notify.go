@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -195,12 +196,42 @@ func Ring(ctx context.Context, h Hook, n Notification) error {
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return fmt.Errorf("ring %s: %v", Host(u), err)
+		return fmt.Errorf("ring %s: %w", Host(u), err)
 	}
 	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("ring %s: %s", Host(u), resp.Status)
+		return statusError{Host(u), resp.Status, resp.StatusCode}
 	}
 	return nil
+}
+
+// statusError is a ring the webhook answered with no 2xx.
+type statusError struct {
+	host, status string
+	code         int
+}
+
+func (e statusError) Error() string { return fmt.Sprintf("ring %s: %s", e.host, e.status) }
+
+// RingErrCode sorts a ring's error into none, timeout, dns, http4xx,
+// http5xx or other, for stats: never the error's text, which names the
+// webhook's host.
+func RingErrCode(err error) string {
+	var se statusError
+	var dns *net.DNSError
+	var ne net.Error
+	switch {
+	case err == nil:
+		return "none"
+	case errors.As(err, &se) && se.code/100 == 4:
+		return "http4xx"
+	case errors.As(err, &se) && se.code/100 == 5:
+		return "http5xx"
+	case errors.As(err, &dns):
+		return "dns"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &ne) && ne.Timeout():
+		return "timeout"
+	}
+	return "other"
 }

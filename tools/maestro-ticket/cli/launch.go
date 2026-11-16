@@ -45,7 +45,8 @@ func (c *call) besideStore(name string) (string, error) {
 			return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, path)
 		}
 	}
-	if err := envcheck.Err(c.envChecks(path)); err != nil {
+	c.storeChecks = c.envChecks(path)
+	if err := envcheck.Err(c.storeChecks); err != nil {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(path), name), nil
@@ -333,6 +334,7 @@ func runSupervise(ctx context.Context, c *call) error {
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP)
 	defer stop()
+	c.startStats(filepath.Dir(dir))
 	return runs.Supervise(ctx, dir, c.args[0], runs.Options{
 		Env:   os.Environ(),
 		Rings: rings,
@@ -352,6 +354,8 @@ func runSupervise(ctx context.Context, c *call) error {
 			}
 			return time.Time{}
 		},
+		// Stats wait for the first ring: none may hold it up.
+		AfterRing: func(r runs.Record, err error) { c.afterRing(dir, r, err) },
 	})
 }
 
@@ -367,28 +371,30 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		}
 	}
 	id := runTicket(r)
-	s, err := c.open(ctx)
-	if err != nil {
-		warn(err)
-		return
-	}
-	defer s.Close()
 	out, _ := runs.ReadTail(filepath.Join(dir, r.ID+".out"), runs.OutputWindow)
 	if len(out) == runs.OutputWindow {
 		if i := bytes.IndexByte(out, '\n'); i >= 0 {
 			out = out[i+1:] // a cut first line isn't JSON
 		}
 	}
-	reply, err := lastResult(out)
+	reply, replyErr := lastResult(out)
+	// Last, after the claim is freed, and silent whatever fails.
+	defer c.writeStats(dir, r, reply, replyErr)
+	s, err := c.open(ctx)
+	if err != nil {
+		warn(err)
+		return
+	}
+	defer s.Close()
 	outcome := ticket.LaunchResult
 	switch {
 	case r.State == runs.Died:
 		outcome = ticket.LaunchDied
-	case err != nil:
+	case replyErr != nil:
 		outcome = ticket.LaunchNoResult
 	}
 	c.endLaunch(ctx, s, r.LaunchID, outcome, reply.SessionID)
-	if err == nil {
+	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
 	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {

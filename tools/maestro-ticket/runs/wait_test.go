@@ -4,6 +4,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -171,5 +172,47 @@ func TestCreditCapsWaitsInsideTheSession(t *testing.T) {
 	}
 	if got, capped := Credit(dir, id, t0, now, 4*time.Hour); got != 3*time.Hour+200*time.Minute || capped {
 		t.Fatalf("4h limit: Credit = %s, capped %v; want all of it", got, capped)
+	}
+}
+
+// AfterRing runs once, right after the first ring and before the rest,
+// with that ring's error; with a webhook it can't look up, once with that
+// error; with no webhook, once after the end.
+func TestSuperviseAfterRing(t *testing.T) {
+	dir := t.TempDir()
+	var rings atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rings.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	for _, hook := range []string{"ok", "broken", "none"} {
+		r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"true"}, Dir: dir}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rings.Store(0)
+		var calls []string
+		o := Options{
+			Rings: []time.Duration{0, 200 * time.Millisecond},
+			AfterRing: func(r Record, err error) {
+				calls = append(calls, fmt.Sprintf("rings %d, rang %v, %s", rings.Load(), r.Rang, RingErrCode(err)))
+			},
+		}
+		want := "rings 0, rang false, none"
+		switch hook {
+		case "ok":
+			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
+			want = "rings 1, rang false, http5xx"
+		case "broken":
+			o.Hook = func(string) (Hook, error) { return Hook{}, errors.New("bad notify file") }
+			want = "rings 0, rang false, other"
+		}
+		if err := Supervise(context.Background(), dir, r.ID, o); err != nil {
+			t.Fatal(err)
+		}
+		if len(calls) != 1 || calls[0] != want {
+			t.Fatalf("hook %s: AfterRing calls %q; want one: %s", hook, calls, want)
+		}
 	}
 }

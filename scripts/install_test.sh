@@ -20,7 +20,8 @@
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
 # bot block that differs only in its Maestro line is the same, one over
 # Grok's limit refuses, and memories go in a message apart; uninstall
-# runs off the pin; check opens a headless page with playwright-cli and
+# runs off the pin; stats: on or off sets the marker, and any other value
+# or a second line refuses; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
 # Playwright CLI's own skill;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
@@ -62,14 +63,16 @@ nskills=$(echo "$skills" | wc -l)
 # A stand-in maestro-ticket: prints a help that lists launch, job,
 # resume and look (only launch with STUB_NOJOB), unless
 # STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
-# is set, and otherwise makes the store as doctor does.
+# is set, and otherwise makes the store as doctor does, and the STATS_OFF
+# marker beside it as stats off does.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
 	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || { printf "Commands:\n  launch      [--ticket T-1]\n"; [ -n "${STUB_NOJOB:-}" ] || printf "  job         <job>\n  resume      <run-id>\n  look        --limit N\n"; }; exit 0; }' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
-	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' >"$tmp/bin/maestro-ticket"
+	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' \
+	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 # check wants what the bots' runs need; stand-ins, so the test passes on a
 # machine without them.
@@ -144,7 +147,11 @@ mkdir -p "$r/.maestro/src" "$r/.maestro/worktrees/T-1" "$r/.maestro/bots" && tou
 seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
-[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor" ] || fail "doctor didn't run once, in the repo: $(cat "$STUB_LOG")"
+[ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor
+$(cd "$r" && pwd -P) stats on --maestro-sha $sha" ] || fail "doctor and stats on didn't run once each, in the repo: $(cat "$STUB_LOG")"
+# No stats: line means on, and asks nothing.
+[ ! -e "$r/.git/maestro/STATS_OFF" ] || fail "stats off with no stats: line"
+says "run stats on: numbers about each run in stats.db beside the store"
 [ "$(grep -c . "$r/.git/maestro/installed.list")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2 + 1)) ] ||
 	fail "the record should list every file in both harness folders"
 
@@ -662,6 +669,39 @@ ok apply "$r3"
 [ "$before" = "$(snap "$r3")" ] || fail "a second apply over a CRLF source changed the repo"
 git -C "$m" config --unset core.autocrlf
 rm "$f" && git -C "$m" checkout -q -- skills/maestro-tdd/SKILL.md
+
+# --- stats: on writes no marker, off writes it, on again removes it; a
+# value but on or off, or the key twice, refuses; uninstall leaves the
+# stats files with the store ---
+r15=$tmp/stats
+repo "$r15" "harnesses: claude" "skills-home: hidden" "stats: on"
+ok apply "$r15"
+[ ! -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: on wrote the marker"
+sed -i 's/^stats: on$/stats: off/' "$r15/.maestro/project/install.yaml"
+: >"$STUB_LOG"
+ok apply "$r15"
+[ -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: off wrote no marker"
+grep -qxF "$(cd "$r15" && pwd -P) stats off --maestro-sha $sha" "$STUB_LOG" || fail "apply didn't run stats off: $(cat "$STUB_LOG")"
+says "run stats off:"
+before=$(snap "$r15")
+ok check "$r15"
+[ "$before" = "$(snap "$r15")" ] || fail "check changed the stats marker"
+sed -i 's/^stats: off$/stats: on/' "$r15/.maestro/project/install.yaml"
+ok apply "$r15"
+[ ! -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: on after off left the marker"
+cp "$r15/.maestro/project/install.yaml" "$tmp/keep15"
+for bad in "stats: maybe|install.yaml: stats wants on or off" "stats: |install.yaml: stats wants on or off" "stats: on|install.yaml:7: stats twice"; do
+	cp "$tmp/keep15" "$r15/.maestro/project/install.yaml"
+	echo "${bad%%|*}" >>"$r15/.maestro/project/install.yaml"
+	[ "${bad%%|*}" = "stats: on" ] || sed -i '/^stats: on$/d' "$r15/.maestro/project/install.yaml"
+	refuses "${bad#*|}" "$r15" apply "$r15"
+done
+cp "$tmp/keep15" "$r15/.maestro/project/install.yaml"
+sed -i 's/^stats: on$/stats: off/' "$r15/.maestro/project/install.yaml"
+ok apply "$r15"
+printf 'SQLite format 3\0' >"$r15/.git/maestro/stats.db"
+ok uninstall "$r15"
+[ -e "$r15/.git/maestro/stats.db" ] && [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "uninstall removed stats.db or STATS_OFF"
 
 # --- refusals ---
 mkdir "$tmp/plain"

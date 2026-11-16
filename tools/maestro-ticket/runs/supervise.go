@@ -43,6 +43,12 @@ type Options struct {
 	// isn't acked, such as the end of the usage limit that stopped it, so
 	// its bot learns its run can go on; zero for none, 24h out at most.
 	RingAgain func(Record) time.Time
+	// AfterRing, if set, runs once after the first ring, with its error,
+	// or with the error looking up the webhook, or with nil once the
+	// supervisor knows no ring comes (no webhook, or the result acked
+	// first), so work that must not hold up the ring, such
+	// as a stats prune, waits for it.
+	AfterRing func(Record, error)
 	Now       func() time.Time
 }
 
@@ -253,6 +259,14 @@ func join(a, b string) string {
 // ring rings the launcher's webhook at each of o.Rings after the end
 // while no one has acked the result.
 func ring(ctx context.Context, dir string, r Record, o Options) {
+	first := o.AfterRing
+	after := func(err error) {
+		if first != nil && ctx.Err() == nil {
+			first(r, err)
+		}
+		first = nil
+	}
+	defer after(nil) // no ring came
 	if o.Hook == nil {
 		return
 	}
@@ -260,6 +274,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	if err != nil {
 		r.RingError = err.Error()
 		Save(dir, r)
+		after(err)
 		return
 	}
 	if h.URL == "" {
@@ -299,6 +314,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 			r.RingError = err.Error()
 		}
 		Save(dir, r)
+		after(err)
 	}
 	if o.RingAgain == nil {
 		return
