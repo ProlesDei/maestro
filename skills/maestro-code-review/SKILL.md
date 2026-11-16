@@ -63,7 +63,8 @@ Open a todo list with one item per phase below.
 ## Phase E: Run the gates
 
 1. Skip this phase on a ruling at the same head (Phase C step 3). Else wait until every pass and subagent is done with `$R`. Then, in `$R`, in one call: `G=$(git rev-parse origin/<main>) && echo $G && git merge --no-edit $G`. Merge the sha, never the ref: every session's fetch moves `origin/<main>`, so a second read can name a main the gates never ran on. Run each command under `## Checks` in main's `project-setup.md` (Phase A step 3); record command, exit code and summary line. A red gate is a blocker unless you show it red on `$G` alone too, in a second detached worktree at `$G`, `$(mktemp -d)/review-<id>-$S-main` (print its path): red only on the old base `$B` proves nothing, since main may have fixed it since. A gate that died of a full disk is no verdict: stop as the `Stop on refused` rule of **maestro-working-principles** says. Never skip hooks or tests.
-2. Read `gh pr checks <n>` for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
+2. When the tier runs pass 6 and the diff changes both code and a test file, run this skill's `scripts/tests-on-base.sh --skip-head -- <the test check's command>` with bash, in `$R`, once the gates are green: it puts the change's code back to main's, keeps its tests, runs them, and restores the tree. Where the runner takes a file, pass `{}` in its place to get a line per test file. `base=red` is what a real test does. A fixture outside a test folder goes back to main's too, so read a red or green that hangs on one before you count it.
+3. Read `gh pr checks <n>` for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
 
