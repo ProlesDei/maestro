@@ -37,6 +37,10 @@ qa
 
 <one line, read by `/maestro-designer`: the path of the team's design rules file (tokens, type, spacing, motion, the checks no script runs), or none; then `dark theme: yes` if the app has one, so designs are shot in both>
 
+## Cache
+
+<leave as it is to cache nothing. Else one bullet per folder an install or build fills that works when copied to another path, as a name, a colon, the files that decide its content, `->` and the folder, such as ``- node: `package-lock.json` -> `node_modules` ``; a Python `.venv` doesn't survive a copy. Gitignore each folder, and have the check that installs skip the install when the folder is there. `maestro-ticket cache restore` copies one into a fresh worktree; a review or QA run saves it>
+
 ## Outside steps
 
 <each step a person or outside system takes before the app can be tested, one per line, with what needs it (running the app, one flow), who takes it, and the command or page that shows it's done, such as a feature flag turned on, a login, a VPN, or a reserved test host and how long to reserve it for. A session checks the steps its work needs before it starts the app or a test that calls an outside system, and stops, never waits, when one isn't done. Write none if there are none>
