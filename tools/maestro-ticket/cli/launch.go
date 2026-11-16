@@ -448,8 +448,10 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 				runs.KillRun(r.ID)
 				runs.Save(dir, r)
 				c.endRun(ctx, dir, r)
-				runs.DropStream(dir, r.ID) // its counts went with its supervisor
 			}
+			// Its supervisor is gone, so no one reads its stream: one
+			// killed after it saved the end leaves the file too.
+			runs.DropStream(dir, r.ID)
 			h, err := runs.Webhook(notify, r.Launcher)
 			if err != nil || h.URL == "" {
 				msg := ""

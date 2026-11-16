@@ -180,6 +180,7 @@ func TestStreamPickupBytesMatchJSON(t *testing.T) {
 	if steps != 5 || mt != "mt:pickup" || rp != "R:maestro-code-review/passes:1:50" {
 		t.Fatalf("run_steps: %d rows, %q, %q", steps, mt, rp)
 	}
+	grepStats(t, sj.h.dir, []string{streamMarker})
 	if _, err := os.Lstat(filepath.Join(jj.h.dir, stats.DBName)); err == nil {
 		t.Fatal("stats off made stats.db")
 	}
@@ -257,6 +258,36 @@ func TestStreamInitOnlyFreesClaim(t *testing.T) {
 	if asJSON != asStream {
 		t.Fatalf("pickup and runs differ:\n--- json\n%s\n--- stream\n%s", asJSON, asStream)
 	}
+}
+
+// A run its limit ended keeps the call that hung, and how long it had
+// gone, though its stream ends with no result.
+func TestStreamTimedOutKeepsOpenCall(t *testing.T) {
+	needStream(t)
+	t.Parallel()
+	j, _ := newStreamJobs(t, "hang", false)
+	hung := streamUse("m7", time.Now().UTC().Format(time.RFC3339Nano), `{"type":"tool_use","id":"t7","name":"Bash","input":{"command":"go test ./... `+streamMarker+`"}}`)
+	if err := os.WriteFile(filepath.Join(j.out, "head"), []byte(streamHead()+hung+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	out, err := j.cmd("", "job", "--json", "build", "T-1", "--limit", "2s").Output()
+	if err != nil {
+		t.Fatalf("job: %v %s", err, out)
+	}
+	var s started
+	json.Unmarshal(out, &s)
+	if r := j.waitEnded(s.Run.ID, 30*time.Second); r.State != runs.TimedOut {
+		t.Fatalf("run %+v", r)
+	}
+	j.waitSupervisors()
+	stream, calls, _, tail, open, _ := streamRow(t, j.h.dir, s.Run.ID)
+	var openMs int64
+	statsQuery(t, j.h.dir, `SELECT coalesce(open_ms, -1) FROM run_facts WHERE run = '`+s.Run.ID+`'`, &openMs)
+	if stream != "no_result" || calls != 6 || open != "Bash:go" || len(strings.Fields(tail)) != 6 || openMs < 1000 || openMs > 60000 {
+		t.Fatalf("row: %s, %d calls, tail %q, open %s for %d ms", stream, calls, tail, open, openMs)
+	}
+	grepStats(t, j.h.dir, []string{streamMarker})
 }
 
 // Stats off: claude gets json, and no stream file is ever made.
