@@ -2,6 +2,9 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,16 +35,21 @@ Claude sessions, never a bot's own shell. Nothing here sends it anywhere.
   stats costs [--by model|job|why|lean] [--since DATE|DURATION]
                            each run's own spend, by group; a resume counts
                            only what it added to its session
+  stats bundle --case T [--cost] [--out FILE|DIR]
+                           write a ticket's runs to a file for maintainers:
+                           labels for ids, offsets for times, no text; --cost
+                           adds spend. For a person only. It sends nothing
   stats on|off [--maestro-sha S]
                            start or stop writes for this store, as install.sh
                            apply does
 `
 
-// statsViews are stats' views, by name.
+// statsViews are stats' views and bundle, by name.
 var statsViews = map[string]func(context.Context, *call) error{
 	"case":   runStatsCase,
 	"health": runStatsHealth,
 	"costs":  runStatsCosts,
+	"bundle": runStatsBundle,
 }
 
 // runStats lists the views, runs one, or turns stats on or off.
@@ -74,7 +82,7 @@ func runStatsSwitch(c *call) error {
 		return err
 	}
 	if len(c.args) != 1 || (c.args[0] != "on" && c.args[0] != "off") {
-		return usagef("stats: want on or off, or a view: case, health, costs (stats --help lists them)")
+		return usagef("stats: want on or off, bundle, or a view: case, health, costs (stats --help lists them)")
 	}
 	if *sha != "" && !stats.ValidSha(*sha) {
 		return usagef("stats: --maestro-sha %q: want a commit sha of 7 to 40 lowercase hex", *sha)
@@ -99,10 +107,31 @@ func (c *call) refuseBot(view string) error {
 	if c.env.Getenv(runs.RunIDEnv) != "" {
 		return nil
 	}
+	if bot := c.botActor(); bot != "" {
+		return fmt.Errorf("%w: stats %s: %s is a bot, and stats are for people and Claude sessions", ticket.ErrForbidden, view, bot)
+	}
+	return nil
+}
+
+// botActor is the bot --actor or MAESTRO_TICKET_ACTOR names, or "".
+func (c *call) botActor() string {
 	for _, a := range []string{c.actor, c.env.Getenv("MAESTRO_TICKET_ACTOR")} {
 		if slices.Contains(botProfiles, a) {
-			return fmt.Errorf("%w: stats %s: %s is a bot, and stats are for people and Claude sessions", ticket.ErrForbidden, view, a)
+			return a
 		}
+	}
+	return ""
+}
+
+// refuseBundle keeps stats bundle to a person: not a bot, and not any
+// run, a Claude session a bot started included. A person reads the file
+// and decides whether it leaves (decision 23).
+func (c *call) refuseBundle() error {
+	if c.env.Getenv(runs.RunIDEnv) != "" {
+		return fmt.Errorf("%w: stats bundle: %s is set, and a bundle is for a person to write and read, never a run", ticket.ErrForbidden, runs.RunIDEnv)
+	}
+	if bot := c.botActor(); bot != "" {
+		return fmt.Errorf("%w: stats bundle: %s is a bot, and a bundle is for a person to write and read", ticket.ErrForbidden, bot)
 	}
 	return nil
 }
@@ -122,32 +151,42 @@ func offWhy(reason string) string {
 // note is the one line to print instead when there is nothing to read:
 // stats are off, or no run has ended with them on.
 func (c *call) statsRead(ctx context.Context, f stats.Filter) (facts []stats.Fact, note string, err error) {
+	note, err = c.withStats(func(db *sql.DB) (err error) {
+		facts, err = stats.Read(ctx, db, f)
+		return err
+	})
+	return facts, note, err
+}
+
+// withStats runs read on stats.db, opened read-only, or returns the one
+// line to print instead.
+func (c *call) withStats(read func(*sql.DB) error) (note string, err error) {
 	path, err := c.besideStore(stats.DBName)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	if why := stats.Off(filepath.Dir(path), c.env.Getenv, c.statsUnsafe()); why != "" {
-		return nil, "stats are off (" + offWhy(why) + "); stats health says more", nil
+		return "stats are off (" + offWhy(why) + "); stats health says more", nil
 	}
 	const none = "no stats yet: a run's supervisor starts stats.db at the first run's end"
 	if fi, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) || (err == nil && fi.Size() == 0) {
-		return nil, none, nil
+		return none, nil
 	}
 	db, err := stats.OpenRead(path)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	defer db.Close()
-	facts, err = stats.Read(ctx, db, f)
+	err = read(db)
 	switch {
 	case errors.Is(err, stats.ErrNoSchema):
-		return nil, none, nil
+		return none, nil
 	case errors.Is(err, stats.ErrNewer):
-		return nil, "", fmt.Errorf("%w: a newer maestro-ticket wrote it; rebuild this one", err)
+		return "", fmt.Errorf("%w: a newer maestro-ticket wrote it; rebuild this one", err)
 	case err != nil:
-		return nil, "", fmt.Errorf("read stats.db: %w", err)
+		return "", fmt.Errorf("read stats.db: %w", err)
 	}
-	return facts, "", nil
+	return "", nil
 }
 
 // printNote prints a view's one line, as {"note": ...} with --json.
@@ -534,4 +573,90 @@ func printHealth(w io.Writer, h statsHealth) {
 	if h.Space != nil {
 		fmt.Fprintf(w, "disk free: %d%% space, %d%% inodes\n", *h.Space, *h.Inodes)
 	}
+}
+
+// bundleOut is what stats bundle prints: where the file went and what it
+// holds by count, never its body.
+type bundleOut struct {
+	Path   string     `json:"path"`
+	Bytes  int        `json:"bytes"`
+	SHA256 string     `json:"sha256"`
+	Rows   bundleRows `json:"rows"`
+	Cost   bool       `json:"cost"`
+	Sent   bool       `json:"sent"`
+}
+
+type bundleRows struct {
+	Runs     int `json:"runs"`
+	Findings int `json:"findings"`
+	Steps    int `json:"steps"`
+}
+
+// runStatsBundle writes one ticket's runs to a case bundle file for a
+// person to read and, once the owner says yes, send.
+func runStatsBundle(ctx context.Context, c *call) error {
+	caseID := c.fs.String("case", "", "the ticket whose runs go in the bundle (T-12)")
+	cost := c.fs.Bool("cost", false, "add each run's spend and tokens")
+	out := c.fs.String("out", "", "the file to write, or a folder for it (default: the current folder)")
+	if err := c.parse(); err != nil {
+		return err
+	}
+	if err := c.refuseBundle(); err != nil {
+		return err
+	}
+	if err := c.noArgs(); err != nil {
+		return err
+	}
+	if *caseID == "" {
+		return usagef("stats bundle: want --case and a ticket id (T-12)")
+	}
+	id, err := ticket.ParseID(*caseID)
+	if err != nil {
+		return usagef("stats bundle: --case %q is no ticket id (T-12)", *caseID)
+	}
+	lists := statsLists()
+	var b *stats.Bundle
+	note, err := c.withStats(func(db *sql.DB) (err error) {
+		b, err = stats.CaseBundle(ctx, db, int64(id), lists, *cost)
+		return err
+	})
+	switch {
+	case errors.Is(err, stats.ErrNoRuns):
+		return fmt.Errorf("%w: %s: no runs in stats.db; nothing was written", ticket.ErrNotFound, id)
+	case err != nil:
+		return err
+	case note != "":
+		return c.printNote(note + "; nothing was written")
+	}
+	body, err := b.Encode(lists)
+	if err != nil {
+		return err
+	}
+	dest := c.env.Dir
+	if *out != "" {
+		dest = *out
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(c.env.Dir, dest)
+		}
+	}
+	path, err := stats.SaveBundle(dest, body)
+	if err != nil {
+		return fmt.Errorf("stats bundle: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	o := bundleOut{Path: path, Bytes: len(body), SHA256: hex.EncodeToString(sum[:]), Cost: *cost}
+	for _, r := range b.Runs {
+		o.Rows.Runs++
+		o.Rows.Findings += len(r.Findings)
+		o.Rows.Steps += len(r.Steps)
+	}
+	return c.out(o, func(w io.Writer) {
+		fmt.Fprintf(w, "wrote %s: %d bytes, sha256 %s\n", path, o.Bytes, o.SHA256)
+		spend := "no spend or tokens (--cost adds them)"
+		if o.Cost {
+			spend = "with spend and tokens"
+		}
+		fmt.Fprintf(w, "rows: %d runs, %d findings, %d steps; %s\n", o.Rows.Runs, o.Rows.Findings, o.Rows.Steps, spend)
+		fmt.Fprintf(w, "nothing was sent: read the file first; it leaves this machine only by a person's hand, after the owner says yes. stats case %s shows the same runs\n", id)
+	})
 }

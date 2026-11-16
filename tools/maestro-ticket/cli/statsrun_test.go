@@ -615,10 +615,11 @@ func TestStatsOnOff(t *testing.T) {
 	}
 }
 
-// Markers planted everywhere text lives miss stats.db and its WAL, before
-// and after a checkpoint and VACUUM.
-func TestMarkersMissStatsDB(t *testing.T) {
-	t.Parallel()
+// markerScene plants Never markers everywhere text lives, in T-1's
+// ticket, a launch on it and a run pickup ends, and returns them once
+// both rows are in stats.db.
+func markerScene(t *testing.T) (*launcher, []string) {
+	t.Helper()
 	markers := []string{"zqmark7", "deadbeefcafe", strings.Repeat("d3adb33f", 5), "claude-zqmark", "cafe0123beef"}
 	all := strings.Join(markers, " ")
 	l := newLauncher(t, "zqmark7")
@@ -654,6 +655,14 @@ func TestMarkersMissStatsDB(t *testing.T) {
 	if n := statsRowCount(t, l.h.dir); n != 2 {
 		t.Fatalf("%d rows; want the launch's and the orphan's", n)
 	}
+	return l, markers
+}
+
+// Markers planted everywhere text lives miss stats.db and its WAL, before
+// and after a checkpoint and VACUUM.
+func TestMarkersMissStatsDB(t *testing.T) {
+	t.Parallel()
+	l, markers := markerScene(t)
 	grep := func(when string) {
 		for _, f := range []string{stats.DBName, stats.DBName + "-wal"} {
 			b, _ := os.ReadFile(filepath.Join(l.h.dir, f))

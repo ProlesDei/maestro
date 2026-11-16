@@ -146,6 +146,28 @@ Plain `get` sets the ticket body and each comment four spaces in, so a line at t
 
 With stats off, or before the first run's end, `case` and `costs` print one line saying so and exit 0.
 
+### Case bundles
+
+`stats bundle --case T-12 [--cost] [--out FILE|DIR]` writes one ticket's runs to a JSON file for maintainers, for a feedback report that names that ticket. Only a person runs it: a bot actor, by `MAESTRO_TICKET_ACTOR` or `--actor`, and any shell with `MAESTRO_RUN_ID` set, a session a bot started included, get `forbidden` (exit 2). It writes `bundle-case-<4 letters>.json` (mode 0600) in the current folder, or in the folder `--out` names, or at the file `--out` names, never over a file that is there, and prints only the file's path, size, sha256 and row counts, and that nothing was sent. Nothing sends it: it leaves the machine only by a person's hand, after the owner reads it and says yes (decision 23). `stats case T-12` shows the same runs. A ticket with no runs in `stats.db` is `not_found` (exit 3); with stats off it prints one line and writes nothing.
+
+The file holds no text, path, session id, ticket or run id, or clock time. Ids become labels, times become offsets, and each name is on its Go list or `other`. Every field has one of the types below; a test holds each bundle struct to them, and the file is checked value by value before it is written.
+
+| Type | Holds | Fields |
+|---|---|---|
+| Label | `T1` for the case; `R1`, `R2`, ... for its runs, oldest first | `case`, `run`, `resume_of`, `again_of` (a parent outside the case is left out) |
+| Offset15m | minutes from the case's first run start, rounded down to 15 | `start_min` |
+| Day | whole days from the first run's start to the last run's end | `span_days` |
+| Enum | a name on its list in `cli/statsrun.go`, or `other` | `role`, `job`, `model` (family), `effort`, `why`, `tier`, `nudge`, `stop`, `state`, `outcome`, `reason`, `subtype`, `stop_reason`, `head`, `verdict`, `mode`, `stream`, `open_code`, `ring_err`, `os`, `arch`; a tail call's and a step's `code`; a finding's `kind`, `sev`, `action`, `prior` |
+| Count | a count or small number | `bundle_schema`, `stats_schema`, `exit`, `tries`, `drops`, `turns`, `tool_calls`, `tool_fails`, `compactions`, `retries`, `subagents`, `escaped`, `v_tier`; a step's `calls`, `fails`; a finding's `fid` (3 for F3), `pass`, `n` |
+| Ms | a duration in ms, under 400 days | `wall_ms`, `claude_ms`, `api_ms`, `wait_ms`, `open_ms`; a step's `ms_sum`, `ms_max` |
+| Bytes | a size | `prompt_bytes`, `reply_bytes` |
+| Pct | 0 to 100 | `disk_free_pct`, `inode_free_pct` |
+| Ver | a commit sha of 7 to 40 hex, or digits and dots | `v_maestro` (`install.yaml`'s maestro-sha), `v_claude` |
+| bool | | `with_cost`, `lean`, `after_death`, `is_error`, `wait_capped`, `rang`, `tool_at_pin` (the binary was built from `v_maestro`; its own commit stays out), a tail call's `fail` |
+| USD, Tokens | only under `cost`, only with `--cost`, since spend shows a team's size and budget | per run: `ctx_peak`; per model family: the run's own `usd` (to the millionth) and `tokens`, as `stats costs` counts them |
+
+A field with no value is left out. Even without `--cost`, a bundle shows how many runs a ticket took, how long they ran and the size of their prompts and replies.
+
 ## Flow
 
 `flow [--since 2026-11-12|72h] [--goal G]` reports where the ship tickets that reached `done` spent their time, from the status changes and comments the store already keeps: per stage (`queue` in `todo`, `build` in `in_progress`, `review` and `qa` in `in_review`, split at review's `Review: GO` and at QA's `Rereview:`, with a stay that comes back from `blocked` going on where it left, and `blocked`) the tickets that passed through, the median and 90th percentile per ticket, the total and its share; then the time a ticket spent in those stages before `done`, how many times review and QA sent tickets back (counted from the moves, so a note posted twice counts once), the share that passed both first time, and the three slowest. Time in `backlog` counts nowhere. Read it before and after a change to the flow: it says which stage to speed up next.
@@ -184,7 +206,7 @@ Each send and start is a handout file in `handouts/` next to the store, one per 
 | `render/` | `Backlog.md` generation and atomic writes. |
 | `envcheck/` | Filesystem and file-lock checks run before opening the store. |
 | `runs/` | Run records, the supervisor `launch` starts, webhook rings and the scan for untracked sessions. |
-| `stats/` | `stats.db`: its schema, writes, off switch and prune. Standard library only; `cli` hands it typed rows. |
+| `stats/` | `stats.db`: its schema, writes, off switch, prune and case bundles. Standard library only; `cli` hands it typed rows. |
 | `streamfilter/` | Reads a run's `stream-json` output once it ends: the bytes `.out` keeps, and counts and step codes, never text. Standard library only. |
 | `cli/` | Flag parsing and output. Talks only to `ticket.Store`, except for opening the store. |
 | `cmd/maestro-ticket/` | `main`. |

@@ -88,6 +88,35 @@ func codeNames(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
 	return names, rows.Err()
 }
 
+// numOf is n, or nil for NULL.
+func numOf(n sql.NullInt64) *int64 {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Int64
+	return &v
+}
+
+// nameOf is the name of code id, or "" for NULL.
+func nameOf(names map[int64]string, id sql.NullInt64) string {
+	if !id.Valid {
+		return ""
+	}
+	return names[id.Int64]
+}
+
+// parseTail reads run_facts.tail: code ids, ! after a failed call.
+func parseTail(text string, names map[int64]string) []TailCall {
+	var out []TailCall
+	for _, w := range strings.Fields(text) {
+		fail := strings.HasSuffix(w, "!")
+		if id, err := strconv.ParseInt(strings.TrimSuffix(w, "!"), 10, 64); err == nil {
+			out = append(out, TailCall{Code: names[id], Fail: fail})
+		}
+	}
+	return out
+}
+
 // Read returns the runs f picks, oldest first, with their spend and
 // findings. It refuses a stats.db at another schema: ErrNewer or
 // ErrNoSchema.
@@ -104,19 +133,6 @@ func Read(ctx context.Context, db *sql.DB, f Filter) ([]Fact, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := func(id sql.NullInt64) string {
-		if !id.Valid {
-			return ""
-		}
-		return names[id.Int64]
-	}
-	num := func(n sql.NullInt64) *int64 {
-		if !n.Valid {
-			return nil
-		}
-		v := n.Int64
-		return &v
-	}
 	at := func(n sql.NullInt64) time.Time {
 		if !n.Valid {
 			return time.Time{}
@@ -132,7 +148,6 @@ func Read(ctx context.Context, db *sql.DB, f Filter) ([]Fact, error) {
 	}
 	defer rows.Close()
 	var out []Fact
-	index := map[string]int{}
 	for rows.Next() {
 		var r Fact
 		var resumeOf, againOf, tail sql.NullString
@@ -146,19 +161,13 @@ func Read(ctx context.Context, db *sql.DB, f Filter) ([]Fact, error) {
 		r.ResumeOf, r.AgainOf, r.Ticket = resumeOf.String, againOf.String, ticket.Int64
 		for i, p := range []*string{&r.Job, &r.Model, &r.Effort, &r.Why, &r.Tier, &r.Nudge,
 			&r.Outcome, &r.Reason, &r.Verdict, &r.Stream, &r.OpenCode} {
-			*p = name(e[i])
+			*p = nameOf(names, e[i])
 		}
 		r.Lean = lean.Int64 == 1
 		r.StartedAt, r.EndedAt = at(started), at(ended)
-		r.WallMs, r.Turns, r.Tries, r.OpenMs = num(wall), num(turns), num(tries), num(openMs)
-		r.ToolCalls, r.ToolFails = num(calls), num(fails)
-		for _, w := range strings.Fields(tail.String) {
-			fail := strings.HasSuffix(w, "!")
-			if id, err := strconv.ParseInt(strings.TrimSuffix(w, "!"), 10, 64); err == nil {
-				r.Tail = append(r.Tail, TailCall{Code: names[id], Fail: fail})
-			}
-		}
-		index[r.Run] = len(out)
+		r.WallMs, r.Turns, r.Tries, r.OpenMs = numOf(wall), numOf(turns), numOf(tries), numOf(openMs)
+		r.ToolCalls, r.ToolFails = numOf(calls), numOf(fails)
+		r.Tail = parseTail(tail.String, names)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -168,56 +177,68 @@ func Read(ctx context.Context, db *sql.DB, f Filter) ([]Fact, error) {
 	if len(out) == 0 {
 		return nil, tx.Commit()
 	}
-	srows, err := tx.QueryContext(ctx, `WITH `+spendCTE(`f.run IN (`+picked+`)
+	spend, err := readSpend(ctx, tx, f, names)
+	if err != nil {
+		return nil, err
+	}
+	finds, err := readFindings(ctx, tx, f, names)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Spend, out[i].Findings = spend[out[i].Run], finds[out[i].Run]
+	}
+	return out, tx.Commit()
+}
+
+// readSpend reads each run's own spend per model, of the runs f picks,
+// by run.
+func readSpend(ctx context.Context, tx *sql.Tx, f Filter, names map[int64]string) (map[string][]Spend, error) {
+	rows, err := tx.QueryContext(ctx, `WITH `+spendCTE(`f.run IN (`+picked+`)
 				OR f.session IN (SELECT session FROM run_facts WHERE run IN (`+picked+`))`)+`
 		SELECT run, model, cost, tok FROM d WHERE run IN (`+picked+`) ORDER BY run, model`, f.args()...)
 	if err != nil {
 		return nil, err
 	}
-	defer srows.Close()
-	for srows.Next() {
+	defer rows.Close()
+	out := map[string][]Spend{}
+	for rows.Next() {
 		var run string
 		var model, tok sql.NullInt64
 		var cost sql.NullFloat64
-		if err := srows.Scan(&run, &model, &cost, &tok); err != nil {
+		if err := rows.Scan(&run, &model, &cost, &tok); err != nil {
 			return nil, err
 		}
-		s := Spend{Model: name(model), Tokens: num(tok)}
+		s := Spend{Model: nameOf(names, model), Tokens: numOf(tok)}
 		if cost.Valid {
 			v := cost.Float64
 			s.USD = &v
 		}
-		if i, ok := index[run]; ok {
-			out[i].Spend = append(out[i].Spend, s)
-		}
+		out[run] = append(out[run], s)
 	}
-	if err := srows.Err(); err != nil {
-		return nil, err
-	}
-	srows.Close()
-	frows, err := tx.QueryContext(ctx, `SELECT run, fid, kind, pass, sev, action, prior, n FROM findings
+	return out, rows.Err()
+}
+
+// readFindings reads the finding rows of the runs f picks, by run.
+func readFindings(ctx context.Context, tx *sql.Tx, f Filter, names map[int64]string) (map[string][]Finding, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT run, fid, kind, pass, sev, action, prior, n FROM findings
 		WHERE run IN (`+picked+`) ORDER BY run, rowid`, f.args()...)
 	if err != nil {
 		return nil, err
 	}
-	defer frows.Close()
-	for frows.Next() {
+	defer rows.Close()
+	out := map[string][]Finding{}
+	for rows.Next() {
 		var run string
 		var fid sql.NullString
 		var kind, pass, sev, action, prior, n sql.NullInt64
-		if err := frows.Scan(&run, &fid, &kind, &pass, &sev, &action, &prior, &n); err != nil {
+		if err := rows.Scan(&run, &fid, &kind, &pass, &sev, &action, &prior, &n); err != nil {
 			return nil, err
 		}
-		fd := Finding{Fid: fid.String, Kind: name(kind), Pass: num(pass), Sev: name(sev), Action: name(action),
-			Prior: name(prior), N: n.Int64}
-		if i, ok := index[run]; ok {
-			out[i].Findings = append(out[i].Findings, fd)
-		}
+		out[run] = append(out[run], Finding{Fid: fid.String, Kind: nameOf(names, kind), Pass: numOf(pass),
+			Sev: nameOf(names, sev), Action: nameOf(names, action), Prior: nameOf(names, prior), N: n.Int64})
 	}
-	if err := frows.Err(); err != nil {
-		return nil, err
-	}
-	return out, tx.Commit()
+	return out, rows.Err()
 }
 
 // State is what health reads of stats.db: its schema, and at this
