@@ -172,7 +172,7 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	why, stopper := "", ""
 	var credit time.Duration
 	var read time.Time // when Credit was last read, on the monotonic clock
-	capped := false
+	capped, freezeOnly := false, false
 	timer := time.NewTimer(min(watchEvery, limit))
 	defer timer.Stop()
 wait:
@@ -208,6 +208,8 @@ wait:
 			}
 			if due() {
 				why = TimedOut
+				// By the monotonic clock alone, did it have time left?
+				freezeOnly = wall.Add(time.Since(mono)).Before(start.Add(limit + credit))
 				break wait
 			}
 		}
@@ -271,7 +273,7 @@ wait:
 		}
 		if frozen >= FreezeGap {
 			r.Error += fmt.Sprintf("; the machine was frozen %s of it", frozen.Round(time.Second))
-			r.Frozen = wall.Add(time.Since(mono)).Before(start.Add(limit + credit))
+			r.Frozen = freezeOnly
 		}
 	case why == asked:
 		r.State, r.Error = Failed, "stopped by "+stopper

@@ -581,6 +581,10 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 		planner("timed_out " + id)
 		return out, nil
 	}
+	if r.Frozen {
+		out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // a freeze ended it: the same limit again
+		return out, nil
+	}
 	// Once at a head: again, with twice the time. The head's start is its
 	// Handoff:, or with none, the ticket's move into review.
 	h, ok := latestWith(d, "Handoff:")
@@ -828,6 +832,10 @@ func (c *call) qaTimedOut(ctx context.Context, s ticket.Store, r runs.Record, d 
 	}
 	if t.Status != ticket.StatusInReview || t.LiveClaim() != nil || !ok {
 		planner("timed_out " + id)
+		return out, nil
+	}
+	if r.Frozen {
+		out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // a freeze ended it: the same limit again
 		return out, nil
 	}
 	if !c.timedOutBefore(r, gate.CreatedAt) {

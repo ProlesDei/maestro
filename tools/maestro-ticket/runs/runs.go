@@ -327,8 +327,12 @@ func StopAsked(dir, id string) (by string, ok bool) {
 	if err != nil {
 		return "", false
 	}
+	// once makes the file, then writes it: an empty one is an ask half
+	// made, which the next look reads whole.
 	var a ack
-	json.Unmarshal(b, &a)
+	if json.Unmarshal(b, &a) != nil || a.By == "" {
+		return "", false
+	}
 	return a.By, true
 }
 
