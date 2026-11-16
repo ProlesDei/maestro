@@ -1,6 +1,6 @@
 ---
 name: maestro-working-principles
-description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to keep a ticket's status true to the work, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off', 'claim a ticket', 'hand off a ticket'. Not for building or proving a change (the maestro-tdd and maestro-prove-complete skills)."
+description: "Sets the day-to-day habits for changing files in a Maestro repo, where hundreds of sessions may run at once: when and how to use a worktree, how to keep a ticket's status true to the work, how to commit and write the message, when to open a PR, how to share the machine and clean up after yourself, and the session rules every other skill points to. Use for /maestro-working-principles, before you create, edit or delete a file, for 'commit this', 'open a PR', 'clean up', 'pick up where I left off', 'claim a ticket', 'hand off a ticket'. Not for building or proving a change (the maestro-software-engineer and maestro-prove-complete skills)."
 ---
 
 # Working principles

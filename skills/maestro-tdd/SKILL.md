@@ -5,9 +5,7 @@ description: "Fix a bug or build a feature test first, only when a person asked 
 
 # Test first, then change
 
-Turn the behaviour you want into a test that fails before your change and passes after it. You hand back the test, its runs and the commits, and you never write a test that only looks like it covers the change.
-
-Maestro writes no tests unless a person asks for them. No one asked? Stop, and build the change as the **maestro-software-engineer** skill says.
+Turn the behaviour you want into a test that fails before your change and passes after it. You hand back the test, its runs and the commits, and you never write a test that only looks like it covers the change. Maestro writes no tests unless a person asks for them. No one asked? Stop, and build the change as the **maestro-software-engineer** skill says.
 
 ## Start
 
