@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
@@ -106,7 +109,7 @@ func statsLists() stats.Lists {
 		"why":         {"tier_senior", "tier_junior", "tier_none", "sent_back", "route_light", "route_full", "fixed", "override", "again", "resume"},
 		"tier":        {"junior", "senior", "none"},
 		"nudge":       {"none", "opus", "escalate", "decide"},
-		"stop":        {"none", "term", "kill"},
+		"stop":        {runs.StopNone, runs.StopTerm, runs.StopKill},
 		"state":       {runs.Starting, runs.Running, runs.Done, runs.Failed, runs.TimedOut, runs.Died, runs.Unreadable},
 		"outcome":     {outDone, outQuestion, outUsageLimit, outDiskFull, outTimedOut, outDied, outRefused, outFailed},
 		"reason":      {"no_result", "max_turns", "api_error", "budget", "stopped", "exit_nonzero", "is_error", "limit", "reboot", "supervisor"},
@@ -178,8 +181,68 @@ var vTool = sync.OnceValue(func() string {
 
 var sha40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// statsRow is the run's row: what its record, its result and the machine
-// say at its end.
+// sideFacts are what job, again and resume know as they start a run that
+// its record doesn't hold: written to runs/<id>.stats before its
+// supervisor starts, read into its row at its end, so a run that ends at
+// once still has them. Names from the lists, numbers, and the finding ids
+// --drop named.
+type sideFacts struct {
+	Why         string   `json:"why,omitempty"`
+	Tier        string   `json:"tier,omitempty"`
+	Tries       *int     `json:"tries,omitempty"`
+	AgainOf     string   `json:"again_of,omitempty"`
+	Drops       []string `json:"drops,omitempty"`
+	PromptBytes int      `json:"prompt_bytes"`
+}
+
+// sideExt ends a run's side file; runs.Prune removes it with the run.
+const sideExt = ".stats"
+
+// sideMax is the most of a side file a run's end reads: a few hundred
+// bytes is all one holds.
+const sideMax = 64 << 10
+
+// fromTicket takes a ticket's tier and send-backs as the job saw them.
+func (s *sideFacts) fromTicket(t ticket.Ticket) {
+	s.Tier, s.Tries = cmp.Or(t.Tier, "none"), ptr(t.Tries)
+}
+
+// fromParent takes the tier and send-backs of the run a resume or a retry
+// carries on, if its side file is there.
+func (s *sideFacts) fromParent(runsDir, id string) {
+	if p, ok := readSide(runsDir, id); ok {
+		s.Tier, s.Tries = p.Tier, p.Tries
+	}
+}
+
+// writeSide writes run id's side file whole, through a rename; nil writes
+// none. A write that fails costs only the row's side facts.
+func writeSide(runsDir, id string, s *sideFacts) {
+	if s == nil {
+		return
+	}
+	if b, err := json.Marshal(s); err == nil {
+		render.WriteAtomic(filepath.Join(runsDir, id+sideExt), append(b, '\n'))
+	}
+}
+
+// readSide reads run id's side file, if there is a whole one.
+func readSide(runsDir, id string) (sideFacts, bool) {
+	var s sideFacts
+	f, err := os.Open(filepath.Join(runsDir, id+sideExt))
+	if err != nil {
+		return s, false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, sideMax+1))
+	if err != nil || len(b) > sideMax || json.Unmarshal(b, &s) != nil {
+		return sideFacts{}, false
+	}
+	return s, true
+}
+
+// statsRow is the run's row: what its record, its side file, its
+// supervisor, its result and the machine say at its end.
 func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr error) stats.Run {
 	outcome, _ := outcomeOf(r)
 	row := stats.Run{
@@ -193,6 +256,17 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 		row.VMaestro = stats.Sha(storeDir)
 	}
 	row.Model, row.Effort, row.Lean = argvFacts(r.Command)
+	if sf, ok := readSide(filepath.Join(storeDir, "runs"), r.ID); ok {
+		row.Why, row.Tier, row.AgainOf = sf.Why, sf.Tier, sf.AgainOf
+		row.PromptBytes, row.Drops = ptr(int64(sf.PromptBytes)), ptr(int64(len(sf.Drops)))
+		if sf.Tries != nil {
+			row.Tries = ptr(int64(*sf.Tries))
+		}
+	}
+	if e := r.End; e != nil {
+		row.WaitMs, row.WaitCapped = ptr(e.WaitMs), ptr(e.WaitCapped)
+		row.Stop, row.Escaped = e.Stop, ptr(int64(e.Escaped))
+	}
 	if r.EndedAt != nil {
 		row.EndedAt = *r.EndedAt
 	}

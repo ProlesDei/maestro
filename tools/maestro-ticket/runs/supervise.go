@@ -20,6 +20,9 @@ const RunIDEnv = "MAESTRO_RUN_ID"
 // SIGKILL.
 const KillGrace = 10 * time.Second
 
+// killGrace is KillGrace, a var only so tests can shorten it.
+var killGrace = KillGrace
+
 // pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
 
@@ -184,7 +187,10 @@ wait:
 			break wait
 		}
 	}
+	// Read once more before the marks go: the run's row keeps it.
+	wait, waitCapped := Credit(dir, r.ID, begun, time.Now(), limit)
 	removeWaits(dir, r.ID)
+	end := &EndFacts{WaitMs: wait.Milliseconds(), WaitCapped: waitCapped, Stop: StopNone}
 	if why != "" {
 		// Anything the command left in its group goes with it on a stop,
 		// even when the command exits on SIGTERM and a child ignores it;
@@ -196,27 +202,27 @@ wait:
 		// or its slot's work. It gets the same SIGTERM and grace, so a git
 		// stopped mid-write removes its lock.
 		killGroup(r.PID, syscall.SIGTERM)
-		termRun(r.ID)
-		grace := time.After(KillGrace)
+		end.Stop, end.Escaped = StopTerm, termRun(r.ID, r.PID)
+		grace := time.After(killGrace)
 		select {
 		case <-done:
 		case <-grace:
 			killGroup(r.PID, syscall.SIGKILL)
 			<-done
-			grace = nil
+			grace, end.Stop = nil, StopKill
 		}
 		for grace != nil && (groupAlive(r.PID) || runAlive(r.ID)) {
 			select {
 			case <-grace:
 				killGroup(r.PID, syscall.SIGKILL)
-				grace = nil
+				grace, end.Stop = nil, StopKill
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
 		KillRun(r.ID)
 	}
 	now := o.Now()
-	r.EndedAt = &now
+	r.EndedAt, r.End = &now, end
 	code := cmd.ProcessState.ExitCode()
 	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 		code = 128 + int(ws.Signal())

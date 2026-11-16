@@ -8,7 +8,9 @@
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
 // holds while it lives; <id>.acked, made once when the launcher says it
 // acted on the result; and <id>.wait.* and <id>.waited.*, the slot waits
-// its command marked (wait.go). Only one process writes a record at a
+// its command marked (wait.go); and <id>.stats, the facts job, again and
+// resume know at its start that stats.db keeps and the record doesn't
+// (cli). Only one process writes a record at a
 // time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
 package runs
@@ -99,6 +101,29 @@ type Record struct {
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
 	AckedBy string     `json:"acked_by,omitempty"`
+	// End is what only the supervisor sees as the run ends, for its stats
+	// row: never stored, so no reader's bytes change. nil on a record
+	// read from disk.
+	End *EndFacts `json:"-"`
+}
+
+// Stop kinds: how the supervisor ended a run's command.
+const (
+	StopNone = "none" // it ended on its own
+	StopTerm = "term" // a stop or the time limit sent SIGTERM, and that did
+	StopKill = "kill" // the grace ran out, and SIGKILL followed
+)
+
+// EndFacts are a run's end as its supervisor saw it.
+type EndFacts struct {
+	// WaitMs is the slot waiting the run's limit left out, as Credit gave
+	// it once the command ended; WaitCapped says a cap cut it.
+	WaitMs     int64
+	WaitCapped bool
+	Stop       string
+	// Escaped counts the run's processes outside its group that the stop
+	// sent SIGTERM: what slot or Claude Code started in a group of its own.
+	Escaped int
 }
 
 // Ended reports whether the run is over.
@@ -406,7 +431,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stats", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -415,6 +440,12 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	for _, e := range ents {
 		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
 			os.Remove(filepath.Join(dir, e.Name()))
+		}
+		// A side file's temp copy that a killed launch left.
+		if rest, ok := strings.CutPrefix(e.Name(), "."); ok {
+			if id, _, ok := strings.Cut(rest, ".stats.tmp-"); ok && pruned[id] {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
 		}
 		// An active-run mark a later start moved aside, or one whose run
 		// ended a day ago.

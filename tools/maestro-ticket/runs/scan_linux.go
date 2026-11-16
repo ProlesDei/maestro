@@ -56,24 +56,32 @@ func Untracked(roots []string) ([]Session, error) {
 // scan finds none.
 func KillRun(id string) {
 	for range 20 {
-		if signalRun(id, syscall.SIGKILL) == 0 {
+		if n, _ := signalRun(id, syscall.SIGKILL, 0); n == 0 {
 			return
 		}
 	}
 }
 
-// termRun asks every process of run id to stop, as KillRun finds them.
-func termRun(id string) { signalRun(id, syscall.SIGTERM) }
+// termRun asks every process of run id to stop, as KillRun finds them,
+// and returns how many of them had left group, the run's process group.
+func termRun(id string, group int) (escaped int) {
+	_, escaped = signalRun(id, syscall.SIGTERM, group)
+	return escaped
+}
 
 // runAlive reports whether any process of run id is left.
-func runAlive(id string) bool { return signalRun(id, 0) > 0 }
+func runAlive(id string) bool {
+	n, _ := signalRun(id, 0, 0)
+	return n > 0
+}
 
 // signalRun sends sig to every process with run id in its environment,
-// but this one, and returns how many took it.
-func signalRun(id string, sig syscall.Signal) (n int) {
+// but this one, and returns how many took it; with a group, also how
+// many of those were outside it.
+func signalRun(id string, sig syscall.Signal, group int) (n, outside int) {
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	for _, e := range ents {
 		pid, err := strconv.Atoi(e.Name())
@@ -82,14 +90,21 @@ func signalRun(id string, sig syscall.Signal) (n int) {
 		}
 		for _, kv := range procList(pid, "environ") {
 			if kv == RunIDEnv+"="+id {
+				pg := group
+				if group != 0 {
+					pg, _ = syscall.Getpgid(pid) // before the signal ends it
+				}
 				if syscall.Kill(pid, sig) == nil {
 					n++
+					if pg != group {
+						outside++
+					}
 				}
 				break
 			}
 		}
 	}
-	return n
+	return n, outside
 }
 
 func procList(pid int, name string) []string {

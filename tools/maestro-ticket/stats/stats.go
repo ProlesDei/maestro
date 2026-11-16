@@ -254,11 +254,12 @@ func prepare(ctx context.Context, db *sql.DB, lists Lists) error {
 // record and result. Enum fields hold names from the lists; Write stores
 // their ids. A field off its shape or list is stored as NULL or other.
 type Run struct {
-	Run, Session, ResumeOf string
-	Ticket                 int64
+	Run, Session, ResumeOf, AgainOf string
+	Ticket                          int64
 	// Enums.
 	Role, Job, Model, Effort, Nudge, State, Outcome, Reason string
 	Subtype, StopReason, Stream, OS, Arch                   string
+	Why, Tier, Stop                                         string
 	Lean, AfterDeath                                        bool
 	StartedAt, EndedAt                                      time.Time
 	Exit                                                    *int64
@@ -266,6 +267,12 @@ type Run struct {
 	ClaudeMs, APIMs, Turns                                  *int64
 	ReplyBytes                                              int64
 	DiskFreePct, InodeFreePct                               *int64
+	// From the run's side file, which job, again and resume write at its
+	// start; nil for a plain launch.
+	Tries, PromptBytes, Drops *int64
+	// From its supervisor at its end; nil where a reader ended it.
+	WaitMs, Escaped *int64
+	WaitCapped      *bool
 	// VTool is the binary's commit, 40 hex; VMaestro install.yaml's
 	// maestro-sha; VClaude Claude Code's version, digits and dots.
 	VTool, VMaestro, VClaude string
@@ -394,12 +401,14 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 		{"role", r.Role}, {"job", r.Job}, {"model", r.Model}, {"effort", r.Effort}, {"nudge", r.Nudge},
 		{"state", r.State}, {"outcome", r.Outcome}, {"reason", r.Reason}, {"subtype", r.Subtype},
 		{"stop_reason", r.StopReason}, {"stream", r.Stream}, {"os", r.OS}, {"arch", r.Arch},
+		{"why", r.Why}, {"tier", r.Tier}, {"stop", r.Stop},
 	} {
 		add(e.col, code(e.col, e.name))
 	}
 	add("lean", boolInt(r.Lean))
 	add("after_death", boolInt(r.AfterDeath))
 	add("resume_of", shaped(r.ResumeOf, runShape))
+	add("again_of", shaped(r.AgainOf, runShape))
 	add("started_at", ms(r.StartedAt))
 	add("ended_at", ms(r.EndedAt))
 	if !r.StartedAt.IsZero() && !r.EndedAt.IsZero() {
@@ -411,10 +420,14 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 	if r.IsError != nil {
 		add("is_error", boolInt(*r.IsError))
 	}
+	if r.WaitCapped != nil {
+		add("wait_capped", boolInt(*r.WaitCapped))
+	}
 	for _, n := range []struct {
 		col string
 		v   *int64
-	}{{"claude_ms", r.ClaudeMs}, {"api_ms", r.APIMs}, {"turns", r.Turns}, {"disk_free_pct", r.DiskFreePct}, {"inode_free_pct", r.InodeFreePct}} {
+	}{{"claude_ms", r.ClaudeMs}, {"api_ms", r.APIMs}, {"turns", r.Turns}, {"disk_free_pct", r.DiskFreePct}, {"inode_free_pct", r.InodeFreePct},
+		{"tries", r.Tries}, {"prompt_bytes", r.PromptBytes}, {"drops", r.Drops}, {"wait_ms", r.WaitMs}, {"escaped", r.Escaped}} {
 		if n.v != nil {
 			add(n.col, *n.v)
 		}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -246,7 +247,7 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil)
 	if err != nil {
 		return err
 	}
@@ -261,8 +262,9 @@ func runLaunch(ctx context.Context, c *call) error {
 
 // startRun records a run for the actor and hands it to a detached
 // supervisor, and returns once its command runs. launch, job and resume
-// all start runs here.
-func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (runs.Record, error) {
+// all start runs here; job, again and resume give side, its facts for
+// stats, and launch none.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -275,6 +277,11 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (r
 	r, err := runs.Create(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
+	}
+	// Before the supervisor, which may end the run at once; stats off
+	// writes none.
+	if side != nil && stats.Off(filepath.Dir(dir), c.env.Getenv, c.statsUnsafe()) == "" {
+		writeSide(dir, r.ID, side)
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
