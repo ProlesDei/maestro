@@ -133,6 +133,7 @@ What you get:
 - The skills in `.claude/skills/` and `.agents/skills/`: committed, or hidden from git.
 - `.maestro/project/project-setup.md`: your main branch, checks, how to run the app.
 - One paste-ready block per Grok bot in `.maestro/bots/`, and a message with its starting memories.
+- Run stats: numbers about each run in `stats.db` beside the ticket store, never text, kept on your machine ([decisions](docs/decisions.md), 23). [The views](tools/maestro-ticket/README.md#run-stats) are for you and Claude sessions, not bots.
 
 The same guide updates Maestro to a newer commit and uninstalls it.
 
