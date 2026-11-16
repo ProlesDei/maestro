@@ -57,7 +57,7 @@ func runCheck(ctx context.Context, c *call) error {
 		return err
 	}
 	if len(c.args) != 1 {
-		return usagef("check: name the check, as ## Checks does, such as: check test --max 2 -- make test")
+		return usagef("check: name the check, as ## Checks does, such as: check build --max 2 -- make build")
 	}
 	name := c.args[0]
 	if !slotName.MatchString(name) {
