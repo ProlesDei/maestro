@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,7 +27,7 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-// unackedAfter is how long an ended run may wait for its launcher's ack
+// unackedAfter is how long an ended run may wait for its owner's ack
 // before doctor flags it.
 const unackedAfter = 15 * time.Minute
 
@@ -343,7 +344,13 @@ func runSupervise(ctx context.Context, c *call) error {
 			c.actor = r.Launcher
 			return c.startLaunch(ctx, runTicket(r))
 		},
-		OnEnd: func(r runs.Record) { c.endRun(context.WithoutCancel(ctx), dir, r) },
+		OnEnd: func(r runs.Record) {
+			c.endRun(context.WithoutCancel(ctx), dir, r)
+			// Bounded: a hung gh in a review's start must not hold the ring.
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chainLimit)
+			defer cancel()
+			c.chain(cctx, dir, r)
+		},
 		// A run a usage limit stopped rings once more as the limit lifts:
 		// nothing else wakes its bot then.
 		RingAgain: func(r runs.Record) time.Time {
@@ -434,7 +441,7 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 				runs.Save(dir, r)
 				c.endRun(ctx, dir, r)
 			}
-			h, err := runs.Webhook(notify, r.Launcher)
+			h, err := runs.Webhook(notify, r.Owner())
 			if err != nil || h.URL == "" {
 				msg := ""
 				if err != nil {
@@ -490,7 +497,7 @@ func runPickup(ctx context.Context, c *call) error {
 	ended, running := []runs.Record{}, []runs.Record{}
 	for _, r := range list {
 		switch {
-		case r.Launcher != c.actor:
+		case r.Owner() != c.actor:
 		case !r.Ended():
 			running = append(running, r)
 		default:
@@ -506,6 +513,16 @@ func runPickup(ctx context.Context, c *call) error {
 		for _, r := range ended {
 			switch {
 			case r.Job == "":
+			case len(r.Routed) > 0:
+				var rt routed
+				if err := json.Unmarshal(r.Routed, &rt); err != nil {
+					routeErr[r.ID] = err
+					break
+				}
+				if s != nil {
+					c.refileFollowUps(ctx, s, r, &rt)
+				}
+				routes[r.ID] = rt
 			case err != nil:
 				routeErr[r.ID] = err
 			default:
@@ -623,6 +640,7 @@ func runAck(ctx context.Context, c *call) error {
 		Acked   bool       `json:"acked"`
 		AckedBy string     `json:"acked_by"`
 		AckedAt *time.Time `json:"acked_at"`
+		LeftTo  string     `json:"left_to,omitempty"`
 	}
 	var res []result
 	for _, id := range c.args {
@@ -639,8 +657,14 @@ func runAck(ctx context.Context, c *call) error {
 		if !r.Ended() {
 			return fmt.Errorf("%w: ack: run %s is %s: ack it once pickup shows it ended", ticket.ErrStatusConflict, id, r.State)
 		}
-		if r.Launcher != c.actor {
-			return fmt.Errorf("%w: ack: run %s is %s's: only the bot that launched it acks it", ticket.ErrForbidden, id, dash(r.Launcher))
+		if r.Owner() != c.actor && r.Launcher == c.actor {
+			// Its end left it to another since this bot's pickup listed
+			// it: that bot acts on it, and the rest of the batch goes on.
+			res = append(res, result{Run: id, LeftTo: r.Owner()})
+			continue
+		}
+		if r.Owner() != c.actor {
+			return fmt.Errorf("%w: ack: run %s is %s's: only the bot it was left to acks it", ticket.ErrForbidden, id, dash(r.Owner()))
 		}
 		ok, err := runs.Ack(dir, id, c.actor, now)
 		if err != nil {
@@ -655,9 +679,12 @@ func runAck(ctx context.Context, c *call) error {
 	}
 	return c.out(map[string]any{"acks": res}, func(w io.Writer) {
 		for _, a := range res {
-			if a.Acked {
+			switch {
+			case a.LeftTo != "":
+				fmt.Fprintf(w, "%s is left to %s: nothing to do\n", a.Run, a.LeftTo)
+			case a.Acked:
 				fmt.Fprintf(w, "acked %s\n", a.Run)
-			} else {
+			default:
 				fmt.Fprintf(w, "%s was already acked by %s\n", a.Run, dash(a.AckedBy))
 			}
 		}
@@ -926,7 +953,7 @@ func (c *call) untracked() ([]runs.Session, error) {
 // runsCheck is doctor's view of the runs. First it rings for runs whose
 // supervisor went away, as pickup does. It warns, without failing doctor,
 // while a claude -p session in this repo runs outside launch, or a run's
-// result has waited over unackedAfter for its launcher's ack: neither
+// result has waited over unackedAfter for its owner's ack: neither
 // harms the store, and a doctor that failed would stop an install.
 func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 	dir := filepath.Join(filepath.Dir(store), "runs")
@@ -942,7 +969,7 @@ func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 		case !r.Ended():
 			live++
 		case r.State == runs.Died || r.EndedAt == nil || now.Sub(*r.EndedAt) > unackedAfter:
-			waiting = append(waiting, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Launcher), r.State))
+			waiting = append(waiting, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Owner()), r.State))
 		}
 	}
 	untracked, scanErr := c.untracked()
@@ -955,7 +982,7 @@ func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 		bad = append(bad, fmt.Sprintf("%d claude -p sessions started outside maestro-ticket launch: %s", len(untracked), strings.Join(s, ", ")))
 	}
 	if len(waiting) > 0 {
-		bad = append(bad, fmt.Sprintf("%d ended runs not acked by their launcher (died, or ended over %s ago): %s", len(waiting), short(unackedAfter), strings.Join(waiting, ", ")))
+		bad = append(bad, fmt.Sprintf("%d ended runs not acked by the bot they were left to (died, or ended over %s ago): %s", len(waiting), short(unackedAfter), strings.Join(waiting, ", ")))
 	}
 	if len(bad) > 0 {
 		return ticket.Check{Name: "runs", OK: true, Warn: true, Detail: strings.Join(bad, "; ")}

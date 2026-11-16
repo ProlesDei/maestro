@@ -80,8 +80,8 @@ flowchart TD
     Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"in_review: pickup hands it on"| Rev
-    Rev -->|"GO: Review: GO comment"| QA
+    Build -->|"in_review: its end starts the review"| Rev
+    Rev -->|"GO: its end starts QA"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done
     Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
