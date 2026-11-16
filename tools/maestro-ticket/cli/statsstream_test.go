@@ -24,7 +24,9 @@ const streamMarker = "STREAM-MARKER-41c7"
 // it prints $FAKE_OUT/head first, as Claude Code's system, assistant and
 // user lines would come; then, by $FAKE_OUT/mode, it ends as a run that
 // gave its result, one killed in the middle of a line ($FAKE_OUT/cut, in
-// stream-json only), or one that exits 1 with no result.
+// stream-json only), one that exits 1 with no result, one that prints a
+// crash of its own after the stream began (crash), or one that prints
+// only an error with no newline (bare).
 const streamClaude = `#!/bin/sh
 d=$FAKE_OUT/$MAESTRO_RUN_ID
 mkdir -p "$d"
@@ -39,8 +41,14 @@ for a in "$@"; do
 	prev=$a
 done
 mode=$(cat "$FAKE_OUT/mode" 2>/dev/null)
-[ -n "$stream" ] && cat "$FAKE_OUT/head"
+[ -n "$stream" ] && [ "$mode" != bare ] && cat "$FAKE_OUT/head"
 case $mode in
+crash)
+	printf 'TypeError: boom\n\n    at x.js:1'
+	exit 3 ;;
+bare)
+	printf 'Error: Credit balance is too low'
+	exit 1 ;;
 killed)
 	[ -n "$stream" ] && cat "$FAKE_OUT/cut"
 	kill -9 $$ ;;
@@ -186,6 +194,27 @@ func TestStreamPickupBytesMatchJSON(t *testing.T) {
 	}
 }
 
+// A command's own text on stdout reads as it would have with json: a
+// crash printed after the stream began, blank line and all, and an error
+// with no newline.
+func TestStreamTextMatchesJSON(t *testing.T) {
+	needStream(t)
+	t.Parallel()
+	for mode, want := range map[string]string{"crash": "TypeError: boom", "bare": "Error: Credit balance is too low"} {
+		asJSON, _, _ := pickupScene(t, mode, true)
+		asStream, j, id := pickupScene(t, mode, false)
+		if !j.streamed(id) {
+			t.Fatalf("%s: not streamed", mode)
+		}
+		if asJSON != asStream {
+			t.Fatalf("%s: pickup and runs differ:\n--- json\n%s\n--- stream\n%s", mode, asJSON, asStream)
+		}
+		if !strings.Contains(asStream, want) {
+			t.Fatalf("%s: no %q in\n%s", mode, want, asStream)
+		}
+	}
+}
+
 // A run killed in the middle of a tool's result reads as it would have
 // with json: failed, not disk_full, and nothing of the cut line
 // anywhere.
@@ -318,7 +347,8 @@ func TestStreamOffWhenStatsOff(t *testing.T) {
 }
 
 // The stream file goes once the run's end is recorded, when its
-// supervisor died, and with a pruned run; a died run's row says lost.
+// supervisor died, and with a pruned run; a died run's row has what its
+// stream showed.
 func TestStreamFileRemovedCLI(t *testing.T) {
 	needStream(t)
 	t.Parallel()
@@ -361,7 +391,7 @@ func TestStreamFileRemovedCLI(t *testing.T) {
 	if len(streams()) != 0 {
 		t.Fatalf("after the orphan path: %v", streams())
 	}
-	if stream, calls, _, _, _, _ := streamRow(t, j.h.dir, s.Run.ID); stream != "lost" || calls != -1 {
+	if stream, calls, _, _, _, _ := streamRow(t, j.h.dir, s.Run.ID); stream != "no_result" || calls != 5 {
 		t.Fatalf("died run's row: %s, %d calls", stream, calls)
 	}
 }
@@ -397,5 +427,73 @@ func TestStreamArgvSwap(t *testing.T) {
 		if string(b) != "--output-format\n"+format+"\n" {
 			t.Errorf("plain launch with %s: claude got %q", format, b)
 		}
+	}
+}
+
+// A supervisor killed after Claude printed its result but before it read
+// the stream: pickup reads the stream as it would have, so the run's
+// cost is logged and its row has the counts, as json's .out would have
+// let them be.
+func TestOrphanReadsStream(t *testing.T) {
+	h, id := orphanScene(t)
+	prepareStatsAt(t, h.dir)
+	dir := filepath.Join(h.dir, "runs")
+	writeSide(dir, id, &sideFacts{Stream: true})
+	res := `{"duration_api_ms":5,"session_id":"11111111-2222-4333-8444-555555555555","total_cost_usd":2.5,"modelUsage":{"claude-sonnet-5-5":{"inputTokens":3,"outputTokens":4,"costUSD":2.5}},"result":"job: done","subtype":"success","is_error":false,"num_turns":2,"type":"result"}`
+	os.WriteFile(filepath.Join(dir, id+".out"), nil, 0o600)
+	os.WriteFile(filepath.Join(dir, id+".stream"), []byte(streamHead()+res+"\n"), 0o600)
+	h.run("", "pickup")
+	if b, _ := os.ReadFile(filepath.Join(dir, id+".out")); string(b) != res+"\n" {
+		t.Fatalf(".out %q", b)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, id+".stream")); err == nil {
+		t.Fatal("stream file left")
+	}
+	if _, out, _ := h.run("", "costs"); !strings.Contains(out, "2.50") {
+		t.Fatalf("the result's cost wasn't logged:\n%s", out)
+	}
+	if stream, calls, _, _, _, _ := streamRow(t, h.dir, id); stream != "ok" || calls != 5 {
+		t.Fatalf("row: %s, %d calls", stream, calls)
+	}
+	// With its stream file gone, its counts are lost.
+	h, id = orphanScene(t)
+	prepareStatsAt(t, h.dir)
+	writeSide(filepath.Join(h.dir, "runs"), id, &sideFacts{Stream: true})
+	h.run("", "pickup")
+	if stream, calls, _, _, _, _ := streamRow(t, h.dir, id); stream != "lost" || calls != -1 {
+		t.Fatalf("row with no stream file: %s, %d calls", stream, calls)
+	}
+}
+
+// A run started with stats off in its shell gets no row, though its
+// supervisor died and a shell with stats on adopted it.
+func TestStatsOffFollowsOrphan(t *testing.T) {
+	needStream(t)
+	t.Parallel()
+	j, _ := newStreamJobs(t, "hang", true)
+	prepareStatsAt(t, j.h.dir)
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	out, err := j.cmd("", "job", "--json", "build", "T-1").Output()
+	if err != nil {
+		t.Fatalf("job: %v %s", err, out)
+	}
+	var s started
+	json.Unmarshal(out, &s)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(j.out, s.Run.ID, "env")); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := exec.Command("pkill", "-KILL", "-f", "supervise "+s.Run.ID).Run(); err != nil {
+		t.Fatalf("kill supervisor: %v", err)
+	}
+	if d := j.waitEnded(s.Run.ID, 10*time.Second); d.State != runs.Died {
+		t.Fatalf("run whose supervisor died: %+v", d)
+	}
+	j.h.ok(nil, "pickup")
+	if n := statsRowCount(t, j.h.dir); n != 0 {
+		t.Fatalf("%d rows of a run started with %s=off", n, stats.OffEnv)
 	}
 }

@@ -20,8 +20,9 @@
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
 # bot block that differs only in its Maestro line is the same, one over
 # Grok's limit refuses, and memories go in a message apart; uninstall
-# runs off the pin; stats: on or off sets the marker and says which, and
-# any other value or a second line refuses; the install.yaml that
+# runs off the pin; stats: on or off sets the marker and says which, no
+# line leaves a person's stats off, and any other value or a second line
+# refuses; the install.yaml that
 # project-setup.md's ## Run writes applies; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
 # Playwright CLI's own skill;
@@ -73,7 +74,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' \
-	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
+	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 # check wants what the bots' runs need; stand-ins, so the test passes on a
 # machine without them.
@@ -149,8 +150,8 @@ seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
 [ "$(cat "$STUB_LOG")" = "$(cd "$r" && pwd -P) doctor
-$(cd "$r" && pwd -P) stats on --maestro-sha $sha" ] || fail "doctor and stats on didn't run once each, in the repo: $(cat "$STUB_LOG")"
-# No stats: line means on, and asks nothing.
+$(cd "$r" && pwd -P) stats --maestro-sha $sha" ] || fail "doctor and stats --maestro-sha didn't run once each, in the repo: $(cat "$STUB_LOG")"
+# No stats: line asks nothing, and stats start on.
 [ ! -e "$r/.git/maestro/STATS_OFF" ] || fail "stats off with no stats: line"
 says "run stats on: numbers about each run in stats.db beside the store"
 [ "$(grep -c . "$r/.git/maestro/installed.list")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2 + 1)) ] ||
@@ -691,6 +692,17 @@ ok check "$r15"
 sed -i 's/^stats: off$/stats: on/' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ ! -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: on after off left the marker"
+# With no stats: line, apply records the sha only: a person's
+# maestro-ticket stats off stays off.
+sed -i '/^stats: on$/d' "$r15/.maestro/project/install.yaml"
+: >"$r15/.git/maestro/STATS_OFF"
+: >"$STUB_LOG"
+ok apply "$r15"
+[ -e "$r15/.git/maestro/STATS_OFF" ] || fail "apply with no stats: line turned a person's stats off back on"
+grep -qxF "$(cd "$r15" && pwd -P) stats --maestro-sha $sha" "$STUB_LOG" || fail "apply didn't record the sha alone: $(cat "$STUB_LOG")"
+says "run stats off: no run is written to stats.db"
+rm "$r15/.git/maestro/STATS_OFF"
+echo "stats: on" >>"$r15/.maestro/project/install.yaml"
 cp "$r15/.maestro/project/install.yaml" "$tmp/keep15"
 for bad in "stats: maybe|install.yaml: stats wants on or off" "stats: |install.yaml: stats wants on or off" "stats: on|install.yaml:7: stats twice"; do
 	cp "$tmp/keep15" "$r15/.maestro/project/install.yaml"

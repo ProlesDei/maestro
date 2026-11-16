@@ -454,10 +454,12 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 			if r.State == runs.Died && r.OrphanTries == 0 {
 				runs.KillRun(r.ID)
 				runs.Save(dir, r)
+				// What its supervisor would have read of its stream, so
+				// a result Claude printed still logs its cost.
+				r.Stream = runs.RecoverStream(dir, r.ID, scanNames())
 				c.endRun(ctx, dir, r)
 			}
-			// Its supervisor is gone, so no one reads its stream: one
-			// killed after it saved the end leaves the file too.
+			// One killed after it saved the end leaves the file too.
 			runs.DropStream(dir, r.ID)
 			h, err := runs.Webhook(notify, r.Owner())
 			if err != nil || h.URL == "" {

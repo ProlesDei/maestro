@@ -5,8 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -257,6 +259,17 @@ func readSide(runsDir, id string) (sideFacts, bool) {
 	return s, true
 }
 
+// startedOff reports a run that started with stats off, by the shell's
+// variable or the marker: a job, again or resume run with no side file.
+// No row of it is written after, and stats health doesn't count it.
+func startedOff(runsDir string, r runs.Record) bool {
+	if r.Job == "" && r.ResumeOf == "" {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(runsDir, r.ID+sideExt))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 // streamOK says a run's stdout may go through the stream filter: on
 // Linux, where its supervisor's death ends the command, and while the
 // store's disk has the room claim asks for, since the stream's file
@@ -277,7 +290,13 @@ func (c *call) streamNames(runsDir, id string) *streamfilter.Names {
 	if !ok || !sf.Stream || stats.Off(filepath.Dir(runsDir), c.env.Getenv, c.statsUnsafe()) != "" {
 		return nil
 	}
-	return &streamfilter.Names{Sub: commandNames(), Model: modelFamily}
+	n := scanNames()
+	return &n
+}
+
+// scanNames are the lists a stream is scanned with.
+func scanNames() streamfilter.Names {
+	return streamfilter.Names{Sub: commandNames(), Model: modelFamily}
 }
 
 // commandNames are maestro-ticket's subcommands.
@@ -303,7 +322,7 @@ func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, i
 	case s != nil:
 		row.Stream = "no_result"
 	case side.Stream && !inSupervisor && r.State == runs.Died:
-		row.Stream = "lost" // its supervisor died, and its counts with it
+		row.Stream = "lost" // its supervisor died, and its stream file is gone
 		return
 	default:
 		return
@@ -358,7 +377,10 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 	streamFacts(&row, r, sf, resErr != nil, c.inSupervisor)
 	if e := r.End; e != nil {
 		row.WaitMs, row.WaitCapped = ptr(e.WaitMs), ptr(e.WaitCapped)
-		row.Stop, row.Escaped = e.Stop, ptr(int64(e.Escaped))
+		row.Stop = e.Stop
+		if runs.CanScan { // off Linux no scan counts them: unknown, not none
+			row.Escaped = ptr(int64(e.Escaped))
+		}
 	}
 	if r.EndedAt != nil {
 		row.EndedAt = *r.EndedAt
@@ -460,6 +482,11 @@ func (c *call) writeStats(runsDir string, r runs.Record, res claudeReply, resErr
 	row := c.statsRow(storeDir, r, res, resErr)
 	ctx := context.Background()
 	if !c.inSupervisor {
+		// Its supervisor dropped the row of a run started with stats off
+		// in its shell; this shell may have them on.
+		if startedOff(runsDir, r) {
+			return
+		}
 		// An empty file is one no supervisor prepared: opening it would
 		// set it up.
 		if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() || fi.Size() == 0 {

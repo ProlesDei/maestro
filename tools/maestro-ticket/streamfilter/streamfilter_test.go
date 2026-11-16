@@ -148,15 +148,27 @@ func TestStreamOutHoldsOnlyResult(t *testing.T) {
 	}
 }
 
-// Text before the first JSON line is kept, as json would have shown it;
-// text after it is counted and dropped.
+// The command's own text is kept as json would have shown it, before the
+// stream and after its first line, blank lines and a last line with no
+// newline included; a stream line cut short is not.
 func TestStreamPreJSONTextKept(t *testing.T) {
-	s, kept := scanString("Error: boom\nsecond line\n" + stream(initLine("2.1.322"), "trailing "+marker, resultLine("r")))
-	if want := "Error: boom\nsecond line\n" + resultLine("r") + "\n"; kept != want {
+	s, kept := scanString("Error: boom\n\nsecond line\n" + stream(initLine("2.1.322"), "trailing text", `{"type":"assistant","mess`, resultLine("r")))
+	if want := "Error: boom\n\nsecond line\ntrailing text\n" + resultLine("r") + "\n"; kept != want || !s.Result {
 		t.Fatalf("kept %q", kept)
 	}
-	if s.Bad != 1 || !s.Result {
-		t.Fatalf("summary %+v", s)
+	for _, c := range []struct{ in, want string }{
+		{"Error: Credit balance is too low", "Error: Credit balance is too low"},
+		{stream(initLine("2.1.322")) + "TypeError: boom\n\nat x.js:1", "TypeError: boom\n\nat x.js:1"},
+		{"no newline", "no newline"},
+	} {
+		if _, kept := scanString(c.in); kept != c.want {
+			t.Errorf("Scan(%q) kept %q; want %q", c.in, kept, c.want)
+		}
+	}
+	// A last line with no newline before a result seen earlier stays on
+	// its own line.
+	if _, kept := scanString(stream(resultLine("r")) + "late"); kept != "late\n"+resultLine("r")+"\n" {
+		t.Errorf("kept %q", kept)
 	}
 	// Only the last MaxPre bytes, from a whole line.
 	long := strings.Repeat("x", 1000) + "\n"
@@ -190,8 +202,13 @@ func TestStreamCounts(t *testing.T) {
 	if !reflect.DeepEqual(s.Tail, wantTail) {
 		t.Fatalf("tail %+v", s.Tail)
 	}
-	// The Grep never got its result.
-	if s.OpenCode != "Grep" || !s.OpenAt.Equal(time.Date(2026, 11, 16, 1, 6, 47, 0, time.UTC)) {
+	// The Grep never got its result, but the run gave its own: no call
+	// hung. With no result line, the Grep is the call that hung.
+	if s.OpenCode != "" {
+		t.Fatalf("a run with a result has open %q", s.OpenCode)
+	}
+	noResult := strings.TrimSuffix(full(), resultLine("job: done: "+marker)+"\n")
+	if s, _ := scanString(noResult); s.OpenCode != "Grep" || !s.OpenAt.Equal(time.Date(2026, 11, 16, 1, 6, 47, 0, time.UTC)) {
 		t.Fatalf("open %q at %v", s.OpenCode, s.OpenAt)
 	}
 	wantUse := []Usage{
@@ -227,13 +244,19 @@ func TestStreamTail(t *testing.T) {
 	}
 }
 
-// An assistant line past MaxLine is skipped and counted, and the scan
-// goes on to the result.
+// A line past MaxResult is skipped, and the scan goes on to the result.
+// One of a few MB, such as a big file's tool result, still counts: its
+// call finished, and failed.
 func TestStreamLongLine(t *testing.T) {
 	big := assistant("m1", "", "claude-sonnet-5-5", "", 1, 0, 0, 1, use{"t1", "Write", map[string]string{"content": strings.Repeat("y", 9<<20)}})
-	mid := assistant("m2", "", "claude-sonnet-5-5", "", 1, 0, 0, 1, use{"t2", "Write", map[string]string{"content": strings.Repeat("y", 2<<20)}})
-	s, kept := scanString(stream(initLine("2.1.322"), big, mid, resultLine("ok")))
-	if !s.Result || kept != resultLine("ok")+"\n" || s.Cut != 2 || s.ToolCalls != 0 {
+	mid := assistant("m2", "", "claude-sonnet-5-5", "", 1, 0, 0, 1, use{"t2", "Read", map[string]string{"content": strings.Repeat("y", 2<<20)}})
+	read := result("", "t2", true)
+	read = strings.Replace(read, `"content":"`, `"content":"`+strings.Repeat("z", 2<<20), 1)
+	s, kept := scanString(stream(initLine("2.1.322"), big, mid, read))
+	if s.Result || kept != "" || s.ToolCalls != 1 || s.ToolFails != 1 || s.OpenCode != "" {
+		t.Fatalf("summary %+v, kept %d bytes", s, len(kept))
+	}
+	if s, kept := scanString(stream(initLine("2.1.322"), big, resultLine("ok"))); !s.Result || kept != resultLine("ok")+"\n" || s.ToolCalls != 0 {
 		t.Fatalf("summary %+v, kept %d bytes", s, len(kept))
 	}
 }
@@ -241,7 +264,7 @@ func TestStreamLongLine(t *testing.T) {
 // A result line past MaxResult is no result: nothing of it is kept.
 func TestStreamHugeResult(t *testing.T) {
 	s, kept := scanString(stream(initLine("2.1.322"), resultLine(strings.Repeat("z", 9<<20))))
-	if s.Result || kept != "" || s.Cut != 1 {
+	if s.Result || kept != "" {
 		t.Fatalf("summary %+v, kept %d bytes", s, len(kept))
 	}
 	// Under the cap, a long result is kept whole.
@@ -256,7 +279,7 @@ func TestStreamCutAtEnd(t *testing.T) {
 	cut := result("2026-11-16T01:06:44.250Z", "t1", false)
 	s, kept := scanString(stream(initLine("2.1.322"), assistant("m1", "", "claude-sonnet-5-5", "2026-11-16T01:06:44.000Z", 1, 0, 0, 1,
 		use{"t1", "Bash", map[string]string{"command": "go test ./..."}})) + cut[:len(cut)/2])
-	if s.Result || kept != "" || s.Cut != 1 || s.OpenCode != "Bash:go" {
+	if s.Result || kept != "" || s.OpenCode != "Bash:go" {
 		t.Fatalf("summary %+v, kept %q", s, kept)
 	}
 }
@@ -351,7 +374,7 @@ func TestSkillListMatchesRepo(t *testing.T) {
 		return out
 	}
 	for _, s := range repo {
-		refs, scripts := SkillFiles(s)
+		refs, scripts := skillStems(s)
 		slices.Sort(refs)
 		slices.Sort(scripts)
 		if got := stems(filepath.Join(root, s, "references"), ".md"); !slices.Equal(got, refs) {

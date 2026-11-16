@@ -130,7 +130,10 @@ func spendCTE(where string) string {
 }
 
 // pruneBatch rolls one batch of runs up into daily and deletes them, in
-// one transaction, and returns how many went. A day's percentiles over
+// one transaction, and returns how many went. A run whose spend on any
+// model is unknown has unknown spend, as the views count it: cost_usd and
+// tokens sum the known runs, and cost_unknown and tok_unknown count the
+// rest. A day's percentiles over
 // two batches are their weighted mean, so a day of more than a batch of
 // runs has close, not exact, ones.
 func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch int) (int64, error) {
@@ -145,20 +148,23 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 		r AS (
 			SELECT f.ended_at / 86400000 AS day, COALESCE(f.job, 0) AS job, COALESCE(f.model, 0) AS model,
 				COALESCE(f.outcome, 0) AS outcome, f.wall_ms,
-				(SELECT SUM(cost) FROM d WHERE d.run = f.run) AS cost,
-				(SELECT SUM(tok) FROM d WHERE d.run = f.run) AS tok
+				(SELECT CASE WHEN COUNT(cost) = COUNT(*) THEN SUM(cost) END FROM d WHERE d.run = f.run) AS cost,
+				(SELECT CASE WHEN COUNT(tok) = COUNT(*) THEN SUM(tok) END FROM d WHERE d.run = f.run) AS tok
 			FROM run_facts f WHERE f.run IN (SELECT run FROM b)
 		),
 		q AS (
 			SELECT *, ROW_NUMBER() OVER (g ORDER BY wall_ms) AS rn, COUNT(*) OVER g AS cnt FROM r
 			WINDOW g AS (PARTITION BY day, job, model, outcome)
 		)
-		INSERT INTO daily (day, job, model, outcome, n, cost_usd, tokens, ms_p50, ms_p90)
+		INSERT INTO daily (day, job, model, outcome, n, cost_usd, tokens, ms_p50, ms_p90, cost_unknown, tok_unknown)
 		SELECT day, job, model, outcome, COUNT(*), SUM(cost), SUM(tok),
 			MAX(CASE WHEN rn = (cnt + 1) / 2 THEN wall_ms END),
-			MAX(CASE WHEN rn = (cnt * 9 + 9) / 10 THEN wall_ms END)
+			MAX(CASE WHEN rn = (cnt * 9 + 9) / 10 THEN wall_ms END),
+			SUM(cost IS NULL), SUM(tok IS NULL)
 		FROM q WHERE true GROUP BY day, job, model, outcome
 		ON CONFLICT (day, job, model, outcome) DO UPDATE SET
+			cost_unknown = cost_unknown + excluded.cost_unknown,
+			tok_unknown = tok_unknown + excluded.tok_unknown,
 			ms_p50 = (COALESCE(ms_p50, 0) * n + COALESCE(excluded.ms_p50, 0) * excluded.n) / (n + excluded.n),
 			ms_p90 = (COALESCE(ms_p90, 0) * n + COALESCE(excluded.ms_p90, 0) * excluded.n) / (n + excluded.n),
 			n = n + excluded.n,

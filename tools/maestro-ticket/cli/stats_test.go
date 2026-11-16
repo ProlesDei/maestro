@@ -149,7 +149,9 @@ func TestStatsHealthMissingRows(t *testing.T) {
 		if state != runs.Running {
 			r.EndedAt, r.Exit = ended(start, time.Minute), exitCode(0)
 		}
-		return putRun(t, dir, r)
+		r = putRun(t, dir, r)
+		writeSide(dir, r.ID, &sideFacts{Why: "tier_senior"}) // started with stats on
+		return r
 	}
 	put(base.Add(-time.Hour), runs.Done) // ended before stats.db's first row
 	stored1 := put(base, runs.Done)
@@ -157,6 +159,13 @@ func TestStatsHealthMissingRows(t *testing.T) {
 	put(base.Add(2*time.Minute), runs.Done) // its write was dropped
 	live := put(base.Add(3*time.Minute), runs.Running)
 	holdRun(t, dir, live.ID)
+	// Never a row to miss: a run started with stats off (no side file),
+	// and a command that never started.
+	off := put(base.Add(4*time.Minute), runs.Done)
+	os.Remove(filepath.Join(dir, off.ID+sideExt))
+	never := put(base.Add(5*time.Minute), runs.Failed)
+	never.PID, never.Error = 0, "start claude: no such file"
+	runs.Save(dir, never)
 	// With no row yet there is no first row to count from.
 	if _, out, _ := h.run("", "stats", "health"); !strings.Contains(out, "missing rows: no row yet; 4 ended runs on disk\n") {
 		t.Errorf("health, no stats.db:\n%s", out)
@@ -184,13 +193,13 @@ func TestStatsHealthMissingRows(t *testing.T) {
 		t.Errorf("health, off:\n%s", out)
 	}
 	stats.SetOff(h.dir, false)
-	statsModes[5].setup(t, h.dir, h) // newer
+	statsMode(t, "newer", h.dir, h)
 	if code, out, _ := h.run("", "stats", "health"); code != 0 || !strings.Contains(out, "stats.db: schema 99, newer than this maestro-ticket's 1") {
 		t.Errorf("health, newer: exit %d\n%s", code, out)
 	}
 	os.Remove(filepath.Join(h.dir, stats.DBName+"-wal"))
 	os.Remove(filepath.Join(h.dir, stats.DBName+"-shm"))
-	statsModes[4].setup(t, h.dir, h) // corrupt
+	statsMode(t, "corrupt", h.dir, h)
 	if code, out, _ := h.run("", "stats", "health"); code != 0 || !strings.Contains(out, "stats.db: unreadable (") {
 		t.Errorf("health, corrupt: exit %d\n%s", code, out)
 	}

@@ -153,11 +153,16 @@ func Open(path string, create bool) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	mode := "rw"
+	mode, vacuum := "rw", ""
 	if create {
 		mode = "rwc"
+		// Only a file with no pages yet takes it: on one with tables the
+		// pragma is a write, a lock and a WAL frame at every open.
+		if fi, err := os.Stat(abs); err != nil || fi.Size() == 0 {
+			vacuum = "&_auto_vacuum=2"
+		}
 	}
-	return open(abs, "mode="+mode+"&_busy_timeout=250&_auto_vacuum=2&_journal_mode=WAL&_synchronous=NORMAL&_txlock=immediate")
+	return open(abs, "mode="+mode+"&_busy_timeout=250"+vacuum+"&_journal_mode=WAL&_synchronous=NORMAL&_txlock=immediate")
 }
 
 // OpenRead opens stats.db at path for a view: it never makes or changes

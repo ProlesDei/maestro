@@ -21,7 +21,8 @@
 #                                   or none for an app with no screens
 #                                   (required: INSTALL.md step 7)
 #   stats: on|off                   local run stats in stats.db beside the
-#                                   store (default on); off stops their writes
+#                                   store; off stops their writes, and no
+#                                   line leaves them as they are (on, at first)
 #
 # apply copies each skill in skills/ beside this script into every harness
 # folder, writes project-setup.md once, creates the ticket store, turns
@@ -781,10 +782,12 @@ out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
 	die "maestro-ticket doctor failed in $target; nothing was written"
 }
 # The STATS_OFF marker beside the store, and the sha each run's row
-# records. A maestro-ticket too old to know stats is a stale copy on PATH.
-out=$(cd "$target" && maestro-ticket stats "${stats:-on}" --maestro-sha "$sha" 2>&1) || {
+# records. With no stats: line, only the sha: stats stay as they were
+# (on, unless a person ran maestro-ticket stats off). A maestro-ticket
+# too old to know stats is a stale copy on PATH.
+out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
 	printf '%s\n' "$out" >&2
-	die "maestro-ticket stats ${stats:-on} failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
+	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
 }
 
 # Hide the old and new skills before the first copy, so a run that stops
@@ -839,7 +842,7 @@ fi
 rm -f -- "$other"
 
 echo "ticket store ready"
-if [ "$stats" = off ]; then
+if [ -e "$(dirname "${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}")/STATS_OFF" ]; then
 	echo "run stats off: no run is written to stats.db"
 else
 	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"

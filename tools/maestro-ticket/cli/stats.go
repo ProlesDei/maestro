@@ -41,7 +41,8 @@ Claude sessions, never a bot's own shell. Nothing here sends it anywhere.
                            adds spend. For a person only. It sends nothing
   stats on|off [--maestro-sha S]
                            start or stop writes for this store, as install.sh
-                           apply does
+                           apply does; --maestro-sha S alone records the sha
+                           and leaves writes as they are
 `
 
 // statsViews are stats' views and bundle, by name.
@@ -74,14 +75,16 @@ func runStats(ctx context.Context, c *call) error {
 
 // runStatsSwitch turns the local run stats on or off for this store, as
 // install.sh apply does from install.yaml's stats: key, and records the
-// maestro-sha apply pinned. It prints nothing on success. Off stops every
-// write and leaves stats.db as it is.
+// maestro-sha apply pinned; with no stats: key, apply records only the
+// sha, so a person's stats off stays. It prints nothing on success. Off
+// stops every write and leaves stats.db as it is.
 func runStatsSwitch(c *call) error {
 	sha := c.fs.String("maestro-sha", "", "the Maestro commit install.yaml pins, recorded with each run")
 	if err := c.parse(); err != nil {
 		return err
 	}
-	if len(c.args) != 1 || (c.args[0] != "on" && c.args[0] != "off") {
+	shaOnly := len(c.args) == 0 && *sha != ""
+	if !shaOnly && (len(c.args) != 1 || (c.args[0] != "on" && c.args[0] != "off")) {
 		return usagef("stats: want on or off, bundle, or a view: case, health, costs (stats --help lists them)")
 	}
 	if *sha != "" && !stats.ValidSha(*sha) {
@@ -96,6 +99,9 @@ func runStatsSwitch(c *call) error {
 		if err := stats.SetSha(dir, *sha); err != nil {
 			return err
 		}
+	}
+	if shaOnly {
+		return nil
 	}
 	return stats.SetOff(dir, c.args[0] == "off")
 }
@@ -521,9 +527,15 @@ func runStatsHealth(ctx context.Context, c *call) error {
 		}
 	}
 	if h.File == "ok" || h.File == "none" {
-		list, _ := runs.List(filepath.Join(dir, "runs"), c.now(), true)
+		runsDir := filepath.Join(dir, "runs")
+		list, _ := runs.List(runsDir, c.now(), true)
 		for _, r := range list {
 			if !r.Ended() || r.State == runs.Unreadable || r.EndedAt == nil || r.EndedAt.Before(st.First) {
+				continue
+			}
+			// A command that never started, and a run started with stats
+			// off, never get a row: no write was dropped.
+			if (r.PID == 0 && r.Error != "") || startedOff(runsDir, r) {
 				continue
 			}
 			h.Ended++

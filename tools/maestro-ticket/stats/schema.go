@@ -91,6 +91,7 @@ var migrations = []string{
 		day INTEGER NOT NULL,
 		job INTEGER NOT NULL, model INTEGER NOT NULL, outcome INTEGER NOT NULL,
 		n INTEGER NOT NULL, cost_usd REAL, tokens INTEGER, ms_p50 INTEGER, ms_p90 INTEGER,
+		cost_unknown INTEGER NOT NULL, tok_unknown INTEGER NOT NULL,
 		PRIMARY KEY (day, job, model, outcome)
 	) STRICT;
 	CREATE TABLE pruned_cum (

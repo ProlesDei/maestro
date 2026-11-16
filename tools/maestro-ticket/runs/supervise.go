@@ -354,8 +354,8 @@ func StreamArgv(cmd []string) ([]string, bool) {
 }
 
 // scanStream reads a streamed run's stdout, once its command is over,
-// and writes to .out what json would have: text before the first JSON
-// line, then the result line. A grandchild that still holds the file
+// and writes to .out what json would have: the command's own text, then
+// the result line. A grandchild that still holds the file
 // may write on; what it writes after this is never read.
 func scanStream(dir, id string, out *os.File, n streamfilter.Names) *streamfilter.Summary {
 	f, err := os.Open(path(dir, id, streamExt))
@@ -366,6 +366,23 @@ func scanStream(dir, id string, out *os.File, n streamfilter.Names) *streamfilte
 	s, kept := streamfilter.Scan(f, n)
 	out.Write(kept)
 	return &s
+}
+
+// RecoverStream does for a run whose supervisor died what that
+// supervisor would have, so the result Claude printed still reaches the
+// run's end: when its stream file is there and its .out is empty, it
+// writes .out from the stream and returns the counts; otherwise nil. Its
+// caller has adopted the run, and drops the stream after.
+func RecoverStream(dir, id string, n streamfilter.Names) *streamfilter.Summary {
+	out, err := os.OpenFile(path(dir, id, ".out"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return nil
+	}
+	defer out.Close()
+	if fi, err := out.Stat(); err != nil || fi.Size() > 0 {
+		return nil
+	}
+	return scanStream(dir, id, out, n)
 }
 
 // DropStream removes a run's stream file: its supervisor once the run's

@@ -794,12 +794,14 @@ func TestSpendAfterDeadRun(t *testing.T) {
 			t.Fatalf("prune: %v %v", ok, err)
 		}
 		var usd float64
-		var tok int64
-		if err := db.QueryRow(`SELECT total(cost_usd), total(tokens) FROM daily`).Scan(&usd, &tok); err != nil {
+		var tok, usdGap, tokGap int64
+		if err := db.QueryRow(`SELECT total(cost_usd), total(tokens), total(cost_unknown), total(tok_unknown) FROM daily`).Scan(&usd, &tok, &usdGap, &tokGap); err != nil {
 			t.Fatal(err)
 		}
-		if usd != 10 || tok != 1800 {
-			t.Fatalf("batch %d: daily usd %v tokens %d; want 10, 1800", batch, usd, tok)
+		// The two runs with unknown dollars and the one with unknown
+		// tokens are counted, not left out without a trace.
+		if usd != 10 || tok != 1800 || usdGap != 2 || tokGap != 1 {
+			t.Fatalf("batch %d: daily usd %v tokens %d, unknown %d and %d; want 10, 1800, 2, 1", batch, usd, tok, usdGap, tokGap)
 		}
 	}
 }
@@ -824,23 +826,40 @@ func TestReadSpendMatchesPrune(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A run with one model's dollars known and another's not has no
+	// known spend at all.
+	r := testRun(runID(6))
+	r.StartedAt, r.EndedAt = end.Add(6*time.Minute), end.Add(6*time.Minute+30*time.Second)
+	three := 3.0
+	r.Models = []Model{{Model: "opus", InputCum: 5, CostCum: &three, CostSrc: "result"}, {Model: "opus-5.5", InputCum: 5, CostSrc: "result"}}
+	if err := Write(t.Context(), db, r); err != nil {
+		t.Fatal(err)
+	}
 	facts, err := Read(t.Context(), db, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var usd float64
-	var unknown int
+	var unknown int64
 	for _, f := range facts {
+		var sum float64
+		known := len(f.Spend) > 0
 		for _, s := range f.Spend {
 			if s.USD == nil {
-				unknown++
-				continue
+				known = false
+				break
 			}
-			usd += *s.USD
+			sum += *s.USD
+		}
+		if known {
+			usd += sum
+		} else {
+			unknown++
 		}
 	}
-	// 1 + 1.5 + 1.5 + 0.5; the resume of a session never seen has none.
-	if len(facts) != 5 || usd != 4.5 || unknown != 1 {
+	// 1 + 1.5 + 1.5 + 0.5; the resume of a session never seen has none,
+	// nor has the run of two models.
+	if len(facts) != 6 || usd != 4.5 || unknown != 2 {
 		t.Fatalf("read: %d runs, $%v, %d unknown", len(facts), usd, unknown)
 	}
 	if one, err := Read(t.Context(), db, Filter{Run: runID(3)}); err != nil || len(one) != 1 || *one[0].Spend[0].USD != 1.5 {
@@ -850,7 +869,56 @@ func TestReadSpendMatchesPrune(t *testing.T) {
 		t.Fatalf("prune: %v %v", ok, err)
 	}
 	var daily float64
-	if err := db.QueryRow(`SELECT total(cost_usd) FROM daily`).Scan(&daily); err != nil || daily != usd {
-		t.Fatalf("daily $%v; the view read $%v", daily, usd)
+	var gap int64
+	if err := db.QueryRow(`SELECT total(cost_usd), total(cost_unknown) FROM daily`).Scan(&daily, &gap); err != nil || daily != usd || gap != unknown {
+		t.Fatalf("daily $%v, %d unknown; the view read $%v, %d unknown (%v)", daily, gap, usd, unknown, err)
+	}
+}
+
+// Only the open that makes the file sets auto_vacuum: on one with tables
+// the pragma is a write, so every later open would take the write lock
+// and add a WAL frame, and fail behind another writer.
+func TestOpenNeverWritesAtConnect(t *testing.T) {
+	_, path := fresh(t)
+	wal := func() int64 {
+		fi, err := os.Stat(path + "-wal")
+		if err != nil {
+			return 0
+		}
+		return fi.Size()
+	}
+	before := wal()
+	for _, create := range []bool{false, true, false} {
+		db, err := Open(path, create)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := count(t, db, `SELECT 1`); n != 1 {
+			t.Fatal(n)
+		}
+		db.Close()
+	}
+	if got := wal(); got != before {
+		t.Fatalf("three opens grew the WAL from %d to %d bytes", before, got)
+	}
+	// Behind another writer, an open still reads.
+	w, err := Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	tx, err := w.BeginTx(t.Context(), nil) // BEGIN IMMEDIATE
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	db, err := Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var one int
+	if err := db.QueryRow(`SELECT 1`).Scan(&one); err != nil {
+		t.Fatalf("an open behind a writer: %v", err)
 	}
 }

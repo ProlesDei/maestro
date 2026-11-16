@@ -29,20 +29,17 @@ func TestParseOutput(t *testing.T) {
 	}
 }
 
-// Only a result line gives a session: stream-json's other lines carry
-// one too.
-func TestParseOutputNeedsResultType(t *testing.T) {
-	for _, out := range []string{
-		`{"type":"system","subtype":"init","session_id":"s1","cwd":"/x"}`,
-		"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n{\"type\":\"assistant\",\"session_id\":\"s1\"}\n",
-		`{"type":"assistant","session_id":"s1"}`,
-	} {
-		if _, session, _ := ParseOutput([]byte(out)); session != "" {
-			t.Errorf("ParseOutput(%q) gave session %q", out, session)
-		}
+// A command launched on stream-json itself is never swapped, and its raw
+// stream is its .out: one that ends with no result keeps the session of
+// its last line and gives no reply, as before stats.
+func TestParseOutputRawStream(t *testing.T) {
+	out := "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"cwd\":\"/x\"}\n" +
+		"{\"type\":\"assistant\",\"session_id\":\"s1\"}\n" +
+		"{\"type\":\"user\",\"session_id\":\"s1\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"content\":\"SECRET\"}]}}\n"
+	if text, session, isErr := ParseOutput([]byte(out)); text != "" || session != "s1" || isErr {
+		t.Errorf("raw stream: %q %q %v; want no reply and session s1", text, session, isErr)
 	}
-	// A result with no result text still counts, by its type, wherever
-	// type sits in it.
+	// A result with no result text counts, wherever type sits in it.
 	text, session, isErr := ParseOutput([]byte(`{"subtype":"error_max_turns","session_id":"s2","is_error":true,"type":"result"}`))
 	if text != "" || session != "s2" || !isErr {
 		t.Errorf("max turns result: %q %q %v", text, session, isErr)

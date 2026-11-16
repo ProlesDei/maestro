@@ -94,7 +94,7 @@ func TestProbeClaude(t *testing.T) {
 	if !sum.Result || sum.Version == "" || sum.CtxPeak == 0 || len(sum.Usage) == 0 {
 		t.Errorf("stream summary %+v", sum)
 	}
-	t.Logf("claude %s, ctx_peak %d, lines %d", sum.Version, sum.CtxPeak, sum.Lines)
+	t.Logf("claude %s, ctx_peak %d, calls %d", sum.Version, sum.CtxPeak, sum.ToolCalls)
 
 	// A bad model: the same exit, stderr and text before any JSON.
 	a, b, _, kept = both("claude-no-such-model-0", "Reply ok\n", "1")

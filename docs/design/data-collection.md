@@ -163,22 +163,21 @@ No source here costs model tokens. Claude Code's harness writes the result objec
 1. `streamfilter.Scan` reads the file once and returns a Summary and the bytes `.out` keeps.
 2. The supervisor writes those bytes to `.out`, then runs today's `ReadTail` and `ParseOutput` on it. `endRun` reads the same `.out`.
 3. The Summary goes on `Record.Stream`, tagged `json:"-"`.
-4. The supervisor removes `.stream` after `OnEnd`. `pickup` and `doctor` remove one a dead supervisor left whenever they adopt its run, and `runs.Prune` lists `.stream` too.
+4. The supervisor removes `.stream` after `OnEnd`. `pickup` and `doctor` remove one a dead supervisor left whenever they adopt its run, after they read it into an empty `.out` as the supervisor would have (`runs.RecoverStream`, `TestOrphanReadsStream`), and `runs.Prune` lists `.stream` too.
 
-**Reading rules.** `Scan` reads with `bufio.Reader.ReadSlice`. It decodes each whole line into a narrow struct and takes `type` from that decode, never from a fixed prefix: R0 found that a result object's first key is not `type`. A result line may be up to 8 MB (`OutputWindow`, as today); any other line over 1 MB is counted and skipped; a line past 8 MB, or a last chunk with no newline, is counted and dropped.
+**Reading rules.** `Scan` reads with `bufio.Reader.ReadSlice`. It decodes each whole line into a narrow struct and takes `type` from that decode, never from a fixed prefix: R0 found that a result object's first key is not `type`. Any line may be up to 8 MB (`OutputWindow`, as today), so a big tool result still closes its call; a line past 8 MB is skipped. A last chunk with no newline is read as a line.
 
-**What `.out` holds:** any non-JSON text from before the first JSON line (a crash message, 64 KB cap), then the last whole result line: the bytes `--output-format json` would have printed. **Never the init line.** `ParseOutput` now takes a session id only from a `type: result` line or a line with a `result` field **[code: runs/runs.go, `TestParseOutputNeedsResultType`]**. Otherwise an init line would give every crashed or stopped run a session id, `endRun` would keep the claim of a `Failed` run with a session, and pickup would print different lines. `TestStreamInitOnlyFreesClaim` and `TestStreamPickupBytesMatchJSON` pin both.
+**What `.out` holds:** the command's own text, as it printed it (a crash message, blank lines and a last line with no newline included, 64 KB cap), then the last whole result line: the bytes `--output-format json` would have printed. Once the stream began, a line that starts as JSON but isn't whole is a stream line cut short, and is dropped. **Never the init line**, so a crashed or stopped run gets no session id from one, and `ParseOutput` reads `.out` as before **[code: runs/runs.go, `TestParseOutputRawStream`]**. A command run on stream-json itself is never swapped, and its raw stream is read as main reads it. `TestStreamInitOnlyFreesClaim`, `TestStreamPickupBytesMatchJSON` and `TestStreamTextMatchesJSON` pin this.
 
 ```mermaid
 flowchart TD
   L["one line of R-x.stream"] --> SZ{"past 8 MB?"}
-  SZ -- yes --> CUT["count it, drop it"]
+  SZ -- yes --> CUT["skip it"]
   SZ -- no --> J{"valid JSON?"}
-  J -- "no, before the first JSON line" --> PRE["keep for .out, 64 KB cap"]
-  J -- "no, after it" --> BAD["count it, drop it"]
+  J -- "no: the command's text" --> PRE["keep for .out, 64 KB cap"]
+  J -- "no, starts with { after the first JSON line" --> CUT
   J -- yes --> T{"type, from a narrow decode"}
   T -- "result" --> RES["keep the last one for .out"]
-  T -- "over 1 MB, not result" --> CUT
   T -- "system init" --> INIT["claude_code_version only"]
   T -- "system api_retry" --> RT["retries +1"]
   T -- "system compact_boundary" --> CP["compactions +1"]
@@ -206,11 +205,11 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 **At run end** the filter hands over:
 - counters per code (calls, fails, ms sum and max);
 - the last 24 calls, each with a fail mark;
-- the oldest call still open, if any (`open_code`, `open_ms`). For a killed run, that is the call that hung (`TestStreamTimedOutKeepsOpenCall`);
+- for a run with no result line, the oldest call still open, if any (`open_code`, `open_ms`): for a killed run, the call that hung (`TestStreamTimedOutKeepsOpenCall`);
 - summed per-turn usage per model family, which becomes the run's `run_models` rows (`cost_src=stream`) when it gave no result.
 
 **Failure modes:**
-- **The supervisor dies mid-run.** On Linux, Pdeathsig sends SIGTERM to the child **[code: runs/sys_linux.go]**. `pickup` or `doctor` marks the run died, removes `.stream`, and writes its row with `stream=lost`.
+- **The supervisor dies mid-run.** On Linux, Pdeathsig sends SIGTERM to the child **[code: runs/sys_linux.go]**. `pickup` or `doctor` marks the run died, reads `.stream` into an empty `.out` as the supervisor would have, so a result Claude printed still logs its cost, then removes it. The row says `stream=ok` or `no_result`, or `stream=lost` when the file is gone.
 - **No result line** (timed out, killed, a result past 8 MB): the row says `stream=no_result`, and the claim is freed as for any run with no result (`TestStreamHugeResult`).
 - **macOS and the BSDs.** No Pdeathsig, so a dead supervisor would leave Claude writing to a file no one reads. They keep json (later, once a Mac can run the probe).
 - **Disk.** A whole transcript sits on disk until the run ends. R0 put the largest session on this box at 16.8 MB; 300 of those is about 5 GB, under `envcheck.FloorBytes` (10 GB), and the stream flag needs headroom at the run's start. A run that hits ENOSPC fails as `disk_full`, as today.
@@ -245,7 +244,7 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 | `nudge`, `after_death` | none, opus, escalate, decide; bool | S1 | S |
 | `started_at`, `ended_at`, `wall_ms` | unix ms, ms | S1 | L (bundles carry offsets and ms only) |
 | `wait_ms`, `wait_capped` | int, bool: `Credit` read once more before `removeWaits` | supervisor | S |
-| `stop`, `escaped` | none, term, kill; how many processes outside the group the SIGTERM reached | supervisor kill path | S |
+| `stop`, `escaped` | none, term, kill; how many processes outside the group the SIGTERM reached, NULL off Linux, where no scan counts them | supervisor kill path | S |
 | `state`, `exit`, `outcome` | list; int; done, question, usage_limit, disk_full, timed_out, died, refused, failed (`outcomeOf`) | S1 | S |
 | `reason` | 5.6 | Go | S |
 | `subtype`, `stop_reason`, `is_error` | lists, bool | S2 | S |
@@ -291,7 +290,7 @@ A finding keeps its id across rounds **[format: passes.md]**, so `stats case` sh
 
 | Table | Fields | Written by |
 |---|---|---|
-| `daily` | day (days since the epoch, UTC), job, model, outcome, n, cost_usd, tokens, ms_p50, ms_p90 | the prune, before it deletes detail rows |
+| `daily` | day (days since the epoch, UTC), job, model, outcome, n, cost_usd, tokens, ms_p50, ms_p90, cost_unknown, tok_unknown. A run with any model's spend unknown is unknown, as the views count it: cost_usd and tokens sum the known runs, and the two counts hold the rest | the prune, before it deletes detail rows |
 | `pruned_cum` | session, model, ended_at, cost_cum, tok_cum | the prune: each pruned session's last totals, kept 30 days past the line |
 | `meta` | key, value: `last_prune`, `codes_version` | `Prepare` seeds both; the prune claims `last_prune` |
 
@@ -349,8 +348,8 @@ Why a separate file and not new tables in `tickets.db`:
 
 ### 6.2 The off switch
 
-- `install.yaml` gains `stats: on|off`. An absent key means on, and is never refused; any other value, or the key twice, is refused.
-- `apply` runs `maestro-ticket stats on|off --maestro-sha <sha>` after `doctor`. `stats off` makes the `STATS_OFF` marker; `stats on` removes it; both write `stats.sha`. `check` doesn't touch stats.
+- `install.yaml` gains `stats: on|off`. An absent key is never refused, and leaves the marker as it is: on at first, and off once a person ran `stats off`. Any other value, or the key twice, is refused.
+- `apply` runs `maestro-ticket stats on|off --maestro-sha <sha>` after `doctor`, or `stats --maestro-sha <sha>` with no key. `stats off` makes the `STATS_OFF` marker; `stats on` removes it; all three write `stats.sha`. `apply` says on or off from the marker. `check` doesn't touch stats.
 - Every write checks for the marker with one `Lstat`. Off stops every write, the side file and the stream included, and leaves `stats.db` as it is.
 - INSTALL.md writes `on` without asking, and tells the person what `stats.db` holds and how to turn it off.
 - `install_test.sh` covers: no key (no refusal, no marker), on, off (marker made), off then on (marker gone), `maybe` and an empty value refused, the key twice refused, and uninstall leaving `stats.db` and the marker.
@@ -447,6 +446,8 @@ erDiagram
     INTEGER tokens
     INTEGER ms_p50
     INTEGER ms_p90
+    INTEGER cost_unknown
+    INTEGER tok_unknown
   }
   pruned_cum {
     TEXT session PK
@@ -514,9 +515,9 @@ sequenceDiagram
 **Capture order:**
 - **Facts are held in memory.** The side file holds what the job knew at the start. The supervisor's end facts (wait, stop kind, escaped count) and the stream Summary sit on the record, tagged `json:"-"`, so they reach `endRun` and never a record byte (`TestEndFactsNotInRecordJSON`, `TestRecordJSONKeys`).
 - **Slot wait.** The supervisor reads `Credit` once more right before `removeWaits` **[code: runs/supervise.go:259-260]** (`TestWaitMsCredit`).
-- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`, within 300 ms, so the chain waits on it at most that long. Prune waits for the first ring.
-- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too. There the stats write is 250 ms, then drop, no retries, and the row says `stream=lost` for a run that was streaming.
-- **The gap.** A run whose supervisor died between Save and `OnEnd`, or whose write was dropped, has no row. `stats health` counts ended runs on disk that have no `run_facts` row, so the gap shows (`TestStatsHealthMissingRows`).
+- **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`. The write takes 300 ms at most. A run that ends while its start's `Prepare` still retries a busy lock first waits for that (2 s at most), then a 300 ms retry, so the chain waits about 2.6 s at worst, and 300 ms once `stats.db` is ready. Prune waits for the first ring.
+- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too, after reading its stream as above. There the stats write is 250 ms, then drop, no retries. A job, again or resume run with no side file started with stats off in its shell, so they write no row of it (`TestStatsOffFollowsOrphan`).
+- **The gap.** A run whose supervisor died between Save and `OnEnd`, or whose write was dropped, has no row. `stats health` counts ended runs on disk that have no `run_facts` row, but a command that never started and a run started with stats off, so the gap shows (`TestStatsHealthMissingRows`).
 - **Stats errors print nothing.** `endRun`'s warnings reach the bot in `pickup`, so a stats error is swallowed, and `stats health` is where losses show.
 
 **From a session's start to a bundle:**
@@ -821,7 +822,7 @@ flowchart LR
 
 | Claim | Status |
 |---|---|
-| `ParseOutput` takes a session only from a result line | **[code: runs/runs.go; `TestParseOutputNeedsResultType`]** |
+| A streamed run's `.out` holds no stream line but its result, so `ParseOutput` reads it as before | **[code: runs/runs.go, streamfilter; `TestParseOutputRawStream`, `TestStreamInitOnlyFreesClaim`]** |
 | `endRun` keeps the claim for a `Failed` run with a session id | **[code: cli/launch.go, `endRun`]** |
 | `OnEnd` runs after Save and before the first ring | **[code: runs/supervise.go, `Supervise`]** |
 | `Credit` is read once more before `removeWaits` | **[code: runs/supervise.go:259-260]** |

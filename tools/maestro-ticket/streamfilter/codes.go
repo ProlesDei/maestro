@@ -56,9 +56,9 @@ func Skills() []string {
 	return out
 }
 
-// SkillFiles are the reference and script stems skillFiles keeps for a
+// skillStems are the reference and script stems skillFiles keeps for a
 // shipped skill.
-func SkillFiles(skill string) (refs, scripts []string) {
+func skillStems(skill string) (refs, scripts []string) {
 	f := skillFiles[skill]
 	return slices.Clone(f.refs), slices.Clone(f.scripts)
 }

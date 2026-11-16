@@ -111,6 +111,18 @@ var statsModes = []struct {
 	}},
 }
 
+// statsMode sets dir's stats.db up as the mode of that name does.
+func statsMode(t *testing.T, name, dir string, h *harness) {
+	t.Helper()
+	for _, m := range statsModes {
+		if m.name == name {
+			m.setup(t, dir, h)
+			return
+		}
+	}
+	t.Fatalf("no stats mode %q", name)
+}
+
 // Every command a bot or a session reads prints the same bytes whatever
 // state stats.db is in: the C0 goldens, under each.
 func TestStatsModesKeepOutput(t *testing.T) {
@@ -498,6 +510,8 @@ func orphanScene(t *testing.T) (*harness, string) {
 	r := putRun(t, filepath.Join(h.dir, "runs"), runs.Record{Launcher: "senior-engineer", Ticket: "T-1", Job: "build",
 		Command: withEnv(claudeCommand(newSessionID(), modelOpus, effortHigh, false)), Dir: h.dir, Limit: "2h",
 		StartedAt: pinBase(), State: runs.Running, PID: 4005})
+	// As a start with stats on writes it.
+	writeSide(filepath.Join(h.dir, "runs"), r.ID, &sideFacts{Why: "tier_senior", Tier: "senior", Tries: ptr(0)})
 	return h, r.ID
 }
 
@@ -521,7 +535,7 @@ func TestOrphanPathNeverCreates(t *testing.T) {
 	}
 	// One at a newer schema stays as it was.
 	h, _ := orphanScene(t)
-	statsModes[5].setup(t, h.dir, h)
+	statsMode(t, "newer", h.dir, h)
 	h.run("", "pickup")
 	if n := statsRowCount(t, h.dir); n != 0 {
 		t.Fatalf("%d rows in a newer stats.db", n)
@@ -545,22 +559,27 @@ func TestOrphanRow(t *testing.T) {
 }
 
 // A locked stats.db holds pickup up a quarter second at most, and the
-// row is dropped.
+// row is dropped: against the same pickup with no lock, it takes at most
+// orphanWait more, give or take a scheduler's slack.
 func TestOrphanBusyDrops(t *testing.T) {
+	h2, _ := orphanScene(t)
+	prepareStatsAt(t, h2.dir)
+	begun := time.Now()
+	_, out2, _ := h2.run("", "pickup")
+	base := time.Since(begun)
+
 	h, _ := orphanScene(t)
 	prepareStatsAt(t, h.dir)
 	release := holdStats(t, h.dir)
-	begun := time.Now()
+	begun = time.Now()
 	code, out, errs := h.run("", "pickup")
 	took := time.Since(begun)
 	if code != 0 || errs != "" || !strings.Contains(out, "build died") {
 		t.Fatalf("pickup: exit %d\n%s\n%s", code, out, errs)
 	}
-	if took > orphanWait+750*time.Millisecond {
-		t.Fatalf("pickup took %s behind a locked stats.db", took)
+	if took > base+orphanWait+300*time.Millisecond {
+		t.Fatalf("pickup took %s behind a locked stats.db, %s with none", took, base)
 	}
-	h2, _ := orphanScene(t)
-	_, out2, _ := h2.run("", "pickup")
 	m := newMasker()
 	if m.mask(out) != newMasker().mask(out2) {
 		t.Fatalf("pickup behind a lock printed\n%s\nnot\n%s", out, out2)
@@ -620,6 +639,12 @@ func TestStatsOnOff(t *testing.T) {
 		{[]string{"stats", "maybe"}, 2, true},
 		{[]string{"stats", "on", "--maestro-sha", "zqmark7"}, 2, true},
 		{[]string{"stats", "on", "off"}, 2, true},
+		// The sha alone, as apply with no stats: line runs it, leaves
+		// the marker as it is; with no sha it is no switch.
+		{[]string{"stats", "--maestro-sha", "abc123456"}, 0, true},
+		{[]string{"stats", "on"}, 0, false},
+		{[]string{"stats", "--maestro-sha", "abc12345"}, 0, false},
+		{[]string{"stats", "--json"}, 2, false},
 	} {
 		code, out, errs := h.run("", c.args...)
 		_, err := os.Stat(marker)
@@ -664,9 +689,10 @@ func markerScene(t *testing.T) (*launcher, []string) {
 	l.waitEnded(r.ID, 20*time.Second)
 	l.waitSupervisors()
 	// And a run whose supervisor died, ended by pickup.
-	putRun(t, filepath.Join(l.h.dir, "runs"), runs.Record{Launcher: "zqmark7", Ticket: "T-1", Job: "build",
+	dead := putRun(t, filepath.Join(l.h.dir, "runs"), runs.Record{Launcher: "zqmark7", Ticket: "T-1", Job: "build",
 		Command: []string{"claude", "-p", "--model", "claude-zqmark", all}, Dir: sub, Limit: "2h", Host: "zqmark7-host",
 		StartedAt: pinBase(), State: runs.Running, PID: 4005, Reply: all, Error: all, SessionID: "deadbeefcafe"})
+	writeSide(filepath.Join(l.h.dir, "runs"), dead.ID, &sideFacts{Why: "tier_senior"}) // started with stats on
 	l.h.env["MAESTRO_TICKET_ACTOR"] = "zqmark7"
 	l.h.run("", "pickup")
 	if n := statsRowCount(t, l.h.dir); n != 2 {
@@ -775,7 +801,7 @@ func TestStatsCLIImports(t *testing.T) {
 
 // A run main's chain starts at another run's end is a job run like a
 // bot's own start: it gets a side file, its stream is read, and its row
-// names the bot it was for. The ending run's row is in before the ring.
+// names the bot it was for.
 func TestStatsChainedRun(t *testing.T) {
 	needStream(t)
 	j, hooks := newChainHarness(t, "junior-engineer", "reviewer")

@@ -518,7 +518,6 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 // reply is the part of claude -p --output-format json (or the last line
 // of stream-json) that a bot reads.
 type reply struct {
-	Type      string  `json:"type"`
 	Result    *string `json:"result"`
 	SessionID string  `json:"session_id"`
 	IsError   bool    `json:"is_error"`
@@ -533,14 +532,13 @@ const maxReply = 64 << 10
 const OutputWindow = 8 << 20
 
 // ParseOutput reads the end of a run's stdout: the result and session id
-// of Claude's JSON output, or else the output's tail. Only a result line
-// counts, one whose type is result or that holds a result: stream-json's
-// other lines carry the session id too, and a run whose stream held one
-// of those but no result gave none.
+// of Claude's JSON output, or else the output's tail. A streamed run's
+// .out holds no stream line but its result (streamfilter.Scan); a
+// command run on stream-json itself is read as before.
 func ParseOutput(out []byte) (text, session string, isError bool) {
 	parse := func(b []byte) bool {
 		var r reply
-		if json.Unmarshal(b, &r) != nil || (r.Result == nil && (r.SessionID == "" || r.Type != "result")) {
+		if json.Unmarshal(b, &r) != nil || (r.Result == nil && r.SessionID == "") {
 			return false
 		}
 		if r.Result != nil {

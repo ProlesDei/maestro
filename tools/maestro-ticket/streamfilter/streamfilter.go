@@ -1,11 +1,11 @@
 // Package streamfilter reads what claude -p --output-format stream-json
 // --verbose printed for one run, once the run is over, and keeps two
-// things: the bytes a run's .out held before stream-json (text before the
-// first JSON line, then the last whole result line), and a Summary of
-// counts and step codes from fixed lists. It keeps no prompt, reply, tool
+// things: the bytes a run's .out held before stream-json (the command's
+// own text, then the last whole result line), and a Summary of counts and
+// step codes from fixed lists. The Summary keeps no prompt, reply, tool
 // input or output, path or name: a field it reads to pick a code is
-// dropped once the code is taken, and a line it can't place is counted,
-// never kept. It imports no other package of this module, and touches no
+// dropped once the code is taken, and a stream line it can't place is
+// skipped. It imports no other package of this module, and touches no
 // file, network or process: the caller hands it a reader.
 package streamfilter
 
@@ -20,13 +20,12 @@ import (
 	"time"
 )
 
-// Caps. A result line may be as long as runs.OutputWindow, as today; any
-// other line past MaxLine is skipped and counted.
+// Caps. A line may be as long as runs.OutputWindow, as today; a longer
+// one is skipped.
 const (
-	MaxLine   = 1 << 20
 	MaxResult = 8 << 20
-	// MaxPre caps the text kept from before the first JSON line, such as
-	// a crash message: its last whole lines.
+	// MaxPre caps the command's own text kept, such as a crash message:
+	// its last whole lines.
 	MaxPre = 64 << 10
 	// TailLen is how many of the last tool calls a Summary keeps.
 	TailLen = 24
@@ -75,17 +74,13 @@ type Usage struct {
 // Summary is what a scan keeps: numbers, bools, a time, step codes from
 // Codes, model families from Names.Model and Claude Code's version.
 type Summary struct {
-	// Lines counts whole JSON lines; Cut, lines past their cap and a
-	// last line with no newline; Bad, lines after the first JSON line
-	// that weren't JSON.
-	Lines, Cut, Bad int64
 	// Result says a whole result line was found and kept.
 	Result bool
 	Steps  []Step // by code
 	Tail   []Call // the last TailLen calls, oldest first
-	// OpenCode is the oldest call that had no result when the stream
-	// ended, and OpenAt when it began: for a killed run, the call that
-	// hung.
+	// OpenCode is the oldest call that had no result when a stream with
+	// no result line ended, and OpenAt when it began: for a killed run,
+	// the call that hung.
 	OpenCode             string
 	OpenAt               time.Time
 	ToolCalls, ToolFails int64
@@ -174,7 +169,7 @@ type scan struct {
 	n        Names
 	s        Summary
 	seenJSON bool
-	pre      []byte // text before the first JSON line
+	pre      []byte // the command's own text, as it printed it
 	result   []byte // the last whole result line
 	steps    map[string]*Step
 	tail     []Call
@@ -187,10 +182,11 @@ type scan struct {
 }
 
 // Scan reads a run's stream to its end and returns its Summary and the
-// bytes its .out holds: text before the first JSON line, then the last
-// whole result line. A line past its cap, a line cut off at the end and,
-// after the first JSON line, a line that isn't JSON are counted and
-// dropped.
+// bytes its .out holds: what json would have printed. That is the
+// command's own text, blank lines and a last line with no newline
+// included, then the last whole result line. A line past MaxResult and,
+// after the first JSON line, one that starts as JSON but isn't whole,
+// such as a line cut off as the command was killed, are dropped.
 func Scan(r io.Reader, n Names) (Summary, []byte) {
 	f := &scan{n: n, steps: map[string]*Step{}, open: map[string]pending{}, parents: map[string]bool{},
 		msgs: map[string]Usage{}, extra: map[string]*Usage{}}
@@ -210,14 +206,12 @@ func Scan(r io.Reader, n Names) (Summary, []byte) {
 			continue
 		}
 		if err != nil { // the end: what is left had no newline
-			if over || len(buf) > 0 {
-				f.s.Cut++
+			if !over && len(buf) > 0 {
+				f.line(buf)
 			}
 			break
 		}
-		if over {
-			f.s.Cut++
-		} else {
+		if !over {
 			f.line(buf)
 		}
 		buf, over = buf[:0], false
@@ -227,16 +221,13 @@ func Scan(r io.Reader, n Names) (Summary, []byte) {
 
 func (f *scan) line(raw []byte) {
 	b := bytes.TrimSpace(raw)
-	if len(b) == 0 {
-		return
-	}
-	if b[0] != '{' || !json.Valid(b) {
-		if f.seenJSON {
-			f.s.Bad++
+	if len(b) == 0 || b[0] != '{' || !json.Valid(b) {
+		// The command's own text, kept as it came. Once the stream began,
+		// a line that starts as JSON is a stream line cut short: dropped.
+		if f.seenJSON && len(b) > 0 && b[0] == '{' {
 			return
 		}
-		f.pre = append(f.pre, bytes.TrimRight(raw, "\r\n")...)
-		f.pre = append(f.pre, '\n')
+		f.pre = append(f.pre, raw...)
 		if len(f.pre) > MaxPre {
 			cut := f.pre[len(f.pre)-MaxPre:]
 			if i := bytes.IndexByte(cut, '\n'); i >= 0 && i < len(cut)-1 {
@@ -250,16 +241,10 @@ func (f *scan) line(raw []byte) {
 	var l line
 	json.Unmarshal(b, &l) // a field of another type is left empty
 	if l.Type == "result" {
-		f.s.Lines++
 		f.s.Result = true
 		f.result = append(f.result[:0], b...)
 		return
 	}
-	if len(b) > MaxLine {
-		f.s.Cut++
-		return
-	}
-	f.s.Lines++
 	at, _ := time.Parse(time.RFC3339Nano, l.Timestamp)
 	switch l.Type {
 	case "system":
@@ -377,13 +362,15 @@ func (f *scan) finish() (Summary, []byte) {
 	}
 	slices.SortFunc(s.Steps, func(a, b Step) int { return strings.Compare(a.Code, b.Code) })
 	s.Tail = f.tail
+	// A run that gave its result had no call hang, though a line too
+	// long to read may have hidden a call's result.
 	var oldest *pending
 	for _, p := range f.open {
 		if oldest == nil || p.seq < oldest.seq {
 			oldest = &p
 		}
 	}
-	if oldest != nil {
+	if oldest != nil && !s.Result {
 		s.OpenCode, s.OpenAt = oldest.code, oldest.at
 	}
 	s.Subagents = int64(len(f.parents))
@@ -413,6 +400,9 @@ func (f *scan) finish() (Summary, []byte) {
 	slices.SortFunc(s.Usage, func(a, b Usage) int { return strings.Compare(a.Model, b.Model) })
 	out := slices.Clone(f.pre)
 	if f.result != nil {
+		if len(out) > 0 && out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
 		out = append(append(out, f.result...), '\n')
 	}
 	return s, out
