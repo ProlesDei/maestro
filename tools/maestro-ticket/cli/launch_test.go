@@ -717,3 +717,31 @@ func TestLookWithoutWebhookWritesOnce(t *testing.T) {
 	}
 	l.ackAll()
 }
+
+// stop ends a live run, failed and stopped by the asker, so pickup shows
+// it and resume can go on; a run that is running refuses resume with a
+// pointer to stop. Only its launcher or the planner stops it.
+func TestStopEndsALiveRun(t *testing.T) {
+	l := newLauncher(t, "designer")
+	r := l.launch("", "--limit", "1h", "--", "sleep", "300")
+	l.h.env["MAESTRO_TICKET_ACTOR"] = "designer"
+	if code, out, _ := l.h.run("", "resume", r.ID, "--json"); code != 4 || !strings.Contains(out, "end it with maestro-ticket stop "+r.ID) {
+		t.Fatalf("resume of a running run: exit %d: %s", code, out)
+	}
+	l.h.env["MAESTRO_TICKET_ACTOR"] = "reviewer"
+	l.h.fails(2, "stop", r.ID)
+	l.h.env["MAESTRO_TICKET_ACTOR"] = "planner"
+	var e runs.Record
+	l.h.ok(&e, "stop", r.ID)
+	if e.State != runs.Failed || e.Error != "stopped by planner" {
+		t.Fatalf("stopped run: %+v", e)
+	}
+	if code, out, _ := l.h.run("", "stop", r.ID, "--json"); code != 4 || !strings.Contains(out, "already") {
+		t.Fatalf("second stop: exit %d: %s", code, out)
+	}
+	l.h.env["MAESTRO_TICKET_ACTOR"] = "designer"
+	if p := l.pickup(); len(p.Ended) != 1 || p.Ended[0].ID != r.ID {
+		t.Fatalf("pickup after stop: %+v", p)
+	}
+	l.waitSupervisors()
+}

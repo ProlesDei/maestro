@@ -507,7 +507,7 @@ func printAlerts(w io.Writer, r alertReport, now time.Time) {
 			roundMin(now.Sub(e.Due)), openText(e.Open))
 	}
 	for _, v := range r.Revived {
-		fmt.Fprintf(w, "revived: %s lease of %s ran out %dx and came back: its run may be hung; ask its bot if it still answers\n", v.Ticket, v.Holder, v.Revivals)
+		fmt.Fprintf(w, "revived: %s lease of %s ran out %dx and came back: its machine froze or its run hung; its limit still ends it, maestro-ticket stop sooner\n", v.Ticket, v.Holder, v.Revivals)
 	}
 	for _, st := range r.Stalled {
 		fmt.Fprintf(w, "stalled: %s %s %s with no one on it\n", st.Ticket, st.Status, st.Idle)

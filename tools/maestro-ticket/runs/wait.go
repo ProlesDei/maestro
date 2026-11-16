@@ -54,7 +54,12 @@ const startMark = "-s"
 const liveWait = 5 * time.Second
 
 // Wait is one slot wait a launched command marked.
-type Wait struct{ file string }
+type Wait struct {
+	file    string
+	dir, id string
+	session bool
+	last    time.Time // the last touch, on the wall clock
+}
 
 // StartWait marks a slot wait for run id in dir. With no such run in dir,
 // it marks nothing and returns nil: the waiter wasn't launched from this
@@ -77,14 +82,30 @@ func StartWait(dir, id string, now time.Time, session bool) (*Wait, error) {
 		return nil, err
 	}
 	f.Close()
-	return &Wait{name}, nil
+	return &Wait{file: name, dir: dir, id: id, session: session, last: now.Round(0)}, nil
 }
 
 // Touch says the wait goes on. Errors are ignored: the run may have ended
-// and its supervisor removed the mark.
+// and its supervisor removed the mark. A waiter touches every second or
+// so, so a gap of FreezeGap or more on the wall clock means the machine
+// was frozen or the waiter stopped: the mark ends at the last touch and a
+// new one starts, so the gap earns the run no credit. The run's limit
+// counts a freeze, and a frozen wait waited on nothing.
 func (w *Wait) Touch(now time.Time) {
-	if w != nil {
-		os.Chtimes(w.file, now, now)
+	if w == nil {
+		return
+	}
+	now = now.Round(0) // the wall clock: the monotonic one stops in a freeze
+	if !w.last.IsZero() && now.Sub(w.last) >= FreezeGap {
+		w.End(w.last)
+		if n, err := StartWait(w.dir, w.id, now, w.session); err == nil && n != nil {
+			*w = *n
+		}
+		return
+	}
+	w.last = now
+	if os.Chtimes(w.file, now, now) != nil {
+		w.last = time.Time{} // the mark is gone with its run: start no new one
 	}
 }
 

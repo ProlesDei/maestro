@@ -173,3 +173,97 @@ func TestCreditCapsWaitsInsideTheSession(t *testing.T) {
 		t.Fatalf("4h limit: Credit = %s, capped %v; want all of it", got, capped)
 	}
 }
+
+// A waiter's touch after a freeze ends its mark at the last touch and
+// starts a new one, so the frozen hours earn the run no credit.
+func TestTouchSplitsAtAFreeze(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "qa-lead", Limit: "1h"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().Add(-5 * time.Hour).Truncate(time.Second)
+	w, err := StartWait(dir, r.ID, t0, false)
+	if err != nil || w == nil {
+		t.Fatalf("StartWait: %v, %v", w, err)
+	}
+	w.Touch(t0.Add(time.Second))
+	w.Touch(t0.Add(2 * time.Second))
+	woke := t0.Add(4*time.Hour + 2*time.Second)
+	w.Touch(woke)
+	w.Touch(woke.Add(time.Second))
+	if got, want := SlotWait(dir, r.ID, t0.Add(-time.Minute), woke.Add(time.Second)), 3*time.Second; got != want {
+		t.Fatalf("SlotWait = %s; want %s: the 2s before the freeze and the 1s after", got, want)
+	}
+	if n := len(waits(dir, r.ID)); n != 2 {
+		t.Fatalf("%d marks; want the one the freeze ended and a new one", n)
+	}
+}
+
+// The limit runs on the wall clock: a machine frozen past it, whose
+// monotonic clock never moved, ends the run within one look of waking,
+// and the result says how long it was frozen.
+func TestSuperviseLimitRunsOnTheWallClock(t *testing.T) {
+	old := watchEvery
+	watchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { watchEvery = old })
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "designer", Limit: "2h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jump atomic.Int64
+	time.AfterFunc(300*time.Millisecond, func() { jump.Store(int64(4 * time.Hour)) })
+	begun := time.Now()
+	err = Supervise(context.Background(), dir, r.ID, Options{
+		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != TimedOut || !strings.Contains(got.Error, "the 2h time limit ended it; the machine was frozen 4h0m0s of it") {
+		t.Fatalf("record: %s: %s", got.State, got.Error)
+	}
+	if took := time.Since(begun); took > 5*time.Second {
+		t.Fatalf("took %s; want the run ended soon after the jump", took)
+	}
+}
+
+// A stop asked ends a live run as its limit would, failed and stopped by
+// the asker; only the first ask counts.
+func TestSuperviseStopsOnAsk(t *testing.T) {
+	old := watchEvery
+	watchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { watchEvery = old })
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "designer", Limit: "1h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(300*time.Millisecond, func() {
+		if ok, err := AskStop(dir, r.ID, "planner", time.Now()); !ok || err != nil {
+			t.Errorf("AskStop: %v, %v", ok, err)
+		}
+		if ok, _ := AskStop(dir, r.ID, "designer", time.Now()); ok {
+			t.Error("a second AskStop counted")
+		}
+	})
+	begun := time.Now()
+	if err := Supervise(context.Background(), dir, r.ID, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != Failed || got.Error != "stopped by planner" || *got.Exit != 128+15 {
+		t.Fatalf("record: %s, exit %v: %q", got.State, got.Exit, got.Error)
+	}
+	if took := time.Since(begun); took > 5*time.Second {
+		t.Fatalf("took %s to stop", took)
+	}
+}

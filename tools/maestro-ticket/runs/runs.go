@@ -7,7 +7,8 @@
 // next to the ticket store): <id>.json, the record; <id>.in, .out and .err,
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
 // holds while it lives; <id>.acked, made once when the launcher says it
-// acted on the result; and <id>.wait.* and <id>.waited.*, the slot waits
+// acted on the result; <id>.stop, made once when someone asks the run to
+// stop; and <id>.wait.* and <id>.waited.*, the slot waits
 // its command marked (wait.go). Only one process writes a record at a
 // time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
@@ -307,6 +308,26 @@ func Acked(dir, id string) bool {
 	return err == nil
 }
 
+// AskStop asks run id's supervisor to stop its command, as its time
+// limit would, and record it failed, stopped by by: the supervisor looks
+// for the ask every few seconds. Only the first ask counts; a second
+// returns false.
+func AskStop(dir, id, by string, now time.Time) (bool, error) {
+	b, _ := json.Marshal(ack{By: by, At: now})
+	return once(path(dir, id, ".stop"), b)
+}
+
+// StopAsked reports whether someone asked run id to stop, and who.
+func StopAsked(dir, id string) (by string, ok bool) {
+	b, err := os.ReadFile(path(dir, id, ".stop"))
+	if err != nil {
+		return "", false
+	}
+	var a ack
+	json.Unmarshal(b, &a)
+	return a.By, true
+}
+
 // once makes name with body, only if it doesn't exist yet: true for the
 // one caller that made it.
 func once(name string, body []byte) (bool, error) {
@@ -406,7 +427,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
