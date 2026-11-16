@@ -839,7 +839,11 @@ fi
 rm -f -- "$other"
 
 echo "ticket store ready"
-echo "run stats ${stats:-on}: numbers about each run in stats.db beside the store; nothing leaves the machine"
+if [ "$stats" = off ]; then
+	echo "run stats off: no run is written to stats.db"
+else
+	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
+fi
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.

@@ -37,7 +37,7 @@ s=$(mktemp -d) && GOBIN=$s/bin
 (cd tools/maestro-ticket && GOBIN=$GOBIN go install ./cmd/maestro-ticket)
 git init -q $s/repo && git -C $s/repo commit -q --allow-empty -m init
 mkdir -p $s/repo/.maestro/project
-printf 'maestro-sha: %s\nharnesses: claude codex\nskills-home: hidden\n' $(git rev-parse HEAD) >$s/repo/.maestro/project/install.yaml
+printf 'maestro-sha: %s\nharnesses: claude codex\nskills-home: hidden\ncode-graph: none\nbrowser: none\n' $(git rev-parse HEAD) >$s/repo/.maestro/project/install.yaml
 PATH=$GOBIN:$PATH bash scripts/install.sh apply $s/repo
 cd $s/repo && PATH=$GOBIN:$PATH maestro-ticket create --title "try it" --status todo
 ```

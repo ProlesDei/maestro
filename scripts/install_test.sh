@@ -20,8 +20,9 @@
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
 # bot block that differs only in its Maestro line is the same, one over
 # Grok's limit refuses, and memories go in a message apart; uninstall
-# runs off the pin; stats: on or off sets the marker, and any other value
-# or a second line refuses; check opens a headless page with playwright-cli and
+# runs off the pin; stats: on or off sets the marker and says which, and
+# any other value or a second line refuses; the install.yaml that
+# project-setup.md's ## Run writes applies; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
 # Playwright CLI's own skill;
 # uninstall removes only unchanged files and keeps .maestro/src/ hidden; a
@@ -682,7 +683,8 @@ sed -i 's/^stats: on$/stats: off/' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: off wrote no marker"
 grep -qxF "$(cd "$r15" && pwd -P) stats off --maestro-sha $sha" "$STUB_LOG" || fail "apply didn't run stats off: $(cat "$STUB_LOG")"
-says "run stats off:"
+says "run stats off: no run is written to stats.db"
+! grep -qF "numbers about each run" "$tmp/out" || fail "stats off reads as if stats.db is still written"
 before=$(snap "$r15")
 ok check "$r15"
 [ "$before" = "$(snap "$r15")" ] || fail "check changed the stats marker"
@@ -702,6 +704,16 @@ ok apply "$r15"
 printf 'SQLite format 3\0' >"$r15/.git/maestro/stats.db"
 ok uninstall "$r15"
 [ -e "$r15/.git/maestro/stats.db" ] && [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "uninstall removed stats.db or STATS_OFF"
+
+# --- the install.yaml that this repo's project-setup.md ## Run writes is
+# one apply takes ---
+fmt=$(sed -n 's/^printf '"'"'\(.*\)'"'"' $(git rev-parse HEAD) >$s\/repo\/.maestro\/project\/install.yaml$/\1/p' "$here/../.maestro/project/project-setup.md")
+[ -n "$fmt" ] || fail "## Run in .maestro/project/project-setup.md no longer writes install.yaml with printf"
+r16=$tmp/run-snippet
+git init -q "$r16" && git -C "$r16" commit -q --allow-empty -m init && mkdir -p "$r16/.maestro/project"
+# shellcheck disable=SC2059 # the snippet's own format
+printf "$fmt" "$(git -C "$m" rev-parse HEAD)" >"$r16/.maestro/project/install.yaml"
+ok apply "$r16"
 
 # --- refusals ---
 mkdir "$tmp/plain"
