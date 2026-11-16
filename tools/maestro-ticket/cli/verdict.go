@@ -1,0 +1,216 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
+)
+
+// A note that ends a run's turn on a ticket, and the move that goes with
+// it. The session writes the note; the comment, the move and the release
+// are fixed steps, so they are one call here, checked before any write.
+type noteKind struct {
+	name    string
+	from    ticket.Status
+	to      ticket.Status // "" posts the note and moves nothing
+	release bool
+	note    string // the move's note, before the sha
+}
+
+var (
+	// "Kickback: 2 blockers at <sha>", or "at none" for a PR that isn't there.
+	kickbackHead = regexp.MustCompile(`^Kickback: ([0-9]+) blockers? at ([0-9a-f]{40}|none)(\s|$)`)
+	// "- F3 [major, auto-fix] file:line: ...": a finding and its severity,
+	// as a bullet or a numbered line, in any case, bold or not.
+	findingLine = regexp.MustCompile(`(?i)^\s*(?:[-*+]|[0-9]+[.)])\s+[*_]*(F[0-9]+)[*_:]*\s*[\[(]\s*[*_]*([a-z]+)`)
+	// A bullet that opens with a finding's id, whatever follows.
+	findingID = regexp.MustCompile(`(?i)^\s*(?:[-*+]|[0-9]+[.)])\s+[*_]*(F[0-9]+)\b`)
+	redGates  = regexp.MustCompile(`(?im)^\s*Gates:\s*(red|not run)`)
+	fullSHA   = regexp.MustCompile(`^[0-9a-f]{40}(\W|$)`)
+)
+
+// verdictKind sorts a review's or QA's note by its first line and checks
+// the note says what its kind must. Only a blocker sends a change back
+// (docs/decisions.md, 22), so a Kickback: that lists anything else is
+// refused here, before the engineer pays a round for it.
+func verdictKind(body string) (noteKind, error) {
+	first := firstLine(body)
+	bad := func(format string, a ...any) (noteKind, error) {
+		return noteKind{}, fmt.Errorf("%w: verdict: %s", ticket.ErrInvalid, fmt.Sprintf(format, a...))
+	}
+	var k noteKind
+	prefix := ""
+	is := func(p string) bool {
+		if strings.HasPrefix(first, p) {
+			prefix = p
+		}
+		return prefix == p
+	}
+	switch {
+	case is("Review: GO at "):
+		k = noteKind{name: "review-go", from: ticket.StatusInReview}
+	case is("QA: pass at "):
+		k = noteKind{name: "qa-pass", from: ticket.StatusInReview}
+	case is("Rereview: QA at "):
+		k = noteKind{name: "rereview", from: ticket.StatusInReview}
+	case is("Kickback: QA fail at "):
+		k = noteKind{name: "qa-fail", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "QA fail at"}
+	case is("Escalation: review at "):
+		k = noteKind{name: "review-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "Review escalated at"}
+	case is("Escalation: QA at "):
+		k = noteKind{name: "qa-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "QA escalated at"}
+	case strings.HasPrefix(first, "Kickback:"):
+		m := kickbackHead.FindStringSubmatch(first)
+		if m == nil {
+			return bad("a review's kickback opens %q, with the head's full sha or none; majors and minors go under ## Follow-ups in the report, not here", "Kickback: <n> blockers at <sha>")
+		}
+		n, _ := strconv.Atoi(m[1])
+		var found, slid, unread []string
+		for _, l := range strings.Split(lineBreaks.Replace(body), "\n") {
+			if f := findingLine.FindStringSubmatch(l); f != nil {
+				found = append(found, strings.ToUpper(f[1]))
+				if sev := strings.ToLower(f[2]); sev != "blocker" {
+					slid = append(slid, strings.ToUpper(f[1])+" ("+sev+")")
+				}
+			} else if f := findingID.FindStringSubmatch(l); f != nil {
+				unread = append(unread, strings.ToUpper(f[1]))
+			}
+		}
+		line := "- F1 [blocker, auto-fix] file:line: what's wrong. Fix: ..."
+		switch {
+		case len(unread) > 0:
+			return bad("can't read the severity of %s: write each finding as %q", strings.Join(unread, ", "), line)
+		case len(slid) > 0:
+			return bad("only a blocker sends a change back: take %s off the Kickback and list them under ## Follow-ups in the report", strings.Join(slid, ", "))
+		case n == 0 && len(found) == 0 && !redGates.MatchString(body):
+			return bad("a Kickback with no blocker is a GO: post %q instead", "Review: GO at <sha>")
+		case len(found) == 0:
+			// Never a hint to post a GO here: the note says something stands.
+			return bad("the first line counts %d blockers, and no finding line follows: give each reason for the NO-GO, a red gate or a conflict too, a line %q, and count them", n, line)
+		case n != len(found):
+			return bad("the first line counts %d blockers, and %d finding lines follow (%s)", n, len(found), strings.Join(found, ", "))
+		}
+		// "at none" is a PR that isn't there: nothing to name in the note.
+		k = noteKind{name: "review-kickback", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "Kickback at"}
+		return k, nil
+	default:
+		return bad("the note opens %q; want Review: GO at, Kickback:, Escalation: review at, QA: pass at, Kickback: QA fail at, Escalation: QA at or Rereview: QA at", first)
+	}
+	if !fullSHA.MatchString(first[len(prefix):]) {
+		return bad("the first line wants the head's full sha right after %q: a verdict covers one head", strings.TrimSpace(prefix))
+	}
+	if k.to == ticket.StatusBlocked && !lastLineHas(body, "Return-role:") {
+		return bad("an Escalation: ends with a line %q, so the ticket goes back to its role once answered", "Return-role: <the ticket's role>")
+	}
+	return k, nil
+}
+
+// lastLineHas reports whether the note's last line with text starts with p.
+func lastLineHas(body, p string) bool {
+	lines := strings.Split(strings.TrimSpace(lineBreaks.Replace(body)), "\n")
+	return strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), p)
+}
+
+func runVerdict(ctx context.Context, c *call) error {
+	return c.postNote(ctx, "verdict", verdictKind)
+}
+
+// runHandoff posts an engineer's Handoff: and sends the ticket to review.
+func runHandoff(ctx context.Context, c *call) error {
+	return c.postNote(ctx, "handoff", func(body string) (noteKind, error) {
+		if !strings.HasPrefix(firstLine(body), "Handoff:") {
+			return noteKind{}, fmt.Errorf("%w: handoff: the note opens %q; want Handoff:", ticket.ErrInvalid, firstLine(body))
+		}
+		if !hexSHA.MatchString(firstLine(body)) {
+			return noteKind{}, fmt.Errorf("%w: handoff: the first line names no full head sha, as in %q: review and QA rule on one head", ticket.ErrInvalid, "Handoff: PR <url> at <sha>")
+		}
+		return noteKind{name: "handoff", from: ticket.StatusInProgress, to: ticket.StatusInReview, release: true, note: "Handoff at"}, nil
+	})
+}
+
+type posted struct {
+	Kind    string         `json:"kind"`
+	Comment ticket.Comment `json:"comment"`
+	Moved   string         `json:"moved,omitempty"`
+	Ticket  any            `json:"ticket"`
+}
+
+// postNote posts the note, then makes its kind's move under the same
+// claim: comment first, so the next run reads the note as the latest. The
+// key makes a retry a replay: the comment under it, the move under
+// <key>-move.
+func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (noteKind, error)) error {
+	body := c.fs.String("body", "", "the note")
+	bodyFile := c.fs.String("body-file", "", "read the note from a file, or - for stdin")
+	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, from your claim")
+	token := c.fs.Int64("token", 0, "lease token from your claim")
+	return c.withStore(ctx, func(s ticket.Store) error {
+		id, err := c.idArg()
+		if err != nil {
+			return err
+		}
+		if *holder == "" || *token == 0 {
+			return usagef("%s: --holder and --token are required: claim the ticket first", cmd)
+		}
+		if c.idemKey == "" {
+			return usagef("%s: --idempotency-key is required, so a retry replays instead of posting twice", cmd)
+		}
+		b, err := c.readBody(*body, *bodyFile)
+		if err != nil {
+			return err
+		}
+		// Routing reads a note's first line from its first byte.
+		b = strings.TrimLeft(lineBreaks.Replace(b), " \t\n")
+		k, err := kindOf(b)
+		if err != nil {
+			return err
+		}
+		d, err := s.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		// A replay finds this note on the ticket already, wherever the
+		// ticket went since: the store answers it from the key.
+		replay := slices.ContainsFunc(d.Comments, func(cm ticket.Comment) bool { return cm.Body == b })
+		if d.Status != k.from && !replay {
+			return fmt.Errorf("%w: %s is %s, and this note goes on a ticket in %s: post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
+		}
+		cm, err := s.Comment(ctx, ticket.CommentRequest{
+			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,
+		})
+		if err != nil {
+			return err
+		}
+		out := posted{Kind: k.name, Comment: cm, Ticket: withoutBody(d.Ticket)}
+		if k.to != "" {
+			note := k.note
+			if sha := shaIn(b); sha != "" {
+				note += " " + sha
+			}
+			t, err := s.Transition(ctx, ticket.TransitionRequest{
+				ID: id, From: k.from, To: k.to, Holder: *holder, Token: *token, Note: note, Release: k.release,
+				Actor: c.actor, IdempotencyKey: c.idemKey + "-move",
+			})
+			if err != nil {
+				return fmt.Errorf("the note is posted (comment %d) but the move to %s failed; run the same command again: %w", cm.ID, k.to, err)
+			}
+			out.Moved, out.Ticket = string(k.from)+" -> "+string(k.to), withoutBody(t)
+		}
+		return c.out(out, func(w io.Writer) {
+			fmt.Fprintf(w, "posted %s on %s (comment %d)", k.name, id, cm.ID)
+			if out.Moved != "" {
+				fmt.Fprintf(w, "; moved %s", out.Moved)
+				if k.release {
+					fmt.Fprint(w, ", claim released")
+				}
+			}
+			fmt.Fprintln(w)
+		})
+	})
+}

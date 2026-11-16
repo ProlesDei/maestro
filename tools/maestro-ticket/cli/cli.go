@@ -69,7 +69,8 @@ Commands:
   create      --title T [--body B | --body-file F|-] [--type ship|scout] [--role R] [--priority 0-3]
               [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
               [--areas path,path] [--split-from T-1] [--goal G] [--tier senior|junior]
-              [--parked R (required for backlog)]
+              [--parked R (required for backlog)] [--lint (refuse an engineer's ship ticket with
+              no numbered criterion, no Not handled: list or no areas)]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
               [--tier senior|junior]
               [--split-from T-1 (a cancelled ticket this one replaces)] [--holder H --token N]
@@ -84,6 +85,9 @@ Commands:
               unchanged, and records the session's cost and tokens; a resume replaces its total)
   costs       [--by actor|ticket|goal|origin|tries] [--ticket ID] [--since DATE|DURATION]
               (logged spend per group: runs, dollars, share, median per run and per ticket)
+  flow        [--since DATE|DURATION] [--goal G]   (where done ship tickets spent their time:
+              queue, build, review, QA and blocked, as median, p90 and share; how many review
+              and QA sent back; the slowest three)
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
@@ -116,6 +120,12 @@ Commands:
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
               [--actor-role R] [--parked R (required to enter backlog, except back from blocked)]
   comment     <id> (--body B | --body-file F|-) [--holder H --token N]
+  verdict     <id> --holder H --token N --body-file F|- --idempotency-key K   (a review's or QA's
+              note and its move in one call, by the note's first line: Review: GO, QA: pass and
+              Rereview: post only; a Kickback: sends the ticket back to in_progress; an
+              Escalation: blocks it; refuses a review Kickback: that lists anything but blockers)
+  handoff     <id> --holder H --token N --body-file F|- --idempotency-key K   (an engineer's
+              Handoff: note, the move to in_review and the release, in one call)
   events      [--since SEQ] [--limit N] [--ticket ID] [--type T]
   backup      [--dir D] [--keep N]   (default dir: backups/ next to the store)
   export      [--out PATH|-]
@@ -133,6 +143,12 @@ Commands:
               command in the same folder on the same git tree: then it prints where, and
               exits 0; a pass is recorded only from a clean checkout the run left clean, a
               failure drops it, and env vars and gitignored files are not compared)
+  cache       restore | save [--at SHA] | drop [<name>]   (restore copies into this worktree
+              each folder ## Cache in the main checkout's project-setup.md lists, such as
+              node_modules, when one was saved for the same key files; save keeps them, only
+              from a review or QA run on a clean checkout whose tree a commit on the main
+              branch has, origin/<main> or --at, which in practice is QA after its merge;
+              drop removes what is kept)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -140,8 +156,9 @@ Flags on every command:
                           $(git rev-parse --git-common-dir)/maestro/tickets.db)
   --actor NAME            who is acting (default $MAESTRO_TICKET_ACTOR)
   --idempotency-key K     on create, update, claim, release, transition,
-                          comment: a retry with the same key and request
-                          replays the result
+                          comment, verdict, handoff (which require it): a
+                          retry with the same key and request replays the
+                          result
 
 Fencing: every claim returns a lease token (claim.token), new on every claim,
 including re-claiming your own lease. heartbeat and release always need
@@ -199,6 +216,7 @@ var commands = []command{
 	{"goals", runGoals},
 	{"log-run", runLogRun},
 	{"costs", runCosts},
+	{"flow", runFlow},
 	{"alerts", runAlerts},
 	{"look", runLook},
 	{"eta", runETA},
@@ -218,6 +236,8 @@ var commands = []command{
 	{"reap", runReap},
 	{"transition", runTransition},
 	{"comment", runComment},
+	{"verdict", runVerdict},
+	{"handoff", runHandoff},
 	{"events", runEvents},
 	{"backup", runBackup},
 	{"export", runExport},
@@ -225,6 +245,7 @@ var commands = []command{
 	{"doctor", runDoctor},
 	{"slot", runSlot},
 	{"check", runCheck},
+	{"cache", runCache},
 }
 
 // call is one parsed invocation.
@@ -617,6 +638,7 @@ func runCreate(ctx context.Context, c *call) error {
 	parked := c.fs.String("parked", "", "why a backlog ticket waits: hold, deferred, unready or planning (required for backlog)")
 	goal := c.fs.String("goal", "", "slug of the goal the ticket serves")
 	tier := c.fs.String("tier", "", "which engineer builds it: senior or junior (default: the split's, else none, which means senior)")
+	lint := c.fs.Bool("lint", false, "refuse an engineer's ship ticket with no numbered criterion, no Not handled: list or no areas")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -647,6 +669,15 @@ func runCreate(ctx context.Context, c *call) error {
 		pk, err := ticket.ParseParked(*parked)
 		if err != nil {
 			return err
+		}
+		if *lint {
+			refuse, warn := lintTicket(ty, strings.TrimSpace(*role), b, ticket.SplitList(*areas))
+			if len(refuse) > 0 {
+				return lintError(refuse)
+			}
+			for _, w := range warn {
+				fmt.Fprintln(c.env.Stderr, "lint: "+w)
+			}
 		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
 			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,

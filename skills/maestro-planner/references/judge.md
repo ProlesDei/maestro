@@ -11,12 +11,12 @@ For each id, in order:
 | Row | Call |
 |---|---|
 | `rerun` | A ticket back in review after an `Answer:`: hand it on as step 4 says for the escalation that answer settled, with the flags it calls for. |
-| `blocked` | A merged PR, or a split or drop whose named dependent has no live claim now: make the writes [finish.md](finish.md) makes instead. Else answer it: a split, rewrite, order, deps or which bot; an engineer's question the code or criteria settle; or a review's block over findings it sent back at two shas: judge each finding against the criteria and the PR at its head, as the chief-of-staff skill's look at a finding says, and rewrite the ticket if any stand. |
+| `blocked` | A merged PR, or a split or drop whose named dependent has no live claim now: make the writes [finish.md](finish.md) makes instead. Else answer it: a split, rewrite, order, deps or which bot; an engineer's question the code or criteria settle; or a review's block over findings it sent back at two shas: judge each finding against the criteria and the PR at its head, as the chief-of-staff skill's look at a finding says. One stands only as a blocker, as the **maestro-code-review** skill's [passes.md](../../maestro-code-review/references/passes.md#rate-each-finding) rates one: drop the rest, and rewrite the ticket if any stand. |
 | `unready` | Requeue it if a command or the app can check each criterion; else rewrite it. |
 | `deferred` | Requeue it if the slice before it merged; plan a `Follow-ups:` ticket instead of requeuing it. Dropping one is the chief of staff's. |
 | `hold` | If the fact its latest `Hold:` says lifts it is true on the board, requeue it with a `--note` naming that fact; else leave it. |
 | `cause` | Plan one fix ticket for the cause as [plan.md](plan.md) does, then dep on it every open ticket of the row and each `todo` ticket the cause would fail too, so none builds again before the fix merges, and send the planner `cause <fix id>: <the ids it holds>`, so it stops the line until the fix merges. No shared cause: leave it. |
-| `urgent` | A `Follow-ups:` ticket whose latest note marks an item urgent: plan that item as its own ticket, tier senior, as [plan.md](plan.md) does, then comment `Taken: <new ids>` on the `Follow-ups:` ticket. |
+| `urgent` | A `Follow-ups:` ticket with an item marked urgent in any note since its latest `Taken:`: plan each such item as its own ticket, tier senior, as [plan.md](plan.md) does, then comment `Taken: <new ids>` on the `Follow-ups:` ticket. |
 
 Requeue means `maestro-ticket transition <id> --from backlog --to todo --expect-version <version>`. A write that stops (a claim, a refusal) gets no line: the next look sends the row again.
 
