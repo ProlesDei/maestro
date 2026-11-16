@@ -35,9 +35,6 @@ var watchEvery = 2 * time.Second
 // monotonic clock, and the wall clock jumps on waking.
 const FreezeGap = time.Minute
 
-// asked is why a run ends when someone asked stop.
-const asked = "asked"
-
 // pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
 
@@ -215,12 +212,12 @@ wait:
 		case <-done:
 			break wait
 		case <-ctx.Done():
-			why = "stopped"
+			why = CauseLauncher
 			break wait
 		case <-timer.C:
 		}
 		if by, ok := StopAsked(dir, r.ID); ok {
-			why, stopper = asked, by
+			why, stopper = CauseAsked, by
 			break wait
 		}
 		// Credit reads wait marks on the wall clock. The deadline goes by
@@ -320,10 +317,10 @@ wait:
 			r.Error += fmt.Sprintf("; the machine was frozen %s of it", frozen.Round(time.Second))
 			r.Frozen = freezeOnly
 		}
-	case why == asked:
-		r.State, r.Error = Failed, "stopped by "+stopper
+	case why == CauseAsked:
+		r.State, r.Error, end.Cause = Failed, "stopped by "+stopper, why
 	case why != "":
-		r.State, r.Error = Failed, "the launcher was stopped, so it stopped the run"
+		r.State, r.Error, end.Cause = Failed, "the launcher was stopped, so it stopped the run", why
 	case code == 0:
 		r.State = Done
 	default:

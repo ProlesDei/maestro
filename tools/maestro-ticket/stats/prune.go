@@ -13,7 +13,9 @@ type limits struct {
 	dailyAge time.Duration // daily rows older than this go
 	gap      time.Duration // a pruned session's totals wait this long past age for a resume
 	budget   time.Duration // one prune stops after this long
-	batch    int           // runs per delete transaction
+	batch    int           // runs per delete transaction, at most
+	hold     time.Duration // each batch is sized to hold the lock about this long
+	rest     time.Duration // the gap after each full batch, for waiting writes
 }
 
 var defaultLimits = limits{
@@ -23,6 +25,11 @@ var defaultLimits = limits{
 	gap:      30 * 24 * time.Hour,
 	budget:   2 * time.Second,
 	batch:    1000,
+	// A write waits 250 ms on the lock, sleeping 50 ms at most between
+	// tries (SQLite's busy handler): a batch holds it well inside that,
+	// and in each 75 ms rest every waiting write wakes and takes its turn.
+	hold: 50 * time.Millisecond,
+	rest: 75 * time.Millisecond,
 }
 
 // pruneEvery is how often one supervisor, of however many, prunes.
@@ -30,8 +37,8 @@ const pruneEvery = time.Hour
 
 // Prune runs once an hour across every supervisor: the first to claim the
 // hour rolls old runs up into daily, keeps each session's last totals for
-// a later resume, deletes the runs in short transactions,
-// so a run's write can get in between, and gives back free pages. It
+// a later resume, deletes the runs in short transactions with a rest
+// between them, so a run's write gets in, and gives back free pages. It
 // reports whether this call claimed the hour.
 func Prune(ctx context.Context, db *sql.DB, now time.Time) (bool, error) {
 	return prune(ctx, db, now, defaultLimits)
@@ -46,9 +53,11 @@ func prune(ctx context.Context, db *sql.DB, now time.Time, l limits) (bool, erro
 		return false, nil
 	}
 	// The claim seeds itself: one statement, so of supervisors at once
-	// only the one whose upsert changed the row prunes.
-	res, err := db.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES (?, ?)
-		ON CONFLICT (key) DO UPDATE SET value = excluded.value WHERE value < excluded.value - ?`,
+	// only the one whose upsert changed the row prunes. A last prune an
+	// hour or more ahead of now came from a clock set wrong: it claims too.
+	res, err := db.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES (?1, ?2)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value
+		WHERE value < excluded.value - ?3 OR value > excluded.value + ?3`,
 		metaLastPrune, now.UnixMilli(), pruneEvery.Milliseconds())
 	if err != nil {
 		return false, err
@@ -58,18 +67,26 @@ func prune(ctx context.Context, db *sql.DB, now time.Time, l limits) (bool, erro
 	}
 	stop := time.Now().Add(l.budget)
 	cutoff := now.Add(-l.age).UnixMilli()
+	size := min(l.batch, 50) // a first batch short on any disk
 	for time.Now().Before(stop) && ctx.Err() == nil {
 		var live int64
 		if err := db.QueryRowContext(ctx, `SELECT (page_count - freelist_count) * page_size
 			FROM pragma_page_count, pragma_freelist_count, pragma_page_size`).Scan(&live); err != nil {
 			return true, err
 		}
-		n, err := pruneBatch(ctx, db, cutoff, live > l.bytes, l.batch)
+		start := time.Now()
+		n, err := pruneBatch(ctx, db, cutoff, live > l.bytes, size)
 		if err != nil {
 			return true, err
 		}
-		if n == 0 {
+		if n < int64(size) {
 			break
+		}
+		took := max(time.Since(start), time.Millisecond)
+		size = min(l.batch, max(1, int(int64(size)*int64(l.hold)/int64(took))))
+		select {
+		case <-ctx.Done():
+		case <-time.After(l.rest):
 		}
 	}
 	day := now.Add(-l.dailyAge).UnixMilli() / int64(24*time.Hour/time.Millisecond)

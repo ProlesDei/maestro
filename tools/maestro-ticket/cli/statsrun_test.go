@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -297,6 +298,11 @@ func TestModelFamily(t *testing.T) {
 		"claude-3-5-sonnet-20241022": "sonnet-3.5", "claude-3-opus-20240229": "opus-3",
 		"claude-acme-finetune-prod": "other", "claude-zqmark": "other", "<synthetic>": "other", "gpt-5": "other",
 		"claude-opus-5-5-zqmark7": "other", "claude-opus-55": "other", "Claude-Opus-5-5": "other", "": "other",
+		// Bedrock and Vertex ids.
+		"us.anthropic.claude-opus-4-5-20251101-v1:0": "opus-4.5", "global.anthropic.claude-haiku-4-5-20251001-v1:0": "haiku-4.5",
+		"anthropic.claude-3-5-sonnet-20241022-v2:0": "sonnet-3.5", "claude-opus-4-5@20251101": "opus-4.5",
+		"claude-3-5-sonnet-v2@20241022": "sonnet-3.5", "claude-sonnet-4@20250514": "sonnet-4",
+		"us.zqmark.claude-opus-4-5-v1:0": "other", "claude-opus-4-5@zqmark7": "other", "anthropic.gpt-5": "other",
 	} {
 		got := modelFamily(in)
 		if got != want {
@@ -437,8 +443,8 @@ func TestReasons(t *testing.T) {
 		{runs.Record{State: runs.Died}, outDied, ok, errors.New("x"), "supervisor"},
 		{runs.Record{State: runs.TimedOut}, outTimedOut, ok, errors.New("x"), "limit"},
 		{runs.Record{State: runs.TimedOut, Frozen: true}, outTimedOut, ok, nil, "frozen"},
-		{runs.Record{State: runs.Failed, Exit: exitCode(143), Error: "stopped by planner\nzqmark7"}, outFailed, ok, nil, "asked"},
-		{runs.Record{State: runs.Failed, Error: "the launcher was stopped, so it stopped the run\nzqmark7"}, outFailed, ok, nil, "stopped"},
+		{runs.Record{State: runs.Failed, Exit: exitCode(143), End: &runs.EndFacts{Cause: runs.CauseAsked}}, outFailed, ok, nil, "asked"},
+		{runs.Record{State: runs.Failed, End: &runs.EndFacts{Cause: runs.CauseLauncher}}, outFailed, ok, errors.New("x"), "stopped"},
 		{runs.Record{State: runs.Failed, Exit: exitCode(1)}, outFailed, ok, errors.New("x"), "no_result"},
 		{runs.Record{State: runs.Done}, outFailed, claudeReply{Subtype: looseStr{"error_max_turns"}}, nil, "max_turns"},
 		{runs.Record{State: runs.Done}, outFailed, claudeReply{Subtype: looseStr{"error_max_budget_usd"}}, nil, "budget"},
@@ -774,7 +780,49 @@ func TestStatsConcurrentRunEnds(t *testing.T) {
 	t.Logf("%d run ends, every row in %s", n, time.Since(begun).Round(time.Millisecond))
 }
 
-// Stats code in cli reaches no network and runs nothing.
+// A died run that asked for a stream lost it only if its command
+// started: one that never did had none to lose.
+func TestStreamLostNeedsAStart(t *testing.T) {
+	for pid, want := range map[int]string{0: "off", 4242: "lost"} {
+		row := stats.Run{Stream: "off"}
+		streamFacts(&row, runs.Record{State: runs.Died, PID: pid}, sideFacts{Stream: true}, true, false)
+		if row.Stream != want {
+			t.Errorf("pid %d: stream %s; want %s", pid, row.Stream, want)
+		}
+	}
+}
+
+// A plain launch started with stats off, whose supervisor died, gets no
+// row from a pickup with stats on; one started with stats on does.
+func TestStatsOffFollowsLaunchOrphan(t *testing.T) {
+	t.Parallel()
+	for _, off := range []bool{true, false} {
+		l := newLauncher(t, "planner")
+		prepareStatsAt(t, l.h.dir)
+		if off {
+			l.env = append(l.env, stats.OffEnv+"=off")
+		}
+		r := l.launch("", "--limit", "1h", "--", "sleep", "300")
+		if err := exec.Command("pkill", "-KILL", "-f", "supervise "+r.ID).Run(); err != nil {
+			t.Fatalf("kill supervisor: %v", err)
+		}
+		if d := l.waitEnded(r.ID, 10*time.Second); d.State != runs.Died {
+			t.Fatalf("run whose supervisor died: %+v", d)
+		}
+		l.h.ok(nil, "pickup")
+		want := 1
+		if off {
+			want = 0
+		}
+		if n := statsRowCount(t, l.h.dir); n != want {
+			t.Errorf("started with stats off %v: %d rows; want %d", off, n, want)
+		}
+	}
+}
+
+// The stats*.go files of cli import no network or exec package
+// themselves. This checks direct imports only: they share package cli,
+// which imports both. stats.TestStatsDeps guards the stats package.
 func TestStatsCLIImports(t *testing.T) {
 	files, _ := filepath.Glob("stats*.go")
 	seen := 0

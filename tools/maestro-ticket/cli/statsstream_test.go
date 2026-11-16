@@ -26,7 +26,8 @@ const streamMarker = "STREAM-MARKER-41c7"
 // gave its result, one killed in the middle of a line ($FAKE_OUT/cut, in
 // stream-json only), one that exits 1 with no result, one that prints a
 // crash of its own after the stream began (crash), or one that prints
-// only an error with no newline (bare).
+// only an error with no newline (bare); one that hangs marks its head
+// printed ($FAKE_OUT/<run>/headed).
 const streamClaude = `#!/bin/sh
 d=$FAKE_OUT/$MAESTRO_RUN_ID
 mkdir -p "$d"
@@ -55,6 +56,7 @@ killed)
 noresult)
 	exit 1 ;;
 hang)
+	: >"$d/headed"
 	sleep 300 ;;
 esac
 extra=
@@ -375,7 +377,10 @@ func TestStreamFileRemovedCLI(t *testing.T) {
 	var s started
 	json.Unmarshal(out, &s)
 	deadline := time.Now().Add(10 * time.Second)
-	for len(streams()) == 0 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(j.out, s.Run.ID, "headed")); err == nil {
+			break
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if fi, err := os.Stat(filepath.Join(j.h.dir, "runs", s.Run.ID+".stream")); err != nil || fi.Mode().Perm() != 0o600 {

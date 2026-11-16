@@ -107,7 +107,8 @@ var migrations = []string{
 func Version() int { return len(migrations) }
 
 // EnumCols are the columns that hold codes ids, by table: each is INTEGER,
-// and a test holds every table to it. In daily, 0 stands for none.
+// and a test holds every table to it. In daily, 0 stands for none. A
+// bundle reads run_facts' in this order, one per BundleRun Enum field.
 var EnumCols = map[string][]string{
 	"run_facts": {"role", "job", "model", "effort", "why", "tier", "nudge", "stop", "state", "outcome", "reason",
 		"subtype", "stop_reason", "head", "verdict", "mode", "stream", "open_code", "ring_err", "os", "arch"},

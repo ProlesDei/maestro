@@ -220,8 +220,8 @@ func TestSideFileAtomic(t *testing.T) {
 	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
 		t.Fatalf("a nil side wrote %v", ents)
 	}
-	want := sideFacts{Why: "route_full", Tier: "senior", Tries: ptr(3), Drops: []string{"F1", "F2"}, PromptBytes: 40}
-	writeSide(dir, id, &sideFacts{Why: "fixed", PromptBytes: 9})
+	want := sideFacts{Why: "route_full", Tier: "senior", Tries: ptr(3), Drops: []string{"F1", "F2"}, PromptBytes: ptr(40)}
+	writeSide(dir, id, &sideFacts{Why: "fixed", PromptBytes: ptr(9)})
 	writeSide(dir, id, &want)
 	ents, _ := os.ReadDir(dir)
 	if len(ents) != 1 || ents[0].Name() != id+sideExt {
@@ -246,10 +246,18 @@ func TestSideFileAtomic(t *testing.T) {
 		}
 	}
 
+	// A plain launch's side file only marks stats on: no stream, no
+	// prompt size; with stats off it has none.
 	l := newLauncher(t, "planner")
 	r := l.launch("", "--", "true")
 	l.waitEnded(r.ID, 10*time.Second)
+	if s, ok := readSide(filepath.Join(l.h.dir, "runs"), r.ID); !ok || !reflect.DeepEqual(s, sideFacts{}) {
+		t.Fatalf("a plain launch's side file: %+v, %v", s, ok)
+	}
+	l.env = append(l.env, stats.OffEnv+"=off")
+	r = l.launch("", "--", "true")
+	l.waitEnded(r.ID, 10*time.Second)
 	if _, err := os.Stat(filepath.Join(l.h.dir, "runs", r.ID+sideExt)); err == nil {
-		t.Fatal("a plain launch wrote a side file")
+		t.Fatal("a plain launch with stats off wrote a side file")
 	}
 }

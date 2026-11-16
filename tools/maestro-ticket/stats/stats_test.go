@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -479,6 +480,21 @@ func TestPruneClaimOnce(t *testing.T) {
 	if n := claims(); n != 1 {
 		t.Fatalf("%d claims an hour on; want 1", n)
 	}
+	// A last prune a year ahead, from a clock set wrong, claims once.
+	db, err := Open(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE meta SET value = ? WHERE key = ?`, now.AddDate(1, 0, 0).UnixMilli(), metaLastPrune); err != nil {
+		t.Fatal(err)
+	}
+	if n := claims(); n != 1 {
+		t.Fatalf("%d claims behind a last prune in the future; want 1", n)
+	}
+	if n := claims(); n != 0 {
+		t.Fatalf("%d claims right after; want 0", n)
+	}
 }
 
 // A self-seeding claim: a meta with no last_prune still claims once.
@@ -685,6 +701,72 @@ func TestStatsBurstBalances(t *testing.T) {
 		t.Fatalf("rows %d + drops %d != %d, or a run lost its models", rows, drops, n)
 	}
 	t.Logf("%d stored, %d dropped behind a 600 ms lock", rows, drops)
+}
+
+// A prune of many batches rests between them: every run's write that
+// comes while it goes lands, though each waits only its busy timeout.
+func TestPruneLetsWritesIn(t *testing.T) {
+	db, path := fresh(t)
+	now := time.Now()
+	// 40 batches of old runs, each with its model row, put in by SQL.
+	if _, err := db.Exec(`WITH RECURSIVE c(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM c WHERE i < 39999)
+		INSERT INTO run_facts (run, started_at, ended_at, wall_ms)
+		SELECT 'R-aaaa' || char(97 + i / 17576 % 26, 97 + i / 676 % 26, 97 + i / 26 % 26, 97 + i % 26), ?1 + i - 60000, ?1 + i, 60000 FROM c`,
+		now.Add(-100*24*time.Hour).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO run_models (run, model, input_cum, cost_cum, cost_src)
+		SELECT run, (SELECT id FROM codes WHERE kind = 'model' AND name = 'opus'), 10, 1.5,
+			(SELECT id FROM codes WHERE kind = 'cost_src' AND name = 'result') FROM run_facts`); err != nil {
+		t.Fatal(err)
+	}
+	var pruning, stop atomic.Bool
+	var tried, dropped atomic.Int64
+	var wg sync.WaitGroup
+	for w := range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; !stop.Load(); i++ {
+				wdb, err := Open(path, false)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				during := pruning.Load()
+				r := testRun(runID(50000 + w*100000 + i))
+				r.StartedAt, r.EndedAt = now.Add(-time.Minute), now
+				err = Write(context.Background(), wdb, r)
+				wdb.Close()
+				if during {
+					tried.Add(1)
+					if err != nil {
+						dropped.Add(1)
+						t.Log(err)
+					}
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
+	}
+	time.Sleep(100 * time.Millisecond)
+	pruning.Store(true)
+	start := time.Now()
+	ok, err := prune(t.Context(), db, now, defaultLimits)
+	took := time.Since(start)
+	pruning.Store(false)
+	stop.Store(true)
+	wg.Wait()
+	if !ok || err != nil {
+		t.Fatalf("prune: %v %v", ok, err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM run_facts WHERE ended_at < ?`, now.Add(-90*24*time.Hour).UnixMilli()); n == 40000 {
+		t.Fatal("the prune deleted nothing")
+	}
+	if dropped.Load() != 0 || tried.Load() == 0 {
+		t.Fatalf("%d of %d writes during a %s prune dropped", dropped.Load(), tried.Load(), took)
+	}
+	t.Logf("%d writes during a %s prune, none dropped", tried.Load(), took)
 }
 
 // The stats package reaches no network, runs nothing and holds no

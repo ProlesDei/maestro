@@ -264,7 +264,7 @@ func runLaunch(ctx context.Context, c *call) error {
 // startRun records a run for the actor and hands it to a detached
 // supervisor, and returns once its command runs. launch, job and resume
 // all start runs here; job, again and resume give side, its facts for
-// stats, and launch none.
+// stats, and launch none: its side file is empty, and never streams.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -281,8 +281,12 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	}
 	// Before the supervisor, which may end the run at once; stats off
 	// writes none.
-	if side != nil && stats.Off(filepath.Dir(dir), c.env.Getenv, c.statsUnsafe()) == "" {
-		side.Stream = c.streamOK(store)
+	if stats.Off(filepath.Dir(dir), c.env.Getenv, c.statsUnsafe()) == "" {
+		if side == nil {
+			side = &sideFacts{}
+		} else {
+			side.Stream = c.streamOK(store)
+		}
 		writeSide(dir, r.ID, side)
 	}
 	// The supervisor outlives this command, in a session of its own: a

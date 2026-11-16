@@ -407,10 +407,9 @@ func enumOf(lists Lists, kind, name string) Enum {
 	return Enum{kind, name}
 }
 
-// bundleEnums are the run_facts enum columns a bundle reads, in the
-// order of BundleRun's Enum fields.
-var bundleEnums = []string{"role", "job", "model", "effort", "why", "tier", "nudge", "stop", "state", "outcome", "reason",
-	"subtype", "stop_reason", "head", "verdict", "mode", "stream", "open_code", "ring_err", "os", "arch"}
+// bundleEnums are the run_facts enum columns a bundle reads, all of
+// them, in the order of BundleRun's Enum fields.
+var bundleEnums = EnumCols["run_facts"]
 
 func (b *BundleRun) enums() []*Enum {
 	return []*Enum{&b.Role, &b.Job, &b.Model, &b.Effort, &b.Why, &b.Tier, &b.Nudge, &b.Stop, &b.State, &b.Outcome, &b.Reason,
@@ -525,7 +524,7 @@ func readSteps(ctx context.Context, tx *sql.Tx, f Filter, names map[int64]string
 }
 
 // CaseBundle builds the bundle of one ticket's runs from stats.db,
-// with each run's spend when cost is set, and checks it. It refuses a
+// with each run's spend when cost is set; Encode checks it. It refuses a
 // stats.db at another schema (ErrNewer, ErrNoSchema) and a ticket with
 // no runs (ErrNoRuns).
 func CaseBundle(ctx context.Context, db *sql.DB, ticket int64, lists Lists, cost bool) (*Bundle, error) {
@@ -623,9 +622,6 @@ func CaseBundle(ctx context.Context, db *sql.DB, ticket int64, lists Lists, cost
 			}
 			b.Cost.Runs = append(b.Cost.Runs, rc)
 		}
-	}
-	if err := b.Check(lists); err != nil {
-		return nil, err
 	}
 	return b, nil
 }

@@ -56,15 +56,12 @@ func Skills() []string {
 	return out
 }
 
-// skillStems are the reference and script stems skillFiles keeps for a
-// shipped skill.
-func skillStems(skill string) (refs, scripts []string) {
-	f := skillFiles[skill]
-	return slices.Clone(f.refs), slices.Clone(f.scripts)
-}
+// gitSubs are the git subcommands coded by name, as git:<sub>.
+var gitSubs = []string{"commit", "merge", "push", "worktree"}
 
-// gitSubs are the git and gh subcommands coded by name.
-var gitSubs = []string{"checks", "commit", "merge", "pr", "push", "worktree"}
+// prSubs are the gh pr subcommands coded by name, as gh:pr-<sub>; any
+// other gh pr call is gh:pr.
+var prSubs = []string{"checks", "comment", "create", "diff", "edit", "merge", "ready", "review", "view"}
 
 // bashWords are the first words of a Bash command coded by name.
 var bashWords = []string{"cargo", "docker", "go", "make", "npm", "playwright-cli", "pnpm", "pytest", "yarn"}
@@ -86,7 +83,11 @@ func Codes(n Names) []string {
 		out = append(out, "mt:"+s)
 	}
 	for _, s := range gitSubs {
-		out = append(out, "git:"+s, "gh:"+s)
+		out = append(out, "git:"+s)
+	}
+	out = append(out, "gh:pr")
+	for _, s := range prSubs {
+		out = append(out, "gh:pr-"+s)
 	}
 	for _, w := range bashWords {
 		out = append(out, "Bash:"+w)
@@ -143,8 +144,8 @@ func readCode(p string) string {
 }
 
 // bash codes a Bash command by what it runs first: a shipped script, a
-// maestro-ticket subcommand, a git or gh subcommand on the list, or a
-// first word on the list; else Bash.
+// maestro-ticket subcommand, a git subcommand or gh pr call on the list,
+// or a first word on the list; else Bash.
 func (n Names) bash(cmd string) string {
 	cmd = strings.TrimSpace(cmd)
 	for {
@@ -170,14 +171,23 @@ func (n Names) bash(cmd string) string {
 	first, rest := path.Base(words[0]), words[1:]
 	switch first {
 	case "maestro-ticket":
-		if sub := firstSub(rest, nil); slices.Contains(n.Sub, sub) {
+		if sub, _ := firstSub(rest, nil); slices.Contains(n.Sub, sub) {
 			return "mt:" + sub
 		}
 		return "Bash"
-	case "git", "gh":
+	case "git":
 		// git -C <dir> and -c <k=v> take a word.
-		if sub := firstSub(rest, []string{"-C", "-c"}); slices.Contains(gitSubs, sub) {
-			return first + ":" + sub
+		if sub, _ := firstSub(rest, []string{"-C", "-c"}); slices.Contains(gitSubs, sub) {
+			return "git:" + sub
+		}
+		return "Bash"
+	case "gh":
+		takes := []string{"-R", "--repo"}
+		if sub, more := firstSub(rest, takes); sub == "pr" {
+			if sub, _ := firstSub(more, takes); slices.Contains(prSubs, sub) {
+				return "gh:pr-" + sub
+			}
+			return "gh:pr"
 		}
 		return "Bash"
 	}
@@ -188,16 +198,16 @@ func (n Names) bash(cmd string) string {
 }
 
 // firstSub is the first word that isn't a flag, skipping the word after
-// each flag in takes.
-func firstSub(words, takes []string) string {
+// each flag in takes, and the words after it.
+func firstSub(words, takes []string) (string, []string) {
 	for i := 0; i < len(words); i++ {
 		w := words[i]
 		if !strings.HasPrefix(w, "-") {
-			return w
+			return w, words[i+1:]
 		}
 		if slices.Contains(takes, w) {
 			i++
 		}
 	}
-	return ""
+	return "", nil
 }

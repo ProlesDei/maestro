@@ -16,7 +16,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
@@ -38,11 +37,13 @@ Claude sessions, never a bot's own shell. Nothing here sends it anywhere.
   stats bundle --case T [--cost] [--out FILE|DIR]
                            write a ticket's runs to a file for maintainers:
                            labels for ids, offsets for times, no text; --cost
-                           adds spend. For a person only. It sends nothing
+                           adds spend, in bundles/ beside the store unless
+                           --out says. For a person only. It sends nothing
   stats on|off [--maestro-sha S]
                            start or stop writes for this store, as install.sh
                            apply does; --maestro-sha S alone records the sha
-                           and leaves writes as they are
+                           and leaves writes as they are. A stats: line in
+                           install.yaml sets them again at each apply
 `
 
 // statsViews are stats' views and bundle, by name.
@@ -544,11 +545,7 @@ func runStatsHealth(ctx context.Context, c *call) error {
 			}
 		}
 	}
-	free := envcheck.DiskFree
-	if c.env.DiskFree != nil {
-		free = c.env.DiskFree
-	}
-	if f, ok, err := free(dir); err == nil && ok {
+	if f, ok, err := c.diskFree()(dir); err == nil && ok {
 		h.Space, h.Inodes = ptr(int64(f.Space)), ptr(int64(f.Inodes))
 	}
 	return c.out(h, func(w io.Writer) { printHealth(w, h) })
@@ -609,7 +606,7 @@ type bundleRows struct {
 func runStatsBundle(ctx context.Context, c *call) error {
 	caseID := c.fs.String("case", "", "the ticket whose runs go in the bundle (T-12)")
 	cost := c.fs.Bool("cost", false, "add each run's spend and tokens")
-	out := c.fs.String("out", "", "the file to write, or a folder for it (default: the current folder)")
+	out := c.fs.String("out", "", "the file to write, or a folder for it (default: bundles/ beside the ticket store, outside the work tree)")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -644,12 +641,19 @@ func runStatsBundle(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	dest := c.env.Dir
-	if *out != "" {
-		dest = *out
-		if !filepath.IsAbs(dest) {
-			dest = filepath.Join(c.env.Dir, dest)
+	dest := *out
+	switch {
+	case dest == "":
+		// Beside the store, outside the work tree: in the current folder
+		// a session's git add -A would take it, and a push send it.
+		if dest, err = c.besideStore("bundles"); err != nil {
+			return err
 		}
+		if err := os.Mkdir(dest, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("stats bundle: %w", err)
+		}
+	case !filepath.IsAbs(dest):
+		dest = filepath.Join(c.env.Dir, dest)
 	}
 	path, err := stats.SaveBundle(dest, body)
 	if err != nil {

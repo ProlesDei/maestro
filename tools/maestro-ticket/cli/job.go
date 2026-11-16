@@ -461,7 +461,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
 		}
 	}
-	side.PromptBytes = len(prompt) + 1
+	side.PromptBytes = ptr(len(prompt) + 1)
 	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side)
 	if err != nil {
 		abort()
@@ -855,7 +855,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		}
 	}
 	// Its facts carry on the run it retries; its drops, the prompt's.
-	side := &sideFacts{Why: "again", AgainOf: r.ID, PromptBytes: len(prompt)}
+	side := &sideFacts{Why: "again", AgainOf: r.ID, PromptBytes: ptr(len(prompt))}
 	side.fromParent(dir, r.ID)
 	if p, ok := readSide(dir, first.ID); ok {
 		side.Drops = p.Drops
@@ -1036,7 +1036,7 @@ func resumeRun(ctx context.Context, c *call) error {
 			return fmt.Errorf("resume %s: %w", r.ID, err)
 		}
 	}
-	side := &sideFacts{Why: "resume", PromptBytes: len(text) + 1}
+	side := &sideFacts{Why: "resume", PromptBytes: ptr(len(text) + 1)}
 	side.fromParent(dir, r.ID)
 	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side)
 	if err != nil {

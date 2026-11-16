@@ -348,13 +348,13 @@ func TestShortFreezeMarksNoFrozen(t *testing.T) {
 // error; with no webhook, once after the end.
 func TestSuperviseAfterRing(t *testing.T) {
 	dir := t.TempDir()
-	var rings atomic.Int32
+	var rings, status atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		rings.Add(1)
-		w.WriteHeader(http.StatusServiceUnavailable)
+		w.WriteHeader(int(status.Load()))
 	}))
 	defer srv.Close()
-	for _, hook := range []string{"ok", "broken", "none"} {
+	for _, hook := range []string{"rang", "ok", "broken", "none"} {
 		r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"true"}, Dir: dir}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -368,7 +368,12 @@ func TestSuperviseAfterRing(t *testing.T) {
 			},
 		}
 		want := "rings 0, rang false, none"
+		status.Store(http.StatusServiceUnavailable)
 		switch hook {
+		case "rang":
+			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
+			status.Store(http.StatusOK)
+			want = "rings 1, rang true, none"
 		case "ok":
 			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
 			want = "rings 1, rang false, http5xx"

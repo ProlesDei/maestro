@@ -166,27 +166,27 @@ type pending struct {
 }
 
 type scan struct {
-	n        Names
-	s        Summary
-	seenJSON bool
-	pre      []byte // the command's own text, as it printed it
-	result   []byte // the last whole result line
-	steps    map[string]*Step
-	tail     []Call
-	calls    int64 // calls seen, so tail[i] is call calls-len(tail)+i
-	open     map[string]pending
-	parents  map[string]bool
-	msgs     map[string]Usage // each message's usage, by id: a message comes as a line per block
-	order    []string
-	extra    map[string]*Usage // usage of messages past maxMessages, or with no id
+	n       Names
+	s       Summary
+	pre     []byte // the command's own text, as it printed it
+	result  []byte // the last whole result line
+	steps   map[string]*Step
+	tail    []Call
+	calls   int64 // calls seen, so tail[i] is call calls-len(tail)+i
+	open    map[string]pending
+	parents map[string]bool
+	msgs    map[string]Usage // each message's usage, by id: a message comes as a line per block
+	order   []string
+	extra   map[string]*Usage // usage of messages past maxMessages, or with no id
 }
 
 // Scan reads a run's stream to its end and returns its Summary and the
 // bytes its .out holds: what json would have printed. That is the
 // command's own text, blank lines and a last line with no newline
-// included, then the last whole result line. A line past MaxResult and,
-// after the first JSON line, one that starts as JSON but isn't whole,
-// such as a line cut off as the command was killed, are dropped.
+// included, then the last whole result line. A line past MaxResult and
+// one that starts as JSON but isn't whole, such as a line cut off as the
+// command was killed or its disk filled, are dropped: on stream-json,
+// Claude Code prints no text of its own that starts with {.
 func Scan(r io.Reader, n Names) (Summary, []byte) {
 	f := &scan{n: n, steps: map[string]*Step{}, open: map[string]pending{}, parents: map[string]bool{},
 		msgs: map[string]Usage{}, extra: map[string]*Usage{}}
@@ -222,9 +222,9 @@ func Scan(r io.Reader, n Names) (Summary, []byte) {
 func (f *scan) line(raw []byte) {
 	b := bytes.TrimSpace(raw)
 	if len(b) == 0 || b[0] != '{' || !json.Valid(b) {
-		// The command's own text, kept as it came. Once the stream began,
-		// a line that starts as JSON is a stream line cut short: dropped.
-		if f.seenJSON && len(b) > 0 && b[0] == '{' {
+		// The command's own text, kept as it came. A line that starts as
+		// JSON is a stream line cut short, the first one too: dropped.
+		if len(b) > 0 && b[0] == '{' {
 			return
 		}
 		f.pre = append(f.pre, raw...)
@@ -237,7 +237,6 @@ func (f *scan) line(raw []byte) {
 		}
 		return
 	}
-	f.seenJSON = true
 	var l line
 	json.Unmarshal(b, &l) // a field of another type is left empty
 	if l.Type == "result" {

@@ -111,7 +111,7 @@ func TestBundleRefusals(t *testing.T) {
 		t.Errorf("refusal: %q", errs)
 	}
 	delete(h.env, runs.RunIDEnv)
-	if got := bundleFiles(h.dir); len(got) != 0 {
+	if got := bundleFiles(filepath.Join(h.dir, "bundles")); len(got) != 0 {
 		t.Fatalf("a refusal wrote %v", got)
 	}
 	// A person gets it; a bad request or a case with nothing is no file.
@@ -126,7 +126,7 @@ func TestBundleRefusals(t *testing.T) {
 			t.Errorf("%v: exit %d; want %d %s%s", c.args, code, c.code, out, errs)
 		}
 	}
-	if got := bundleFiles(h.dir); len(got) != 1 {
+	if got := bundleFiles(filepath.Join(h.dir, "bundles")); len(got) != 1 {
 		t.Fatalf("files %v; want the person's one", got)
 	}
 	stats.SetOff(h.dir, true)
@@ -135,7 +135,7 @@ func TestBundleRefusals(t *testing.T) {
 		t.Errorf("off: exit %d %q", code, out)
 	}
 	stats.SetOff(h.dir, false)
-	if got := bundleFiles(h.dir); len(got) != 1 {
+	if got := bundleFiles(filepath.Join(h.dir, "bundles")); len(got) != 1 {
 		t.Fatalf("files %v after a bundle with stats off", got)
 	}
 }
@@ -161,8 +161,12 @@ func TestBundlePrintsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(body)
-	if filepath.Dir(m[1]) != h.dir || m[2] != strconv.Itoa(len(body)) || m[3] != hex.EncodeToString(sum[:]) {
+	if filepath.Dir(m[1]) != filepath.Join(h.dir, "bundles") || m[2] != strconv.Itoa(len(body)) || m[3] != hex.EncodeToString(sum[:]) {
 		t.Errorf("path, size or sha256 off: %v, %d bytes", m[1:], len(body))
+	}
+	// Never in the current folder, where git add -A would take it.
+	if got := bundleFiles(h.dir); len(got) != 0 {
+		t.Errorf("a bundle in the current folder: %v", got)
 	}
 	var b struct {
 		Runs []map[string]any `json:"runs"`

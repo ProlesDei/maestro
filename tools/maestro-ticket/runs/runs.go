@@ -147,7 +147,16 @@ type EndFacts struct {
 	// Escaped counts the run's processes outside its group that the stop
 	// sent SIGTERM: what slot or Claude Code started in a group of its own.
 	Escaped int
+	// Cause is who stopped the run, if someone did: CauseAsked or
+	// CauseLauncher; "" for a run that ended or timed out.
+	Cause string
 }
+
+// Stop causes.
+const (
+	CauseAsked    = "asked"    // maestro-ticket stop
+	CauseLauncher = "launcher" // the launcher was stopped
+)
 
 // Owner is the bot whose pickup shows the run once it ends, who acks it
 // and whose webhook rings for it: its launcher, unless its end named

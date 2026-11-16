@@ -20,9 +20,9 @@
 # git's reason; a bare repo works under safe.bareRepository=explicit; a
 # bot block that differs only in its Maestro line is the same, one over
 # Grok's limit refuses, and memories go in a message apart; uninstall
-# runs off the pin; stats: on or off sets the marker and says which, no
-# line leaves a person's stats off, and any other value or a second line
-# refuses; the install.yaml that
+# runs off the pin; stats: on or off sets the marker and says which, on
+# says when it removed a marker, no line leaves a person's stats off, and
+# any other value or a second line refuses; the install.yaml that
 # project-setup.md's ## Run writes applies; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
 # Playwright CLI's own skill;
@@ -692,6 +692,14 @@ ok check "$r15"
 sed -i 's/^stats: off$/stats: on/' "$r15/.maestro/project/install.yaml"
 ok apply "$r15"
 [ ! -e "$r15/.git/maestro/STATS_OFF" ] || fail "stats: on after off left the marker"
+says "stats: on in install.yaml turned run stats back on, over STATS_OFF"
+# A person's maestro-ticket stats off under a stats: on line: apply
+# says it turned them back on; with the marker gone already, it doesn't.
+: >"$r15/.git/maestro/STATS_OFF"
+ok apply "$r15"
+says "stats: on in install.yaml turned run stats back on, over STATS_OFF"
+ok apply "$r15"
+! grep -qF "turned run stats back on" "$tmp/out" || fail "apply said it turned stats back on, with no marker there"
 # With no stats: line, apply records the sha only: a person's
 # maestro-ticket stats off stays off.
 sed -i '/^stats: on$/d' "$r15/.maestro/project/install.yaml"

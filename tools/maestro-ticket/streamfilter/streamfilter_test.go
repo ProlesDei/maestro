@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -284,6 +285,23 @@ func TestStreamCutAtEnd(t *testing.T) {
 	}
 }
 
+// A first line cut short, before any whole JSON line, is a stream line
+// too: dropped, whether the init line or a hook's.
+func TestStreamCutFirstLine(t *testing.T) {
+	for _, head := range []string{initLine("2.1.322"), hookResponse()} {
+		cut := head[:len(head)/2]
+		for _, in := range []string{cut, "Error: boom\n" + cut, cut + "\n" + resultLine("r")} {
+			_, kept := scanString(in)
+			if strings.Contains(kept, marker) || strings.Contains(kept, `"type":"system"`) {
+				t.Errorf("Scan(%.40q...) kept %q", in, kept)
+			}
+		}
+	}
+	if _, kept := scanString("Error: boom\n" + initLine("2.1.322")[:40]); kept != "Error: boom\n" {
+		t.Errorf("kept %q; want the command's own text alone", kept)
+	}
+}
+
 func TestStepCodes(t *testing.T) {
 	bash := map[string]string{
 		"maestro-ticket pickup":                                    "mt:pickup",
@@ -295,7 +313,13 @@ func TestStepCodes(t *testing.T) {
 		"git -C /w/x commit -m " + marker:                          "git:commit",
 		"git " + marker:                                            "Bash",
 		"git status":                                               "Bash",
-		"gh pr create --title " + marker:                           "gh:pr",
+		"gh pr create --title " + marker:                           "gh:pr-create",
+		"gh pr checks 12 --watch":                                  "gh:pr-checks",
+		"gh -R o/r pr merge 12 --squash":                           "gh:pr-merge",
+		"gh pr " + marker:                                          "gh:pr",
+		"gh api repos/x":                                           "Bash",
+		"git pr":                                                   "Bash",
+		"git checks":                                               "Bash",
 		"go test -race ./...":                                      "Bash:go",
 		"npm run build":                                            "Bash:npm",
 		"bash .claude/skills/maestro-code-review/scripts/review-prep.sh --route T-1": "X:maestro-code-review/review-prep",
@@ -304,6 +328,12 @@ func TestStepCodes(t *testing.T) {
 		"bash .claude/skills/maestro-" + "teamskill/scripts/x.sh":                    "Bash",
 		marker + " --flag": "Bash",
 		"":                 "Bash",
+	}
+	for _, sub := range gitSubs {
+		bash["git "+sub+" x"] = "git:" + sub
+	}
+	for _, sub := range prSubs {
+		bash["gh pr "+sub+" 12"] = "gh:pr-" + sub
 	}
 	for cmd, want := range bash {
 		if got := names.code(block{Name: "Bash", Input: input{Command: cmd}}); got != want {
@@ -346,6 +376,12 @@ func TestStepCodes(t *testing.T) {
 	if slices.Contains(codes, Other) {
 		t.Error("Codes holds other")
 	}
+	// And every git and gh code on the list has a call that gets it.
+	for _, c := range codes {
+		if (strings.HasPrefix(c, "git:") || strings.HasPrefix(c, "gh:")) && !slices.Contains(slices.Collect(maps.Values(bash)), c) {
+			t.Errorf("%q is on Codes, and no call here gets it", c)
+		}
+	}
 }
 
 // The hand-kept list names every shipped skill, reference and script,
@@ -374,7 +410,8 @@ func TestSkillListMatchesRepo(t *testing.T) {
 		return out
 	}
 	for _, s := range repo {
-		refs, scripts := skillStems(s)
+		f := skillFiles[s]
+		refs, scripts := slices.Clone(f.refs), slices.Clone(f.scripts)
 		slices.Sort(refs)
 		slices.Sort(scripts)
 		if got := stems(filepath.Join(root, s, "references"), ".md"); !slices.Equal(got, refs) {

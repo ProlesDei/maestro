@@ -783,8 +783,12 @@ out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
 }
 # The STATS_OFF marker beside the store, and the sha each run's row
 # records. With no stats: line, only the sha: stats stay as they were
-# (on, unless a person ran maestro-ticket stats off). A maestro-ticket
+# (on, unless a person ran maestro-ticket stats off). stats: on removes a
+# marker whoever made it, so apply says when it does. A maestro-ticket
 # too old to know stats is a stale copy on PATH.
+marker=$(dirname "${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}")/STATS_OFF
+reon=''
+[ "$stats" != on ] || [ ! -e "$marker" ] || reon=1
 out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
 	printf '%s\n' "$out" >&2
 	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
@@ -842,10 +846,11 @@ fi
 rm -f -- "$other"
 
 echo "ticket store ready"
-if [ -e "$(dirname "${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}")/STATS_OFF" ]; then
+if [ -e "$marker" ]; then
 	echo "run stats off: no run is written to stats.db"
 else
 	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
+	[ -z "$reon" ] || echo "stats: on in install.yaml turned run stats back on, over STATS_OFF; without that line, maestro-ticket stats off lasts through apply"
 fi
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"

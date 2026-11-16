@@ -140,7 +140,7 @@ func TestStopKind(t *testing.T) {
 		{"kill", []string{"sh", "-c", "trap '' TERM; sleep 30"}, StopKill, 0},
 	} {
 		got := superviseEnd(t, dir, Record{Limit: "1s", Command: c.cmd}, Options{})
-		if e := got.End; e.Stop != c.stop || e.Escaped != c.escaped {
+		if e := got.End; e.Stop != c.stop || e.Escaped != c.escaped || e.Cause != "" {
 			t.Errorf("%s: end facts %+v; want stop %s, %d escaped", c.name, e, c.stop, c.escaped)
 		}
 	}
@@ -156,6 +156,37 @@ func TestStopKind(t *testing.T) {
 	}
 	if runAlive(got.ID) {
 		t.Fatal("an escaped process outlived its run")
+	}
+}
+
+// Who stopped a run reaches its end facts as data: a stop asked, or its
+// launcher's.
+func TestStopCause(t *testing.T) {
+	old := watchEvery
+	watchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { watchEvery = old })
+	dir := t.TempDir()
+	for _, want := range []string{CauseAsked, CauseLauncher} {
+		r, err := Create(dir, Record{Launcher: "planner", Limit: "1h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		time.AfterFunc(300*time.Millisecond, func() {
+			if want == CauseAsked {
+				AskStop(dir, r.ID, "planner", time.Now())
+			} else {
+				cancel()
+			}
+		})
+		var got Record
+		if err := Supervise(ctx, dir, r.ID, Options{OnEnd: func(r Record) { got = r }}); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		if got.End == nil || got.End.Cause != want {
+			t.Errorf("end facts %+v; want cause %s", got.End, want)
+		}
 	}
 }
 

@@ -532,16 +532,20 @@ func (c *call) minFree() (int, error) {
 	return envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
 }
 
+// diskFree is how this call measures a directory's filesystem.
+func (c *call) diskFree() func(dir string) (envcheck.Free, bool, error) {
+	if c.env.DiskFree != nil {
+		return c.env.DiskFree
+	}
+	return envcheck.DiskFree
+}
+
 // headroom refuses, with ErrLowDisk, while the store's, the temp dir's or
 // the working directory's filesystem is under the min margin, as
 // envcheck.Headroom counts it. Work started there would die mid-run with
 // "no space left on device", and the store's own writes with it.
 func (c *call) headroom(store string, min int) error {
-	free := envcheck.DiskFree
-	if c.env.DiskFree != nil {
-		free = c.env.DiskFree
-	}
-	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
+	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, c.diskFree())
 	if err != nil {
 		return fmt.Errorf("refused: %w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
 	}

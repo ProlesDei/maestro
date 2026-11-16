@@ -133,7 +133,7 @@ No source here costs model tokens. Claude Code's harness writes the result objec
 
 | # | Source | What it gives | How it is captured | Privacy class | v1 |
 |---|---|---|---|---|---|
-| S1 | Run record, plus a side file `<id>.stats` | From the record: job, start, end, exit, state, resume_of, nudge, after_death, rang. Model, effort and lean, parsed from `Record.Command` by one function (`argvFacts`). From the side file: why, tier, tries, again_of, drop ids, prompt_bytes, the stream flag. From the supervisor: slot wait, stop kind, escaped count | `startRun` writes the side file through tmp + rename after `runs.Create` and before the supervisor starts, so a run that ends at once still has it; plain `launch` writes none. The supervisor's end facts sit on `Record.End`, tagged `json:"-"`, so no record, `runs` or `pickup` byte changes. `runs.Prune` removes `.stats` | Share (ids Local) | built |
+| S1 | Run record, plus a side file `<id>.stats` | From the record: job, start, end, exit, state, resume_of, nudge, after_death, rang. Model, effort and lean, parsed from `Record.Command` by one function (`argvFacts`). From the side file: why, tier, tries, again_of, drop ids, prompt_bytes, the stream flag. From the supervisor: slot wait, stop kind, escaped count | `startRun` writes the side file through tmp + rename after `runs.Create` and before the supervisor starts, so a run that ends at once still has it; a plain `launch` writes an empty one, which only marks that stats were on as it started; stats off writes none. The supervisor's end facts sit on `Record.End`, tagged `json:"-"`, so no record, `runs` or `pickup` byte changes. `runs.Prune` removes `.stats` | Share (ids Local) | built |
 | S2 | Claude's result object | subtype, is_error, stop_reason, duration_ms, duration_api_ms, num_turns, per-model `modelUsage` with costUSD | `endRun` already reads it; `claudeReply` gained fields whose decode never fails | Share; cost is opt-in in bundles | built |
 | S3 | `stream-json` events, `job`, `job again` and `resume` runs on Linux | step codes, tool calls and fails with ms, the call open at the end, the last 24 calls, subagents, API retries, compactions, peak context, per-turn usage, Claude Code version | stdout goes to `runs/<id>.stream`; the supervisor scans it once the command exits (section 4) | Share (fixed code lists only) | built |
 | S4 | Review findings JSON in the reply | per finding: id, pass, severity, action, prior; per run: verdict, tier, mode; a count of `## Follow-ups` lines; dropped ids | `endRun` reads the reply it already holds (`cli/statsreview.go`) **[format: skills/maestro-code-review/references/passes.md]** | Share | built |
@@ -157,7 +157,7 @@ No source here costs model tokens. Claude Code's harness writes the result objec
 
 ## 4. The stream filter (S3)
 
-**Scope.** A run streams only when its side file asks for it. `startRun` sets the flag when stats are on, the OS is Linux, and the store's disk passes the same headroom test `claim` uses (`streamOK`). Only `job`, `job again` and `resume` write a side file, so a plain `launch -- <cmd>` never streams. The supervisor then swaps the exact `--output-format json` pair for `--output-format stream-json --verbose` when it starts the command (`runs.StreamArgv`). The record keeps json, so `runs`, `pickup` and `job again` read the same command as before, and a command already on stream-json is left alone. Every other run keeps today's path, and its row says `stream=off`.
+**Scope.** A run streams only when its side file asks for it. `startRun` sets the flag when stats are on, the OS is Linux, and the store's disk passes the same headroom test `claim` uses (`streamOK`). Only `job`, `job again` and `resume` set the flag, so a plain `launch -- <cmd>` never streams. The supervisor then swaps the exact `--output-format json` pair for `--output-format stream-json --verbose` when it starts the command (`runs.StreamArgv`). The record keeps json, so `runs`, `pickup` and `job again` read the same command as before, and a command already on stream-json is left alone. Every other run keeps today's path, and its row says `stream=off`.
 
 **Plumbing: a file, not a pipe.** Claude's stdout goes to `runs/<id>.stream` (mode 0600), as it went to `.out` before. Nothing reads it while the command runs, so Claude never waits on Maestro, a grandchild that keeps fd 1 open can't hold `done` back (`TestStreamGrandchildHoldsStdout`), and there is no pipe to break. After `done`, and after the kill path:
 1. `streamfilter.Scan` reads the file once and returns a Summary and the bytes `.out` keeps.
@@ -167,7 +167,7 @@ No source here costs model tokens. Claude Code's harness writes the result objec
 
 **Reading rules.** `Scan` reads with `bufio.Reader.ReadSlice`. It decodes each whole line into a narrow struct and takes `type` from that decode, never from a fixed prefix: R0 found that a result object's first key is not `type`. Any line may be up to 8 MB (`OutputWindow`, as today), so a big tool result still closes its call; a line past 8 MB is skipped. A last chunk with no newline is read as a line.
 
-**What `.out` holds:** the command's own text, as it printed it (a crash message, blank lines and a last line with no newline included, 64 KB cap), then the last whole result line: the bytes `--output-format json` would have printed. Once the stream began, a line that starts as JSON but isn't whole is a stream line cut short, and is dropped. **Never the init line**, so a crashed or stopped run gets no session id from one, and `ParseOutput` reads `.out` as before **[code: runs/runs.go, `TestParseOutputRawStream`]**. A command run on stream-json itself is never swapped, and its raw stream is read as main reads it. `TestStreamInitOnlyFreesClaim`, `TestStreamPickupBytesMatchJSON` and `TestStreamTextMatchesJSON` pin this.
+**What `.out` holds:** the command's own text, as it printed it (a crash message, blank lines and a last line with no newline included, 64 KB cap), then the last whole result line: the bytes `--output-format json` would have printed. A line that starts as JSON but isn't whole is a stream line cut short, the first one too, and is dropped: on stream-json, Claude Code prints no text of its own that starts with `{`. **Never the init line**, so a crashed or stopped run gets no session id from one, and `ParseOutput` reads `.out` as before **[code: runs/runs.go, `TestParseOutputRawStream`]**. A command run on stream-json itself is never swapped, and its raw stream is read as main reads it. `TestStreamInitOnlyFreesClaim`, `TestStreamPickupBytesMatchJSON` and `TestStreamTextMatchesJSON` pin this.
 
 ```mermaid
 flowchart TD
@@ -175,7 +175,7 @@ flowchart TD
   SZ -- yes --> CUT["skip it"]
   SZ -- no --> J{"valid JSON?"}
   J -- "no: the command's text" --> PRE["keep for .out, 64 KB cap"]
-  J -- "no, starts with { after the first JSON line" --> CUT
+  J -- "no, starts with {" --> CUT
   J -- yes --> T{"type, from a narrow decode"}
   T -- "result" --> RES["keep the last one for .out"]
   T -- "system init" --> INIT["claude_code_version only"]
@@ -197,7 +197,7 @@ flowchart TD
 | Read of a shipped skill's `SKILL.md` or `references/<file>.md` | `R:maestro-code-review` or `R:maestro-code-review/passes`: the path shape `maestro-<skill>/references/<stem>.md`, kept only for a skill and stem on the hand-kept list | `Read` |
 | Bash running a shipped script: `[bash\|sh] .../maestro-<skill>/scripts/<stem>.sh` | `X:maestro-code-review/review-prep`, kept only for a listed stem | `Bash` |
 | Bash whose first word is `maestro-ticket` | `mt:<sub>`, from the CLI's command table, which `cli` passes in | `Bash` |
-| Bash whose first word is `git` or `gh` | `git:<sub>` or `gh:<sub>` for push, commit, merge, worktree, pr, checks | `Bash` |
+| Bash whose first word is `git` or `gh` | `git:<sub>` for push, commit, merge, worktree; `gh:pr-<sub>` for `gh pr` checks, comment, create, diff, edit, merge, ready, review, view, and `gh:pr` for any other `gh pr` | `Bash` |
 | Bash whose first word is npm, pnpm, yarn, go, make, pytest, cargo, docker or playwright-cli | `Bash:<word>` | `Bash` |
 
 The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `TestSkillListMatchesRepo` holds the hand-kept skill list to `skills/`, so a new skill or file shows up as a failing test, and until the list catches up it reads as `S:other`, `Read` or `Bash`, never as text. Team setup commands get no code of their own: that would need a parse of each team's `project-setup.md` (later).
@@ -209,7 +209,7 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 - summed per-turn usage per model family, which becomes the run's `run_models` rows (`cost_src=stream`) when it gave no result.
 
 **Failure modes:**
-- **The supervisor dies mid-run.** On Linux, Pdeathsig sends SIGTERM to the child **[code: runs/sys_linux.go]**. `pickup` or `doctor` marks the run died, reads `.stream` into an empty `.out` as the supervisor would have, so a result Claude printed still logs its cost, then removes it. The row says `stream=ok` or `no_result`, or `stream=lost` when the file is gone.
+- **The supervisor dies mid-run.** On Linux, Pdeathsig sends SIGTERM to the child **[code: runs/sys_linux.go]**. `pickup` or `doctor` marks the run died, reads `.stream` into an empty `.out` as the supervisor would have, so a result Claude printed still logs its cost, then removes it. The row says `stream=ok` or `no_result`, or `stream=lost` when the file is gone and the command had started (a pid on the record); one that never started had no stream, and says `off`.
 - **No result line** (timed out, killed, a result past 8 MB): the row says `stream=no_result`, and the claim is freed as for any run with no result (`TestStreamHugeResult`).
 - **macOS and the BSDs.** No Pdeathsig, so a dead supervisor would leave Claude writing to a file no one reads. They keep json (later, once a Mac can run the probe).
 - **Disk.** A whole transcript sits on disk until the run ends. R0 put the largest session on this box at 16.8 MB; 300 of those is about 5 GB, under `envcheck.FloorBytes` (10 GB), and the stream flag needs headroom at the run's start. A run that hits ENOSPC fails as `disk_full`, as today.
@@ -236,7 +236,7 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 | `run`, `session`, `ticket` | id shapes, int | S1, S2 | L |
 | `role` | 7 profile names, `person`, `other`: one Go function, exact match, run before any write | launcher | S |
 | `job` | `launch` plus the `jobKinds` list | S1 | S |
-| `model`, `effort`, `lean` | model family (`opus`, `sonnet`, `opus-5.5`, ... or `other`); effort list; bool | parsed from `Record.Command` by `argvFacts` | S |
+| `model`, `effort`, `lean` | model family (`opus`, `sonnet`, `opus-5.5`, ... or `other`), a Bedrock or Vertex id mapped as the API's own; effort list; bool | parsed from `Record.Command` by `argvFacts` | S |
 | `why` | tier_senior, tier_junior, tier_none, sent_back, route_light, route_full, fixed, override (`--model` changed the pick), again, resume: set where `startJob` decides | side file | S |
 | `tier`, `tries` | junior, senior, none; int. Again and resume copy them from the parent's side file | side file | S |
 | `again_of`, `resume_of` | run id | side file, record | L |
@@ -300,7 +300,7 @@ The schema version lives in `PRAGMA user_version` (1 in v1). Later, with S6: `ch
 
 | Where | Code, worked out by Go (`reasonOf`, `escalateCause`) |
 |---|---|
-| outcome `failed` | `stopped` (the launcher stopped), `asked` (`maestro-ticket stop`, error `stopped by`), `no_result`, `max_turns`, `budget`, `api_error`, `is_error`, `exit_nonzero` |
+| outcome `failed` | `stopped` (the launcher stopped), `asked` (`maestro-ticket stop`), both from the cause the supervisor puts on its end facts, `no_result`, `max_turns`, `budget`, `api_error`, `is_error`, `exit_nonzero` |
 | outcome `timed_out` | `limit`; `frozen` when the record says the machine froze past the limit (`Record.Frozen`) |
 | outcome `died` | `supervisor`. (`reboot`, from a changed boot stamp, is on the list but not yet set.) |
 | review finding (S4) | pass, sev, action, prior, fid |
@@ -348,10 +348,10 @@ Why a separate file and not new tables in `tickets.db`:
 
 ### 6.2 The off switch
 
-- `install.yaml` gains `stats: on|off`. An absent key is never refused, and leaves the marker as it is: on at first, and off once a person ran `stats off`. Any other value, or the key twice, is refused.
+- `install.yaml` gains `stats: on|off`. An absent key is never refused, and leaves the marker as it is: on at first, and off once a person ran `stats off`. Any other value, or the key twice, is refused. A key sets the marker at every `apply`, whoever made it; when `stats: on` removes one, `apply` says so.
 - `apply` runs `maestro-ticket stats on|off --maestro-sha <sha>` after `doctor`, or `stats --maestro-sha <sha>` with no key. `stats off` makes the `STATS_OFF` marker; `stats on` removes it; all three write `stats.sha`. `apply` says on or off from the marker. `check` doesn't touch stats.
 - Every write checks for the marker with one `Lstat`. Off stops every write, the side file and the stream included, and leaves `stats.db` as it is.
-- INSTALL.md writes `on` without asking, and tells the person what `stats.db` holds and how to turn it off.
+- INSTALL.md writes no key without asking, so `maestro-ticket stats off` lasts, and tells the person what `stats.db` holds and how to turn it off. An update from before stats tells them too.
 - `install_test.sh` covers: no key (no refusal, no marker), on, off (marker made), off then on (marker gone), `maybe` and an empty value refused, the key twice refused, and uninstall leaving `stats.db` and the marker.
 
 ### 6.3 Tables
@@ -474,8 +474,8 @@ The diagram leaves out some `run_facts` columns; 5.1 lists them all, and `stats/
 | `pruned_cum` | 30 days past the 90-day line | same prune |
 
 **The prune** runs in a supervisor, after its first ring, so neither a bot's turn nor a ring waits on it:
-1. Claim it in one statement: an upsert on `meta.last_prune` that changes the row only when the last prune is over an hour old. Only the supervisor whose upsert changed a row prunes (`TestPruneClaimOnce`: 50 goroutines, one winner).
-2. Roll a batch of the oldest runs into `daily`, keep each pruned session's last totals in `pruned_cum`, and delete the batch, in one transaction of 1,000 runs. Repeat until the file is under the cap and the age, or 2 s pass. Short transactions let a run's write in between.
+1. Claim it in one statement: an upsert on `meta.last_prune` that changes the row only when the last prune is over an hour old, or over an hour ahead, from a clock set wrong. Only the supervisor whose upsert changed a row prunes (`TestPruneClaimOnce`: 50 goroutines, one winner).
+2. Roll a batch of the oldest runs into `daily`, keep each pruned session's last totals in `pruned_cum`, and delete the batch, in one transaction. The first holds 50 runs; each next is sized to hold the lock about 50 ms, 1,000 runs at most. After each, rest 75 ms. Repeat until the file is under the cap and the age, or 2 s pass. A run's write waits 250 ms on the lock and sleeps 50 ms at most between tries, so each one gets in during a rest (`TestPruneLetsWritesIn`).
 3. Delete old `daily` and `pruned_cum` rows.
 4. Run `PRAGMA incremental_vacuum(2000)`, then a `PASSIVE` WAL checkpoint, so no writer is stalled.
 
@@ -516,7 +516,7 @@ sequenceDiagram
 - **Facts are held in memory.** The side file holds what the job knew at the start. The supervisor's end facts (wait, stop kind, escaped count) and the stream Summary sit on the record, tagged `json:"-"`, so they reach `endRun` and never a record byte (`TestEndFactsNotInRecordJSON`, `TestRecordJSONKeys`).
 - **Slot wait.** The supervisor reads `Credit` once more right before `removeWaits` **[code: runs/supervise.go:259-260]** (`TestWaitMsCredit`).
 - **Ordering.** `Supervise` saves, then calls `OnEnd`, then rings. `OnEnd` runs `endRun`, then the chain that starts the run's fixed next step (`cli/chain.go`). `endRun` writes the stats row last, in a `defer` that runs after `freeRunClaim`. The write takes 300 ms at most. A run that ends while its start's `Prepare` still retries a busy lock first waits for that (2 s at most), then a 300 ms retry, so the chain waits about 2.6 s at worst, and 300 ms once `stats.db` is ready. Prune waits for the first ring.
-- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too, after reading its stream as above. There the stats write is 250 ms, then drop, no retries. A job, again or resume run with no side file started with stats off in its shell, so they write no row of it (`TestStatsOffFollowsOrphan`).
+- **Orphans.** `pickup` and `doctor` end a `Died` run through `endRun` too, after reading its stream as above. There the stats write is 250 ms, then drop, no retries. A run with no side file, a plain launch's included, started with stats off in its shell, so they write no row of it (`TestStatsOffFollowsOrphan`, `TestStatsOffFollowsLaunchOrphan`).
 - **The gap.** A run whose supervisor died between Save and `OnEnd`, or whose write was dropped, has no row. `stats health` counts ended runs on disk that have no `run_facts` row, but a command that never started and a run started with stats off, so the gap shows (`TestStatsHealthMissingRows`).
 - **Stats errors print nothing.** `endRun`'s warnings reach the bot in `pickup`, so a stats error is swallowed, and `stats health` is where losses show.
 
@@ -631,7 +631,7 @@ flowchart LR
 - **`--case T` is the only bundle in v1**, and the default answer to a feedback report. It holds the share-class facts of one ticket's runs, with their steps, tail and findings.
 - **No clock time goes in.** Starts become offsets from the case's first run, rounded down to 15 minutes; the span is whole days; durations are ms.
 - **`--cost`** adds a cost section: each run's own dollars and tokens per model family, and `ctx_peak`.
-- The file is JSON, written whole through a temp file, mode 0600, as `bundle-case-<rand4>.json` in the current folder or where `--out` says. `stats case T` is the readable preview; there is no `preview.txt` and no `--explain`.
+- The file is JSON, written whole through a temp file, mode 0600, as `bundle-case-<rand4>.json` in `bundles/` beside the store, outside the work tree, where no `git add -A` takes it, or where `--out` says. `stats case T` is the readable preview; there is no `preview.txt` and no `--explain`.
 - Later: `--level counts|rows` for trends, and `stats --from` to read bundles, once 2 or more arrive. Bundles from other teams are outside content. Nothing keeps old bundles; the person deletes them.
 
 ### 9.5 Enforced in code
@@ -683,7 +683,7 @@ flowchart LR
 | Stream capture | each run writes its own `.stream`; one scan per supervisor after exit, nothing shared | a few KB of counters per run; the file goes at the run's end |
 | `.stream` on disk | 300 live transcripts | R0: p99 5.0 MB, max 16.8 MB per session; about 1.5 GB at p99, 5 GB at max, under the 10 GB floor; the stream flag needs headroom |
 | Busy lock | `busy_timeout` 250 ms. The orphan path drops its row; a supervisor's write has 300 ms | stats never fails or blocks a command |
-| Prune | one claimed supervisor an hour, after its ring | 2 s of 1,000-run transactions, 3 s in all |
+| Prune | one claimed supervisor an hour, after its ring | 2 s of transactions of about 50 ms each, with 75 ms rests, 3 s in all |
 | Growth | about 2 KB per run (guess) | 9,600 runs a day is about 19 MB a day; the 256 MB live cap holds about 13 days, and `daily` keeps the trend |
 | Names | one `stats.db`; rows keyed by run id or day; one `<id>.stats` and `<id>.stream` per run; bundles named `bundle-case-<rand4>.json`, linked without replace | nothing collides |
 | Missing rows | dropped writes cluster under load | `stats health` counts ended runs with no row |

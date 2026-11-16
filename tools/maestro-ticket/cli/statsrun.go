@@ -51,16 +51,27 @@ var (
 	modelID = regexp.MustCompile(`^claude-(opus|sonnet|haiku)-([3-9])(?:[-.]([0-9]))?(?:-[0-9]{8})?(?:\[1m\])?$`)
 	// claude-3-5-sonnet-20241022, the older order
 	oldModelID = regexp.MustCompile(`^claude-([3-9])(?:-([0-9]))?-(opus|sonnet|haiku)(?:-[0-9]{8})?$`)
+	// Bedrock's us.anthropic. or anthropic. before an id, and -v1:0 after.
+	bedrockPrefix  = regexp.MustCompile(`^(?:[a-z]+\.)?anthropic\.`)
+	bedrockVersion = regexp.MustCompile(`-v[0-9]+(?::[0-9]+)?$`)
+	// Vertex's @20251101 after an id, where the API has -20251101.
+	vertexDate = regexp.MustCompile(`@([0-9]{8})$`)
 )
 
 // modelFamily maps a model name, as argv or modelUsage gives it, to its
-// family on the list: opus, opus-5.5, sonnet-4.5 and the like. Any other,
-// such as a proxy's own id, is other.
+// family on the list: opus, opus-5.5, sonnet-4.5 and the like. A Bedrock
+// or Vertex id maps as the API's own would. Any other, such as a proxy's
+// own id, is other.
 func modelFamily(id string) string {
 	switch id {
 	case modelOpus, modelSonnet, "haiku":
 		return id
 	}
+	date := ""
+	if m := vertexDate.FindStringSubmatch(id); m != nil {
+		id, date = id[:len(id)-len(m[0])], "-"+m[1]
+	}
+	id = bedrockVersion.ReplaceAllString(bedrockPrefix.ReplaceAllString(id, ""), "") + date
 	fam, major, minor := "", "", ""
 	if m := modelID.FindStringSubmatch(id); m != nil {
 		fam, major, minor = m[1], m[2], m[3]
@@ -149,10 +160,14 @@ func reasonOf(r runs.Record, outcome string, res claudeReply, resErr error) stri
 	default:
 		return ""
 	}
+	var cause string
+	if r.End != nil {
+		cause = r.End.Cause
+	}
 	switch {
-	case strings.HasPrefix(r.Error, "the launcher was stopped"):
+	case cause == runs.CauseLauncher:
 		return "stopped"
-	case strings.HasPrefix(r.Error, "stopped by "):
+	case cause == runs.CauseAsked:
 		return "asked" // maestro-ticket stop
 	case resErr != nil:
 		return "no_result"
@@ -201,14 +216,15 @@ var sha40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // its record doesn't hold: written to runs/<id>.stats before its
 // supervisor starts, read into its row at its end, so a run that ends at
 // once still has them. Names from the lists, numbers, and the finding ids
-// --drop named.
+// --drop named. A plain launch's is empty: it only marks that stats were
+// on as the run started.
 type sideFacts struct {
 	Why         string   `json:"why,omitempty"`
 	Tier        string   `json:"tier,omitempty"`
 	Tries       *int     `json:"tries,omitempty"`
 	AgainOf     string   `json:"again_of,omitempty"`
 	Drops       []string `json:"drops,omitempty"`
-	PromptBytes int      `json:"prompt_bytes"`
+	PromptBytes *int     `json:"prompt_bytes,omitempty"`
 	// Stream says its supervisor reads the run's stdout as stream-json.
 	Stream bool `json:"stream,omitempty"`
 }
@@ -260,12 +276,9 @@ func readSide(runsDir, id string) (sideFacts, bool) {
 }
 
 // startedOff reports a run that started with stats off, by the shell's
-// variable or the marker: a job, again or resume run with no side file.
-// No row of it is written after, and stats health doesn't count it.
+// variable or the marker: a run with no side file. No row of it is
+// written after, and stats health doesn't count it.
 func startedOff(runsDir string, r runs.Record) bool {
-	if r.Job == "" && r.ResumeOf == "" {
-		return false
-	}
 	_, err := os.Lstat(filepath.Join(runsDir, r.ID+sideExt))
 	return errors.Is(err, fs.ErrNotExist)
 }
@@ -321,7 +334,7 @@ func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, i
 		row.Stream = "ok"
 	case s != nil:
 		row.Stream = "no_result"
-	case side.Stream && !inSupervisor && r.State == runs.Died:
+	case side.Stream && !inSupervisor && r.State == runs.Died && r.PID != 0:
 		row.Stream = "lost" // its supervisor died, and its stream file is gone
 		return
 	default:
@@ -368,7 +381,9 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 	sf, ok := readSide(filepath.Join(storeDir, "runs"), r.ID)
 	if ok {
 		row.Why, row.Tier, row.AgainOf = sf.Why, sf.Tier, sf.AgainOf
-		row.PromptBytes, row.Drops = ptr(int64(sf.PromptBytes)), ptr(int64(len(sf.Drops)))
+		if sf.PromptBytes != nil { // a job's, again's or resume's, not a launch's
+			row.PromptBytes, row.Drops = ptr(int64(*sf.PromptBytes)), ptr(int64(len(sf.Drops)))
+		}
 		if sf.Tries != nil {
 			row.Tries = ptr(int64(*sf.Tries))
 		}
@@ -405,11 +420,7 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 		}
 		slices.SortFunc(row.Models, func(a, b stats.Model) int { return strings.Compare(a.Model, b.Model) })
 	}
-	free := envcheck.DiskFree
-	if c.env.DiskFree != nil {
-		free = c.env.DiskFree
-	}
-	if f, ok, err := free(storeDir); err == nil && ok {
+	if f, ok, err := c.diskFree()(storeDir); err == nil && ok {
 		row.DiskFreePct, row.InodeFreePct = ptr(int64(f.Space)), ptr(int64(f.Inodes))
 	}
 	return row
