@@ -105,6 +105,19 @@ func TestStreamOutFile(t *testing.T) {
 	}
 }
 
+// A run its limit kills keeps no result in .out, as in json mode, where
+// Claude Code prints its one result only as it exits on its own: a
+// result line a session printed while it waited on background work
+// must not become the reply.
+func TestStreamKilledKeepsNoResult(t *testing.T) {
+	dir := t.TempDir()
+	got := superviseEnd(t, dir, Record{Limit: "1s", Command: streamScript(t, "warn: x\n"+streamResult+"\n", "sleep 30")}, Options{Stream: names})
+	b, _ := os.ReadFile(path(dir, got.ID, ".out"))
+	if got.State != TimedOut || string(b) != "warn: x\n" || got.SessionID != "" || strings.Contains(got.Reply, "done: T-1") {
+		t.Fatalf("state %s, .out %q, record %+v", got.State, b, got)
+	}
+}
+
 // The stream file is mode 0600 while the run goes, and gone once its end
 // is recorded; Prune takes one a dead supervisor left.
 func TestStreamFileRemoved(t *testing.T) {

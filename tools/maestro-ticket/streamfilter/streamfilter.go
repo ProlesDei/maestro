@@ -74,8 +74,14 @@ type Usage struct {
 // Summary is what a scan keeps: numbers, bools, a time, step codes from
 // Codes, model families from Names.Model and Claude Code's version.
 type Summary struct {
-	// Result says a whole result line was found and kept.
+	// Result says a whole result line was found and kept: the last one,
+	// with no turn after it. A result the session went on past, as when
+	// it waits on background work, is a turn's end, not the run's, and
+	// json mode never prints it.
 	Result bool
+	// PreLen is how many bytes of the kept output are the command's own
+	// text, before the result line.
+	PreLen int64
 	Steps  []Step // by code
 	Tail   []Call // the last TailLen calls, oldest first
 	// OpenCode is the oldest call that had no result when a stream with
@@ -170,6 +176,7 @@ type scan struct {
 	s       Summary
 	pre     []byte // the command's own text, as it printed it
 	result  []byte // the last whole result line
+	past    bool   // a turn came after result
 	steps   map[string]*Step
 	tail    []Call
 	calls   int64 // calls seen, so tail[i] is call calls-len(tail)+i
@@ -240,9 +247,11 @@ func (f *scan) line(raw []byte) {
 	var l line
 	json.Unmarshal(b, &l) // a field of another type is left empty
 	if l.Type == "result" {
-		f.s.Result = true
-		f.result = append(f.result[:0], b...)
+		f.result, f.past = append(f.result[:0], b...), false
 		return
+	}
+	if l.Type == "assistant" || l.Type == "user" {
+		f.past = f.result != nil
 	}
 	at, _ := time.Parse(time.RFC3339Nano, l.Timestamp)
 	switch l.Type {
@@ -355,7 +364,11 @@ func (f *scan) done(c block, at time.Time) {
 }
 
 func (f *scan) finish() (Summary, []byte) {
+	if f.past {
+		f.result = nil
+	}
 	s := f.s
+	s.Result = f.result != nil
 	for _, st := range f.steps {
 		s.Steps = append(s.Steps, *st)
 	}
@@ -402,7 +415,10 @@ func (f *scan) finish() (Summary, []byte) {
 		if len(out) > 0 && out[len(out)-1] != '\n' {
 			out = append(out, '\n')
 		}
+		s.PreLen = int64(len(out))
 		out = append(append(out, f.result...), '\n')
+	} else {
+		s.PreLen = int64(len(out))
 	}
 	return s, out
 }

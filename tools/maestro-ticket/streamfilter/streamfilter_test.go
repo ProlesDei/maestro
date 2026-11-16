@@ -149,6 +149,22 @@ func TestStreamOutHoldsOnlyResult(t *testing.T) {
 	}
 }
 
+// A result the session went on past is a turn's end, which json mode
+// never prints: a session waiting on background work prints one, then
+// goes on. Only a result with no turn after it is kept; a system or
+// rate-limit line after it changes nothing.
+func TestStreamResultThenTurn(t *testing.T) {
+	at := "2026-11-15T10:00:00.000Z"
+	s, kept := scanString(stream("warn: x", resultLine("waiting"), assistant("m1", "", "claude-sonnet-5-5", at, 1, 0, 0, 1)))
+	if s.Result || kept != "warn: x\n" || s.PreLen != int64(len(kept)) {
+		t.Fatalf("result %v, kept %q, pre %d", s.Result, kept, s.PreLen)
+	}
+	s, kept = scanString(stream(resultLine("one"), result(at, "t1", false), resultLine("two"), rateLimit(), initLine("2.1.322")))
+	if !s.Result || kept != resultLine("two")+"\n" || s.PreLen != 0 {
+		t.Fatalf("result %v, kept %q, pre %d", s.Result, kept, s.PreLen)
+	}
+}
+
 // The command's own text is kept as json would have shown it, before the
 // stream and after its first line, blank lines and a last line with no
 // newline included; a stream line cut short is not.

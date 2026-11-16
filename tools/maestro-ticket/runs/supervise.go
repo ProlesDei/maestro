@@ -299,7 +299,7 @@ wait:
 	}
 	r.Exit = &code
 	if stream != nil {
-		r.Stream = scanStream(dir, r.ID, out, *o.Stream)
+		r.Stream = scanStream(dir, r.ID, out, *o.Stream, why != "")
 	}
 	outb, _ := ReadTail(path(dir, r.ID, ".out"), OutputWindow)
 	r.Reply, r.SessionID, r.IsError = ParseOutput(outb)
@@ -354,13 +354,18 @@ func StreamArgv(cmd []string) ([]string, bool) {
 // and writes to .out what json would have: the command's own text, then
 // the result line. A grandchild that still holds the file
 // may write on; what it writes after this is never read.
-func scanStream(dir, id string, out *os.File, n streamfilter.Names) *streamfilter.Summary {
+func scanStream(dir, id string, out *os.File, n streamfilter.Names, killed bool) *streamfilter.Summary {
 	f, err := os.Open(path(dir, id, streamExt))
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
 	s, kept := streamfilter.Scan(f, n)
+	if killed {
+		// json mode prints its result only as the command exits on its
+		// own, so a killed run's .out holds its own text alone.
+		kept = kept[:s.PreLen]
+	}
 	out.Write(kept)
 	return &s
 }
@@ -379,7 +384,7 @@ func RecoverStream(dir, id string, n streamfilter.Names) *streamfilter.Summary {
 	if fi, err := out.Stat(); err != nil || fi.Size() > 0 {
 		return nil
 	}
-	return scanStream(dir, id, out, n)
+	return scanStream(dir, id, out, n, false)
 }
 
 // LastOutput is when a died run last wrote its stream, stderr or

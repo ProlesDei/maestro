@@ -307,8 +307,11 @@ func caseMore(f stats.Fact) string {
 	if f.Lean {
 		add("lean")
 	}
-	if f.ResumeOf != "" {
-		add("resume of %s (%s)", f.ResumeOf, dash(f.Nudge))
+	switch {
+	case f.ResumeOf != "" && f.Nudge != "" && f.Nudge != "none":
+		add("resume of %s (%s)", f.ResumeOf, f.Nudge)
+	case f.ResumeOf != "":
+		add("resume of %s", f.ResumeOf)
 	}
 	if f.AgainOf != "" {
 		add("again of %s", f.AgainOf)
