@@ -30,9 +30,11 @@ var (
 	// "(T-1, 5s)": the clock moves between a run's end and the read.
 	maskElapsed = regexp.MustCompile(`\b(after|for) ` + duration)
 	maskRunning = regexp.MustCompile(`(\(\S+, )` + duration + `\)`)
-	maskSHA     = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
-	maskPID     = regexp.MustCompile(`"pid": \d+`)
-	maskHost    = regexp.MustCompile(`"host": "[^"]*"`)
+	// A live run's age in a refusal: "2h54m into its 2h limit".
+	maskInto = regexp.MustCompile(`\b` + duration + ` into its\b`)
+	maskSHA  = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+	maskPID  = regexp.MustCompile(`"pid": \d+`)
+	maskHost = regexp.MustCompile(`"host": "[^"]*"`)
 )
 
 // fixedIDs are run ids the code and the tests write as they are: the
@@ -103,6 +105,7 @@ func (m *masker) mask(s string) string {
 	s = maskAgo.ReplaceAllString(s, "D ago")
 	s = maskElapsed.ReplaceAllString(s, "$1 D")
 	s = maskRunning.ReplaceAllString(s, "${1}D)")
+	s = maskInto.ReplaceAllString(s, "D into its")
 	s = maskPID.ReplaceAllString(s, `"pid": N`)
 	s = maskHost.ReplaceAllString(s, `"host": "<host>"`)
 	return s

@@ -48,6 +48,6 @@ Stop every process you started.
 1. Write one line per claim: `n. <claim>: pass | fail | carried: <sha> | not checked: <evidence>`.
 2. Give `not checked` its reason; it is never a pass. A criterion nobody can check as written blocks the work.
 3. Give each failure its steps, expected result, actual result and error line.
-4. Name a problem outside the criteria on its own line; it doesn't fail the work.
+4. Name a problem outside the criteria on its own line; it doesn't fail the work. That includes a Phase C break on an input no criterion names, unless it loses or leaks data.
 
 **Reply:** the sha, one line per claim (n, pass | fail | carried | not checked, evidence), one line per failure (steps, expected, actual), problems outside the criteria, and the evidence folder.

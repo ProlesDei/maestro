@@ -107,7 +107,7 @@ maestro-ticket: job again: run R-4 isn't a job's
 $ maestro-ticket job again R-2
 exit 4
 stderr:
-maestro-ticket: status conflict: job again: run R-2 is running
+maestro-ticket: status conflict: job again: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2
 $ maestro-ticket resume
 exit 2
 stderr:
@@ -127,7 +127,7 @@ maestro-ticket: not allowed for this actor: resume: run R-3 is reviewer's: only 
 $ maestro-ticket resume R-2
 exit 4
 stderr:
-maestro-ticket: status conflict: resume: run R-2 is running
+maestro-ticket: status conflict: resume: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2
 $ maestro-ticket resume R-5 --died
 exit 4
 stderr:
@@ -397,7 +397,7 @@ stdout:
 {
   "error": {
     "code": "status_conflict",
-    "message": "status conflict: job again: run R-2 is running"
+    "message": "status conflict: job again: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2"
   }
 }
 $ maestro-ticket resume --json
@@ -442,7 +442,7 @@ stdout:
 {
   "error": {
     "code": "status_conflict",
-    "message": "status conflict: resume: run R-2 is running"
+    "message": "status conflict: resume: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2"
   }
 }
 $ maestro-ticket resume R-5 --died --json

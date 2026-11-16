@@ -45,7 +45,7 @@ This section links each rule and says how the design keeps it. It does not resta
 | [Decision 15](../decisions.md) | Capture follows `job`/`resume` under `launch` and keys on the run ids `launch` issues. |
 | [Decision 17](../decisions.md) | Bundles carry versions and an install id, so maintainers can count across teams. A case bundle shows one team's case as a case. |
 | [Decision 19](../decisions.md) | No bot step is added. `look`, `pickup`, `job`, `check` and `ack` print the same bytes on stdout and stderr, text and `--json`, and a test enforces this under each stats failure (10.2). Code refuses `stats` views to bots (section 8). |
-| [Decision 9](../decisions.md) | Enum lists live once, in Go. `stats.db` holds a copy that grows by insert and never by table rebuild (5.0). The rule that stats stay local goes in a new decision (proposed 22, added in PR 7). This doc links to it and does not restate it. |
+| [Decision 9](../decisions.md) | Enum lists live once, in Go. `stats.db` holds a copy that grows by insert and never by table rebuild (5.0). The rule that stats stay local goes in a new decision (23, added in C1). This doc links to it and does not restate it. |
 | [Decision 8](../decisions.md) | `install.sh check` stays read-only. `apply` gains one key, `stats:` (6.2). |
 | [Decision 12](../decisions.md) | All sessions run as one user with all permissions, so the run-id gate on `bundle` only guards against slips. The real guards are the lack of send code and the share-only content (9.6). |
 | Swarm scale (AGENTS.md) | No prompt, skill or persona grows. A CLI write waits at most 250 ms and is dropped on busy. Migration and prune run only in the supervisor, after its first ring. |
@@ -801,7 +801,7 @@ sequenceDiagram
 ```
 
 - **Bundle header:** install hash, `bundle_schema`, checked `v_maestro` and `v_tool`, the Claude versions seen, the span in days, the flags used, and a sha256 of the body.
-- **No send code**: see the new decision (proposed 22), backed by the deps test (9.5, item 6).
+- **No send code**: see decision 23, backed by the deps test (9.5, item 6).
 - **Maintainers treat bundles as data**, under AGENTS.md "Outside content".
 
 ---

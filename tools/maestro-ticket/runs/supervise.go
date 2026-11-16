@@ -26,6 +26,18 @@ const KillGrace = 10 * time.Second
 // killGrace is KillGrace, a var only so tests can shorten it.
 var killGrace = KillGrace
 
+// watchEvery is how often a supervisor looks at the wall clock and for a
+// stop asked while its command runs. A var only so tests can shorten it.
+var watchEvery = 2 * time.Second
+
+// FreezeGap is the least gap between the wall and monotonic clocks that
+// counts as the machine frozen: a VM paused by its host stops the
+// monotonic clock, and the wall clock jumps on waking.
+const FreezeGap = time.Minute
+
+// asked is why a run ends when someone asked stop.
+const asked = "asked"
+
 // pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
 
@@ -173,42 +185,78 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	// The limit leaves out time the command spent waiting for a slot, up
-	// to what Credit allows, so the deadline moves on each time it comes.
-	begun := time.Now()
-	timer := time.NewTimer(limit)
-	defer timer.Stop()
-	why := ""
+	// The limit runs on the wall clock, from the record's start, as leases
+	// and rings do: a machine frozen past a run's limit ends it at once on
+	// waking, since everyone waiting on the run waited through the freeze
+	// too. A Go timer runs on the monotonic clock, which stops while the
+	// machine is frozen, so the supervisor looks at the wall clock each
+	// watchEvery instead. The limit leaves out time the command spent
+	// waiting for a slot, up to what Credit allows, so the deadline moves
+	// on each time it comes.
+	start := r.StartedAt
+	if start.IsZero() {
+		start = o.Now()
+	}
+	wall, mono := o.Now(), time.Now()
+	why, stopper := "", ""
 	var credit time.Duration
-	capped := false
+	var read time.Time // when Credit was last read, on the monotonic clock
+	capped, freezeOnly := false, false
+	timer := time.NewTimer(min(watchEvery, limit))
+	defer timer.Stop()
 wait:
 	for {
 		select {
 		case <-done:
 			break wait
-		case <-timer.C:
-			credit, capped = Credit(dir, r.ID, begun, time.Now(), limit)
-			if left := time.Until(begun.Add(limit + credit)); left <= 0 {
-				// Read once more before it ends the run: a read that
-				// raced a wait's rename can miss that wait.
-				credit, capped = Credit(dir, r.ID, begun, time.Now(), limit)
-			}
-			if left := time.Until(begun.Add(limit + credit)); left > 0 {
-				// While a wait goes on, the deadline moves as fast as the
-				// clock: look again no sooner than liveWait, not in a spin,
-				// but never past the latest the deadline can be.
-				timer.Reset(min(max(left, liveWait), time.Until(begun.Add(limit+maxSlotCredit))))
-				continue
-			}
-			why = TimedOut
-			break wait
 		case <-ctx.Done():
 			why = "stopped"
 			break wait
+		case <-timer.C:
 		}
+		if by, ok := StopAsked(dir, r.ID); ok {
+			why, stopper = asked, by
+			break wait
+		}
+		// Credit reads wait marks on the wall clock. The deadline goes by
+		// the later of the wall clock and the monotonic one: a freeze moves
+		// only the first, and a clock stepped back only the first too, so
+		// neither stretches the limit.
+		now := o.Now()
+		at := later(now, wall.Add(time.Since(mono)))
+		due := func() bool { return !at.Before(start.Add(limit + credit)) }
+		// While a wait goes on, the deadline moves as fast as the clock:
+		// read the waits no sooner than liveWait apart, not in a spin.
+		if due() && (read.IsZero() || time.Since(read) >= liveWait) {
+			credit, capped = Credit(dir, r.ID, start, now, limit)
+			read = time.Now()
+			if due() {
+				// Read once more before it ends the run: a read that
+				// raced a wait's rename can miss that wait.
+				credit, capped = Credit(dir, r.ID, start, now, limit)
+			}
+			if due() {
+				why = TimedOut
+				// The freeze ended it if, by the monotonic clock alone, it
+				// had time left, and the freeze took half its time or more:
+				// a host that sleeps a few minutes each run doesn't hide a
+				// run that hangs.
+				fz := now.Sub(wall) - time.Since(mono)
+				freezeOnly = fz >= FreezeGap && 2*fz >= now.Sub(start) &&
+					wall.Add(time.Since(mono)).Before(start.Add(limit+credit))
+				break wait
+			}
+		}
+		next := watchEvery
+		if left := start.Add(limit + credit).Sub(at); left > 0 {
+			next = min(next, left)
+		}
+		timer.Reset(next)
 	}
+	// Frozen is the wall time the monotonic clock never saw.
+	frozen := o.Now().Sub(wall) - time.Since(mono)
 	// Read once more before the marks go: the run's row keeps it.
-	wait, waitCapped := Credit(dir, r.ID, begun, time.Now(), limit)
+	wait, waitCapped := Credit(dir, r.ID, start, o.Now(), limit)
 	removeWaits(dir, r.ID)
 	end := &EndFacts{WaitMs: wait.Milliseconds(), WaitCapped: waitCapped, Stop: StopNone}
 	if why != "" {
@@ -263,6 +311,12 @@ wait:
 				r.Error += " (the most it leaves out)"
 			}
 		}
+		if frozen >= FreezeGap {
+			r.Error += fmt.Sprintf("; the machine was frozen %s of it", frozen.Round(time.Second))
+			r.Frozen = freezeOnly
+		}
+	case why == asked:
+		r.State, r.Error = Failed, "stopped by "+stopper
 	case why != "":
 		r.State, r.Error = Failed, "the launcher was stopped, so it stopped the run"
 	case code == 0:

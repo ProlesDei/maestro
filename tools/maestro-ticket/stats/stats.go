@@ -2,7 +2,7 @@
 // ticket store, so maintainers and a team can see where runs go wrong and
 // where spend goes. It stores numbers, bools, id-shaped text and enum ids
 // from Go's own lists; never a prompt, reply, path, name or other text.
-// Nothing here sends anything anywhere (decision 22).
+// Nothing here sends anything anywhere (decision 23).
 //
 // Only the supervisor creates or migrates the file (Prepare). Other
 // writers open it only when it exists at this binary's schema, wait at

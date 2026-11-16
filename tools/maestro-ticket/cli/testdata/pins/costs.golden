@@ -265,4 +265,4 @@ stdout:
 $ maestro-ticket costs --since yesterday
 exit 2
 stderr:
-maestro-ticket: --since wants a date such as 2026-11-12 or a length of time such as 72h, not "yesterday"
+maestro-ticket: --since wants a date such as 2026-11-12 or a length of time such as 72h or 7d, not "yesterday"

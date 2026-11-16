@@ -154,7 +154,7 @@ git -C "$tmp/bare.git" config remote.origin.fetch '+refs/heads/*:refs/remotes/or
 git -C "$tmp/bare.git" fetch -q origin
 git -C "$tmp/bare.git" worktree add -q "$tmp/bare-other" -b other origin/main
 git -C "$tmp/bare.git" worktree add -q "$tmp/bare-wt" main
-mkdir -p "$tmp/bare-wt/.maestro/src"
+mkdir -p "$tmp/bare-wt/.maestro/src/.git"
 printf '## Main branch\n\nnope\n' >"$tmp/bare-other/.maestro/project/project-setup.md"
 (cd "$tmp/bare-other" && bash "$prep" --route 8) >"$tmp/out" || fail "route from a bare repo exited $?"
 has route=light

@@ -25,6 +25,7 @@ What we hold to:
 - Least friction for the team that installs it. Every bot's sessions run with all permissions, and Maestro offers no limit to set ([decisions](docs/decisions.md), 12).
 - Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
+- Trade-offs, not perfection. Only a blocker sends a change back; every other real defect ships and goes on a follow-up. Settle the edge cases in the ticket, where one costs a line, not in review, where it costs a round ([decisions](docs/decisions.md), 22).
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch and checks from their `.maestro/project/project-setup.md`.
 - Feedback from one team is a case, not a rule. Maestro is live, and a team's feedback may fit only its own stack or habits. Change the shared files only where a fix helps most teams; point the rest to that team's own setup ([decisions](docs/decisions.md), 17).
@@ -75,7 +76,7 @@ From `tools/maestro-ticket/`:
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 
-Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review prep: `bash scripts/review_prep_test.sh`, after changing `skills/maestro-code-review/scripts/`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
+Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review and QA prep: `bash scripts/review_prep_test.sh`, `bash scripts/qa_prep_test.sh` and `bash scripts/tests_on_base_test.sh`, after changing `skills/maestro-code-review/scripts/` or `skills/maestro-qa-lead/scripts/qa-prep.sh`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
 
 ## Changing shipped skills
 
@@ -85,8 +86,9 @@ This repo is Maestro's source, and Maestro runs on it. To change how Maestro wor
 
 So edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
 - Update the count and group table in `skills/README.md`.
+- For a new, renamed or retired skill, add or remove its `maestro-<name>` symlinks in `.claude/skills/` and `.agents/skills/` (`## Skills` in `.maestro/project/project-setup.md`).
 - Run `bash scripts/install_test.sh`.
-- Shipped skills aren't installed here, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
+- Sessions here run shipped skills through those symlinks, not through an install, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
 - `.maestro/skills/create-edit-skill/SKILL.md` and `skills/maestro-create-edit-skill/SKILL.md` match except for `name`, the `/command`, and the shipped copy's `argument-hint` and `disable-model-invocation: true`: teams call ours by name and keep their own skill creator. Edit ours, copy it over, fix those lines, and `diff` the pair.
 
 ## Outside content

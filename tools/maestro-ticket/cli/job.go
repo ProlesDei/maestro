@@ -795,7 +795,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	case r.Job == "":
 		return usagef("job again: run %s isn't a job's", r.ID)
 	case !r.Ended():
-		return fmt.Errorf("%w: job again: run %s is %s", ticket.ErrStatusConflict, r.ID, r.State)
+		return fmt.Errorf("%w: job again: %s", ticket.ErrStatusConflict, stillRunning(r))
 	}
 	// A resumed run's prompt is only its resume text: start from the run
 	// the session began with.
@@ -873,6 +873,11 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "again: "+r.ID)
 }
 
+// stillRunning says why a live run can't go again yet, and the way out.
+func stillRunning(r runs.Record) string {
+	return fmt.Sprintf("run %s is %s, %s into its %s limit: wait for its end, or end it with maestro-ticket stop %s", r.ID, r.State, ago(time.Since(r.StartedAt)), r.Limit, r.ID)
+}
+
 // diedText is what a run that died is resumed with.
 const diedText = "Your run died. Go on from your last step."
 
@@ -937,7 +942,7 @@ func resumeRun(ctx context.Context, c *call) error {
 	case r.Launcher != c.actor:
 		return fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher))
 	case !r.Ended():
-		return fmt.Errorf("%w: resume: run %s is %s", ticket.ErrStatusConflict, r.ID, r.State)
+		return fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r))
 	case *died && r.State != runs.Died:
 		return fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State)
 	}

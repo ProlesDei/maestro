@@ -15,12 +15,13 @@ Many runs share this machine and its browsers. Keep yours apart from theirs.
 
 ## Check each changed screen
 
+Steps 1 to 3 run on every changed screen. Steps 4 to 7 run only where a criterion names the case, or at tier 2. What a step finds fails a test only as Phase E of [test-a-pr.md](test-a-pr.md) says; the rest is a `New tickets:` line.
+
 1. **The path.** Start logged out with empty storage and walk to the state the criterion names. Screenshot it as `<n>-<slug>-<width>.png`, then open the image and look at it: a page snapshot lists what is on the page, not how it looks.
-2. **Sizes.** At least a phone (375 wide) and a desktop (1280 wide), plus any `## QA` names. Nothing cut off, overlapping or scrolling sideways.
-3. **Console and network.** No new console error or warning next to the same screen on the main branch. No failed request except the ones you caused, and none to a host you don't expect.
+2. **Sizes.** A phone (375 wide) and a desktop (1280 wide), plus any `## QA` names. Nothing on the path cut off, overlapping or scrolling sideways.
+3. **Words and requests.** No `undefined`, `NaN`, `[object Object]`, raw keys like `login.title` or placeholder text on the path. No failed request except the ones you caused, and none to a host you don't expect.
 4. **States.** Loading, with the network slowed; empty; an error, with the API made to fail; very long text, non-Latin text and a name with an apostrophe; a list of hundreds.
 5. **Hands.** Keyboard only: tab order, visible focus, Enter and Escape. Double-click every submit. Use back, reload mid-flow, and two tabs at once.
-6. **Words.** No `undefined`, `NaN`, `[object Object]`, raw keys like `login.title`, placeholder text or typos.
-7. **Access.** Every input has a label and every image alt text. Run an accessibility checker if one is at hand.
-8. **Nearby.** Screenshot one screen next to the change on both the main branch and `H`. Any difference the PR doesn't explain is a finding.
-9. **Rerun.** Record the steps of each failure as Playwright code and save it in the evidence folder, so the engineer can replay it.
+6. **Access.** Every input has a label and every image alt text. Run an accessibility checker if one is at hand.
+7. **Nearby.** Screenshot one screen next to the change on both the main branch and `H`. Any difference the PR doesn't explain is a finding.
+8. **Rerun.** Record the steps of each failure as Playwright code and save it in the evidence folder, so the engineer can replay it.

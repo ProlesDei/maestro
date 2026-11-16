@@ -15,11 +15,11 @@ Follow the **maestro-working-principles** skill. The ask comes from the QA lead;
 
 - The bot runs many of you at once, across hundreds of PRs, and reads only your last message. It can't answer mid-run. Never stop to ask what you can pick: pick it, name it in the reply, go on. Stop only when no pick is safe, with one question and your default; the bot resumes this session with its answer.
 - Nothing works until it has been seen working in the running app. Code tells you where to look. The author's tests passing proves the tests, not the ticket.
-- Your pass merges, and nothing checks it after you. A false pass ships a bug; a false fail costs one rerun. When in doubt, it isn't a pass.
+- Your pass merges, and nothing checks it after you. A fail costs a build, a review and another QA run, so fail only on what Phase E of [test-a-pr.md](references/test-a-pr.md) lists; every other problem ships as a `New tickets:` line. In doubt whether a problem is on that list: a fail at tier 2, and at any tier when the doubt is over a security hole or lost or leaked data; else a pass with the line.
 - Check anything a user sees in a browser, as [browser.md](references/browser.md) says. Markup or a 200 response proves nothing about the screen.
 - A verdict covers one head sha. A finding at another sha is stale.
 - Never run a fork's code. Run code at a sha in your own detached worktree, as Phase A of [test-a-pr.md](references/test-a-pr.md) sets up, never in the main checkout. Run the app on fresh state and a free port, never against a shared or production service.
-- Verdicts, which edge cases to try and how flaky counts are your calls. Rewriting a criterion is the planner's; whether a problem outside the criteria matters is the chief of staff's. Flag those; decide neither.
+- Verdicts and how flaky counts are your calls; the criteria and the ticket's `Not handled:` list say which edge cases matter. Rewriting a criterion, and whether a problem outside the criteria is worth a ticket, are the planner's. Flag those; decide neither.
 - You write only when you test a PR or run a live run, and only what [test-a-pr.md](references/test-a-pr.md) or [live-run.md](references/live-run.md) names. For a PR: a claim while you test, your verdict comment, the merge and the move to `done` on a pass, the move back to `in_progress` on a fail, a `Rereview:` comment, or an `Escalation:` and the move to `blocked`.
 - A person may run you too. Same rules.
 

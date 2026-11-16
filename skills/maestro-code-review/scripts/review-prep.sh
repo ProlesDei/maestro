@@ -15,6 +15,20 @@
 #     route=light when every changed file is docs or inert config that no
 #     agent reads as instructions, else route=full, with pr= and lines=,
 #     its added plus deleted lines.
+#   review-prep.sh --qa <target>
+#     The fixed steps of a QA test (maestro-qa-lead): the same target,
+#     stops, fetch, diff files and sorting, then what QA needs in place
+#     of review's. A run name no other run shares, run=qa-<id>-<6
+#     letters>, names the worktree; today's main, G, is merged into it
+#     (merged=yes|conflict; a conflict is aborted and exits 0, since QA
+#     posts a fail for it), and the commit is never pushed. E is the
+#     run's evidence folder in the repo's shared git folder. review_go is
+#     the sha review's latest verdict passed; qa_last, qa_last_at and
+#     qa_last_main are QA's own latest verdict. K is that verdict's sha
+#     only when it is a fail that tested, at a sha in H's history: then
+#     mode=retest, with the author's delta since K as review works it
+#     out. delta_classes and main_since_classes name the file classes
+#     the delta, and main since that verdict's G, changed.
 #
 # Run it inside the repo, any worktree. Needs git 2.38+, gh and jq, and
 # maestro-ticket for a ticket's verdicts. Exit 2: bad target; 3: no PR or
@@ -23,9 +37,12 @@ set -euo pipefail
 
 die() { echo "review-prep: $2" >&2; exit "$1"; }
 
-route=
-if [ "${1-}" = --route ]; then route=1; shift; fi
-[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route] <PR number | maestro/T-<n> | T-<n>>"
+route="" qa=""
+case ${1-} in
+--route) route=1; shift ;;
+--qa) qa=1; shift ;;
+esac
+[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route | --qa] <PR number | maestro/T-<n> | T-<n>>"
 target=$1
 
 # 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
@@ -43,12 +60,14 @@ gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}
 
 # The main branch, from the main checkout's project-setup.md, never the
 # PR's tree. Where the main repo is bare, the install sits in the linked
-# worktree that holds .maestro/src/ (install.sh allows only one).
+# worktree that holds .maestro/src/ (install.sh allows only one), a clone
+# of Maestro: its .git is looked for, since git tracks no path of that
+# name, so no PR's tree can pass for the install.
 wts=$(git worktree list --porcelain)
 mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
 if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
 	while IFS= read -r w; do
-		[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
 	done < <(sed -n 's/^worktree //p' <<<"$wts")
 fi
 setup=$mainwt/.maestro/project/project-setup.md
@@ -224,6 +243,16 @@ pkeys() {
 	echo "main=$main"
 	echo "H=$H"
 }
+# QA's run name, on a stop too: it keys the note QA posts for one. Six
+# letters from the OS, so runs started in one second, by hundreds of
+# sessions, still share no worktree, evidence folder or write key.
+qarun=
+if [ -n "$qa" ]; then
+	abc=abcdefghijklmnopqrstuvwxyz rand=""
+	for b in $(od -An -N6 -tu1 /dev/urandom); do rand+=${abc:b % 26:1}; done
+	[ ${#rand} -eq 6 ] || die 1 "no 6 random bytes from /dev/urandom"
+	qarun=qa-${ticket:-pr-$pr}-$rand
+fi
 stop=
 if [ "$fork" != false ]; then
 	stop=fork # never run, or even check out, a fork's code
@@ -235,6 +264,7 @@ fi
 if [ -n "$stop" ]; then
 	pkeys
 	echo "stop=$stop"
+	[ -z "$qarun" ] || echo "run=$qarun"
 	exit 0
 fi
 
@@ -248,25 +278,66 @@ git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die
 load_rules
 
 S=$(date +%s)
+id=${ticket:-pr-$pr}
+run=review-$id-$S E="" G=""
+# What main is for the rest of the run: in QA mode its sha, not the ref,
+# which another session's fetch can move while this one works.
+tip=origin/$main
+if [ -n "$qa" ]; then
+	run=$qarun
+	G=$(git rev-parse "refs/remotes/origin/$main^{commit}")
+	tip=$G
+	# In the shared git folder, never the worktree: the PR controls that.
+	E=$(git rev-parse --path-format=absolute --git-common-dir)/maestro/evidence/$id/$run
+fi
 C=$(mktemp -d)
-R=$(mktemp -d)/review-${ticket:-pr-$pr}-$S
-# A failed prep leaves nothing behind for the session to clean up.
+R=$(mktemp -d)/$run
+# A failed prep leaves nothing behind for the session to clean up. Of
+# the evidence folders only this run's goes: others may be writing in
+# the ticket's.
 cleanup() {
 	[ $? -eq 0 ] && return
 	git worktree remove --force "$R" 2>/dev/null || true
 	rm -rf -- "$C" "${R%/*}"
+	[ -z "$E" ] || rm -rf -- "$E"
 }
 trap cleanup EXIT
+# bash runs no EXIT trap when a signal kills it, and a run's time limit
+# ends it with one: exit, so the trap runs.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 git worktree add -q --detach "$R" "$H" || die 1 "git worktree add $R failed"
 [ "$(git -C "$R" rev-parse HEAD)" = "$H" ] || die 1 "worktree $R isn't at $H"
 
-B=$(git merge-base "origin/$main" "$H")
+merged=yes
+if [ -n "$qa" ]; then
+	mkdir -p "$E" || die 1 "can't make $E"
+	# What ships is H on today's main, so that is what QA runs. The merge
+	# commit stays in this worktree and is never pushed, so it takes a
+	# stand-in author where git has none, no signature, and no hook: a
+	# hook is a check, and the session runs the checks.
+	ident=()
+	{ git -C "$R" var GIT_AUTHOR_IDENT && git -C "$R" var GIT_COMMITTER_IDENT; } >/dev/null 2>&1 ||
+		ident=(-c user.name=maestro-qa -c user.email=maestro-qa@localhost)
+	if ! err=$(git -C "$R" "${ident[@]}" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+		merge -q --ff --no-edit "$G" 2>&1); then
+		# Only a merge git stopped half way is a conflict.
+		git -C "$R" rev-parse -q --verify MERGE_HEAD >/dev/null ||
+			die 1 "git merge of $main at $G into $R failed: $(tail -n 1 <<<"$err")"
+		git -C "$R" merge --abort || die 1 "git merge --abort in $R failed"
+		merged=conflict
+	fi
+fi
+
+B=$(git merge-base "$tip" "$H")
 jq . <<<"$view" >"$C/pr.json"
 gd "$B" "$H" >"$C/diff.patch"
 gd --stat "$B" "$H" >"$C/stat.txt"
 git log --oneline "$B..$H" >"$C/log.txt"
 merges=yes
-git merge-tree --write-tree "origin/$main" "$H" >/dev/null 2>&1 || {
+# QA's real merge above has already said.
+[ -n "$qa" ] || git merge-tree --write-tree "origin/$main" "$H" >/dev/null 2>&1 || {
 	[ $? -eq 1 ] || die 1 "git merge-tree failed"
 	merges=conflict
 }
@@ -293,21 +364,60 @@ touch "$C/files.txt"
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
 if [ -n "$ticket" ]; then
 	firsts=$(maestro-ticket get "$ticket" --json |
-		jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // ""))') ||
+		jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // "")) | sub("^[ \t]+"; "")') ||
 		die 1 "maestro-ticket get $ticket failed"
 else
 	firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
 		--jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
 		die 1 "gh couldn't read PR $pr's comments"
 fi
-last=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
-# The word after the first " at " only, and only a full sha.
-case $last in *" at "*) K=$(awk '{print $1}' <<<"${last#* at }"); [[ $K =~ ^[0-9a-f]{40}$ ]] || K= ;; *) K= ;; esac
+# sha_after <line> <text>: the full sha right after the first <text> in
+# the line, or nothing.
+sha_after() {
+	[[ $1 == *"$2"* ]] || return 0
+	[[ ${1#*"$2"} =~ ^([0-9a-f]{40})([^[:alnum:]]|$) ]] && echo "${BASH_REMATCH[1]}"
+	return 0
+}
+# classes: the distinct classes of the paths on stdin, on one line.
+classes() {
+	local f out
+	out=$(while IFS= read -r f; do if [ -n "$f" ]; then class "$f"; fi; done | sort -u | tr '\n' ' ')
+	out=${out% }
+	echo "${out:-none}"
+}
+inc=incremental by="review's verdict" why="no earlier verdict" delta=""
+if [ -n "$qa" ]; then
+	# What review passed: its latest verdict, a Kickback: of its own
+	# included, and only when that one opens as a GO.
+	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
+	review_go=
+	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
+	# QA's own latest verdict. Only a fail that tested is a base for a
+	# retest: a pass or a "not tested:" checked nothing to carry over.
+	inc=retest by="QA's fail" why="no earlier QA verdict" K=""
+	last=$(grep -E '^(QA: pass|Kickback: QA fail)' <<<"$firsts" | tail -n 1 || true)
+	qa_last=none qa_at="" qa_main=""
+	if [ -n "$last" ]; then
+		qa_at=$(sha_after "$last" " at ")
+		qa_main=$(sha_after "$last" " on $main at ")
+		case $last in
+		"QA: pass"*) qa_last=pass why="QA's last verdict is a pass" ;;
+		*"not tested:"*) qa_last=not-tested why="QA's last fail tested nothing" ;;
+		*) qa_last=fail K=$qa_at why="QA's last fail names no sha" ;;
+		esac
+	fi
+else
+	last=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
+	# The word after the first " at " only, and only a full sha.
+	case $last in *" at "*) K=$(awk '{print $1}' <<<"${last#* at }"); [[ $K =~ ^[0-9a-f]{40}$ ]] || K= ;; *) K= ;; esac
+fi
 
-mode=full why="no earlier verdict" T="" dfiles="" dlines=""
+mode=full T="" dfiles="" dlines="" dclasses=""
 if [ -n "$K" ]; then
 	if ! git cat-file -e "$K^{commit}" 2>/dev/null || ! git merge-base --is-ancestor "$K" "$H"; then
 		why="$K is not in $H's history"
+		# QA's K is only ever a sha a retest can start from.
+		[ -z "$qa" ] || K=
 	else
 		# The author's change since K, with main's merges taken out.
 		if T=$(git merge-tree --write-tree "$K" "$B" | head -n 1) && gd "$T" "$H" >"$C/delta.patch"; then
@@ -325,11 +435,20 @@ if [ -n "$K" ]; then
 		fi
 		dfiles=$(grep -c . <<<"$delta" || true)
 		dlines=$(awk -F'\t' '{a = $1 == "-" ? 0 : $1; d = $2 == "-" ? 0 : $2; n += a + d} END {print n + 0}' <<<"$delta")
+		[ -z "$qa" ] || dclasses=$(cut -f3- <<<"$delta" | classes)
 		if [ "$dlines" -gt 400 ] || [ "$dfiles" -gt 15 ]; then
 			why="delta of $dlines lines in $dfiles files: redone, not fixed"
 		else
-			mode=incremental why="from review's verdict at $K"
+			mode=$inc why="from $by at $K"
 		fi
+	fi
+fi
+# What main changed since the G of QA's last verdict; unknown when that
+# verdict names no main, or one this repo doesn't have.
+if [ -n "$qa" ]; then
+	msince=unknown
+	if [ -n "$qa_main" ] && git cat-file -e "$qa_main^{commit}" 2>/dev/null; then
+		msince=$(gd --name-only --no-renames "$qa_main" "$G" | classes)
 	fi
 fi
 
@@ -337,19 +456,39 @@ fi
 	pkeys
 	echo "stop=none"
 	echo "S=$S"
-	echo "R=$R"
-	echo "C=$C"
-	echo "B=$B"
-	echo "merges=$merges"
+	if [ -n "$qa" ]; then
+		echo "run=$run"
+		echo "R=$R"
+		echo "C=$C"
+		echo "E=$E"
+		echo "B=$B"
+		echo "G=$G"
+		echo "merged=$merged"
+	else
+		echo "R=$R"
+		echo "C=$C"
+		echo "B=$B"
+		echo "merges=$merges"
+	fi
 	echo "files=$nfiles"
 	echo "lines=$lines"
 	echo "binary=$binary"
 	echo "tier2_paths=$tier2"
 	echo "docs_only=$([ -n "$light" ] && [ "$nfiles" -gt 0 ] && echo yes || echo no)"
+	if [ -n "$qa" ]; then
+		echo "review_go=${review_go:-none}"
+		echo "qa_last=$qa_last"
+		echo "qa_last_at=${qa_at:-none}"
+		echo "qa_last_main=${qa_main:-none}"
+	fi
 	echo "K=${K:-none}"
 	echo "T=${T:-none}"
 	echo "delta_files=${dfiles:-none}"
 	echo "delta_lines=${dlines:-none}"
+	if [ -n "$qa" ]; then
+		echo "delta_classes=${dclasses:-none}"
+		echo "main_since_classes=$msince"
+	fi
 	echo "mode=$mode"
 	echo "mode_why=$why"
 	echo "wrote=$C: pr.json diff.patch stat.txt log.txt files.txt$([ -f "$C/delta.patch" ] && echo ' delta.patch') prep.txt"

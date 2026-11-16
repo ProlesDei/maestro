@@ -275,8 +275,15 @@ func (c *call) parseSince(s string) (time.Time, error) {
 		return t, nil
 	}
 	d, err := time.ParseDuration(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		// time.ParseDuration stops at hours, and people say 7d.
+		var n int
+		if n, err = strconv.Atoi(days); err == nil {
+			d = time.Duration(n) * 24 * time.Hour
+		}
+	}
 	if err != nil || d <= 0 {
-		return time.Time{}, usagef("--since wants a date such as 2026-11-12 or a length of time such as 72h, not %q", s)
+		return time.Time{}, usagef("--since wants a date such as 2026-11-12 or a length of time such as 72h or 7d, not %q", s)
 	}
 	now := time.Now()
 	if c.env.Now != nil {
