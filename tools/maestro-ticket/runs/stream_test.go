@@ -113,7 +113,7 @@ func TestStreamKilledKeepsNoResult(t *testing.T) {
 	dir := t.TempDir()
 	got := superviseEnd(t, dir, Record{Limit: "1s", Command: streamScript(t, "warn: x\n"+streamResult+"\n", "sleep 30")}, Options{Stream: names})
 	b, _ := os.ReadFile(path(dir, got.ID, ".out"))
-	if got.State != TimedOut || string(b) != "warn: x\n" || got.SessionID != "" || strings.Contains(got.Reply, "done: T-1") {
+	if got.State != TimedOut || string(b) != "warn: x\n" || got.SessionID != "" || strings.Contains(got.Reply, "done: T-1") || got.Stream == nil || got.Stream.Result {
 		t.Fatalf("state %s, .out %q, record %+v", got.State, b, got)
 	}
 }

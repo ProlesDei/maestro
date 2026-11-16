@@ -696,7 +696,7 @@ flowchart LR
 
 **Differential modes (C1, C4).** `TestStatsModesKeepOutput` runs the pinned commands in process under seven stats states (off, fresh, missing, locked, corrupt, newer schema, broken) against the same goldens. `TestStatsModesKeepJobOutput` does the same for `job`, `job again`, `resume` and `look` with stats off and broken. `TestStreamPickupBytesMatchJSON` runs one fake claude in both formats: masked `pickup` and `runs --json` are identical.
 
-**Concurrency (C1).** `TestStatsConcurrentRunEnds`: 40 processes end runs over 3 s, every row lands, stderr stays empty; with `MAESTRO_STATS_LOAD=1`, 300. `TestStatsBurstBalances`: rows plus drops equal the runs. `TestPruneClaimOnce`: one prune per hour, however many try.
+**Concurrency (C1).** `TestStatsConcurrentRunEnds`: 40 processes end runs over 3 s, every row lands, stderr stays empty; with `MAESTRO_STATS_LOAD=1`, 300. Under `-race`, writes run slow enough to miss their 300 ms, so there it asks only that no launch fails and some row lands. `TestStatsBurstBalances`: rows plus drops equal the runs. `TestPruneClaimOnce`: one prune per hour, however many try.
 
 ---
 

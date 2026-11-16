@@ -363,8 +363,9 @@ func scanStream(dir, id string, out *os.File, n streamfilter.Names, killed bool)
 	s, kept := streamfilter.Scan(f, n)
 	if killed {
 		// json mode prints its result only as the command exits on its
-		// own, so a killed run's .out holds its own text alone.
-		kept = kept[:s.PreLen]
+		// own, so a killed run's .out holds its own text alone, and it
+		// gave no result.
+		kept, s.Result = kept[:s.PreLen], false
 	}
 	out.Write(kept)
 	return &s
