@@ -71,9 +71,12 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		}
 	}
 	rt.Send = left
+	// A launcher with no webhook, such as a person, reads its pickup:
+	// leave it what it would have seen.
+	bot := hasHook(notify, r.Launcher)
 	rest := leftForBot(rt)
-	done := len(left) == 0 && !rest
-	toPlanner := len(left) > 0 && !rest && r.Launcher != "planner" &&
+	done := bot && len(left) == 0 && !rest
+	toPlanner := bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
 		!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
 	if len(chained) == 0 && !done && !toPlanner {
 		return // as before: the launcher's pickup routes it

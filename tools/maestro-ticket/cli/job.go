@@ -172,6 +172,8 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 	}
 	cmd := exec.CommandContext(ctx, "bash", script, "--route", target)
 	cmd.Dir = strings.TrimSpace(root)
+	// A gh the script started keeps stdout open after ctx kills bash.
+	cmd.WaitDelay = 5 * time.Second
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

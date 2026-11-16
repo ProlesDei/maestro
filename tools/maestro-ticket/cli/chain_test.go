@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,7 +17,8 @@ import (
 )
 
 // chainClaude stands in for claude in a chain: each session does what
-// its skill would to T-1, through maestro-ticket, then replies.
+// its skill would to T-1, through maestro-ticket, then replies. The
+// first review sends it back; the second passes.
 const chainClaude = `#!/bin/sh
 d=$FAKE_OUT/$MAESTRO_RUN_ID
 mkdir -p "$d"
@@ -25,7 +27,14 @@ printf '%s\n' "$in" >"$d/stdin"
 mt() { "$FAKE_MT" "$@" >>"$d/mt" 2>&1; }
 case $in in
 "/maestro-software-engineer T-1"*) mt transition T-1 --to in_review ;;
-"/maestro-code-review T-1"*) printf 'Review: GO at abc1234\n' | mt comment T-1 --body-file - ;;
+"/maestro-code-review T-1"*)
+	if [ -e "$FAKE_OUT/kicked" ]; then
+		printf 'Review: GO at abc1234\n' | mt comment T-1 --body-file -
+	else
+		: >"$FAKE_OUT/kicked"
+		printf 'Kickback: review at abc1234: F1 no test\n' | mt comment T-1 --body-file -
+		mt transition T-1 --to in_progress
+	fi ;;
 "/maestro-qa-lead T-1"*) mt transition T-1 --to done --actor-role qa-lead ;;
 esac
 printf '{"type":"result","subtype":"success","is_error":false,"result":"job: done: %s","session_id":"s","total_cost_usd":0.01,"usage":{},"modelUsage":{}}\n' "$MAESTRO_RUN_ID"
@@ -87,19 +96,6 @@ func (j *jobHarness) waitStatus(id, want string, within time.Duration) {
 	}
 }
 
-func allRuns(t *testing.T, dir string) map[string]runs.Record {
-	t.Helper()
-	list, err := runs.List(filepath.Join(dir, "runs"), time.Now(), true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := map[string]runs.Record{}
-	for _, r := range list {
-		out[r.Job] = r
-	}
-	return out
-}
-
 func (j *jobHarness) pickupAs(actor string) string {
 	j.t.Helper()
 	out, err := j.chainCmd(actor, "", "pickup").CombinedOutput()
@@ -109,10 +105,28 @@ func (j *jobHarness) pickupAs(actor string) string {
 	return string(out)
 }
 
-// A build's end starts its review, as the reviewer; the GO starts QA, as
-// the QA lead, on the slots the QA lead last asked for; QA merges. No
-// worker bot is rung: the planner hears of the free slot and the merge,
-// in its own pickup, and acks them.
+// ticketRuns are the runs on id, oldest first.
+func ticketRuns(t *testing.T, dir, id string) []runs.Record {
+	t.Helper()
+	list, err := runs.List(filepath.Join(dir, "runs"), time.Now(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := []runs.Record{}
+	for _, r := range list {
+		if r.Ticket == id {
+			out = append(out, r)
+		}
+	}
+	slices.SortFunc(out, func(a, b runs.Record) int { return a.StartedAt.Compare(b.StartedAt) })
+	return out
+}
+
+// A build's end starts its review, as the reviewer; the send-back starts
+// the junior's build again; the GO starts QA, as the QA lead, on the
+// slots the QA lead last asked for; QA merges. No worker bot is rung:
+// the planner hears of each free slot and the merge, rung as itself, in
+// its own pickup, and acks them.
 func TestChainRunsTheHandoffs(t *testing.T) {
 	j, hooks := newChainHarness(t, "junior-engineer", "reviewer", "qa-lead")
 	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
@@ -139,20 +153,39 @@ func TestChainRunsTheHandoffs(t *testing.T) {
 	if out, err := j.chainCmd("junior-engineer", "", "job", "build", "T-1").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	j.waitStatus("T-1", "done", 60*time.Second)
-	hooks["planner"].wait(t, 20*time.Second)
-	hooks["planner"].wait(t, 20*time.Second)
-
-	rs := allRuns(t, j.h.dir)
-	build, review, qa := rs["build"], rs["review"], rs["qa"]
-	if review.Launcher != "reviewer" || review.ChainOf != build.ID || review.Hops != 1 {
-		t.Fatalf("review: %+v", review)
+	j.waitStatus("T-1", "done", 90*time.Second)
+	for range 3 {
+		if n := hooks["planner"].wait(t, 20*time.Second); n.Launcher != "planner" {
+			t.Fatalf("the planner's ring names %q", n.Launcher)
+		}
 	}
-	if qa.Ticket != "T-1" || qa.Launcher != "qa-lead" || qa.ChainOf != review.ID || qa.Hops != 2 || flagValue(qa.Command, "--max") != "3" {
-		t.Fatalf("qa: %+v", qa)
+
+	rs := ticketRuns(t, j.h.dir, "T-1")
+	want := []struct{ job, launcher string }{
+		{"build", "junior-engineer"}, {"review", "reviewer"}, {"build", "junior-engineer"}, {"review", "reviewer"}, {"qa", "qa-lead"},
+	}
+	if len(rs) != len(want) {
+		t.Fatalf("%d runs on T-1; want %d: %+v", len(rs), len(want), rs)
+	}
+	for i, w := range want {
+		r := rs[i]
+		chainOf := ""
+		if i > 0 {
+			chainOf = rs[i-1].ID
+		}
+		if r.Job != w.job || r.Launcher != w.launcher || r.ChainOf != chainOf || r.Hops != i {
+			t.Fatalf("run %d: %s by %s, chain_of %q, hops %d; want %s by %s after %q", i, r.Job, r.Launcher, r.ChainOf, r.Hops, w.job, w.launcher, chainOf)
+		}
+	}
+	build, kicked, build2, qa := rs[0], rs[1], rs[2], rs[4]
+	if flagValue(qa.Command, "--max") != "3" {
+		t.Fatalf("qa slots: %q", qa.Command)
 	}
 	if len(build.Chained) != 1 || build.Chained[0] != "reviewer: review T-1" || build.Notify != "planner" {
 		t.Fatalf("build: chained %q notify %q", build.Chained, build.Notify)
+	}
+	if len(kicked.Chained) != 1 || kicked.Chained[0] != "junior-engineer: build T-1" || kicked.Notify != "" || kicked.AckedBy != chainBy {
+		t.Fatalf("send-back: chained %q notify %q acked by %q", kicked.Chained, kicked.Notify, kicked.AckedBy)
 	}
 	for _, b := range []string{"junior-engineer", "reviewer"} {
 		if n := hooks[b].count(); n != 0 {
@@ -170,6 +203,7 @@ func TestChainRunsTheHandoffs(t *testing.T) {
 	got := j.pickupAs("planner")
 	for _, want := range []string{
 		build.ID + " build done on T-1 (in_review): job: done: " + build.ID + "\nsend planner: slot free T-1\n",
+		build2.ID + " build done on T-1 (in_review): job: done: " + build2.ID + "\nsend planner: slot free T-1\n",
 		qa.ID + " qa done on T-1 (done): job: done: " + qa.ID + "\nsend planner: merged T-1\n",
 		"ack each once you have acted on it: maestro-ticket ack ",
 	} {
@@ -190,7 +224,7 @@ func TestChainRunsTheHandoffs(t *testing.T) {
 		t.Fatalf("launcher's ack: %v\n%s", err, out)
 	}
 	j.waitEnded(plan, 20*time.Second)
-	if out, err := j.chainCmd("planner", "", "ack", build.ID, qa.ID, plan).CombinedOutput(); err != nil {
+	if out, err := j.chainCmd("planner", "", "ack", build.ID, build2.ID, qa.ID, plan).CombinedOutput(); err != nil {
 		t.Fatalf("planner ack: %v\n%s", err, out)
 	}
 }
@@ -209,7 +243,7 @@ func TestChainNeedsTheNextBotsWebhook(t *testing.T) {
 	if !strings.Contains(got, "\nsend reviewer: review T-1\n") {
 		t.Fatalf("pickup:\n%s", got)
 	}
-	if hooks["planner"].count() != 0 || allRuns(t, j.h.dir)["review"].ID != "" {
+	if hooks["planner"].count() != 0 || len(ticketRuns(t, j.h.dir, "T-1")) != 1 {
 		t.Fatal("a review started, or the planner was rung")
 	}
 	j.ackAll()
@@ -278,17 +312,26 @@ func TestChainLeavesALooksHandout(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	h.c.actor = "junior-engineer"
 
+	// A launcher with no webhook, such as a person, reads its own pickup:
+	// the run stays for it.
 	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
 		t.Fatal("no handout")
 	}
 	r := h.endedRun("build", "junior-engineer", "build: done")
 	h.c.chain(context.Background(), dir, r)
+	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || runs.Acked(dir, r.ID) {
+		t.Fatalf("a launcher with no webhook: %+v acked %v", got, runs.Acked(dir, r.ID))
+	}
+	h.hook("junior-engineer")
+
+	r = h.endedRun("build", "junior-engineer", "build: done")
+	h.c.chain(context.Background(), dir, r)
 	got, _ := runs.Load(dir, r.ID)
 	if len(got.Chained) != 0 || !runs.Acked(dir, r.ID) {
 		t.Fatalf("a look's handout: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
-	if list, _ := runs.List(dir, time.Now(), true); len(list) != 1 {
-		t.Fatalf("%d runs; want the one ended", len(list))
+	if list, _ := runs.List(dir, time.Now(), true); len(list) != 2 {
+		t.Fatalf("%d runs; want the two ended", len(list))
 	}
 }
 
@@ -331,5 +374,26 @@ func TestChainLeftForBot(t *testing.T) {
 		if got := leftForBot(c.rt); got != c.want {
 			t.Errorf("%+v: %v; want %v", c.rt, got, c.want)
 		}
+	}
+}
+
+// The chain's time limit stops a review's start even when the route
+// script's child, such as a gh that hangs, holds its output open.
+func TestChainLimitStopsAHungRoute(t *testing.T) {
+	dir, bin := t.TempDir(), t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	prep := filepath.Join(dir, ".claude", "skills", "maestro-code-review", "scripts")
+	os.MkdirAll(prep, 0o755)
+	os.WriteFile(filepath.Join(prep, "review-prep.sh"), []byte("sleep 30\necho route=full\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\n"), 0o755)
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	c := &call{env: Env{Getenv: func(string) string { return "" }, Dir: dir}}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := c.reviewRoute(ctx, "T-1"); err == nil || time.Since(start) > 15*time.Second {
+		t.Fatalf("route: %v after %s", err, time.Since(start))
 	}
 }

@@ -165,10 +165,13 @@ func Notice(r Record) Notification {
 		on = " on " + r.Ticket
 	}
 	return Notification{
-		Text:     fmt.Sprintf("Maestro run %s%s ended: %s. Run maestro-ticket pickup to read it, then ack it.", r.ID, on, r.State),
-		Run:      r.ID,
-		Ticket:   r.Ticket,
-		Launcher: r.Launcher,
+		Text:   fmt.Sprintf("Maestro run %s%s ended: %s. Run maestro-ticket pickup to read it, then ack it.", r.ID, on, r.State),
+		Run:    r.ID,
+		Ticket: r.Ticket,
+		// The bot the ring is for, which a URL serving several bots
+		// routes on: the run's owner, as a chain may have left it to
+		// the planner.
+		Launcher: r.Owner(),
 		State:    r.State,
 	}
 }
