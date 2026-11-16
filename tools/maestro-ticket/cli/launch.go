@@ -281,6 +281,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	// Before the supervisor, which may end the run at once; stats off
 	// writes none.
 	if side != nil && stats.Off(filepath.Dir(dir), c.env.Getenv, c.statsUnsafe()) == "" {
+		side.Stream = c.streamOK(store)
 		writeSide(dir, r.ID, side)
 	}
 	// The supervisor outlives this command, in a session of its own: a
@@ -343,9 +344,10 @@ func runSupervise(ctx context.Context, c *call) error {
 	defer stop()
 	c.startStats(filepath.Dir(dir))
 	return runs.Supervise(ctx, dir, c.args[0], runs.Options{
-		Env:   os.Environ(),
-		Rings: rings,
-		Hook:  func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
+		Env:    os.Environ(),
+		Rings:  rings,
+		Stream: c.streamNames(dir, c.args[0]),
+		Hook:   func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
 		// The supervisor stands in for log-run: it lives as long as the
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
@@ -446,6 +448,7 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 				runs.KillRun(r.ID)
 				runs.Save(dir, r)
 				c.endRun(ctx, dir, r)
+				runs.DropStream(dir, r.ID) // its counts went with its supervisor
 			}
 			h, err := runs.Webhook(notify, r.Launcher)
 			if err != nil || h.URL == "" {

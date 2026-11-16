@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 )
 
 // fakeClaude stands in for claude: it saves its arguments, stdin and
@@ -137,10 +138,19 @@ func TestJobBuildPicksTheModelByTier(t *testing.T) {
 	if got.stdin[0] != "/maestro-software-engineer T-1" {
 		t.Fatalf("prompt %q", got.stdin)
 	}
-	for f, want := range map[string]string{"--model": "sonnet", "--effort": "high", "--permission-mode": "bypassPermissions", "--output-format": "json"} {
+	// The record keeps json; claude gets stream-json when the side
+	// file asks for the stream.
+	format := "json"
+	if side, _ := readSide(filepath.Join(j.h.dir, "runs"), r.ID); side.Stream {
+		format = "stream-json"
+	}
+	for f, want := range map[string]string{"--model": "sonnet", "--effort": "high", "--permission-mode": "bypassPermissions", "--output-format": format} {
 		if v := got.flag(f); v != want {
 			t.Errorf("%s %q; want %q", f, v, want)
 		}
+	}
+	if v := flagValue(r.Command, "--output-format"); v != "json" {
+		t.Errorf("record --output-format %q", v)
 	}
 	if sid := got.flag("--session-id"); len(sid) != 36 || r.SessionID != sid {
 		t.Errorf("session id %q, record %q", sid, r.SessionID)
@@ -565,9 +575,19 @@ func TestPickupWaitsOutALimit(t *testing.T) {
 // job again and for every resume flag: the record's command, the argv
 // claude runs with, its stdin, and the environment words maestro-ticket
 // adds to the launcher's.
+//
+// It runs with stats off, so claude gets the record's json as on main;
+// TestStreamArgvSwap holds the stats-on argv to this one.
 func TestClaudeArgvEveryKind(t *testing.T) {
 	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "argv", argvPins(t, stats.OffEnv+"=off"))
+}
+
+// argvPins runs every job kind, job again and every resume flag with env
+// added to the harness's, and returns what claude got for each.
+func argvPins(t *testing.T, env ...string) string {
 	j := newJobHarness(t, "planner")
+	j.env = append(j.env, env...)
 	// gh is only looked for: with it, review-prep.sh routes the review.
 	if err := os.WriteFile(filepath.Join(j.bin, "gh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -672,5 +692,5 @@ esac
 		_, r = j.resume(c.stdin, append([]string{r.ID}, c.flags...)...)
 		pin(strings.Join(append([]string{"resume", "<run>"}, c.flags...), " "), r)
 	}
-	golden(t, "argv", m.mask(b.String()))
+	return m.mask(b.String())
 }

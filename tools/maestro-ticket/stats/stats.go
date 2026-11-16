@@ -282,6 +282,53 @@ type Run struct {
 	Head, Verdict, Mode string
 	VTier               *int64
 	Findings            []Finding
+	// From the stream filter, for a streamed run: Stream is ok,
+	// no_result, lost or off; the step codes are of the step list.
+	CtxPeak, Compactions, Retries, Subagents, ToolCalls, ToolFails, OpenMs *int64
+	OpenCode                                                               string
+	Tail                                                                   []TailCall
+	Steps                                                                  []Step
+}
+
+// TailCall is one of a run's last tool calls, stored in run_facts.tail as
+// its code's id, with ! when its result was an error.
+type TailCall struct {
+	Code string
+	Fail bool
+}
+
+// Step is a run_steps row: one step code's calls, fails and time.
+type Step struct {
+	Code                       string
+	Calls, Fails, MsSum, MsMax int64
+}
+
+// Caps on a run's tail and step rows.
+const (
+	maxTail  = 24
+	maxSteps = 256
+)
+
+// tailText is the tail as code ids: "12 7! 3".
+func tailText(tail []TailCall, code func(kind, name string) any) any {
+	if len(tail) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	for i, c := range tail[max(0, len(tail)-maxTail):] {
+		id, ok := code("step", c.Code).(int64)
+		if !ok {
+			return nil
+		}
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		fmt.Fprint(&b, id)
+		if c.Fail {
+			b.WriteByte('!')
+		}
+	}
+	return b.String()
 }
 
 // Finding is one row of a review's findings: a finding of its JSON, its
@@ -425,6 +472,8 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 	} {
 		add(e.col, code(e.col, e.name))
 	}
+	add("open_code", code("step", r.OpenCode))
+	add("tail", tailText(r.Tail, code))
 	add("lean", boolInt(r.Lean))
 	add("after_death", boolInt(r.AfterDeath))
 	add("resume_of", shaped(r.ResumeOf, runShape))
@@ -450,7 +499,9 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 		col string
 		v   *int64
 	}{{"claude_ms", r.ClaudeMs}, {"api_ms", r.APIMs}, {"turns", r.Turns}, {"disk_free_pct", r.DiskFreePct}, {"inode_free_pct", r.InodeFreePct},
-		{"tries", r.Tries}, {"prompt_bytes", r.PromptBytes}, {"drops", r.Drops}, {"wait_ms", r.WaitMs}, {"escaped", r.Escaped}} {
+		{"tries", r.Tries}, {"prompt_bytes", r.PromptBytes}, {"drops", r.Drops}, {"wait_ms", r.WaitMs}, {"escaped", r.Escaped},
+		{"ctx_peak", r.CtxPeak}, {"compactions", r.Compactions}, {"retries", r.Retries}, {"subagents", r.Subagents},
+		{"tool_calls", r.ToolCalls}, {"tool_fails", r.ToolFails}, {"open_ms", r.OpenMs}} {
 		if n.v != nil {
 			add(n.col, *n.v)
 		}
@@ -507,6 +558,35 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_models (run, model, input_cum, output_cum, cache_read_cum, cache_write_cum, cost_cum, cost_src)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, r.Run, id, s.in, s.out, s.cr, s.cw, cost, s.src); err != nil {
+			return err
+		}
+	}
+	// Two codes off the list make one other row.
+	steps := map[any]*Step{}
+	var stepOrder []any
+	for _, st := range r.Steps {
+		id := code("step", st.Code)
+		if id == nil || st.Calls < 0 || st.Fails < 0 || st.MsSum < 0 || st.MsMax < 0 {
+			continue
+		}
+		s := steps[id]
+		if s == nil {
+			if len(stepOrder) == maxSteps {
+				continue
+			}
+			s = &Step{}
+			steps[id] = s
+			stepOrder = append(stepOrder, id)
+		}
+		s.Calls += st.Calls
+		s.Fails += st.Fails
+		s.MsSum += st.MsSum
+		s.MsMax = max(s.MsMax, st.MsMax)
+	}
+	for _, id := range stepOrder {
+		s := steps[id]
+		if _, err := tx.ExecContext(ctx, `INSERT INTO run_steps (run, code, calls, fails, ms_sum, ms_max) VALUES (?, ?, ?, ?, ?, ?)`,
+			r.Run, id, s.Calls, s.Fails, s.MsSum, s.MsMax); err != nil {
 			return err
 		}
 	}

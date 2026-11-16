@@ -21,6 +21,7 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -127,6 +128,7 @@ func statsLists() stats.Lists {
 		"os":          {"linux", "darwin", "freebsd", "openbsd", "netbsd"},
 		"arch":        {"amd64", "arm64", "386", "arm", "riscv64"},
 		"cost_src":    {"result", "stream"},
+		"step":        streamfilter.Codes(streamfilter.Names{Sub: commandNames()}),
 	}
 }
 
@@ -200,6 +202,8 @@ type sideFacts struct {
 	AgainOf     string   `json:"again_of,omitempty"`
 	Drops       []string `json:"drops,omitempty"`
 	PromptBytes int      `json:"prompt_bytes"`
+	// Stream says its supervisor reads the run's stdout as stream-json.
+	Stream bool `json:"stream,omitempty"`
 }
 
 // sideExt ends a run's side file; runs.Prune removes it with the run.
@@ -248,6 +252,80 @@ func readSide(runsDir, id string) (sideFacts, bool) {
 	return s, true
 }
 
+// streamOK says a run's stdout may go through the stream filter: on
+// Linux, where its supervisor's death ends the command, and while the
+// store's disk has the room claim asks for, since the stream's file
+// holds a whole run's transcript until the run ends.
+func (c *call) streamOK(store string) bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	min, err := c.minFree()
+	return err == nil && c.headroom(store, min) == nil
+}
+
+// streamNames are the lists the supervisor of run id scans its stream
+// with, or nil when its side file doesn't ask for a stream or stats went
+// off since it started.
+func (c *call) streamNames(runsDir, id string) *streamfilter.Names {
+	sf, ok := readSide(runsDir, id)
+	if !ok || !sf.Stream || stats.Off(filepath.Dir(runsDir), c.env.Getenv, c.statsUnsafe()) != "" {
+		return nil
+	}
+	return &streamfilter.Names{Sub: commandNames(), Model: modelFamily}
+}
+
+// commandNames are maestro-ticket's subcommands.
+func commandNames() []string { return slices.Clone(subNames) }
+
+// subNames is filled from commands in init: read straight from a
+// function that commands reaches, commands would wait on itself.
+var subNames []string
+
+func init() {
+	for _, k := range commands {
+		subNames = append(subNames, k.name)
+	}
+}
+
+// streamFacts puts what the stream filter read into the row. A run with
+// no result gets its tokens from the stream's own turns.
+func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, inSupervisor bool) {
+	s := r.Stream
+	switch {
+	case s != nil && s.Result:
+		row.Stream = "ok"
+	case s != nil:
+		row.Stream = "no_result"
+	case side.Stream && !inSupervisor && r.State == runs.Died:
+		row.Stream = "lost" // its supervisor died, and its counts with it
+		return
+	default:
+		return
+	}
+	row.CtxPeak, row.Compactions, row.Retries = ptr(s.CtxPeak), ptr(s.Compactions), ptr(s.Retries)
+	row.Subagents, row.ToolCalls, row.ToolFails = ptr(s.Subagents), ptr(s.ToolCalls), ptr(s.ToolFails)
+	row.VClaude = s.Version
+	if s.OpenCode != "" {
+		row.OpenCode = s.OpenCode
+		if !s.OpenAt.IsZero() && r.EndedAt != nil {
+			row.OpenMs = ptr(max(0, r.EndedAt.Sub(s.OpenAt).Milliseconds()))
+		}
+	}
+	for _, c := range s.Tail {
+		row.Tail = append(row.Tail, stats.TailCall{Code: c.Code, Fail: c.Fail})
+	}
+	for _, st := range s.Steps {
+		row.Steps = append(row.Steps, stats.Step{Code: st.Code, Calls: st.Calls, Fails: st.Fails, MsSum: st.MsSum, MsMax: st.MsMax})
+	}
+	if noResult {
+		for _, u := range s.Usage {
+			row.Models = append(row.Models, stats.Model{Model: u.Model, InputCum: u.Input, OutputCum: u.Output,
+				CacheReadCum: u.CacheRead, CacheWriteCum: u.CacheWrite, CostSrc: "stream"})
+		}
+	}
+}
+
 // statsRow is the run's row: what its record, its side file, its
 // supervisor, its result and the machine say at its end.
 func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr error) stats.Run {
@@ -272,6 +350,7 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 		}
 	}
 	reviewFacts(&row, r.Job, r.Reply, sf.Drops)
+	streamFacts(&row, r, sf, resErr != nil, c.inSupervisor)
 	if e := r.End; e != nil {
 		row.WaitMs, row.WaitCapped = ptr(e.WaitMs), ptr(e.WaitCapped)
 		row.Stop, row.Escaped = e.Stop, ptr(int64(e.Escaped))

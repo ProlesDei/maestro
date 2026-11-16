@@ -8,9 +8,11 @@
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
 // holds while it lives; <id>.acked, made once when the launcher says it
 // acted on the result; and <id>.wait.* and <id>.waited.*, the slot waits
-// its command marked (wait.go); and <id>.stats, the facts job, again and
+// its command marked (wait.go); <id>.stats, the facts job, again and
 // resume know at its start that stats.db keeps and the record doesn't
-// (cli). Only one process writes a record at a
+// (cli); and <id>.stream, a streamed run's stdout, which its supervisor
+// reads once the command is over and removes once its end is recorded
+// (Options.Stream). Only one process writes a record at a
 // time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
 package runs
@@ -33,6 +35,7 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
 // States. Starting and running are live; the rest are ended. A reader
@@ -105,6 +108,9 @@ type Record struct {
 	// row: never stored, so no reader's bytes change. nil on a record
 	// read from disk.
 	End *EndFacts `json:"-"`
+	// Stream is what the supervisor read from a streamed run's stdout,
+	// never stored either; nil for a run that wasn't streamed.
+	Stream *streamfilter.Summary `json:"-"`
 }
 
 // Stop kinds: how the supervisor ended a run's command.
@@ -431,7 +437,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stats", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stats", streamExt, ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -461,6 +467,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 // reply is the part of claude -p --output-format json (or the last line
 // of stream-json) that a bot reads.
 type reply struct {
+	Type      string  `json:"type"`
 	Result    *string `json:"result"`
 	SessionID string  `json:"session_id"`
 	IsError   bool    `json:"is_error"`
@@ -475,11 +482,14 @@ const maxReply = 64 << 10
 const OutputWindow = 8 << 20
 
 // ParseOutput reads the end of a run's stdout: the result and session id
-// of Claude's JSON output, or else the output's tail.
+// of Claude's JSON output, or else the output's tail. Only a result line
+// counts, one whose type is result or that holds a result: stream-json's
+// other lines carry the session id too, and a run whose stream held one
+// of those but no result gave none.
 func ParseOutput(out []byte) (text, session string, isError bool) {
 	parse := func(b []byte) bool {
 		var r reply
-		if json.Unmarshal(b, &r) != nil || (r.Result == nil && r.SessionID == "") {
+		if json.Unmarshal(b, &r) != nil || (r.Result == nil && (r.SessionID == "" || r.Type != "result")) {
 			return false
 		}
 		if r.Result != nil {

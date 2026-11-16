@@ -29,6 +29,26 @@ func TestParseOutput(t *testing.T) {
 	}
 }
 
+// Only a result line gives a session: stream-json's other lines carry
+// one too.
+func TestParseOutputNeedsResultType(t *testing.T) {
+	for _, out := range []string{
+		`{"type":"system","subtype":"init","session_id":"s1","cwd":"/x"}`,
+		"{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n{\"type\":\"assistant\",\"session_id\":\"s1\"}\n",
+		`{"type":"assistant","session_id":"s1"}`,
+	} {
+		if _, session, _ := ParseOutput([]byte(out)); session != "" {
+			t.Errorf("ParseOutput(%q) gave session %q", out, session)
+		}
+	}
+	// A result with no result text still counts, by its type, wherever
+	// type sits in it.
+	text, session, isErr := ParseOutput([]byte(`{"subtype":"error_max_turns","session_id":"s2","is_error":true,"type":"result"}`))
+	if text != "" || session != "s2" || !isErr {
+		t.Errorf("max turns result: %q %q %v", text, session, isErr)
+	}
+}
+
 func TestTailKeepsWholeRunes(t *testing.T) {
 	s := tail(strings.Repeat("é", 10), 5)
 	if !strings.HasPrefix(s, "…") || strings.ContainsRune(s, utf8.RuneError) || len(s) > 5+len("…") {

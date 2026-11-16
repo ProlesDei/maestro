@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"syscall"
 	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
 // RunIDEnv names the variable every launched command gets, so a scan can
@@ -52,7 +55,12 @@ type Options struct {
 	// first), so work that must not hold up the ring, such
 	// as a stats prune, waits for it.
 	AfterRing func(Record, error)
-	Now       func() time.Time
+	// Stream, when set, runs the command with stream-json in place of
+	// its exact --output-format json, its stdout in <id>.stream, and
+	// reads that file once the command is over: .out gets what it would
+	// have held with json, and the record's Stream the counts.
+	Stream *streamfilter.Names
+	Now    func() time.Time
 }
 
 // Supervise runs the command of a starting record to its end within its
@@ -83,14 +91,17 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 	}
 	r = run(ctx, dir, r, o)
 	if err := Save(dir, r); err != nil {
+		DropStream(dir, id)
 		return err
 	}
 	if r.Error != "" && r.PID == 0 {
+		DropStream(dir, id)
 		return nil // never started: launch reports it
 	}
 	if o.OnEnd != nil {
 		o.OnEnd(r)
 	}
+	DropStream(dir, id)
 	// Stopped, as at a shutdown: leave the ring to the first reader after,
 	// which Adopt lets in once this exits.
 	if ctx.Err() == nil {
@@ -128,9 +139,18 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	}
 	defer errf.Close()
 
-	cmd := exec.Command(r.Command[0], r.Command[1:]...)
+	// The record keeps the command as given; only what runs changes.
+	argv, stdout := r.Command, out
+	var stream *os.File
+	if a, ok := StreamArgv(r.Command); ok && o.Stream != nil {
+		if f, err := os.OpenFile(path(dir, r.ID, streamExt), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); err == nil {
+			argv, stdout, stream = a, f, f
+			defer f.Close()
+		}
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = r.Dir
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, errf
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, stdout, errf
 	cmd.Env = append(append([]string{}, o.Env...), RunIDEnv+"="+r.ID, "MAESTRO_TICKET_ACTOR="+r.Launcher)
 	// Its own process group, so a stop reaches all it started; on Linux it
 	// also dies if this supervisor dies. That signal follows the thread
@@ -228,6 +248,9 @@ wait:
 		code = 128 + int(ws.Signal())
 	}
 	r.Exit = &code
+	if stream != nil {
+		r.Stream = scanStream(dir, r.ID, out, *o.Stream)
+	}
 	outb, _ := ReadTail(path(dir, r.ID, ".out"), OutputWindow)
 	r.Reply, r.SessionID, r.IsError = ParseOutput(outb)
 	switch {
@@ -254,6 +277,41 @@ wait:
 	}
 	return r
 }
+
+// streamExt ends the file a streamed run's stdout goes to while it runs.
+const streamExt = ".stream"
+
+// StreamArgv is cmd with its exact --output-format json pair made
+// --output-format stream-json --verbose, and whether it had one. Any
+// other command, such as one already on stream-json, has none.
+func StreamArgv(cmd []string) ([]string, bool) {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] == "--output-format" && cmd[i+1] == "json" {
+			out := append(slices.Clone(cmd[:i+1]), "stream-json", "--verbose")
+			return append(out, cmd[i+2:]...), true
+		}
+	}
+	return nil, false
+}
+
+// scanStream reads a streamed run's stdout, once its command is over,
+// and writes to .out what json would have: text before the first JSON
+// line, then the result line. A grandchild that still holds the file
+// may write on; what it writes after this is never read.
+func scanStream(dir, id string, out *os.File, n streamfilter.Names) *streamfilter.Summary {
+	f, err := os.Open(path(dir, id, streamExt))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	s, kept := streamfilter.Scan(f, n)
+	out.Write(kept)
+	return &s
+}
+
+// DropStream removes a run's stream file: its supervisor once the run's
+// end is recorded, and the reader that writes a died run's end.
+func DropStream(dir, id string) { os.Remove(path(dir, id, streamExt)) }
 
 func join(a, b string) string {
 	if a == "" {
