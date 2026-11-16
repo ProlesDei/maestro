@@ -44,7 +44,7 @@ This section links each rule and says how the design keeps it. It does not resta
 | [Decision 1](../decisions.md) | No daemon, cron or uploader. Writes happen in the supervisor, which already lives as long as its run, or in `pickup` and `doctor`, which already end a died run. The ring body stays the same; `TestNotificationFields` and `TestNoticeGolden` pin it. |
 | [Decision 15](../decisions.md) | Capture follows `job`, `job again` and `resume` under `launch`, keyed on the run ids `launch` issues. |
 | [Decision 17](../decisions.md) | A bundle carries versions, so maintainers can tell teams' releases apart. A case bundle shows one team's case as a case. |
-| [Decision 19](../decisions.md) | No bot step is added. `pickup`, `doctor`, `runs`, `job`, `job again`, `resume`, `look`, `check`, `ack`, `costs` and `--help` print the same bytes, text and `--json`, against masked goldens taken from main (C0), under each stats state (10.2). Records keep `--output-format json`; the supervisor swaps in `stream-json --verbose` only when it starts the command (section 4). Code refuses `stats` views to bots (section 8). |
+| [Decision 19](../decisions.md) | No bot step is added. `pickup`, `doctor`, `runs`, `job`, `job again`, `resume`, `look`, `check`, `ack`, `costs` and `--help` print the same bytes, text and `--json`, against masked goldens taken from main (C0): `pickup`, `doctor`, `runs`, `ack`, `costs` and `check` under all seven stats states, and `job`, `job again`, `resume` and `look` under off and broken (10.2), and `--help` once (`TestPinUsage`). Records keep `--output-format json`; the supervisor swaps in `stream-json --verbose` only when it starts the command (section 4). Code refuses `stats` views to bots (section 8). |
 | [Decision 9](../decisions.md) | Enum lists live once, in Go. `stats.db` holds a copy that grows by insert, never by rebuild (5.0). The rule that stats stay local is [decision 23](../decisions.md), added in C1; this doc links to it. |
 | [Decision 8](../decisions.md) | `install.sh check` stays read-only. `apply` gains one key, `stats:` (6.2). |
 | [Decision 12](../decisions.md) | All sessions run as one user with all permissions, so the bot and run checks on views and `bundle` guard only against slips. The real guards are the lack of send code and what a bundle can hold (9.6). |
@@ -263,13 +263,13 @@ The filter strips leading `cd <x> &&` and `VAR=value` words before it matches. `
 
 ### 5.2 `run_models`: one row per run per model family
 
-Fields: `input_cum`, `output_cum`, `cache_read_cum`, `cache_write_cum`, `cost_cum`, `cost_src` (result or stream). Each is the session's running total, which is what the result reports. Model ids map to a family list; Go accepts only ids shaped like `claude-(opus|sonnet|haiku)-<major>[-<minor>][-<8-digit date>][[1m]]` or the older `claude-3-5-sonnet-...` order, and everything else becomes `other` (`TestModelFamily`: `claude-acme-finetune-prod` is `other`). Two raw ids of one family make one row.
+Fields: `input_cum`, `output_cum`, `cache_read_cum`, `cache_write_cum`, `cost_cum`, `cost_src` (result or stream). From a result, each is the session's running total, which is what the result reports; from a stream, each is the run's own turns summed. Model ids map to a family list; Go accepts only ids shaped like `claude-(opus|sonnet|haiku)-<major>[-<minor>][-<8-digit date>][[1m]]` or the older `claude-3-5-sonnet-...` order, and everything else becomes `other` (`TestModelFamily`: `claude-acme-finetune-prod` is `other`). Two raw ids of one family make one row.
 
 **A run's own spend is worked out at read time**, never stored: its session's total less the run before it in that session, by `LAG()` over (session, model). One CTE (`spendCTE` in `stats/prune.go`) does it for both the views and the prune, and `TestReadSpendMatchesPrune` holds the two to the same sums.
 - A fresh session's first run, a run with no session, and a model new to a known session count their whole total.
 - Once prune deletes a session's runs, `pruned_cum` keeps its last totals per model for 30 days past the 90-day line, so a later resume still counts only what it added (`TestPruneResumeAcrossPrunes`).
 - A resume with no trace of its session's past has an unknown spend: NULL.
-- **Runs with no result** (timed out, killed, died with a stream) get their tokens from the stream's per-turn usage, `cost_src=stream`, and no dollars. The next resume's result total takes in the dead run's spend, so its dollars are NULL too. `stats costs` counts such runs in its header instead of guessing a split.
+- **Runs with no result** (timed out, killed, died with a stream) get their tokens from the stream's per-turn usage, `cost_src=stream`, and no dollars; the row takes the session its command names (`--session-id` or `--resume`), since Claude gave none. Those tokens count whole. The next resume's result total takes in the dead run's spend, so its dollars and tokens are NULL (`TestSpendAfterDeadRun`, `TestDeadRunKeepsSession`). `stats costs` counts such runs in its header instead of guessing a split.
 - The `runs` table in `tickets.db` stays as it is, so `costs` keeps working.
 
 ### 5.3 `run_steps` and `tail`
@@ -314,7 +314,7 @@ The cites behind `stopped` and `asked` are **[code: runs/supervise.go:319-321]**
 
 All of 5.7 is later. Since the spec was written, main added the parser it needs, which changes the plan:
 - **Main's `maestro-ticket verdict` checks every review and QA note before it writes** (`cli/verdict.go`). One table, `fixedNotes`, holds the opening words of each note kind, `noteOpening` reads a first line against it, `kickbackHead` reads a review kickback's count and sha, and `findingLine` reads each finding's id and severity. `verdictKind` refuses a note whose sha, count, finding lines or `Return-role:` are off.
-- **So S5 needs no second parser.** It reads first lines through `noteOpening` and `kickbackHead`, as C3's head codes already do **[code: cli/statsreview.go:119]**. The risk the spec named, a stats parser drifting from route's checks, goes away for the note kinds.
+- **So S5 needs no second parser.** It reads first lines through `noteOpening`, as C3's head codes already do **[code: cli/statsreview.go:119]**, and a kickback's count and sha through `kickbackHead`. The risk the spec named, a stats parser drifting from route's checks, goes away for the note kinds.
 - **Notes posted through `verdict` have a checked shape**, so counts over them hold. Older comments, and notes a skill still posts with `comment` (re-posting a GO on a head reviewed before **[code: skills/maestro-code-review/SKILL.md:24]**), may not; they count as `other`.
 - **QA item lines and `Checks:` exit codes are not in `verdictKind`.** The QA reasons still need new parsing code. It belongs in `verdict.go`, beside `verdictKind`, so one file holds the note formats.
 - **Route still makes its own prefix checks** **[code: cli/route.go:383,385,425,431,475,571]**. Moving it onto `noteOpening` is a small change of its own, with golden pickup output, and stats doesn't wait on it.
@@ -327,7 +327,7 @@ All of 5.7 is later. Since the spec was written, main added the parser it needs,
 
 ### 6.1 Files
 
-Beside `tickets.db`, in the store dir that `--store` and `MAESTRO_TICKET_STORE` pick (by default `maestro/` under the git common dir) **[code: cli/cli.go:460-480]**:
+Beside `tickets.db`, in the store dir that `--store` and `MAESTRO_TICKET_STORE` pick (by default `maestro/` under the git common dir) **[code: cli/cli.go:468-504, `resolveStore`]**:
 
 | File | Who writes it | What it holds |
 |---|---|---|
