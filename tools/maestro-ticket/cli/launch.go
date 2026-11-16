@@ -664,6 +664,69 @@ func runAck(ctx context.Context, c *call) error {
 	})
 }
 
+// stopWait is how long stop waits for the supervisor to record the end:
+// its look for the ask, then the kill grace.
+const stopWait = runs.KillGrace + 10*time.Second
+
+// runStop asks a live run's supervisor to stop its command, as its time
+// limit would, and waits for the end it records: failed, "stopped by"
+// the asker, rung to its launcher like any end, so job again and resume
+// work once pickup shows it. Its launcher or the planner may ask.
+func runStop(ctx context.Context, c *call) error {
+	if err := c.parse(); err != nil {
+		return err
+	}
+	if len(c.args) != 1 || !runs.ValidID(c.args[0]) {
+		return usagef("stop: want one run id, such as R-abcdefgh")
+	}
+	if !runs.Supported {
+		return usagef("stop needs a unix system")
+	}
+	if err := c.needActor("stop"); err != nil {
+		return err
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	id := c.args[0]
+	r, err := runs.Get(dir, id, time.Now())
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("%w: run %s", ticket.ErrNotFound, id)
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case r.Launcher != c.actor && c.actor != "planner":
+		return fmt.Errorf("%w: stop: run %s is %s's: only the bot that launched it, or the planner, stops it", ticket.ErrForbidden, id, dash(r.Launcher))
+	case r.State == runs.Died:
+		return fmt.Errorf("%w: stop: run %s died: nothing runs; pickup shows it", ticket.ErrStatusConflict, id)
+	case r.Ended():
+		return fmt.Errorf("%w: stop: run %s is %s already", ticket.ErrStatusConflict, id, r.State)
+	}
+	if _, err := runs.AskStop(dir, id, c.actor, time.Now().UTC().Round(time.Millisecond)); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(stopWait)
+	for !r.Ended() && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+		if r, err = runs.Get(dir, id, time.Now()); err != nil {
+			return err
+		}
+	}
+	if !r.Ended() {
+		return fmt.Errorf("%w: stop: run %s asked to stop, still %s after %s: runs %s shows when it ends", ticket.ErrStatusConflict, id, r.State, stopWait, id)
+	}
+	return c.out(r, func(w io.Writer) {
+		fmt.Fprintf(w, "%s %s: %s; its launcher's pickup shows it\n", id, r.State, firstLine(r.Error))
+	})
+}
+
 // maxPickup is how many ended runs one pickup shows: after a reboot a bot
 // can have a hundred, and it reads every line.
 const maxPickup = 20
