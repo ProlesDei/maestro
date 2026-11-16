@@ -113,11 +113,11 @@ func statsLists() stats.Lists {
 		"stop":        {runs.StopNone, runs.StopTerm, runs.StopKill},
 		"state":       {runs.Starting, runs.Running, runs.Done, runs.Failed, runs.TimedOut, runs.Died, runs.Unreadable},
 		"outcome":     {outDone, outQuestion, outUsageLimit, outDiskFull, outTimedOut, outDied, outRefused, outFailed},
-		"reason":      append([]string{"no_result", "max_turns", "api_error", "budget", "stopped", "exit_nonzero", "is_error", "limit", "reboot", "supervisor"}, escalateCauses...),
+		"reason":      append([]string{"no_result", "max_turns", "api_error", "budget", "stopped", "exit_nonzero", "is_error", "limit", "frozen", "asked", "reboot", "supervisor"}, escalateCauses...),
 		"head":        headNames(),
 		"verdict":     {"go", "nogo", "escalate"},
 		"mode":        {"full", "incremental", "ruling"},
-		"finding":     {"finding", "out_of_scope", "dropped"},
+		"finding":     {"finding", "follow_up", "dropped"},
 		"sev":         {"blocker", "major", "minor", "nit"},
 		"action":      {"auto-fix", "ask-user", "no-op"},
 		"prior":       {"new", "still_present"},
@@ -139,6 +139,9 @@ func reasonOf(r runs.Record, outcome string, res claudeReply, resErr error) stri
 	case outDied:
 		return "supervisor"
 	case outTimedOut:
+		if r.Frozen {
+			return "frozen" // the machine froze past the limit
+		}
 		return "limit"
 	case outFailed:
 	default:
@@ -147,6 +150,8 @@ func reasonOf(r runs.Record, outcome string, res claudeReply, resErr error) stri
 	switch {
 	case strings.HasPrefix(r.Error, "the launcher was stopped"):
 		return "stopped"
+	case strings.HasPrefix(r.Error, "stopped by "):
+		return "asked" // maestro-ticket stop
 	case resErr != nil:
 		return "no_result"
 	case res.Subtype.V == "error_max_turns":

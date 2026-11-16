@@ -407,6 +407,8 @@ func TestReasons(t *testing.T) {
 	}{
 		{runs.Record{State: runs.Died}, outDied, ok, errors.New("x"), "supervisor"},
 		{runs.Record{State: runs.TimedOut}, outTimedOut, ok, errors.New("x"), "limit"},
+		{runs.Record{State: runs.TimedOut, Frozen: true}, outTimedOut, ok, nil, "frozen"},
+		{runs.Record{State: runs.Failed, Exit: exitCode(143), Error: "stopped by planner\nzqmark7"}, outFailed, ok, nil, "asked"},
 		{runs.Record{State: runs.Failed, Error: "the launcher was stopped, so it stopped the run\nzqmark7"}, outFailed, ok, nil, "stopped"},
 		{runs.Record{State: runs.Failed, Exit: exitCode(1)}, outFailed, ok, errors.New("x"), "no_result"},
 		{runs.Record{State: runs.Done}, outFailed, claudeReply{Subtype: looseStr{"error_max_turns"}}, nil, "max_turns"},
@@ -418,6 +420,23 @@ func TestReasons(t *testing.T) {
 		if got := reasonOf(c.r, c.outcome, c.res, c.resErr); got != c.want {
 			t.Errorf("%+v: reason %q; want %q", c.r, got, c.want)
 		}
+	}
+}
+
+// A run maestro-ticket stop ended gets the reason asked and the stop
+// kind of a SIGTERM, from its supervisor's row.
+func TestStatsStoppedRun(t *testing.T) {
+	t.Parallel()
+	l := newLauncher(t, "planner")
+	prepareStatsAt(t, l.h.dir)
+	r := l.launch("", "--limit", "1h", "--", "sleep", "300")
+	l.h.ok(nil, "stop", r.ID)
+	l.waitSupervisors()
+	var reason, stop string
+	statsQuery(t, l.h.dir, `SELECT r.name, s.name FROM run_facts f JOIN codes r ON r.id = f.reason
+		JOIN codes s ON s.id = f.stop WHERE f.run = '`+r.ID+`'`, &reason, &stop)
+	if reason != "asked" || stop != runs.StopTerm {
+		t.Fatalf("reason %s, stop %s; want asked, term", reason, stop)
 	}
 }
 

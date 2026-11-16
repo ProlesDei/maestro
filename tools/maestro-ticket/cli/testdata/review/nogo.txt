@@ -15,9 +15,9 @@ Skeptic: short inline
 ## Passes         1: F1. 2: clean, checked: no auth path. 5: F3. 6: clean, checked: mutation of the cap. 7: F4.
 ## Dropped        | F2 | could not reproduce on a rerun |
 ## Earlier feedback   F1: still present
-## Out of scope
+## Follow-ups
+- worker/upload.go:60: F3, a 500 is retried forever
 - worker/queue.go:12: the queue never shrinks (already on main)
-- worker/log.go:3: log level hard-coded
 ## Outcome        Kickback comment 88, ticket moved to in_progress
 ```
 

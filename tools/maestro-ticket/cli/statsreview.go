@@ -8,14 +8,17 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // Review facts for stats.db, from the reply a run's end already holds:
 // the head its first line names and, for a review, the verdict, tier,
 // mode and each finding's id, pass, severity, action and prior from its
-// findings JSON (maestro-code-review's passes.md). Nothing else of the
-// reply is decoded or kept: no sha, file, line, evidence, impact or fix.
+// findings JSON (maestro-code-review's passes.md), and how many lines its
+// Follow-ups section has. Nothing else of the reply is decoded or kept:
+// no sha, file, line, evidence, impact or fix.
 
 // replyHeads are the first lines the shipped skills ask a reply to open
 // with, "<word>: <status>", by word: the statuses each word may take.
@@ -47,6 +50,12 @@ var reviewVerdicts = []struct{ text, head string }{
 	{"NO-GO", "review:nogo"},
 	{"ESCALATE", "review:escalate"},
 	{"GO", "review:go"},
+}
+
+// noteHeads are the heads of a review reply that is only its verdict
+// note's first line, as on a head reviewed before, by the note's kind.
+var noteHeads = map[string]string{
+	"review-go": "review:go", "review-kickback": "review:nogo", "review-escalation": "review:escalate",
 }
 
 func headName(word, status string) string {
@@ -83,7 +92,8 @@ func cutWord(s, w string) bool {
 
 // headCode maps a reply's first line to a head on the list, by prefix:
 // "" for no reply, other for a line off the list. A review report opens
-// with its title, so its head comes from the Verdict: line under it.
+// with its title, so its head comes from the Verdict: line under it; a
+// verdict note's first line gets its head from the note's kind.
 func headCode(reply string) string {
 	lines := strings.SplitN(strings.TrimLeft(lineBreaks.Replace(reply), " \t\n"), "\n", 12)
 	for len(lines) > 1 && strings.HasPrefix(lines[0], "```") {
@@ -105,6 +115,9 @@ func headCode(reply string) string {
 			}
 		}
 		return stats.Other
+	}
+	if k, _, ok := noteOpening(first); ok {
+		return cmp.Or(noteHeads[k.name], stats.Other)
 	}
 	word, rest, ok := strings.Cut(first, ": ")
 	if !ok {
@@ -202,9 +215,6 @@ var (
 	// step 4), and when a gate needs an outside step (working principles).
 	mergedText  = regexp.MustCompile(`Escalation: review at [0-9a-f]{7,40}: PR \S+ merged as `)
 	outsideText = regexp.MustCompile(`\boutside step: `)
-	// The report's out-of-scope section.
-	outOfScope = regexp.MustCompile(`^#{1,3} Out of scope\b`)
-	tableRule  = regexp.MustCompile(`^\|[\s|:-]*$`)
 )
 
 // escalateCauses are the reasons escalateCause gives.
@@ -232,33 +242,6 @@ func escalateCause(reply string, fs []stats.Finding) string {
 		return "repeat"
 	}
 	return "approval"
-}
-
-// outOfScopeLines counts the items under the report's Out of scope
-// heading: one per line, bar a table's header and rule, and none.
-func outOfScopeLines(reply string) int64 {
-	lines := strings.Split(lineBreaks.Replace(reply), "\n")
-	var n int64
-	for i := 0; i < len(lines); i++ {
-		if !outOfScope.MatchString(lines[i]) {
-			continue
-		}
-		for i++; i < len(lines); i++ {
-			l := strings.TrimSpace(lines[i])
-			if strings.HasPrefix(l, "#") || strings.HasPrefix(l, "```") {
-				break
-			}
-			item := strings.TrimSpace(strings.TrimLeft(l, "-*+ "))
-			switch {
-			case item == "", strings.EqualFold(strings.TrimRight(item, "."), "none"), tableRule.MatchString(l):
-			case strings.HasPrefix(l, "|") && i+1 < len(lines) && tableRule.MatchString(strings.TrimSpace(lines[i+1])):
-			default:
-				n++
-			}
-		}
-		break
-	}
-	return n
 }
 
 // wholeIn is n as a whole number from lo to hi, or nil.
@@ -292,8 +275,9 @@ func reviewFacts(row *stats.Run, job, reply string, drops []string) {
 				Prior:  listName(prior, "new", "still_present"), N: 1})
 		}
 	}
-	if n := outOfScopeLines(reply); n > 0 {
-		row.Findings = append(row.Findings, stats.Finding{Kind: "out_of_scope", N: n})
+	// One count of what the report lets ship, as pickup files it.
+	if n := len(followUpLines(runs.Record{Job: job, Reply: reply}, ticket.Detail{})); n > 0 {
+		row.Findings = append(row.Findings, stats.Finding{Kind: "follow_up", N: int64(n)})
 	}
 	for _, id := range drops {
 		row.Findings = append(row.Findings, stats.Finding{Fid: id, Kind: "dropped", N: 1})

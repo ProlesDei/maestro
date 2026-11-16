@@ -96,6 +96,7 @@ func reviewFactsRow(t *testing.T, dir, id string) string {
 // shipped skills ask for; any other line is other, and no reply is NULL.
 func TestHeadCodes(t *testing.T) {
 	heads := statsLists()["head"]
+	sha40 := strings.Repeat("ab", 20)
 	for in, want := range map[string]string{
 		"":                                           "",
 		"  \n\n":                                     "",
@@ -127,6 +128,11 @@ func TestHeadCodes(t *testing.T) {
 		"# Code review: T-1 a\nPR: x\nVerdict: GOOD": stats.Other,
 		"# Code review: T-1 a\nno verdict line":      stats.Other,
 		"Verdict: GO":                                stats.Other,
+		// A head reviewed before: the reply is its verdict's first line.
+		"Review: GO at " + sha40 + " (PR x), tier 1":            "review:go",
+		"Kickback: 2 blockers at " + sha40:                      "review:nogo",
+		"Escalation: review at " + sha40 + ": PR x merged as y": "review:escalate",
+		"Kickback: QA fail at " + sha40:                         stats.Other,
 	} {
 		if got := headCode(in); got != want {
 			t.Errorf("headCode(%q) = %q; want %q", in, got, want)
@@ -202,7 +208,7 @@ func TestHeadCodes(t *testing.T) {
 }
 
 // A review's findings JSON gives the row's verdict, tier and mode and one
-// row per finding; the out-of-scope lines give one counted row.
+// row per finding; the Follow-ups lines give one counted row.
 func TestFindingsFromReply(t *testing.T) {
 	dir := t.TempDir()
 	reviewRow(t, dir, "R-aaaaaaaa", "review", reviewFixture(t, "nogo"), nil)
@@ -213,7 +219,7 @@ func TestFindingsFromReply(t *testing.T) {
 		"F1 finding 1 blocker auto-fix still_present 1",
 		"F3 finding 5 major ask-user new 1",
 		"F4 finding 7 minor no-op new 1",
-		"- out_of_scope - - - - 2",
+		"- follow_up - - - - 2",
 	}
 	if got := findingRows(t, dir, "R-aaaaaaaa"); !slices.Equal(got, want) {
 		t.Errorf("findings\n got %q\nwant %q", got, want)
@@ -346,7 +352,7 @@ func TestDroppedRowsFromSideFile(t *testing.T) {
 	moveTo(j, "T-2", "in_progress", "in_review")
 	_, r := j.job("F1 and F3 are moot\n", "review", "T-2", "--drop", "F1,F3,X.2", "--drop-file", "-")
 	j.waitSupervisors()
-	// go.txt's Out of scope says none; X.2 is off the id shape.
+	// go.txt's Follow-ups says none; X.2 is off the id shape.
 	want := []string{"F1 dropped - - - - 1", "F3 dropped - - - - 1", "- dropped - - - - 1"}
 	if got := findingRows(t, j.h.dir, r.ID); !slices.Equal(got, want) {
 		t.Fatalf("review: findings %q; want %q", got, want)
@@ -463,7 +469,7 @@ func TestFindingsMarkers(t *testing.T) {
 	_, r := j.job(all+"\n", "review", "T-2", "--drop", "F1,zqmark7", "--drop-file", "-")
 	j.waitSupervisors()
 	got := findingRows(t, j.h.dir, r.ID)
-	want := []string{"F1 finding 2 blocker auto-fix new 1", "- finding 3 other other other 1", "- out_of_scope - - - - 1",
+	want := []string{"F1 finding 2 blocker auto-fix new 1", "- finding 3 other other other 1", "- follow_up - - - - 1",
 		"F1 dropped - - - - 1", "- dropped - - - - 1"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("findings\n got %q\nwant %q", got, want)

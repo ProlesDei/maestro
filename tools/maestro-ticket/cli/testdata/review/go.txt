@@ -5,7 +5,7 @@ Tier: 0, only docs | Mode: full
 Confidence: very high, docs only
 Skeptic: short inline
 ## Findings       none
-## Out of scope   none
+## Follow-ups     none
 ## Outcome        Review comment 90
 {
   "verdict": "GO",

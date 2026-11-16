@@ -276,7 +276,7 @@ How the delta works:
 
 ### 5.4 `findings` (S4)
 
-`run`, `fid` (`F` plus 1 to 3 digits, else NULL), `kind` (finding, out_of_scope, dropped), `pass` (1-10, named as in passes.md), `sev`, `action`, `prior` (new, still_present), `n`.
+`run`, `fid` (`F` plus 1 to 3 digits, else NULL), `kind` (finding, follow_up, dropped; follow_up is one counted row for the lines under the report's `## Follow-ups`, read by the same function pickup files them with), `pass` (1-10, named as in passes.md), `sev`, `action`, `prior` (new, still_present), `n`.
 - Finding rows have `n=1`.
 - Out-of-scope lines get one row with a count.
 - Each `--drop` id becomes a `dropped` row with its `fid`. The reason text from `--drop-file` is never stored.
@@ -300,8 +300,8 @@ The schema version lives in `PRAGMA user_version`. Peak runs come from `launches
 
 | Where | Code, worked out by Go |
 |---|---|
-| outcome `failed` | `no_result`, `max_turns`, `api_error`, `budget`, `stopped` **[code: runs/supervise.go:228]**, `exit_nonzero`, `is_error` |
-| outcome `timed_out` | `limit` |
+| outcome `failed` | `no_result`, `max_turns`, `api_error`, `budget`, `stopped` (the launcher stopped), `asked` (`maestro-ticket stop`, error `stopped by`), `exit_nonzero`, `is_error` |
+| outcome `timed_out` | `limit`; `frozen` when the record says the machine froze past the limit (`Record.Frozen`) |
 | outcome `died` | `reboot` (the launch's boot stamp changed **[code: sqlitestore/sqlitestore.go:248]**, guess), `supervisor` |
 | review finding (S4) | pass, sev, action, prior, fid |
 | review ESCALATE (S4 plus the first line) | `repeat`: every surviving blocker and major has prior `still present`. `outside_step`: the `outside step:` marker. `merged`: first line `Escalation: review at <H>: PR <url> merged as`. `approval`: what is left. |
@@ -596,7 +596,7 @@ kickbacks 14d: 66 (review 41, qa 25) on 38 tickets
 code          sev      prior          n  tickets
 tests         blocker  new           27     21
 spec          major    still_present 14     11
-out_of_scope  -        -             30     19   (already on main)
+follow_up     -        -             30     19   (shipped as follow-ups)
 regress       -        -              6      5   (qa: works on main, broken at H)
 setup_fail    -        -              4      4   (qa: app never came up)
 ```
