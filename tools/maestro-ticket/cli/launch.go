@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -343,7 +344,10 @@ func runSupervise(ctx context.Context, c *call) error {
 			c.actor = r.Launcher
 			return c.startLaunch(ctx, runTicket(r))
 		},
-		OnEnd: func(r runs.Record) { c.endRun(context.WithoutCancel(ctx), dir, r) },
+		OnEnd: func(r runs.Record) {
+			c.endRun(context.WithoutCancel(ctx), dir, r)
+			c.chain(context.WithoutCancel(ctx), dir, r)
+		},
 		// A run a usage limit stopped rings once more as the limit lifts:
 		// nothing else wakes its bot then.
 		RingAgain: func(r runs.Record) time.Time {
@@ -434,7 +438,7 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 				runs.Save(dir, r)
 				c.endRun(ctx, dir, r)
 			}
-			h, err := runs.Webhook(notify, r.Launcher)
+			h, err := runs.Webhook(notify, r.Owner())
 			if err != nil || h.URL == "" {
 				msg := ""
 				if err != nil {
@@ -490,7 +494,7 @@ func runPickup(ctx context.Context, c *call) error {
 	ended, running := []runs.Record{}, []runs.Record{}
 	for _, r := range list {
 		switch {
-		case r.Launcher != c.actor:
+		case r.Owner() != c.actor:
 		case !r.Ended():
 			running = append(running, r)
 		default:
@@ -506,6 +510,13 @@ func runPickup(ctx context.Context, c *call) error {
 		for _, r := range ended {
 			switch {
 			case r.Job == "":
+			case len(r.Routed) > 0:
+				var rt routed
+				if err := json.Unmarshal(r.Routed, &rt); err != nil {
+					routeErr[r.ID] = err
+				} else {
+					routes[r.ID] = rt
+				}
 			case err != nil:
 				routeErr[r.ID] = err
 			default:
@@ -639,8 +650,8 @@ func runAck(ctx context.Context, c *call) error {
 		if !r.Ended() {
 			return fmt.Errorf("%w: ack: run %s is %s: ack it once pickup shows it ended", ticket.ErrStatusConflict, id, r.State)
 		}
-		if r.Launcher != c.actor {
-			return fmt.Errorf("%w: ack: run %s is %s's: only the bot that launched it acks it", ticket.ErrForbidden, id, dash(r.Launcher))
+		if r.Owner() != c.actor {
+			return fmt.Errorf("%w: ack: run %s is %s's: only the bot it was left to acks it", ticket.ErrForbidden, id, dash(r.Owner()))
 		}
 		ok, err := runs.Ack(dir, id, c.actor, now)
 		if err != nil {

@@ -216,6 +216,8 @@ type jobReq struct {
 	model, effort string   // overrides
 	limit         time.Duration
 	slots         int // QA runs at once; 0 for the default
+	chainOf       string
+	hops          int // a chained start: the run whose end starts it, and its hops
 }
 
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
@@ -428,7 +430,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
-		Command: withEnv(cmd),
+		Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops,
 	}
 	if k.ids {
 		rec.Tickets = ids
@@ -731,7 +733,7 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 	list, _ := runs.List(dir, time.Now(), false)
 	ended := []string{}
 	for _, o := range list {
-		if o.Launcher == c.actor && o.Ended() && o.ID != r.ID {
+		if o.Owner() == c.actor && o.Ended() && o.ID != r.ID {
 			ended = append(ended, o.ID)
 		}
 	}
