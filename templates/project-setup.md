@@ -4,7 +4,7 @@
 
 - `## Main branch`: one line, the branch PRs merge into.
 - `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
-- `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove with tests and one real run of the changed path, and QA proves the rest before it merges, so engineers spend no build run on test-only work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
+- `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove each criterion with one real run, and QA proves the rest before it merges, so engineers spend no build run on QA's work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
 
 Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads.
 
@@ -19,7 +19,7 @@ main
 
 ## Checks
 
-<each check a bullet of a name, a colon and the command in backticks, such as - test: `make test`. Wrap a check that takes minutes, strains the machine or writes temp files, such as a test run, in `maestro-ticket slot`, such as - test: `maestro-ticket slot --max 4 -- make test`, so many sessions at once don't make it slow or flaky, and each run's temp files go when it ends>
+<each check a bullet of a name, a colon and the command in backticks, such as - lint: `make lint`. Wrap a check that takes minutes, strains the machine or writes temp files, such as a full build, in `maestro-ticket slot`, such as - build: `maestro-ticket slot --max 4 -- make build`, so many sessions at once don't make it slow or flaky, and each run's temp files go when it ends>
 
 ## Run
 
@@ -51,4 +51,4 @@ qa
 
 ## Conventions
 
-<commit style, where tests live, files never to touch, and the shared helpers new code must use instead of its own, such as one for safe file paths or for errors that never print a secret; engineers and review hold every change to them>
+<commit style, files never to touch, and the shared helpers new code must use instead of its own, such as one for safe file paths or for errors that never print a secret; engineers and review hold every change to them>

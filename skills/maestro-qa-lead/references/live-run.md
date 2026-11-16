@@ -1,6 +1,6 @@
 # Live run
 
-A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests run against fakes, and a fake with the wrong response shape passes every test and fails the owner's first real call. So before the goal reaches the owner, you run the user's path once for real, the way a new user would, from nothing but the README. The ticket is a scout ticket you own: your pass sets it `done`, and the goal reads done only then.
+A goal that calls an outside API ends with a `Live run:` ticket. Its code was built against fakes or the API's docs, and a response shape guessed wrong works in every local run and fails the owner's first real call. So before the goal reaches the owner, you run the user's path once for real, the way a new user would, from nothing but the README. The ticket is a scout ticket you own: your pass sets it `done`, and the goal reads done only then.
 
 ## Phase A: Claim
 
@@ -17,7 +17,7 @@ A goal that calls an outside API ends with a `Live run:` ticket. Its unit tests 
 
 1. Run the path start to end against the real API, in the sandbox, test or paused mode the ticket names (ads created paused, payments in test mode). Never a mode that spends money or reaches real people: if the API has no safe mode, escalate as step 4 says, since that call is the owner's.
 2. Save each real response, with tokens, secrets and personal data redacted, under `maestro/evidence/<id>/<run>/responses/` in the repo's shared git folder, one file per call, named for the call.
-3. Find the fake each call has in the tests. A field the code reads that the real response lacks, names another way or types differently is a finding, with both shapes: the fake was written by hand, not built from a real response. Name the saved file, so the fix builds its fake from it.
+3. Compare each real response with what the code expects of it: the type it decodes into, the fields it reads, any fake it was built against. A field the code reads that the real response lacks, names another way or types differently is a finding, with both shapes. Name the saved file, so the fix builds from it.
 4. Missing a key, account, safe mode or outside step (named as **maestro-working-principles** says): post `Escalation: live run at <G>: <what's missing>; <the one question>` with a last line `Return-role: qa-lead`, keyed `<run>-escalation`, move the ticket to `todo`, keyed `<run>-back`, then to `blocked` with `--release`, keyed `<run>-blocked`, so the answer returns it to `todo` for a new live run, and go to Phase D step 3.
 
 ## Phase D: Judge and post

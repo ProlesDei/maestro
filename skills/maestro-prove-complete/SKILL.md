@@ -16,7 +16,7 @@ Open a todo list with one item per phase below.
 1. In the worktree, `git status --porcelain` prints nothing. Your sha is `git rev-parse HEAD`. Proof from a dirty tree or another sha doesn't count, save what step 4 carries.
 2. Number each acceptance criterion from `maestro-ticket get <id> --json`.
 3. Read `## Run` in `.maestro/project/project-setup.md` for how the project runs, else the README and build files. Then check the steps under `## Outside steps` there that this proof needs, as **maestro-working-principles** says; one not done: prove each claim that doesn't need it, mark the rest `not checked: outside step`, and write the block up as it says.
-4. On a rerun after a `Kickback:`, prove only what changed: each item it names, and each criterion whose code or test, or anything they call, changed since the sha of the latest `Handoff:`. Mark the rest `carried: <that sha>`; it counts as a pass. Never prove a criterion again that nothing touched.
+4. On a rerun after a `Kickback:`, prove only what changed: each item it names, and each criterion whose code, or anything it calls, changed since the sha of the latest `Handoff:`. Mark the rest `carried: <that sha>`; it counts as a pass. Never prove a criterion again that nothing touched.
 5. Save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/<sha>/`, so a rerun's proof never mixes with an older commit's.
 
 ## Phase B: Prove each claim
@@ -25,7 +25,7 @@ Pick the strongest proof for each:
 
 | Claim is about | Proof | Keep |
 |---|---|---|
-| logic | a test that fails without the change and passes with it | command, exit code, counts, test name |
+| logic | the changed path run for real on the base commit and on yours: the command or request that reaches it, or a throwaway script in a temp folder that calls it | the command, both outputs, exit codes |
 | a bug | the repro failing on the base commit and passing on yours | both outputs |
 | a CLI | the real command against the built binary | command, output excerpt, exit code |
 | an HTTP API | `curl -i` against the running app | request, status, the headers that matter, body excerpt |
@@ -40,8 +40,7 @@ Stop every process you started.
 
 1. Feed it empty input, wrong input, each limit and one past it, error paths, a restart (does state survive?) and a double submit.
 2. Check one nearby feature that worked before and must still work.
-3. Run a test that looks flaky 3 times and report each result, not the best.
-4. Run each new test on the base commit. One that passes there proves nothing.
+3. Run a check that looks flaky 3 times and report each result, not the best.
 
 ## Phase D: Report
 
