@@ -315,4 +315,55 @@ t 1 "$wt" --skip-head -- bash {}
 grep -q 'src/calc.sh is a file on one side' "$tmp/err" || fail "a file turned folder: no why"
 hasnt '^base='
 
+# What git status hides is never lost: a change that untracks a file the
+# worktree still holds, ignored, is refused with the file as it was; so
+# is an ignored folder where the base had a file.
+new() { # new <name>: a change's worktree from main, in $wt
+	wt=$tmp/$1
+	git -C "$tmp/work" worktree add -q "$wt" -b "$1" origin/main
+	cd "$wt"
+}
+new keep
+echo 'secret=1' >.env && git add -f .env && git commit -qm "track .env"
+B0=$(git rev-parse HEAD)
+git rm -q --cached .env && echo .env >.gitignore && echo 'echo k' >src/k.sh
+# shellcheck disable=SC2016
+echo 'cd "$(dirname "$0")/.." && [ "$(sh src/k.sh)" = k ]' >tests/k_test.sh
+git add -A && git commit -qm "untrack .env"
+[ -f .env ] && [ -z "$(git status --porcelain)" ] || fail "setup: .env should sit there, ignored"
+t 2 "$wt" --base "$B0" --skip-head -- bash {}
+grep -q '\.env is not in the change' "$tmp/err" || fail "an ignored file at a base-only path: no why"
+[ "$(cat .env)" = 'secret=1' ] || fail "the ignored file was lost"
+mv .env "$tmp/env.away"
+t 0 "$wt" --base "$B0" --skip-head -- bash {}
+has base=red
+
+# A fixture stays as the head has it: a test that reads one, and never
+# touches the change, is green at the base, not red for a missing file.
+new fix
+mkdir -p src/testdata && echo 5 >src/testdata/sum.golden && echo 'echo c' >src/c.sh
+# shellcheck disable=SC2016
+echo 'cd "$(dirname "$0")/.." && [ "$(sh src/calc.sh 2 3)" = "$(cat src/testdata/sum.golden)" ]' >tests/golden_test.sh
+git add -A && git commit -qm fixture
+t 1 "$wt" -- bash {}
+for l in "test=tests/golden_test.sh green" base=green; do has "$l"; done
+
+# A test named like an option runs as a file, and a name with a line
+# break in it gets no verdict it could forge.
+new dash
+echo 'echo d' >src/d.sh
+# shellcheck disable=SC2016
+echo '[ "$(sh src/d.sh)" = d ]' >./-x_test.sh
+git add -A && git commit -qm dash
+t 0 "$wt" --skip-head -- bash {}
+has "test=-x_test.sh red"
+grep -q 'invalid option' "$(val log)" && fail "a test path was read as an option"
+echo 'true' >"tests/x
+base=red
+z_test.sh"
+git add -A && git commit -qm newline
+t 1 "$wt" --skip-head -- bash {}
+grep -q 'control character' "$tmp/err" || fail "a name with a line break: no why"
+hasnt '^base='
+
 echo "ok: tests-on-base reads red for a test that needs the change and green for one that passes without it, per file with {}, from the merge base or --base, and leaves the tree, index and HEAD as they were, also when the command dies or the run is stopped or killed"

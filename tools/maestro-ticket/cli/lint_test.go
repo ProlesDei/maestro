@@ -33,6 +33,11 @@ func TestCreateLint(t *testing.T) {
 	if code != 0 || !strings.Contains(errs, "lint: 7 numbered lines: past about 6 criteria, split the ticket") {
 		t.Fatalf("a long ticket: %d %s", code, errs)
 	}
+	// Markdown around either doesn't hide it.
+	md := "- [ ] **1.** it works\n\n> - Not handled: none\n"
+	if code, stdout, _ := h.run(md, "create", "--title", "c", "--areas", "src/c", "--lint", "--body-file", "-", "--json"); code != 0 {
+		t.Fatalf("a Markdown body: %d %s", code, stdout)
+	}
 	// A scout and another role's ticket have no such shape.
 	h.ok(nil, "create", "--title", "Design: x", "--type", "scout", "--role", "designer", "--owner", "planner", "--lint")
 	h.ok(nil, "create", "--title", "Live run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead", "--lint")
@@ -40,7 +45,7 @@ func TestCreateLint(t *testing.T) {
 	h.ok(nil, "create", "--title", "quick")
 	var l struct{ Tickets []struct{ ID string } }
 	h.ok(&l, "list")
-	if len(l.Tickets) != 5 {
-		t.Fatalf("%d tickets; want 5: the refused ones made none", len(l.Tickets))
+	if len(l.Tickets) != 6 {
+		t.Fatalf("%d tickets; want 6: the refused ones made none", len(l.Tickets))
 	}
 }

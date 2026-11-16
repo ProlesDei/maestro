@@ -100,19 +100,33 @@ is_test() {
 	esac
 	return 1
 }
+# What tests read. It stays as the head has it and is never run: put
+# back to the base, it would fail a test that never touches the change,
+# and read as red.
+is_fixture() {
+	case /$1 in
+	*/testdata/* | */fixtures/* | */__fixtures__/* | */__snapshots__/* | */__mocks__/* | */conftest.py) return 0 ;;
+	esac
+	return 1
+}
 # tests: the changed test files the head has; a deleted one stays gone
 # and is not run. code: every other changed file. added: those the base
 # lacks. inbase: those it has.
-tests=() code=() added=() inbase=()
+tests=() code=() added=() inbase=() gone=()
 declare -A changed=()
 while IFS= read -r -d '' st && IFS= read -r -d '' p; do
+	# A line break in a name would print as a line of its own, and could
+	# read as this script's verdict.
+	[[ $p != *[[:cntrl:]]* ]] || die 1 "a changed path holds a control character: check these tests by hand"
 	changed[$p]=1
+	if is_fixture "$p"; then continue; fi
 	if is_test "$p"; then
 		[ "$st" = D ] || tests+=("$p")
 		continue
 	fi
 	code+=("$p")
 	if [ "$st" = A ]; then added+=("$p"); else inbase+=("$p"); fi
+	[ "$st" != D ] || gone+=("$p")
 done < <(g diff --no-renames --name-status -z "$B" "$head")
 # A file on one side that is a folder on the other can't be swapped: git
 # takes its path for all the folder holds, and the way back would fail.
@@ -123,6 +137,26 @@ for p in "${!changed[@]}"; do
 		[ -z "${changed[$d]-}" ] || die 1 "$d is a file on one side of the change and a folder on the other: this can't swap it, so check these tests by hand"
 	done
 done
+
+# A path only the base tracks comes back for the run and goes again
+# after it. git status hides an ignored file, so one that sits there now,
+# or a file or link where a folder of the path must go, would be written
+# over and then removed.
+for p in "${gone[@]}"; do
+	if [ -e "$top/$p" ] || [ -L "$top/$p" ]; then
+		die 2 "$p is not in the change's head, but something sits there, ignored or untracked: this would write over it and remove it. Move it away first"
+	fi
+	d=$p
+	while [[ $d == */* ]]; do
+		d=${d%/*}
+		if [ -L "$top/$d" ] || { [ -e "$top/$d" ] && [ ! -d "$top/$d" ]; }; then
+			die 2 "$d is a file or a link here, and a folder at the base: this would replace it. Move it away first"
+		fi
+	done
+done
+# A submodule's files aren't in this tree to swap.
+! g diff --no-renames --raw "$B" "$head" | grep -Eq '^:(160000 [0-7]+|[0-7]+ 160000) ' ||
+	die 1 "the change adds, removes or moves a submodule: this can't swap it, so check these tests by hand"
 
 echo "base_sha=$B"
 echo "head_sha=$head"
@@ -164,7 +198,10 @@ rel() {
 		pre=${pre#"$d"}
 		if [ -z "$up" ] && [[ $p == "$d"* ]]; then p=${p#"$d"}; else up+=../; fi
 	done
-	printf '%s' "$up$p"
+	p=$up$p
+	# Never an option to the command.
+	[[ $p != -* ]] || p=./$p
+	printf '%s' "$p"
 }
 
 # run <stage> <test file, or ''>: the command's exit code in $rc, its

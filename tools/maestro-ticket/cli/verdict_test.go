@@ -51,7 +51,7 @@ func TestVerdictPostsAndMoves(t *testing.T) {
 		t.Fatalf("after a GO: %s %q %d comments", st, holder, n)
 	}
 
-	kick := "Kickback: 2 blockers at " + vsha + "\nVerified: criteria 1\nGates: green on g\n- F1 [blocker, auto-fix] a.go:3: x. Fix: y\n- F2 [blocker, ask-user] b.go:9: which one?\n"
+	kick := "Kickback: 2 blockers at " + vsha + "\nVerified: criteria 1\nGates: green on g\n- F1 [blocker, auto-fix] a.go:3: x. Fix: y\n2. **F2** [Blocker, ask-user] b.go:9: which one?\n"
 	code, out, errs := h.note("verdict", "T-1", "reviewer/r1", tok, "k2", kick)
 	if code != 0 || !strings.Contains(out, `"moved": "in_review -> in_progress"`) {
 		t.Fatalf("kickback: %d %s %s", code, out, errs)
@@ -92,7 +92,10 @@ func TestVerdictRefuses(t *testing.T) {
 		"the old header":  {"Kickback: 1 blockers, 1 majors at " + vsha + "\n- F1 [blocker, auto-fix] a.go:1: x", "majors and minors go under ## Follow-ups"},
 		"a wrong count":   {"Kickback: 3 blockers at " + vsha + "\n- F1 [blocker, auto-fix] a.go:1: x", "counts 3 blockers, and 1 finding lines follow"},
 		"no finding":      {"Kickback: 0 blockers at " + vsha, "a Kickback with no blocker is a GO"},
-		"no head":         {"Review: GO at HEAD (PR u)", "names no full head sha"},
+		"no head":         {"Review: GO at HEAD (PR u)", "wants the head's full sha right after"},
+		"a short head":    {"QA: pass at abc1234 (PR u), tier 1, on main at " + vsha, "wants the head's full sha right after"},
+		"a bold major":    {"Kickback: 1 blockers at " + vsha + "\n- **F1** [blocker, auto-fix] a.go:1: x\n* **F2** [Major, auto-fix] a.go:2: y", "take F2 (major) off the Kickback"},
+		"a reason unread": {"Kickback: 1 blockers at " + vsha + "\nGates: red: make test", "no finding line follows"},
 		"no return role":  {"Escalation: review at " + vsha + "\nWhat happened", "an Escalation: ends with a line"},
 		"an unknown note": {"Looks good to me", "want Review: GO at, Kickback:"},
 		"a build's note":  {"Handoff: PR u at " + vsha, "the note opens"},
@@ -104,6 +107,10 @@ func TestVerdictRefuses(t *testing.T) {
 	}
 	if st, holder, n := h.status("T-1"); st != "in_review" || holder != "reviewer/r1" || n != 0 {
 		t.Fatalf("a refusal wrote: %s %q %d comments", st, holder, n)
+	}
+	// A refusal never hints at a GO while the first line counts blockers.
+	if _, out, _ := h.note("verdict", "T-1", "reviewer/r1", tok, "k-hint", "Kickback: 1 blockers at "+vsha+"\nGates: red: make test"); strings.Contains(out, "Review: GO") {
+		t.Errorf("a kickback with a reason no line names was told to post a GO: %s", out)
 	}
 	// No key, no claim.
 	if code, _, _ := h.run("Review: GO at "+vsha, "verdict", "T-1", "--holder", "reviewer/r1", "--token", tok, "--body-file", "-"); code != 2 {
@@ -161,6 +168,7 @@ func TestHandoff(t *testing.T) {
 	tok := h.claim("T-1", "senior-engineer/e1")
 	for body, want := range map[string]string{
 		"Handoff: PR u, head abc1234":          "names no full head sha",
+		"Handoff: PR u\nMerged main " + vsha:   "names no full head sha",
 		"Review: GO at " + vsha:                "want Handoff:",
 		"Kickback: 1 blockers at " + vsha + "": "want Handoff:",
 	} {
@@ -168,18 +176,27 @@ func TestHandoff(t *testing.T) {
 			t.Errorf("%q: exit %d, want 2 with %q: %s", body, code, want, out)
 		}
 	}
-	body := "Handoff: PR https://github.com/o/r/pull/3, branch maestro/T-1, head " + vsha + "\nChecks: test 0\n1. criterion: proof"
+	body := "\n  Handoff: PR https://github.com/o/r/pull/3 at " + vsha + ", branch maestro/T-1\nChecks: test 0\n1. criterion: proof"
 	if code, out, errs := h.note("handoff", "T-1", "senior-engineer/e1", tok, "h1", body); code != 0 || !strings.Contains(out, `"kind": "handoff"`) {
 		t.Fatalf("handoff: %d %s %s", code, out, errs)
 	}
 	if st, holder, n := h.status("T-1"); st != "in_review" || holder != "" || n != 1 {
 		t.Fatalf("after a handoff: %s %q %d comments", st, holder, n)
 	}
-	// Pickup routes it as any build in review.
+	// The note is stored from its first word, as routing reads it.
+	var d struct{ Comments []struct{ Body string } }
+	h.ok(&d, "get", "T-1", "--full")
+	if !strings.HasPrefix(d.Comments[0].Body, "Handoff: PR ") {
+		t.Fatalf("stored with its leading blanks: %q", d.Comments[0].Body)
+	}
+	// The same command again replays, even once the reviewer has taken the
+	// ticket and written on it.
+	rtok := h.claim("T-1", "reviewer/r1")
+	h.run("looking", "comment", "T-1", "--body-file", "-", "--holder", "reviewer/r1", "--token", rtok)
 	if code, _, errs := h.note("handoff", "T-1", "senior-engineer/e1", tok, "h1", body); code != 0 {
 		t.Fatalf("replay: %d %s", code, errs)
 	}
-	if _, _, n := h.status("T-1"); n != 1 {
+	if _, _, n := h.status("T-1"); n != 2 {
 		t.Fatalf("a replay posted again: %d comments", n)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,9 +26,10 @@ type noteKind struct {
 var (
 	// "Kickback: 2 blockers at <sha>", or "at none" for a PR that isn't there.
 	kickbackHead = regexp.MustCompile(`^Kickback: ([0-9]+) blockers? at ([0-9a-f]{40}|none)(\s|$)`)
-	// "- F3 [major, auto-fix] file:line: ...": a finding and its severity.
-	findingLine = regexp.MustCompile(`^\s*[-*]\s+(F[0-9]+)\s+\[\s*([a-z]+)`)
-	atSHA       = regexp.MustCompile(` at [0-9a-f]{40}(\W|$)`)
+	// "- F3 [major, auto-fix] file:line: ...": a finding and its severity,
+	// as a bullet or a numbered line, in any case, bold or not.
+	findingLine = regexp.MustCompile(`(?i)^\s*(?:[-*+]|[0-9]+[.)])\s+[*_]*(F[0-9]+)[*_:]*\s*[\[(]\s*[*_]*([a-z]+)`)
+	fullSHA     = regexp.MustCompile(`^[0-9a-f]{40}(\W|$)`)
 )
 
 // verdictKind sorts a review's or QA's note by its first line and checks
@@ -40,18 +42,25 @@ func verdictKind(body string) (noteKind, error) {
 		return noteKind{}, fmt.Errorf("%w: verdict: %s", ticket.ErrInvalid, fmt.Sprintf(format, a...))
 	}
 	var k noteKind
+	prefix := ""
+	is := func(p string) bool {
+		if strings.HasPrefix(first, p) {
+			prefix = p
+		}
+		return prefix == p
+	}
 	switch {
-	case strings.HasPrefix(first, "Review: GO at "):
+	case is("Review: GO at "):
 		k = noteKind{name: "review-go", from: ticket.StatusInReview}
-	case strings.HasPrefix(first, "QA: pass at "):
+	case is("QA: pass at "):
 		k = noteKind{name: "qa-pass", from: ticket.StatusInReview}
-	case strings.HasPrefix(first, "Rereview: QA at "):
+	case is("Rereview: QA at "):
 		k = noteKind{name: "rereview", from: ticket.StatusInReview}
-	case strings.HasPrefix(first, "Kickback: QA fail at "):
+	case is("Kickback: QA fail at "):
 		k = noteKind{name: "qa-fail", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "QA fail at"}
-	case strings.HasPrefix(first, "Escalation: review at "):
+	case is("Escalation: review at "):
 		k = noteKind{name: "review-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "Review escalated at"}
-	case strings.HasPrefix(first, "Escalation: QA at "):
+	case is("Escalation: QA at "):
 		k = noteKind{name: "qa-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "QA escalated at"}
 	case strings.HasPrefix(first, "Kickback:"):
 		m := kickbackHead.FindStringSubmatch(first)
@@ -62,30 +71,31 @@ func verdictKind(body string) (noteKind, error) {
 		var found, slid []string
 		for _, l := range strings.Split(lineBreaks.Replace(body), "\n") {
 			if f := findingLine.FindStringSubmatch(l); f != nil {
-				found = append(found, f[1])
-				if f[2] != "blocker" {
-					slid = append(slid, f[1]+" ("+f[2]+")")
+				found = append(found, strings.ToUpper(f[1]))
+				if sev := strings.ToLower(f[2]); sev != "blocker" {
+					slid = append(slid, strings.ToUpper(f[1])+" ("+sev+")")
 				}
 			}
 		}
 		switch {
 		case len(slid) > 0:
 			return bad("only a blocker sends a change back: take %s off the Kickback and list them under ## Follow-ups in the report", strings.Join(slid, ", "))
-		case n == 0 || len(found) == 0:
+		case n == 0:
 			return bad("a Kickback with no blocker is a GO: post %q instead", "Review: GO at <sha>")
+		case len(found) == 0:
+			// Never a hint to post a GO: the first line says blockers stand.
+			return bad("the first line counts %d blockers, and no finding line follows: give each reason for the NO-GO, a red gate or a conflict too, a line %q", n, "- F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...")
 		case n != len(found):
 			return bad("the first line counts %d blockers, and %d finding lines follow (%s)", n, len(found), strings.Join(found, ", "))
 		}
 		// "at none" is a PR that isn't there: nothing to name in the note.
 		k = noteKind{name: "review-kickback", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "Kickback at"}
-		if m[2] == "none" {
-			return k, nil
-		}
+		return k, nil
 	default:
 		return bad("the note opens %q; want Review: GO at, Kickback:, Escalation: review at, QA: pass at, Kickback: QA fail at, Escalation: QA at or Rereview: QA at", first)
 	}
-	if !atSHA.MatchString(first) {
-		return bad("the first line names no full head sha after \" at \": a verdict covers one head")
+	if !fullSHA.MatchString(first[len(prefix):]) {
+		return bad("the first line wants the head's full sha right after %q: a verdict covers one head", strings.TrimSpace(prefix))
 	}
 	if k.to == ticket.StatusBlocked && !lastLineHas(body, "Return-role:") {
 		return bad("an Escalation: ends with a line %q, so the ticket goes back to its role once answered", "Return-role: <the ticket's role>")
@@ -109,8 +119,8 @@ func runHandoff(ctx context.Context, c *call) error {
 		if !strings.HasPrefix(firstLine(body), "Handoff:") {
 			return noteKind{}, fmt.Errorf("%w: handoff: the note opens %q; want Handoff:", ticket.ErrInvalid, firstLine(body))
 		}
-		if !hexSHA.MatchString(body) {
-			return noteKind{}, fmt.Errorf("%w: handoff: the note names no full head sha: review and QA rule on one head", ticket.ErrInvalid)
+		if !hexSHA.MatchString(firstLine(body)) {
+			return noteKind{}, fmt.Errorf("%w: handoff: the first line names no full head sha, as in %q: review and QA rule on one head", ticket.ErrInvalid, "Handoff: PR <url> at <sha>")
 		}
 		return noteKind{name: "handoff", from: ticket.StatusInProgress, to: ticket.StatusInReview, release: true, note: "Handoff at"}, nil
 	})
@@ -147,6 +157,8 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 		if err != nil {
 			return err
 		}
+		// Routing reads a note's first line from its first byte.
+		b = strings.TrimLeft(lineBreaks.Replace(b), " \t\n")
 		k, err := kindOf(b)
 		if err != nil {
 			return err
@@ -155,11 +167,11 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 		if err != nil {
 			return err
 		}
-		// A replay finds the ticket where the first try left it, with this
-		// note as its latest.
-		replay := k.to != "" && d.Status == k.to && len(d.Comments) > 0 && d.Comments[len(d.Comments)-1].Body == b
+		// A replay finds this note on the ticket already, wherever the
+		// ticket went since: the store answers it from the key.
+		replay := slices.ContainsFunc(d.Comments, func(cm ticket.Comment) bool { return cm.Body == b })
 		if d.Status != k.from && !replay {
-			return fmt.Errorf("%w: %s is %s, not %s: it moved on without this run, so post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
+			return fmt.Errorf("%w: %s is %s, and this note goes on a ticket in %s: post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
 		}
 		cm, err := s.Comment(ctx, ticket.CommentRequest{
 			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,

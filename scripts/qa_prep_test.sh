@@ -151,9 +151,22 @@ git config --unset user.useConfigOnly
 comments T-7 "$go" "Review: NO-GO at $H (PR $url)"
 qa 7
 has review_go=none
-comments T-7 "Review: GO at $K (PR $url), tier 1, gated on $G0" "Kickback: 1 blockers, 0 majors at $K" "Handoff: fixed at $H"
+comments T-7 "Review: GO at $K (PR $url), tier 1, gated on $G0" "Handoff: fixed at $H"
 qa 7
 has "review_go=$K"
+# Review's own later Kickback: takes its GO back, and a line that only
+# quotes a GO is none; an indented first line still reads.
+comments T-7 "Review: GO at $H (PR $url), tier 1, gated on $G0" "Kickback: 1 blockers at $H" "Handoff: fixed at $H"
+qa 7
+has review_go=none
+comments T-7 "$go" "Review: report-only at $H; the last was Review: GO at $H"
+qa 7
+has review_go=none
+comments T-7 "Handoff: PR 7 at $H" "   Review: GO at $H (PR $url), tier 1"
+qa 7
+has "review_go=$H"
+comments T-7 "Review: GO at $K (PR $url), tier 1, gated on $G0" "Handoff: fixed at $H"
+qa 7
 has qa_last=none
 has mode=full
 comments T-7 "Handoff: PR 7 at $H" "Rereview: QA at $H: review passed none"
@@ -243,7 +256,9 @@ before=$(made)
 qa 12
 for l in ticket=none fork=true "H=$F" stop=fork; do has "$l"; done
 git cat-file -e "$F^{commit}" 2>/dev/null && fail "prep fetched a fork's head"
-grep -qE '^(run|R|C|E|G)=' "$tmp/out" && fail "prep made something for a fork"
+grep -qE '^(R|C|E|G)=' "$tmp/out" && fail "prep made something for a fork"
+# A stop still names the run: it keys the note QA posts for it.
+[[ $(val run) =~ ^qa-pr-12-[a-z]{6}$ ]] || fail "a stop names no run: $(val run)"
 pr 13 maestro/T-7 "$H2" false src/a.go
 jq '.state = "MERGED"' "$FX/pr-13.json" >"$FX/x" && mv "$FX/x" "$FX/pr-13.json"
 qa 13

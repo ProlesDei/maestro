@@ -121,9 +121,9 @@ Commands:
               [--actor-role R] [--parked R (required to enter backlog, except back from blocked)]
   comment     <id> (--body B | --body-file F|-) [--holder H --token N]
   verdict     <id> --holder H --token N --body-file F|- --idempotency-key K   (a review's or QA's
-              note and its move in one call, by the note's first line: Review: GO and QA: pass
-              post only; a Kickback: sends the ticket back to in_progress; an Escalation: blocks
-              it; refuses a review Kickback: that lists anything but blockers)
+              note and its move in one call, by the note's first line: Review: GO, QA: pass and
+              Rereview: post only; a Kickback: sends the ticket back to in_progress; an
+              Escalation: blocks it; refuses a review Kickback: that lists anything but blockers)
   handoff     <id> --holder H --token N --body-file F|- --idempotency-key K   (an engineer's
               Handoff: note, the move to in_review and the release, in one call)
   events      [--since SEQ] [--limit N] [--ticket ID] [--type T]
@@ -143,10 +143,12 @@ Commands:
               command in the same folder on the same git tree: then it prints where, and
               exits 0; a pass is recorded only from a clean checkout the run left clean, a
               failure drops it, and env vars and gitignored files are not compared)
-  cache       restore | save   (restore copies into this worktree each folder ## Cache in the
-              main checkout's project-setup.md lists, such as node_modules, when a run saved one
-              for the same key files; save keeps them, from a review or QA run on a clean
-              checkout only; both exit 0 and say what they did)
+  cache       restore | save [--at SHA] | drop [<name>]   (restore copies into this worktree
+              each folder ## Cache in the main checkout's project-setup.md lists, such as
+              node_modules, when one was saved for the same key files; save keeps them, only
+              from a review or QA run on a clean checkout whose tree a commit on the main
+              branch has, origin/<main> or --at, which in practice is QA after its merge;
+              drop removes what is kept)
 
 Flags on every command:
   --json                  machine-readable output (errors too, on stdout)
@@ -154,8 +156,9 @@ Flags on every command:
                           $(git rev-parse --git-common-dir)/maestro/tickets.db)
   --actor NAME            who is acting (default $MAESTRO_TICKET_ACTOR)
   --idempotency-key K     on create, update, claim, release, transition,
-                          comment: a retry with the same key and request
-                          replays the result
+                          comment, verdict, handoff (which require it): a
+                          retry with the same key and request replays the
+                          result
 
 Fencing: every claim returns a lease token (claim.token), new on every claim,
 including re-claiming your own lease. heartbeat and release always need

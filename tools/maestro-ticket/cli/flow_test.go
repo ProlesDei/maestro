@@ -92,4 +92,50 @@ func TestFlowStagesAndSendBacks(t *testing.T) {
 	if code := h.fails(2, "flow", "--since", "soon"); code == "" {
 		t.Fatal("a bad --since passed")
 	}
+	h.ok(&got, "flow", "--since", "7d")
+	if got.Tickets != 2 {
+		t.Fatalf("since 7d: %+v", got)
+	}
+}
+
+// QA's time after its escalation is answered is QA's, though no new GO is
+// posted; a stay in backlog mid-life counts nowhere, the lead included;
+// and a send-back whose note was posted twice counts once.
+func TestFlowBlockedBacklogAndReposts(t *testing.T) {
+	h := newRouteHarness(t)
+	clock := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return clock }
+	step := func(d time.Duration) { clock = clock.Add(d) }
+
+	h.ok(nil, "create", "--title", "one")
+	h.move("T-1", "in_progress", "in_review")
+	step(5 * time.Minute)
+	h.comment("T-1", "Review: GO at aaa")
+	step(10 * time.Minute)
+	h.comment("T-1", "Escalation: QA at aaa: no browser\nReturn-role: engineer")
+	h.move("T-1", "blocked")
+	step(20 * time.Minute)
+	h.comment("T-1", "Answer: it is there now")
+	h.move("T-1", "in_review")
+	step(30 * time.Minute)
+	h.comment("T-1", "Kickback: QA fail at aaa (PR u), tier 1, on main at g")
+	h.comment("T-1", "Kickback: QA fail at aaa (PR u), tier 1, on main at g")
+	h.move("T-1", "in_progress", "todo")
+	h.ok(nil, "transition", "T-1", "--to", "backlog", "--parked", "hold")
+	step(time.Hour)
+	h.move("T-1", "todo", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at bbb")
+	h.move("T-1", "done")
+
+	var got flowReport
+	h.ok(&got, "flow")
+	want := map[string]float64{"queue": 0, "build": 0, "review": 300, "qa": 2400, "blocked": 1200}
+	for _, s := range got.Stages {
+		if s.Total != want[s.Stage] {
+			t.Errorf("%s: total %v; want %v", s.Stage, s.Total, want[s.Stage])
+		}
+	}
+	if got.QASendBacks != 1 || got.ReviewSendBacks != 0 || got.Slowest[0].Lead != 3900 {
+		t.Fatalf("send-backs or lead: %+v", got)
+	}
 }

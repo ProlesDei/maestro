@@ -241,6 +241,16 @@ pkeys() {
 	echo "main=$main"
 	echo "H=$H"
 }
+# QA's run name, on a stop too: it keys the note QA posts for one. Six
+# letters from the OS, so runs started in one second, by hundreds of
+# sessions, still share no worktree, evidence folder or write key.
+qarun=
+if [ -n "$qa" ]; then
+	abc=abcdefghijklmnopqrstuvwxyz rand=""
+	for b in $(od -An -N6 -tu1 /dev/urandom); do rand+=${abc:b % 26:1}; done
+	[ ${#rand} -eq 6 ] || die 1 "no 6 random bytes from /dev/urandom"
+	qarun=qa-${ticket:-pr-$pr}-$rand
+fi
 stop=
 if [ "$fork" != false ]; then
 	stop=fork # never run, or even check out, a fork's code
@@ -252,6 +262,7 @@ fi
 if [ -n "$stop" ]; then
 	pkeys
 	echo "stop=$stop"
+	[ -z "$qarun" ] || echo "run=$qarun"
 	exit 0
 fi
 
@@ -271,12 +282,7 @@ run=review-$id-$S E="" G=""
 # which another session's fetch can move while this one works.
 tip=origin/$main
 if [ -n "$qa" ]; then
-	# Six letters from the OS, so runs started in one second, by hundreds
-	# of sessions, still share no worktree, evidence folder or write key.
-	abc=abcdefghijklmnopqrstuvwxyz rand=""
-	for b in $(od -An -N6 -tu1 /dev/urandom); do rand+=${abc:b % 26:1}; done
-	[ ${#rand} -eq 6 ] || die 1 "no 6 random bytes from /dev/urandom"
-	run=qa-$id-$rand
+	run=$qarun
 	G=$(git rev-parse "refs/remotes/origin/$main^{commit}")
 	tip=$G
 	# In the shared git folder, never the worktree: the PR controls that.
@@ -294,6 +300,11 @@ cleanup() {
 	[ -z "$E" ] || rm -rf -- "$E"
 }
 trap cleanup EXIT
+# bash runs no EXIT trap when a signal kills it, and a run's time limit
+# ends it with one: exit, so the trap runs.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 git worktree add -q --detach "$R" "$H" || die 1 "git worktree add $R failed"
 [ "$(git -C "$R" rev-parse HEAD)" = "$H" ] || die 1 "worktree $R isn't at $H"
 
@@ -308,7 +319,7 @@ if [ -n "$qa" ]; then
 	{ git -C "$R" var GIT_AUTHOR_IDENT && git -C "$R" var GIT_COMMITTER_IDENT; } >/dev/null 2>&1 ||
 		ident=(-c user.name=maestro-qa -c user.email=maestro-qa@localhost)
 	if ! err=$(git -C "$R" "${ident[@]}" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
-		merge -q --no-edit "$G" 2>&1); then
+		merge -q --ff --no-edit "$G" 2>&1); then
 		# Only a merge git stopped half way is a conflict.
 		git -C "$R" rev-parse -q --verify MERGE_HEAD >/dev/null ||
 			die 1 "git merge of $main at $G into $R failed: $(tail -n 1 <<<"$err")"
@@ -351,7 +362,7 @@ touch "$C/files.txt"
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
 if [ -n "$ticket" ]; then
 	firsts=$(maestro-ticket get "$ticket" --json |
-		jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // ""))') ||
+		jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // "")) | sub("^[ \t]+"; "")') ||
 		die 1 "maestro-ticket get $ticket failed"
 else
 	firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
@@ -374,8 +385,11 @@ classes() {
 }
 inc=incremental by="review's verdict" why="no earlier verdict" delta=""
 if [ -n "$qa" ]; then
-	# What review passed: its latest Review: comment, only when a GO.
-	review_go=$(sha_after "$(grep '^Review:' <<<"$firsts" | tail -n 1)" "Review: GO at ")
+	# What review passed: its latest verdict, a Kickback: of its own
+	# included, and only when that one opens as a GO.
+	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
+	review_go=
+	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
 	# QA's own latest verdict. Only a fail that tested is a base for a
 	# retest: a pass or a "not tested:" checked nothing to carry over.
 	inc=retest by="QA's fail" why="no earlier QA verdict" K=""

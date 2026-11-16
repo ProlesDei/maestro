@@ -86,21 +86,21 @@ func flowOf(ex ticket.Export, since time.Time, goal string) flowReport {
 		if d.Type != ticket.TypeShip || d.Status != ticket.StatusDone || (goal != "" && d.Goal != goal) {
 			continue
 		}
-		spent, start, done := ticketFlow(d, events[d.ID])
+		spent, done, review, qa := ticketFlow(d, events[d.ID])
 		if done.IsZero() || done.Before(since) {
 			continue
 		}
 		rep.Tickets++
+		lead := 0.0
 		for st, sec := range spent {
 			per[st] = append(per[st], sec)
+			lead += sec
 		}
-		review, qa := sendBacks(d.Comments)
 		rep.ReviewSendBacks += review
 		rep.QASendBacks += qa
 		if review+qa == 0 {
 			firstPass++
 		}
-		lead := done.Sub(start).Seconds()
 		leads = append(leads, lead)
 		rep.Slowest = append(rep.Slowest, flowTicket{ID: d.ID, Lead: lead, SendBacks: review + qa})
 	}
@@ -137,17 +137,16 @@ func flowOf(ex ticket.Export, since time.Time, goal string) flowReport {
 }
 
 // ticketFlow walks one ticket's status changes and returns the seconds it
-// spent in each stage, when it first left backlog (its start) and when it
-// last reached done. Time in backlog counts nowhere: a parked ticket
-// waits on a plan, not on the flow.
-func ticketFlow(d ticket.Detail, evs []ticket.Event) (map[string]float64, time.Time, time.Time) {
-	spent := map[string]float64{}
-	var start, done time.Time
+// spent in each stage, when it last reached done, and how many times
+// review and QA sent it back. Time in backlog counts nowhere, before the
+// work starts or after: a parked ticket waits on a plan, not on the flow.
+func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, done time.Time, review, qa int) {
+	spent = map[string]float64{}
 	status, at := ticket.Status(""), d.CreatedAt
+	// Who held the ticket when it last left review: a stay that comes
+	// back from blocked goes on with them, since no new GO is posted.
+	held, fromBlocked := "review", false
 	leave := func(to time.Time) {
-		if status != "" && status != ticket.StatusBacklog && start.IsZero() {
-			start = at
-		}
 		sec := to.Sub(at).Seconds()
 		if sec <= 0 {
 			return
@@ -163,6 +162,9 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (map[string]float64, time.T
 			// Within one stay, review's GO hands the ticket to QA, and QA's
 			// Rereview: hands it back.
 			stage, from := "review", at
+			if fromBlocked {
+				stage = held
+			}
 			for _, cm := range d.Comments {
 				if cm.CreatedAt.Before(at) || !cm.CreatedAt.Before(to) {
 					continue
@@ -180,6 +182,7 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (map[string]float64, time.T
 				}
 			}
 			spent[stage] += to.Sub(from).Seconds()
+			held = stage
 		}
 	}
 	for _, e := range evs {
@@ -193,26 +196,30 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (map[string]float64, time.T
 				status = data.From
 			}
 			leave(e.CreatedAt)
+			if status == ticket.StatusInReview && data.To == ticket.StatusInProgress {
+				// A send-back, counted once however often its note was
+				// posted: QA's when the newest Kickback: by then is a QA fail.
+				by := &review
+				for _, cm := range d.Comments {
+					if cm.CreatedAt.After(e.CreatedAt) {
+						break
+					}
+					if l := firstLine(cm.Body); strings.HasPrefix(l, "Kickback: QA fail") {
+						by = &qa
+					} else if strings.HasPrefix(l, "Kickback:") {
+						by = &review
+					}
+				}
+				*by++
+			}
+			fromBlocked = status == ticket.StatusBlocked
 			status, at = data.To, e.CreatedAt
 			if data.To == ticket.StatusDone {
 				done = e.CreatedAt
 			}
 		}
 	}
-	return spent, start, done
-}
-
-// sendBacks counts a ticket's kickbacks from review and from QA.
-func sendBacks(cs []ticket.Comment) (review, qa int) {
-	for _, cm := range cs {
-		switch l := firstLine(cm.Body); {
-		case strings.HasPrefix(l, "Kickback: QA fail"):
-			qa++
-		case strings.HasPrefix(l, "Kickback:"):
-			review++
-		}
-	}
-	return review, qa
+	return spent, done, review, qa
 }
 
 // span prints seconds as a duration to the minute, or to the second

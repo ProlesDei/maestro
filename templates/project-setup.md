@@ -6,7 +6,7 @@
 - `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
 - `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove with tests and one real run of the changed path, and QA proves the rest before it merges, so engineers spend no build run on test-only work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
 
-Sessions read the rest as plain text.
+Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads.
 
 ## Project
 
@@ -39,7 +39,7 @@ qa
 
 ## Cache
 
-<leave as it is to cache nothing. Else one bullet per folder an install or build fills that works when copied to another path, as a name, a colon, the files that decide its content, `->` and the folder, such as ``- node: `package-lock.json` -> `node_modules` ``; a Python `.venv` doesn't survive a copy. Gitignore each folder, and have the check that installs skip the install when the folder is there. `maestro-ticket cache restore` copies one into a fresh worktree; a review or QA run saves it>
+<leave as it is to cache nothing. Else one bullet per folder an install fills that works when copied to another path, as a name, a colon, every file that decides its content, `->` and the folder, such as ``- node: `package-lock.json`, `.nvmrc` -> `node_modules` ``; a Python `.venv` doesn't survive a copy, and build output depends on the source, which no key file names. Gitignore each folder, and have the check that installs skip the install when the folder is there. `maestro-ticket cache restore` copies one into a fresh worktree; QA saves it after a merge>
 
 ## Outside steps
 
