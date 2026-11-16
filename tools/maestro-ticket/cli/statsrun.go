@@ -112,7 +112,14 @@ func statsLists() stats.Lists {
 		"stop":        {runs.StopNone, runs.StopTerm, runs.StopKill},
 		"state":       {runs.Starting, runs.Running, runs.Done, runs.Failed, runs.TimedOut, runs.Died, runs.Unreadable},
 		"outcome":     {outDone, outQuestion, outUsageLimit, outDiskFull, outTimedOut, outDied, outRefused, outFailed},
-		"reason":      {"no_result", "max_turns", "api_error", "budget", "stopped", "exit_nonzero", "is_error", "limit", "reboot", "supervisor"},
+		"reason":      append([]string{"no_result", "max_turns", "api_error", "budget", "stopped", "exit_nonzero", "is_error", "limit", "reboot", "supervisor"}, escalateCauses...),
+		"head":        headNames(),
+		"verdict":     {"go", "nogo", "escalate"},
+		"mode":        {"full", "incremental", "ruling"},
+		"finding":     {"finding", "out_of_scope", "dropped"},
+		"sev":         {"blocker", "major", "minor", "nit"},
+		"action":      {"auto-fix", "ask-user", "no-op"},
+		"prior":       {"new", "still_present"},
 		"subtype":     {"success", "error_max_turns", "error_during_execution", "error_max_budget_usd", "error_max_structured_output_retries"},
 		"stop_reason": {"end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", "model_context_window_exceeded"},
 		"stream":      {"ok", "no_result", "lost", "off"},
@@ -256,13 +263,15 @@ func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr 
 		row.VMaestro = stats.Sha(storeDir)
 	}
 	row.Model, row.Effort, row.Lean = argvFacts(r.Command)
-	if sf, ok := readSide(filepath.Join(storeDir, "runs"), r.ID); ok {
+	sf, ok := readSide(filepath.Join(storeDir, "runs"), r.ID)
+	if ok {
 		row.Why, row.Tier, row.AgainOf = sf.Why, sf.Tier, sf.AgainOf
 		row.PromptBytes, row.Drops = ptr(int64(sf.PromptBytes)), ptr(int64(len(sf.Drops)))
 		if sf.Tries != nil {
 			row.Tries = ptr(int64(*sf.Tries))
 		}
 	}
+	reviewFacts(&row, r.Job, r.Reply, sf.Drops)
 	if e := r.End; e != nil {
 		row.WaitMs, row.WaitCapped = ptr(e.WaitMs), ptr(e.WaitCapped)
 		row.Stop, row.Escaped = e.Stop, ptr(int64(e.Escaped))

@@ -1,0 +1,16 @@
+# Code review: T-7 Fix a typo in the README
+PR: https://github.com/acme/app/pull/41 | branch: maestro/T-7 | head: 5555555555555555555555555555555555555555 | base: main @ 2222222222222222222222222222222222222222 | gated on: 3333333333333333333333333333333333333333
+Verdict: GO
+Tier: 0, only docs | Mode: full
+Confidence: very high, docs only
+Skeptic: short inline
+## Findings       none
+## Out of scope   none
+## Outcome        Review comment 90
+{
+  "verdict": "GO",
+  "head": "5555555555555555555555555555555555555555",
+  "mode": "full",
+  "tier": 0,
+  "findings": []
+}

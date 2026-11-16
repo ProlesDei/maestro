@@ -1,0 +1,11 @@
+# Code review: T-12 Add retry to the upload worker
+PR: https://github.com/acme/app/pull/40 | branch: maestro/T-12 | head: 6666666666666666666666666666666666666666 | base: main @ 2222222222222222222222222222222222222222 | gated on: 3333333333333333333333333333333333333333
+Verdict: ESCALATE
+Tier: 1, anything else | Mode: incremental from 1111111111111111111111111111111111111111
+## Findings       | F1 | blocker | ... | F3 | major | ...
+## Outcome        Escalation comment 95, ticket moved to blocked
+
+{"head": "6666666666666666666666666666666666666666", "verdict": "ESCALATE", "tier": 1, "mode": "incremental",
+ "findings": [{"id": "F1", "severity": "blocker", "action": "auto-fix", "pass": 1, "file": "worker/upload.go", "line": 52, "evidence": "still fails", "impact": "x", "fix": "y", "prior": "still present"},
+  {"id": "F3", "severity": "major", "action": "ask-user", "pass": 5, "file": "worker/upload.go", "line": 60, "evidence": "still retries", "impact": "x", "fix": "y", "prior": "still present"},
+  {"id": "F6", "severity": "minor", "action": "no-op", "pass": 7, "file": "worker/upload.go", "line": 80, "evidence": "e", "impact": "x", "fix": "y", "prior": "new"}]}

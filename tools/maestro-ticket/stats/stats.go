@@ -277,7 +277,25 @@ type Run struct {
 	// maestro-sha; VClaude Claude Code's version, digits and dots.
 	VTool, VMaestro, VClaude string
 	Models                   []Model
+	// From the reply: the head its first line names, and a review's
+	// verdict, tier (0-2), mode and findings.
+	Head, Verdict, Mode string
+	VTier               *int64
+	Findings            []Finding
 }
+
+// Finding is one row of a review's findings: a finding of its JSON, its
+// out-of-scope lines as one counted row, or a finding a ruling dropped.
+// Fid is F and 1 to 3 digits, Pass 1 to 10; any other is stored as NULL.
+type Finding struct {
+	Fid                      string
+	Kind, Sev, Action, Prior string
+	Pass                     *int64
+	N                        int64
+}
+
+// maxFindings caps a run's finding rows.
+const maxFindings = 256
 
 // Model is a run's use of one model family, as the session's totals so
 // far: deltas come at read time.
@@ -292,6 +310,7 @@ var (
 	runShape    = regexp.MustCompile(`^R-[a-z2-7]{8}$`)
 	uuidShape   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	sha40Shape  = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	fidShape    = regexp.MustCompile(`^F[0-9]{1,3}$`)
 	semverShape = regexp.MustCompile(`^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$`)
 )
 
@@ -402,6 +421,7 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 		{"state", r.State}, {"outcome", r.Outcome}, {"reason", r.Reason}, {"subtype", r.Subtype},
 		{"stop_reason", r.StopReason}, {"stream", r.Stream}, {"os", r.OS}, {"arch", r.Arch},
 		{"why", r.Why}, {"tier", r.Tier}, {"stop", r.Stop},
+		{"head", r.Head}, {"verdict", r.Verdict}, {"mode", r.Mode},
 	} {
 		add(e.col, code(e.col, e.name))
 	}
@@ -422,6 +442,9 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 	}
 	if r.WaitCapped != nil {
 		add("wait_capped", boolInt(*r.WaitCapped))
+	}
+	if r.VTier != nil && *r.VTier >= 0 && *r.VTier <= 2 {
+		add("v_tier", *r.VTier)
 	}
 	for _, n := range []struct {
 		col string
@@ -484,6 +507,17 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_models (run, model, input_cum, output_cum, cache_read_cum, cache_write_cum, cost_cum, cost_src)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, r.Run, id, s.in, s.out, s.cr, s.cw, cost, s.src); err != nil {
+			return err
+		}
+	}
+	for _, f := range r.Findings[:min(len(r.Findings), maxFindings)] {
+		var pass any
+		if f.Pass != nil && *f.Pass >= 1 && *f.Pass <= 10 {
+			pass = *f.Pass
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO findings (run, fid, kind, pass, sev, action, prior, n) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.Run, shaped(f.Fid, fidShape), code("finding", f.Kind), pass, code("sev", f.Sev), code("action", f.Action),
+			code("prior", f.Prior), max(f.N, 1)); err != nil {
 			return err
 		}
 	}
