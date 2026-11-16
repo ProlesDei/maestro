@@ -317,3 +317,27 @@ func TestSuperviseLimitSurvivesAClockStepBack(t *testing.T) {
 		t.Fatalf("took %s; want about the 1s limit", took)
 	}
 }
+
+// A short freeze near the end of a run that hangs isn't the freeze's
+// doing: the run times out as any other, not marked frozen.
+func TestShortFreezeMarksNoFrozen(t *testing.T) {
+	old := watchEvery
+	watchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { watchEvery = old })
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "reviewer", Limit: "2h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC().Add(-110 * time.Minute)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jump atomic.Int64
+	time.AfterFunc(300*time.Millisecond, func() { jump.Store(int64(15 * time.Minute)) })
+	err = Supervise(context.Background(), dir, r.ID, Options{
+		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Load(dir, r.ID); got.State != TimedOut || got.Frozen || !strings.Contains(got.Error, "frozen 15m0s") {
+		t.Fatalf("record: %s, frozen %v: %s", got.State, got.Frozen, got.Error)
+	}
+}

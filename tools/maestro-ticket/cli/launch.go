@@ -719,12 +719,11 @@ func runStop(ctx context.Context, c *call) error {
 			return err
 		}
 	}
+	if !r.Ended() {
+		return fmt.Errorf("%w: stop: run %s asked to stop, still %s after %s: runs %s shows when it ends", ticket.ErrStatusConflict, id, r.State, stopWait, id)
+	}
 	return c.out(r, func(w io.Writer) {
-		if r.Ended() {
-			fmt.Fprintf(w, "%s %s: %s; its launcher's pickup shows it\n", id, r.State, firstLine(r.Error))
-		} else {
-			fmt.Fprintf(w, "%s asked to stop; still %s after %s: runs %s shows when it ends\n", id, r.State, stopWait, id)
-		}
+		fmt.Fprintf(w, "%s %s: %s; its launcher's pickup shows it\n", id, r.State, firstLine(r.Error))
 	})
 }
 

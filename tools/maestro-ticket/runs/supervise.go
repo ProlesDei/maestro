@@ -208,8 +208,13 @@ wait:
 			}
 			if due() {
 				why = TimedOut
-				// By the monotonic clock alone, did it have time left?
-				freezeOnly = wall.Add(time.Since(mono)).Before(start.Add(limit + credit))
+				// The freeze ended it if, by the monotonic clock alone, it
+				// had time left, and the freeze took half its time or more:
+				// a host that sleeps a few minutes each run doesn't hide a
+				// run that hangs.
+				fz := now.Sub(wall) - time.Since(mono)
+				freezeOnly = fz >= FreezeGap && 2*fz >= now.Sub(start) &&
+					wall.Add(time.Since(mono)).Before(start.Add(limit+credit))
 				break wait
 			}
 		}
