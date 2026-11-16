@@ -13,9 +13,11 @@ Follow the **maestro-working-principles** skill.
 
 1. **Draft.** From the user's words (or ask for one sentence), write:
    - a title: a verb and an object, under 70 characters, never "Improve X";
-   - a body: the goal in one or two sentences, numbered acceptance criteria, the paths to start from and the closest code to copy, what must not change, and for each dep the code this ticket needs from it.
+   - a body: the goal in one or two sentences, numbered acceptance criteria, a `Not handled:` list, the paths to start from and the closest code to copy, what must not change, and for each dep the code this ticket needs from it.
 
    A criterion is something a command or the running app can show, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it. Read the code each criterion touches on the main branch: rewrite one the code already contradicts, or that pulls against another, since the engineer would stop and ask.
+
+   Make the trade-offs here, where one costs a line; in review it costs a round. Write a criterion for the main path, and one for each case that must hold: the empty state, the wrong input users will send, the failure that would lose data or money. Each names its input and what must show. Put every other case you weighed under `Not handled:`, with a few words on why it can wait (rare, cheap to fix later, another ticket's). The engineer builds none of those, and review and QA send nothing back for one, or for any case the criteria don't name, unless it is a blocker as the **maestro-code-review** skill's [passes.md](../maestro-code-review/references/passes.md#rate-each-finding) rates one. Past about six criteria, split the ticket.
 2. **Look around.** Run `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,areas}'` and compare titles and areas. If one is close, show it and ask whether to go on. Check each path you named exists.
 3. **Ask once.** In one message, ask only for the fields you can't infer, each with your pick so the user can say "yes":
 

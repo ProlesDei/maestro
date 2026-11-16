@@ -934,9 +934,10 @@ func quoteFirst(body string) string {
 	return "under " + strings.SplitN(firstLine(body), ":", 2)[0] + ":"
 }
 
-// followUpLines are the problems a review or QA run found outside its
-// ticket: a review's "## Out of scope" section, and the "New tickets:"
-// line of QA's verdict and the "Open:" line of its reply.
+// followUpLines are the problems a review or QA run let ship or found
+// outside its ticket: a review's "## Follow-ups" section ("## Out of
+// scope" in a report from before the rename), and the "New tickets:" line
+// of QA's verdict and the "Open:" line of its reply.
 func followUpLines(r runs.Record, d ticket.Detail) []string {
 	var out []string
 	keep := func(l string) {
@@ -949,7 +950,7 @@ func followUpLines(r runs.Record, d ticket.Detail) []string {
 		in := false
 		for _, l := range strings.Split(r.Reply, "\n") {
 			switch {
-			case strings.HasPrefix(l, "## Out of scope"):
+			case strings.HasPrefix(l, "## Follow-ups"), strings.HasPrefix(l, "## Out of scope"):
 				in = true
 			case strings.HasPrefix(l, "## "):
 				in = false
@@ -982,7 +983,7 @@ func followUpLines(r runs.Record, d ticket.Detail) []string {
 	return out
 }
 
-// fileFollowUps puts what a run found outside its ticket on the
+// fileFollowUps puts what a run let ship or found outside its ticket on the
 // "Follow-ups: <area>" ticket of its first area, making that ticket, parked
 // deferred, when there is none: the planner's rule, done by code, so no bot
 // reads the lines. A follow-up marked urgent shows in the planner's look.

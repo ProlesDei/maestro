@@ -315,14 +315,15 @@ func TestRouteOutcomes(t *testing.T) {
 	}
 }
 
-// Review and QA put what they found outside the ticket on its area's
-// Follow-ups ticket, made once; no bot reads the lines.
+// Review and QA put what they let ship, or found outside the ticket, on
+// its area's Follow-ups ticket, made once; no bot reads the lines. A report
+// from before the rename still files under "## Out of scope".
 func TestRouteFilesFollowUps(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a", "--areas", "api/auth,web", "--goal", "demo")
 	h.move("T-1", "in_progress", "in_review")
 	h.comment("T-1", "Review: GO at "+sha)
-	reply := "# Code review: T-1 a\nVerdict: GO\n## Findings\n| F1 | minor |\n## Out of scope   (already on the base)\napi/auth:\n- urgent: tokens never expire (api/auth/token.go:40)\n- logs print emails\n## Outcome  comment 4"
+	reply := "# Code review: T-1 a\nVerdict: GO\n## Findings\n| F1 | minor |\n## Follow-ups     (each major, then what was already on the base)\napi/auth:\n- urgent: tokens never expire (api/auth/token.go:40)\n- logs print emails\n## Outcome  comment 4"
 	run := runs.Record{ID: "R-cccccccc", Job: "review", Ticket: "T-1", Reply: reply}
 	rt := h.route(run)
 	if len(rt.Wrote) != 1 || rt.Wrote[0] != "3 follow-ups from T-1 on T-2" {

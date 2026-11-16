@@ -1,6 +1,6 @@
 # Test a PR
 
-You are the last check before production. Review read the diff and passed it; you run what ships, the way people use it, and catch what reading can't: the production build, data made before the change, whole journeys, what the screen shows, a second user, and what breaks over time. Your pass merges the PR and sets its ticket done; your fail sends it back to its engineer. Nothing comes after you.
+You are the last check before production. Review read the diff and passed it; you run what ships, the way people use it, and catch what reading can't: the production build, data made before the change, whole journeys, what the screen shows. Your pass merges the PR and sets its ticket done; your fail sends it back to its engineer. Nothing comes after you, and no change is perfect: you look for what must not ship, and write the rest down.
 
 ## Phase A: Resolve
 
@@ -16,14 +16,14 @@ You are the last check before production. Review read the diff and passed it; yo
 ## Phase B: Plan by risk
 
 1. Pick the tier from the changed files with the table in Phase C of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)). When unsure, go up.
-2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it. Prove each criterion in the running app, not by rerunning the tests review read: what QA adds is what reading and unit tests can't show.
+2. Before you run anything, write `plan.md` in the evidence folder: each criterion with its proof, the critical flows (from `## QA`, else the app's main journeys), and the tier's angles. Each tier adds to the ones above it. Plan no check of a case the ticket lists under `Not handled:`. Prove each criterion in the running app, not by rerunning the tests review read: what QA adds is what reading and unit tests can't show.
 3. **Retest only what changed.** If the ticket's latest QA verdict is a `Kickback: QA fail at <K>` that tested (not `not tested:`), and `K` is an ancestor of `H`, plan only: each item that failed, was `not checked` or was `waived` there (a waiver binds at one sha); each criterion, flow and angle whose code, or anything it calls, the author's change or main's merge since `K` touches, with the delta worked out as Phase C step 2 of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)) does; and the checks, the production build's start and one pass through each critical flow, since main moved. Every other item that passed or was carried at `K` is `carried: <K>, <comment id>`. Plan in full instead if the delta passes 400 changed lines or 15 files or raises the tier, or if the delta or main since that verdict's `G` changes how the app builds, starts, migrates or is configured, or its dependencies.
 
 | Tier | Angles |
 |---|---|
-| 0 | The production build starts; each criterion, with one empty or wrong input; one pass through each critical flow |
-| 1 | Break each criterion as Phase C of the **maestro-prove-complete** skill ([SKILL.md](../../maestro-prove-complete/SKILL.md)) says; every changed screen as [browser.md](browser.md) says; the features next to the change |
-| 2 | **Upgrade:** data made on the main branch still works at `H`. **Rollback:** the main branch still runs on data `H` wrote. **Second user:** they can't see or change the first's data. **Dependencies:** each one the change calls, slow and then down. **Time:** a restart, then 10 minutes of steady use with errors and memory watched. **Together:** two users or tabs on the same record at once |
+| 0 | Only docs or inert config: each criterion and the checks, with nothing built or started, bar what Phase C step 5 asks. Else: the production build starts; each criterion on the inputs it names; one pass through each critical flow |
+| 1 | Each criterion with one empty and one wrong input; every changed screen as [browser.md](browser.md) says; one feature next to the change |
+| 2 | Only the angles the diff reaches; name each one you skip and why. **Upgrade** and **rollback**, when it changes stored data's shape: data made on the main branch still works at `H`, and the main branch still runs on data `H` wrote. **Second user**, when it touches auth, permissions or records owned by a user: they can't see or change the first's data. **Dependencies**, when it adds or changes a call to one: slow, then down. **Time**, when it touches a worker, queue, cache or other state that outlives a request: a restart, then 10 minutes of steady use with errors and memory watched. **Together**, when it writes a record two users can reach: two users or tabs on it at once |
 
 ## Phase C: Set up what ships
 
@@ -36,9 +36,9 @@ You are the last check before production. Review read the diff and passed it; yo
 ## Phase D: Test
 
 1. Prove each criterion on the running app with the proof table in Phase B of **maestro-prove-complete**. Check anything a user sees in a browser, as [browser.md](browser.md) says.
-2. Run each angle in the plan. Then explore: use the change as a new user, a careless one and a hostile one, until two rounds in a row find nothing new.
+2. Run each angle in the plan. Then explore once: one pass through the change as a new user and one as a careless one, and at tier 2 one as a hostile one. Stop there: the plan sets the test's size, and a longer hunt always finds something.
 3. When something looks wrong, run the same steps on the main branch. Wrong there too means it was already there: a new ticket, unless `H` makes it worse.
-4. Rerun each failure from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
+4. Rerun each failure that Phase E step 1 counts from a fresh start, 3 times if it comes and goes, and give the rate. A failure that comes and goes is still a failure.
 5. Run each command under `## Checks` in the worktree, hooks and tests included: review ran them on an older main. A red one fails the PR, unless it is red the same way on `G` alone, in a second detached worktree, or died of a full disk, as Phase C step 4 says.
 6. For each check, keep the command, exit code and a short excerpt, and save a script or step list that reruns it in the evidence folder.
 7. A criterion or angle you couldn't check is `not checked` with the reason, never a pass. One no one can check as written is `not checkable`, never a pass: escalate it as step 8 says, asking "rewrite <criterion> as <your rewrite>, or waive it at <H>?". Only the planner rewrites a criterion.
@@ -46,7 +46,7 @@ You are the last check before production. Review read the diff and passed it; yo
 
 ## Phase E: Judge and post
 
-1. `fail` if a criterion fails or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes, returns a server error or logs a new console error on a changed screen; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` or `carried` check fails nothing. List every other problem as a possible new ticket, worst first.
+1. `fail` only if a criterion fails on an input it names, or is `not checked` or `not checkable`; a critical flow breaks; something that works on the main branch breaks at `H`; data is lost, wrong or shown to the wrong user; the app crashes or hangs on a path a criterion or critical flow takes; the upgrade or rollback breaks; or a check is red as Phase D step 5 says. Else `pass`. A `waived` or `carried` check fails nothing, and nor does any other problem: a failure on an input no criterion names, a console error, a rough screen state, a case under `Not handled:`. List each of those under `New tickets:`, worst first, with the steps that show it, so the planner can weigh it against the rest of the board.
 2. Stop every process you started, and close your browser session as [browser.md](browser.md) says.
 3. If the PR's head has moved past `H`, post at `H` anyway and merge nothing: the new head needs review first, so on a pass post the `Rereview:` of Phase A step 3 after your verdict, naming the new head.
 4. Post this comment on the ticket with `maestro-ticket comment`, sent as **maestro-working-principles** says for quoted text, keyed `<run>-verdict`. With no ticket, comment on the PR.

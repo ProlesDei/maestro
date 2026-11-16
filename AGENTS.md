@@ -25,6 +25,7 @@ What we hold to:
 - Least friction for the team that installs it. Every bot's sessions run with all permissions, and Maestro offers no limit to set ([decisions](docs/decisions.md), 12).
 - Put a rule in code, a schema or a lint before you put it in prose.
 - Proof over claims. A verdict covers one head sha; a worker's report is a claim until a run shows it.
+- Trade-offs, not perfection. Only a blocker sends a change back; the rest ships and goes on a follow-up. Settle the edge cases in the ticket, where one costs a line, not in review, where it costs a round ([decisions](docs/decisions.md), 22).
 - Never clash with a team's setup. Every shipped skill is named `maestro-*`, and the installer never writes over a file it didn't place ([decisions](docs/decisions.md)).
 - It runs in someone else's repo. The installer copies Maestro into a team's project, so never assume their setup: read the main branch and checks from their `.maestro/project/project-setup.md`.
 - Feedback from one team is a case, not a rule. Maestro is live, and a team's feedback may fit only its own stack or habits. Change the shared files only where a fix helps most teams; point the rest to that team's own setup ([decisions](docs/decisions.md), 17).
