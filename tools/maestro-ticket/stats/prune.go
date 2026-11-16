@@ -91,6 +91,9 @@ func prune(ctx context.Context, db *sql.DB, now time.Time, l limits) (bool, erro
 // runs, since run_facts changes only in the last.
 const batchRuns = `SELECT run FROM run_facts WHERE (?1 OR ended_at < ?2) ORDER BY ended_at, run LIMIT ?3`
 
+// streamSrc is the cost_src id of a run_models row from a stream.
+const streamSrc = `(SELECT id FROM codes WHERE kind = 'cost_src' AND name = 'stream')`
+
 // spendCTE names d (run, model, cost, tok): each run's own spend per
 // model, of the runs where picks (f is run_facts), which must take in the
 // rest of their sessions, so each finds the run before it. A run's spend is its session's total less the run
@@ -98,12 +101,14 @@ const batchRuns = `SELECT run FROM run_facts WHERE (?1 OR ended_at < ?2) ORDER B
 // from pruned_cum. A fresh session's first run spent its whole total, as
 // did a run with no session; so did a model new to a known session. A
 // resume with no trace of its session's past spent an unknown sum: NULL.
-// A run with no dollars (its tokens from its stream) leaves the next
-// run's dollars NULL too.
+// A run with no result (cost_src stream) holds its own turns' tokens, not
+// a total, and no dollars: it spent those tokens whole, and the next run
+// in its session, whose total takes in the dead run's, spent NULL.
 func spendCTE(where string) string {
 	return `x AS (
 			SELECT m.run, m.model, f.session, f.resume_of, f.ended_at, m.cost_cum,
 				m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum AS tok,
+				COALESCE(m.cost_src = ` + streamSrc + `, 0) AS own,
 				EXISTS (SELECT 1 FROM run_facts e WHERE e.session = f.session AND (e.ended_at, e.run) < (f.ended_at, f.run))
 					OR EXISTS (SELECT 1 FROM pruned_cum e WHERE e.session = f.session) AS known
 			FROM run_models m JOIN run_facts f ON f.run = m.run
@@ -111,12 +116,12 @@ func spendCTE(where string) string {
 		),
 		d AS (
 			SELECT x.run, x.model,
-				x.cost_cum - CASE WHEN x.resume_of IS NULL OR x.session IS NULL THEN 0
+				x.cost_cum - CASE WHEN x.own OR x.resume_of IS NULL OR x.session IS NULL THEN 0
 					WHEN LAG(x.run) OVER w IS NOT NULL THEN LAG(x.cost_cum) OVER w
 					WHEN p.session IS NOT NULL THEN p.cost_cum
 					WHEN x.known THEN 0 END AS cost,
-				x.tok - CASE WHEN x.resume_of IS NULL OR x.session IS NULL THEN 0
-					WHEN LAG(x.run) OVER w IS NOT NULL THEN LAG(x.tok) OVER w
+				x.tok - CASE WHEN x.own OR x.resume_of IS NULL OR x.session IS NULL THEN 0
+					WHEN LAG(x.run) OVER w IS NOT NULL THEN CASE WHEN LAG(x.own) OVER w THEN NULL ELSE LAG(x.tok) OVER w END
 					WHEN p.session IS NOT NULL THEN p.tok_cum
 					WHEN x.known THEN 0 END AS tok
 			FROM x LEFT JOIN pruned_cum p ON p.session = x.session AND p.model = x.model
@@ -165,11 +170,12 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 		return 0, err
 	}
 	// Keep each session's last totals in the batch, for a resume that a
-	// later batch or prune rolls up.
+	// later batch or prune rolls up. A stream's tokens are no total: NULL.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pruned_cum (session, model, ended_at, cost_cum, tok_cum)
 		SELECT session, model, ended_at, cost_cum, tok FROM (
 			SELECT f.session, m.model, f.ended_at, m.cost_cum,
-				m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum AS tok,
+				CASE WHEN COALESCE(m.cost_src = `+streamSrc+`, 0) THEN NULL
+					ELSE m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum END AS tok,
 				ROW_NUMBER() OVER (PARTITION BY f.session, m.model ORDER BY f.ended_at DESC, f.run DESC) AS rn
 			FROM run_models m JOIN run_facts f ON f.run = m.run
 			WHERE f.run IN (`+batchRuns+`) AND f.session IS NOT NULL

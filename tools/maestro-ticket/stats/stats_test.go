@@ -61,7 +61,7 @@ var testLists = Lists{
 	"role": {"planner", "reviewer", "person"}, "job": {"build", "review"}, "model": {"opus", "opus-5.5"},
 	"effort": {"high"}, "nudge": {"none", "opus"}, "state": {"done", "failed"}, "outcome": {"done", "failed"},
 	"reason": {"no_result"}, "subtype": {"success"}, "stop_reason": {"end_turn"}, "stream": {"off"},
-	"os": {"linux"}, "arch": {"amd64"}, "cost_src": {"result"}, "ring_err": {"none", "timeout"},
+	"os": {"linux"}, "arch": {"amd64"}, "cost_src": {"result", "stream"}, "ring_err": {"none", "timeout"},
 }
 
 func runID(i int) string {
@@ -744,6 +744,63 @@ func TestStatsNeverReads(t *testing.T) {
 	}
 	if seen < 4 {
 		t.Fatalf("read %d files; want stats and cli/stats*", seen)
+	}
+}
+
+// A run with no result spent its stream's tokens and unknown dollars; the
+// resume after it can't split its total from the dead run's, so it has
+// neither. Read and prune agree, in one batch or a batch each.
+func TestSpendAfterDeadRun(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	end := now.Add(-100 * 24 * time.Hour)
+	put := func(db *sql.DB, i int, resumeOf string, m Model) {
+		r := testRun(runID(i))
+		r.StartedAt, r.EndedAt = end.Add(time.Duration(i)*time.Minute), end.Add(time.Duration(i)*time.Minute+30*time.Second)
+		r.ResumeOf, r.Models = resumeOf, []Model{m}
+		if err := Write(t.Context(), db, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ten, more := 10.0, 25.0
+	for _, batch := range []int{1000, 1} {
+		db, _ := fresh(t)
+		put(db, 1, "", Model{Model: "opus-5.5", InputCum: 1000, CostCum: &ten, CostSrc: "result"})
+		put(db, 2, runID(1), Model{Model: "opus-5.5", InputCum: 800, CostSrc: "stream"})
+		put(db, 3, runID(2), Model{Model: "opus-5.5", InputCum: 2500, CostCum: &more, CostSrc: "result"})
+		facts, err := Read(t.Context(), db, Filter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, f := range facts {
+			s := f.Spend[0]
+			usd, tok := "nil", "nil"
+			if s.USD != nil {
+				usd = fmt.Sprint(*s.USD)
+			}
+			if s.Tokens != nil {
+				tok = fmt.Sprint(*s.Tokens)
+			}
+			got = append(got, f.Run+" "+usd+" "+tok)
+		}
+		slices.Sort(got)
+		want := []string{runID(1) + " 10 1000", runID(2) + " nil 800", runID(3) + " nil nil"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("read:\n got %q\nwant %q", got, want)
+		}
+		l := defaultLimits
+		l.batch = batch
+		if ok, err := prune(t.Context(), db, now, l); !ok || err != nil {
+			t.Fatalf("prune: %v %v", ok, err)
+		}
+		var usd float64
+		var tok int64
+		if err := db.QueryRow(`SELECT total(cost_usd), total(tokens) FROM daily`).Scan(&usd, &tok); err != nil {
+			t.Fatal(err)
+		}
+		if usd != 10 || tok != 1800 {
+			t.Fatalf("batch %d: daily usd %v tokens %d; want 10, 1800", batch, usd, tok)
+		}
 	}
 }
 

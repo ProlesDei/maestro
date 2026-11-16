@@ -336,7 +336,7 @@ func streamFacts(row *stats.Run, r runs.Record, side sideFacts, noResult bool, i
 func (c *call) statsRow(storeDir string, r runs.Record, res claudeReply, resErr error) stats.Run {
 	outcome, _ := outcomeOf(r)
 	row := stats.Run{
-		Run: r.ID, Session: r.SessionID, ResumeOf: r.ResumeOf, Ticket: int64(runTicket(r)),
+		Run: r.ID, Session: sessionOf(r), ResumeOf: r.ResumeOf, Ticket: int64(runTicket(r)),
 		Role: statsRole(r.Launcher), Job: cmp.Or(r.Job, "launch"), Nudge: cmp.Or(r.Nudge, "none"),
 		State: r.State, Outcome: outcome, Reason: reasonOf(r, outcome, res, resErr),
 		AfterDeath: r.AfterDeath, StartedAt: r.StartedAt, ReplyBytes: int64(len(r.Reply)),

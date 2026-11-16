@@ -396,6 +396,23 @@ func TestResultFacts(t *testing.T) {
 	}
 }
 
+// A run with no result has no session id from Claude; its row takes the
+// one its command names, so its spend sits in its session.
+func TestDeadRunKeepsSession(t *testing.T) {
+	const s1 = "11111111-1111-4111-8111-111111111111"
+	c := &call{env: Env{Getenv: func(string) string { return "" }, DiskFree: halfFree}}
+	for _, cmd := range [][]string{
+		claudeCommand(s1, modelSonnet, effortHigh, false),
+		resumeCommand(claudeCommand("22222222-2222-4222-8222-222222222222", modelSonnet, effortHigh, false), s1, false),
+	} {
+		r := runs.Record{ID: "R-aaaaaaaa", State: runs.TimedOut, Launcher: "planner", Job: "build",
+			StartedAt: time.Unix(1000, 0), EndedAt: ended(time.Unix(1000, 0), time.Minute), Command: withEnv(cmd)}
+		if got := c.statsRow(t.TempDir(), r, claudeReply{}, errors.New("no result")).Session; got != s1 {
+			t.Errorf("%q: session %q; want %s", cmd, got, s1)
+		}
+	}
+}
+
 func TestReasons(t *testing.T) {
 	ok := claudeReply{}
 	for _, c := range []struct {
