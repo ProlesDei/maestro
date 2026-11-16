@@ -1,0 +1,109 @@
+$ maestro-ticket doctor
+exit 0
+stdout:
+ok    store              <DIR>/tickets.db (from MAESTRO_TICKET_STORE)
+ok    filesystem         local
+ok    schema             user_version = 9 (want 9)
+ok    journal_mode       journal_mode = wal (want wal)
+ok    synchronous        synchronous = 1 (want 1)
+ok    busy_timeout       busy_timeout = 5000 (want 5000)
+ok    foreign_keys       foreign_keys = 1 (want 1)
+ok    integrity          quick_check = ok (want ok)
+ok    foreign_key_check  0 violations
+ok    leases             7 tickets; 0 live claims, 0 expired (claimable; reap frees them)
+ok    stalls             no in_review ticket has waited 20 minutes with no one on it
+ok    statuses           every open ticket has a known status
+ok    roles              every open ticket has a known role or none
+ok    parked             every backlog ticket says why it waits, and no other does
+ok    events             last seq 15; append-only triggers 2/2
+warn  runs               7 ended runs not acked by their launcher (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)
+$ maestro-ticket doctor --json
+exit 0
+stdout:
+{
+  "checks": [
+    {
+      "name": "store",
+      "ok": true,
+      "detail": "<DIR>/tickets.db (from MAESTRO_TICKET_STORE)"
+    },
+    {
+      "name": "filesystem",
+      "ok": true,
+      "detail": "local"
+    },
+    {
+      "name": "schema",
+      "ok": true,
+      "detail": "user_version = 9 (want 9)"
+    },
+    {
+      "name": "journal_mode",
+      "ok": true,
+      "detail": "journal_mode = wal (want wal)"
+    },
+    {
+      "name": "synchronous",
+      "ok": true,
+      "detail": "synchronous = 1 (want 1)"
+    },
+    {
+      "name": "busy_timeout",
+      "ok": true,
+      "detail": "busy_timeout = 5000 (want 5000)"
+    },
+    {
+      "name": "foreign_keys",
+      "ok": true,
+      "detail": "foreign_keys = 1 (want 1)"
+    },
+    {
+      "name": "integrity",
+      "ok": true,
+      "detail": "quick_check = ok (want ok)"
+    },
+    {
+      "name": "foreign_key_check",
+      "ok": true,
+      "detail": "0 violations"
+    },
+    {
+      "name": "leases",
+      "ok": true,
+      "detail": "7 tickets; 0 live claims, 0 expired (claimable; reap frees them)"
+    },
+    {
+      "name": "stalls",
+      "ok": true,
+      "detail": "no in_review ticket has waited 20 minutes with no one on it"
+    },
+    {
+      "name": "statuses",
+      "ok": true,
+      "detail": "every open ticket has a known status"
+    },
+    {
+      "name": "roles",
+      "ok": true,
+      "detail": "every open ticket has a known role or none"
+    },
+    {
+      "name": "parked",
+      "ok": true,
+      "detail": "every backlog ticket says why it waits, and no other does"
+    },
+    {
+      "name": "events",
+      "ok": true,
+      "detail": "last seq 15; append-only triggers 2/2"
+    },
+    {
+      "name": "runs",
+      "ok": true,
+      "detail": "7 ended runs not acked by their launcher (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)",
+      "warn": true
+    }
+  ],
+  "ok": true,
+  "store": "<DIR>/tickets.db"
+}

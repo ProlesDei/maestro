@@ -3,6 +3,8 @@ package runs
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +223,32 @@ func TestRunElsewhereOnASharedStore(t *testing.T) {
 		t.Fatal("didn't adopt an overdue run on another machine")
 	} else {
 		release()
+	}
+}
+
+// A run's record is what runs --json, pickup --json and job --json print,
+// and what every reader of runs/ parses: its fields and their JSON names
+// stay as they are. A field a reader never sees is tagged json:"-".
+func TestRecordJSONKeys(t *testing.T) {
+	want := []string{
+		"ID id", "Launcher launcher", "Ticket ticket,omitempty", "Limit limit", "Command command",
+		"Job job,omitempty", "Tickets tickets,omitempty", "ResumeOf resume_of,omitempty",
+		"AfterDeath after_death,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",
+		"State state", "PID pid,omitempty", "EndedAt ended_at,omitempty", "Exit exit,omitempty",
+		"SessionID session_id,omitempty", "IsError is_error,omitempty", "Reply reply,omitempty",
+		"Error error,omitempty", "Rings rings,omitempty", "RingError ring_error,omitempty",
+		"Rang rang,omitempty", "OrphanTries orphan_tries,omitempty", "LaunchID launch_id,omitempty",
+		"Host host,omitempty", "AckedAt acked_at,omitempty", "AckedBy acked_by,omitempty",
+	}
+	var got []string
+	rt := reflect.TypeFor[Record]()
+	for i := range rt.NumField() {
+		f := rt.Field(i)
+		if tag := f.Tag.Get("json"); tag != "-" {
+			got = append(got, f.Name+" "+tag)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Record's JSON fields changed:\n got %q\nwant %q", got, want)
 	}
 }

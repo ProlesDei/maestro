@@ -1,0 +1,105 @@
+## job build T-1
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--session-id" "U-1" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-1" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-software-engineer T-1\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-1"]
+## job build T-2
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--session-id" "U-2" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-2" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-software-engineer T-2\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-2"]
+## job review T-3
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--session-id" "U-3" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-3" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-code-review T-3 --light\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-3"]
+## job review T-3 --full
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--session-id" "U-4" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-4" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-code-review T-3\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-4"]
+## job review T-4 --approved abc1234 --drop F2 --drop-file -
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--session-id" "U-5" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-5" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-code-review T-4 --approved abc1234 --drop F2: F2 was wrong: the test covers it\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-5"]
+## job qa T-3 --slots 2
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "<exe>" "slot" "--name" "qa" "--max" "2" "--" "claude" "-p" "--session-id" "U-6" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-6" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-qa-lead T-3\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-6" "TMPDIR=<slot's own>"]
+## job live T-5
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "<exe>" "slot" "--name" "qa" "--max" "6" "--" "claude" "-p" "--session-id" "U-7" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-7" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-qa-lead live T-5\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-7" "TMPDIR=<slot's own>"]
+## job qa-ask
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "<exe>" "slot" "--name" "qa" "--max" "6" "--" "claude" "-p" "--session-id" "U-8" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-8" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-qa-lead why is the login slow?\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-8" "TMPDIR=<slot's own>"]
+## job plan
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-9" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-9" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-planner goal demo: ship the login page\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-9"]
+## job rule T-5
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-10" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-10" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-planner rule T-5: split it in two\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-10"]
+## job finish T-5
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-11" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-11" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-planner finish T-5\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-11"]
+## job judge T-5 T-6
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-12" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-12" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-planner judge T-5 T-6\nRows:\njudge: T-5 blocked: x\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-12"]
+## job design T-6
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-13" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-13" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-designer design T-6\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-13"]
+## job cos --ticket T-5
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "claude" "-p" "--session-id" "U-14" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-14" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-chief-of-staff is T-5 ready?\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "CLAUDE_CODE_PROMPT_CACHE_TTL=5m" "MAESTRO_RUN_ID=R-14"]
+## job again R-6
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "<exe>" "slot" "--name" "qa" "--max" "2" "--" "claude" "-p" "--session-id" "U-15" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--session-id" "U-15" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "/maestro-qa-lead T-3\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-15" "TMPDIR=<slot's own>"]
+## resume <run>
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "sonnet" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "use the v2 endpoint\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-16"]
+## resume <run> --opus
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "You are now on Opus, in the senior engineer's place. Settle your question yourself if the ticket and the repo settle it, and go on. If they don't, send it up as your skill says.\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-17"]
+## resume <run> --escalate
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "You stopped on a question. Post it on the ticket as an Escalation:, as maestro-working-principles says for a block, move the ticket to blocked, release it, and stop.\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-18"]
+## resume <run> --decide
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "Make each call you stopped on that is the planner's yourself, naming your pick, and finish. Put each call that is the chief of staff's on a line of its own: up: <the card in the team rules' shape, on one line, its fields split by |>.\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-19"]
+## resume <run> --died
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "Your run died. Go on from your last step.\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-20"]
+## resume <run> --go-on
+record: ["env" "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "claude" "-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+argv: ["-p" "--resume" "U-1" "--model" "opus" "--effort" "high" "--permission-mode" "bypassPermissions" "--output-format" "json"]
+stdin: "A usage limit stopped your run; it has lifted. Go on from your last step.\n"
+env: ["CLAUDE_CODE_DISABLE_AUTO_MEMORY=1" "MAESTRO_RUN_ID=R-21"]
