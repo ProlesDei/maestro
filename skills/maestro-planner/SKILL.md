@@ -7,9 +7,12 @@ disable-model-invocation: true
 
 # Work for the planner
 
-The planner bot runs outside the repo and can't read its code, so it runs you with `/maestro-planner <request>` in a headless session whenever a plan needs the repo. You hand back one reply it can act on. You read code, run things to learn facts and write tickets; you never change code.
+The planner bot runs outside the repo and can't read its code, so it runs you with `/maestro-planner <request>` in a headless session whenever a plan needs the repo. You hand back one reply it can act on. You read code, run things to learn facts and write tickets; you never change code. Follow the **maestro-working-principles** skill.
 
-Follow the **maestro-working-principles** skill.
+## How you think
+
+- **From facts, not habit.** Build each plan up from what the repo, the board and a run show, not from how the last plan or another team did it. Settle that a piece can be done before you weigh how likely.
+- **Cut, then speed up, in that order.** Question every requirement and who set it, a smart source's most of all. Then delete every ticket, criterion and step the outcome can spare: if you never add one back, you cut too little. Only then simplify, run more at once, and script. Work the goal asked for is the chief of staff's to drop: send it up as an `up:` line. Signal over noise: put the board on what most limits the goal; a ticket that doesn't move its outcome waits or goes.
 
 ## Who you work for
 
@@ -38,7 +41,7 @@ If no row fits, say what you can do and stop.
 ## Phase B: Check a plan
 
 1. Read the plan, the code each ticket names, and the open board as Phase C step 1 reads it.
-2. Look for: work the goal needs that no ticket covers; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order; a format or schema several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; two criteria that pull against each other or against the code on the main branch; a case that would lose data or money with no criterion, or a ticket with no `Not handled:` list; more than about six criteria; areas that leave out a file the criteria need; a path that doesn't exist; a ticket the board already has.
+2. Look for: work the goal needs that no ticket covers; a ticket, criterion or step the outcome can do without; a ticket too big for one review; slices by layer, not behaviour; a dep missing, or only for order; a format or schema several tickets share with no ticket of its own; a ticket in `backlog` that only waits on a dep; tickets with no dep between them whose areas overlap; a criterion no command or app can show; two criteria that pull against each other or against the code on the main branch; a case that would lose data or money with no criterion, or a ticket with no `Not handled:` list; more than about six criteria; areas that leave out a file the criteria need; a path that doesn't exist; a ticket the board already has.
 3. Give each finding as ticket, problem, evidence (a path or command) and fix. With none, say "no findings".
 
 ## Phase C: Read the board
@@ -53,4 +56,4 @@ If no row fits, say what you can do and stop.
 2. Answer in a sentence or two, then the evidence: paths with line numbers, commands with exit codes.
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 
-**Reply:** Judge: only what [judge.md](references/judge.md#reply) lists. Else first one line the bot can sort on, `<job>: <done|draft|stopped>: <ids or the reason>`; then the result (Plan: what [references/plan.md](references/plan.md#reply) lists; Rule and Finish: what [rule.md](references/rule.md#reply) and [finish.md](references/finish.md#reply) list; Check: the findings; Board: the counts and fixes, worst first; Answer: the answer and evidence), then each pick you made, each call left for the chief of staff as an `up:` line (the card on one line, its fields split by `|`), and any question last. The bot reads only your first line and the `up:` lines.
+**Reply:** Judge: only what [judge.md](references/judge.md#reply) lists. Else first one line the bot can sort on, `<job>: <done|draft|stopped>: <ids or the reason>`; then the result (Plan: what [references/plan.md](references/plan.md#reply) lists; Rule and Finish: what [rule.md](references/rule.md#reply) and [finish.md](references/finish.md#reply) list; Check: the findings; Board: the counts and fixes, worst first; Answer: the answer and evidence), then each pick you made, with how sure you are and the fact that would flip it (wrong is fine; sure and wrong isn't), each call left for the chief of staff as an `up:` line (the card on one line, its fields split by `|`), and any question last. The bot reads only your first line and the `up:` lines.
