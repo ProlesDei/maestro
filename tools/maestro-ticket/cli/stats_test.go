@@ -94,6 +94,10 @@ func TestStatsCase(t *testing.T) {
 	if strings.Contains(out, "R-aaaaaaae") {
 		t.Errorf("case T-1 shows another ticket's run:\n%s", out)
 	}
+	// A flag may come before the view's name.
+	if code, out, _ := h.run("", "stats", "--json", "case", "T-1"); code != 0 || !strings.HasPrefix(out, "{") {
+		t.Fatalf("stats --json case T-1: exit %d\n%s", code, out)
+	}
 	// One run, and the same as JSON.
 	if code, out, _ := h.run("", "stats", "case", "R-aaaaaaad"); code != 0 || !strings.HasPrefix(out, "R-aaaaaaad: 1 run, $1.30\n") {
 		t.Fatalf("case of a run: exit %d\n%s", code, out)
@@ -153,6 +157,10 @@ func TestStatsHealthMissingRows(t *testing.T) {
 	put(base.Add(2*time.Minute), runs.Done) // its write was dropped
 	live := put(base.Add(3*time.Minute), runs.Running)
 	holdRun(t, dir, live.ID)
+	// With no row yet there is no first row to count from.
+	if _, out, _ := h.run("", "stats", "health"); !strings.Contains(out, "missing rows: no row yet; 4 ended runs on disk\n") {
+		t.Errorf("health, no stats.db:\n%s", out)
+	}
 	row := func(r runs.Record) stats.Run {
 		return stats.Run{Run: r.ID, Job: "build", StartedAt: r.StartedAt, EndedAt: *r.EndedAt}
 	}

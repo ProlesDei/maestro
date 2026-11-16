@@ -50,9 +50,16 @@ func runStats(ctx context.Context, c *call) error {
 		fmt.Fprint(c.env.Stdout, statsHelp)
 		return nil
 	}
-	if view := statsViews[c.args[0]]; view != nil {
-		c.args = c.args[1:]
-		return view(ctx, c)
+	// A view's name may come after a flag, as in stats --json case T-1.
+	// No flag's value can name a view.
+	for i, a := range c.args {
+		if a == "--" {
+			break
+		}
+		if view := statsViews[a]; view != nil {
+			c.args = slices.Delete(slices.Clone(c.args), i, i+1)
+			return view(ctx, c)
+		}
 	}
 	return runStatsSwitch(c)
 }
@@ -415,7 +422,8 @@ type statsHealth struct {
 	Rows      int64  `json:"rows"`
 	LastPrune string `json:"last_prune,omitempty"`
 	// Ended counts ended runs on disk since the first row (all of them
-	// with no row yet); Missing those with no row.
+	// with no row yet); Missing those with no row. The text says no row
+	// yet in place of a missing count when Rows is 0.
 	Ended   int    `json:"ended"`
 	Missing int    `json:"missing"`
 	Space   *int64 `json:"space_free_pct,omitempty"`
@@ -517,7 +525,10 @@ func printHealth(w io.Writer, h statsHealth) {
 		}
 		fmt.Fprintln(w, line)
 	}
-	if h.File == "ok" || h.File == "none" {
+	switch {
+	case (h.File == "ok" || h.File == "none") && h.Rows == 0:
+		fmt.Fprintf(w, "missing rows: no row yet; %d ended runs on disk\n", h.Ended)
+	case h.File == "ok":
 		fmt.Fprintf(w, "missing rows: %d of %d ended runs on disk since the first row\n", h.Missing, h.Ended)
 	}
 	if h.Space != nil {
