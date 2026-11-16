@@ -91,33 +91,26 @@ func prune(ctx context.Context, db *sql.DB, now time.Time, l limits) (bool, erro
 // runs, since run_facts changes only in the last.
 const batchRuns = `SELECT run FROM run_facts WHERE (?1 OR ended_at < ?2) ORDER BY ended_at, run LIMIT ?3`
 
-// pruneBatch rolls one batch of runs up into daily and deletes them, in
-// one transaction, and returns how many went. A day's percentiles over
-// two batches are their weighted mean, so a day of more than a batch of
-// runs has close, not exact, ones.
-func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch int) (int64, error) {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	// A run's spend is its session's total less the run before it in
-	// that session: from run_facts, or, once that run is gone, from
-	// pruned_cum. A fresh session's first run spent its whole total, as
-	// did a run with no session; so did a model new to a known session.
-	// A resume with no trace of its session's past spent an unknown sum.
-	if _, err := tx.ExecContext(ctx, `WITH b AS (`+batchRuns+`),
-		x AS (
+// spendCTE names d (run, model, cost, tok): each run's own spend per
+// model, of the runs where picks (f is run_facts), which must take in the
+// rest of their sessions, so each finds the run before it. A run's spend is its session's total less the run
+// before it in that session: from run_facts, or, once that run is gone,
+// from pruned_cum. A fresh session's first run spent its whole total, as
+// did a run with no session; so did a model new to a known session. A
+// resume with no trace of its session's past spent an unknown sum: NULL.
+// A run with no dollars (its tokens from its stream) leaves the next
+// run's dollars NULL too.
+func spendCTE(where string) string {
+	return `x AS (
 			SELECT m.run, m.model, f.session, f.resume_of, f.ended_at, m.cost_cum,
 				m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum AS tok,
 				EXISTS (SELECT 1 FROM run_facts e WHERE e.session = f.session AND (e.ended_at, e.run) < (f.ended_at, f.run))
 					OR EXISTS (SELECT 1 FROM pruned_cum e WHERE e.session = f.session) AS known
 			FROM run_models m JOIN run_facts f ON f.run = m.run
-			WHERE f.run IN (SELECT run FROM b)
-				OR f.session IN (SELECT session FROM run_facts WHERE run IN (SELECT run FROM b))
+			WHERE ` + where + `
 		),
 		d AS (
-			SELECT x.run,
+			SELECT x.run, x.model,
 				x.cost_cum - CASE WHEN x.resume_of IS NULL OR x.session IS NULL THEN 0
 					WHEN LAG(x.run) OVER w IS NOT NULL THEN LAG(x.cost_cum) OVER w
 					WHEN p.session IS NOT NULL THEN p.cost_cum
@@ -128,7 +121,22 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 					WHEN x.known THEN 0 END AS tok
 			FROM x LEFT JOIN pruned_cum p ON p.session = x.session AND p.model = x.model
 			WINDOW w AS (PARTITION BY COALESCE(x.session, x.run), x.model ORDER BY x.ended_at, x.run)
-		),
+		)`
+}
+
+// pruneBatch rolls one batch of runs up into daily and deletes them, in
+// one transaction, and returns how many went. A day's percentiles over
+// two batches are their weighted mean, so a day of more than a batch of
+// runs has close, not exact, ones.
+func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch int) (int64, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `WITH b AS (`+batchRuns+`),
+		`+spendCTE(`f.run IN (SELECT run FROM b)
+				OR f.session IN (SELECT session FROM run_facts WHERE run IN (SELECT run FROM b))`)+`,
 		r AS (
 			SELECT f.ended_at / 86400000 AS day, COALESCE(f.job, 0) AS job, COALESCE(f.model, 0) AS model,
 				COALESCE(f.outcome, 0) AS outcome, f.wall_ms,

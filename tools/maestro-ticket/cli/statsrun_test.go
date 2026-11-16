@@ -601,7 +601,6 @@ func TestStatsOnOff(t *testing.T) {
 		{[]string{"stats", "on", "--maestro-sha", "abc1234"}, 0, false},
 		{[]string{"stats", "off", "--maestro-sha", "abc12345"}, 0, true},
 		{[]string{"stats", "maybe"}, 2, true},
-		{[]string{"stats"}, 2, true},
 		{[]string{"stats", "on", "--maestro-sha", "zqmark7"}, 2, true},
 		{[]string{"stats", "on", "off"}, 2, true},
 	} {

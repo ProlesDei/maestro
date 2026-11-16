@@ -746,3 +746,54 @@ func TestStatsNeverReads(t *testing.T) {
 		t.Fatalf("read %d files; want stats and cli/stats*", seen)
 	}
 }
+
+// A view's spend per run is what prune rolls into daily: one rule, read
+// before and after the runs go.
+func TestReadSpendMatchesPrune(t *testing.T) {
+	db, _ := fresh(t)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	end := now.Add(-100 * 24 * time.Hour)
+	const s1 = "11111111-1111-4111-8111-111111111111"
+	for i, c := range []struct {
+		cost             float64
+		session, resumes string
+	}{{1, s1, ""}, {2.5, s1, runID(1)}, {4, s1, runID(2)}, {0.5, "", ""}, {7, "33333333-3333-4333-8333-333333333333", runID(30)}} {
+		r := testRun(runID(i + 1))
+		r.StartedAt, r.EndedAt = end.Add(time.Duration(i)*time.Minute), end.Add(time.Duration(i)*time.Minute+30*time.Second)
+		r.Session, r.ResumeOf = c.session, c.resumes
+		cost := c.cost
+		r.Models[0].CostCum = &cost
+		if err := Write(t.Context(), db, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	facts, err := Read(t.Context(), db, Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usd float64
+	var unknown int
+	for _, f := range facts {
+		for _, s := range f.Spend {
+			if s.USD == nil {
+				unknown++
+				continue
+			}
+			usd += *s.USD
+		}
+	}
+	// 1 + 1.5 + 1.5 + 0.5; the resume of a session never seen has none.
+	if len(facts) != 5 || usd != 4.5 || unknown != 1 {
+		t.Fatalf("read: %d runs, $%v, %d unknown", len(facts), usd, unknown)
+	}
+	if one, err := Read(t.Context(), db, Filter{Run: runID(3)}); err != nil || len(one) != 1 || *one[0].Spend[0].USD != 1.5 {
+		t.Fatalf("one run's spend: %+v %v", one, err)
+	}
+	if ok, err := prune(t.Context(), db, now, defaultLimits); !ok || err != nil {
+		t.Fatalf("prune: %v %v", ok, err)
+	}
+	var daily float64
+	if err := db.QueryRow(`SELECT total(cost_usd) FROM daily`).Scan(&daily); err != nil || daily != usd {
+		t.Fatalf("daily $%v; the view read $%v", daily, usd)
+	}
+}

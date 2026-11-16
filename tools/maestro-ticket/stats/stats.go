@@ -157,10 +157,23 @@ func Open(path string, create bool) (*sql.DB, error) {
 	if create {
 		mode = "rwc"
 	}
+	return open(abs, "mode="+mode+"&_busy_timeout=250&_auto_vacuum=2&_journal_mode=WAL&_synchronous=NORMAL&_txlock=immediate")
+}
+
+// OpenRead opens stats.db at path for a view: it never makes or changes
+// the file. The caller closes it.
+func OpenRead(path string) (*sql.DB, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	return open(abs, "mode=ro&_busy_timeout=250")
+}
+
+func open(abs, params string) (*sql.DB, error) {
 	// A file: name keeps SQLite's mode; these three would end the path.
 	name := strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(abs)
-	db, err := sql.Open("sqlite", "file:"+name+"?mode="+mode+
-		"&_busy_timeout=250&_auto_vacuum=2&_journal_mode=WAL&_synchronous=NORMAL&_txlock=immediate")
+	db, err := sql.Open("sqlite", "file:"+name+"?"+params)
 	if err != nil {
 		return nil, err
 	}
@@ -293,8 +306,8 @@ type Run struct {
 // TailCall is one of a run's last tool calls, stored in run_facts.tail as
 // its code's id, with ! when its result was an error.
 type TailCall struct {
-	Code string
-	Fail bool
+	Code string `json:"code"`
+	Fail bool   `json:"fail,omitempty"`
 }
 
 // Step is a run_steps row: one step code's calls, fails and time.
@@ -335,10 +348,13 @@ func tailText(tail []TailCall, code func(kind, name string) any) any {
 // out-of-scope lines as one counted row, or a finding a ruling dropped.
 // Fid is F and 1 to 3 digits, Pass 1 to 10; any other is stored as NULL.
 type Finding struct {
-	Fid                      string
-	Kind, Sev, Action, Prior string
-	Pass                     *int64
-	N                        int64
+	Fid    string `json:"fid,omitempty"`
+	Kind   string `json:"kind"`
+	Sev    string `json:"sev,omitempty"`
+	Action string `json:"action,omitempty"`
+	Prior  string `json:"prior,omitempty"`
+	Pass   *int64 `json:"pass,omitempty"`
+	N      int64  `json:"n"`
 }
 
 // maxFindings caps a run's finding rows.

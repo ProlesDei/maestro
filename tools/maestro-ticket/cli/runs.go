@@ -375,9 +375,19 @@ func quantile(v []float64, q float64) float64 {
 }
 
 func printCosts(w io.Writer, by string, rows []costRow, total costRow) {
+	if !printCostTable(w, by, rows, total) {
+		return
+	}
+	fmt.Fprintf(w, "tokens: input %d, output %d, cache write %d, cache read %d\n",
+		total.InputTokens, total.OutputTokens, total.CacheWriteTokens, total.CacheReadTokens)
+}
+
+// printCostTable prints a row per group and one for all, or a line for
+// none; it reports whether there were runs.
+func printCostTable(w io.Writer, by string, rows []costRow, total costRow) bool {
 	if total.Runs == 0 {
 		fmt.Fprintln(w, "no runs logged")
-		return
+		return false
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "%s\tRUNS\tUSD\tSHARE\tMEDIAN/RUN\tTICKETS\tMEDIAN/TICKET\tP90/TICKET\n", strings.ToUpper(by))
@@ -386,6 +396,5 @@ func printCosts(w io.Writer, by string, rows []costRow, total costRow) {
 			r.Key, r.Runs, r.USD, r.Percent, r.RunMedian, r.Tickets, r.TicketMedian, r.TicketP90)
 	}
 	tw.Flush()
-	fmt.Fprintf(w, "tokens: input %d, output %d, cache write %d, cache read %d\n",
-		total.InputTokens, total.OutputTokens, total.CacheWriteTokens, total.CacheReadTokens)
+	return true
 }
