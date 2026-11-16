@@ -720,7 +720,7 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen {
 				n++
 			}
 		}
@@ -805,10 +805,11 @@ func (c *call) diedBefore(r runs.Record) bool {
 func neverRan(r runs.Record) bool { return r.State == runs.Failed && r.PID == 0 }
 
 // timedOutBefore reports whether another run of r's job on its ticket ran
-// out of time since since: a second timeout at one head goes up.
+// out of time since since: a second timeout at one head goes up. One a
+// freeze caused (Frozen) counts as none.
 func (c *call) timedOutBefore(r runs.Record, since time.Time) bool {
 	for _, o := range c.allRuns() {
-		if o.ID != r.ID && o.Ticket == r.Ticket && o.Job == r.Job && o.State == runs.TimedOut && o.StartedAt.After(since) {
+		if o.ID != r.ID && o.Ticket == r.Ticket && o.Job == r.Job && o.State == runs.TimedOut && !o.Frozen && o.StartedAt.After(since) {
 			return true
 		}
 	}

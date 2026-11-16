@@ -225,7 +225,7 @@ func TestSuperviseLimitRunsOnTheWallClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != TimedOut || !strings.Contains(got.Error, "the 2h time limit ended it; the machine was frozen 4h0m0s of it") {
+	if got.State != TimedOut || !got.Frozen || !strings.Contains(got.Error, "the 2h time limit ended it; the machine was frozen 4h0m0s of it") {
 		t.Fatalf("record: %s: %s", got.State, got.Error)
 	}
 	if took := time.Since(begun); took > 5*time.Second {
@@ -265,5 +265,55 @@ func TestSuperviseStopsOnAsk(t *testing.T) {
 	}
 	if took := time.Since(begun); took > 5*time.Second {
 		t.Fatalf("took %s to stop", took)
+	}
+}
+
+// A wait that ends right after a freeze, with no touch between, ends at
+// its last touch, so the freeze earns no credit either.
+func TestEndAfterAFreeze(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "qa-lead", Limit: "1h"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Now().Add(-5 * time.Hour).Truncate(time.Second)
+	w, err := StartWait(dir, r.ID, t0, true)
+	if err != nil || w == nil {
+		t.Fatalf("StartWait: %v, %v", w, err)
+	}
+	w.Touch(t0.Add(time.Second))
+	if !w.End(t0.Add(4 * time.Hour)) {
+		t.Fatal("End found no mark")
+	}
+	if got, _ := Credit(dir, r.ID, t0.Add(-time.Minute), t0.Add(4*time.Hour), time.Hour); got != time.Second {
+		t.Fatalf("Credit = %s; want the 1s before the freeze", got)
+	}
+}
+
+// A wall clock stepped back stretches no limit: the monotonic clock
+// still ends the run.
+func TestSuperviseLimitSurvivesAClockStepBack(t *testing.T) {
+	old := watchEvery
+	watchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { watchEvery = old })
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "designer", Limit: "1s", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jump atomic.Int64
+	time.AfterFunc(200*time.Millisecond, func() { jump.Store(int64(-time.Hour)) })
+	begun := time.Now()
+	err = Supervise(context.Background(), dir, r.ID, Options{
+		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := Load(dir, r.ID); got.State != TimedOut {
+		t.Fatalf("record: %s: %s", got.State, got.Error)
+	}
+	if took := time.Since(begun); took > 5*time.Second {
+		t.Fatalf("took %s; want about the 1s limit", took)
 	}
 }

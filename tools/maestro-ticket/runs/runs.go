@@ -85,8 +85,12 @@ type Record struct {
 	IsError   bool       `json:"is_error,omitempty"`
 	Reply     string     `json:"reply,omitempty"`
 	Error     string     `json:"error,omitempty"`
-	Rings     int        `json:"rings,omitempty"`
-	RingError string     `json:"ring_error,omitempty"`
+	// Frozen marks a time limit that ended a run only because the machine
+	// was frozen: by the monotonic clock it had time left. Pickup counts
+	// it as no repeat timeout, so one freeze escalates nothing.
+	Frozen    bool   `json:"frozen,omitempty"`
+	Rings     int    `json:"rings,omitempty"`
+	RingError string `json:"ring_error,omitempty"`
 	// Rang is true once a ring reached the webhook; OrphanTries counts the
 	// rings readers tried for a run whose supervisor went away first.
 	Rang        bool `json:"rang,omitempty"`

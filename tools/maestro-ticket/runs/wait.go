@@ -97,7 +97,10 @@ func (w *Wait) Touch(now time.Time) {
 	}
 	now = now.Round(0) // the wall clock: the monotonic one stops in a freeze
 	if !w.last.IsZero() && now.Sub(w.last) >= FreezeGap {
-		w.End(w.last)
+		if !w.End(now) {
+			w.last = time.Time{} // the supervisor removed the mark: its run ended
+			return
+		}
 		if n, err := StartWait(w.dir, w.id, now, w.session); err == nil && n != nil {
 			*w = *n
 		}
@@ -109,15 +112,20 @@ func (w *Wait) Touch(now time.Time) {
 	}
 }
 
-// End marks the wait over at now.
-func (w *Wait) End(now time.Time) {
+// End marks the wait over at now, or at the last touch when a freeze
+// came between, and reports whether the mark was still there.
+func (w *Wait) End(now time.Time) bool {
 	if w == nil {
-		return
+		return false
 	}
-	if os.Chtimes(w.file, now, now) == nil {
-		dir, base := filepath.Split(w.file)
-		os.Rename(w.file, filepath.Join(dir, strings.Replace(base, ".wait.", ".waited.", 1)))
+	if now = now.Round(0); !w.last.IsZero() && now.Sub(w.last) >= FreezeGap {
+		now = w.last
 	}
+	if os.Chtimes(w.file, now, now) != nil {
+		return false
+	}
+	dir, base := filepath.Split(w.file)
+	return os.Rename(w.file, filepath.Join(dir, strings.Replace(base, ".wait.", ".waited.", 1))) == nil
 }
 
 // SlotWait is how long run id's commands waited for slots between start

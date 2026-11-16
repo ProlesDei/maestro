@@ -171,7 +171,7 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	wall, mono := o.Now(), time.Now()
 	why, stopper := "", ""
 	var credit time.Duration
-	var read time.Time // when Credit was last read
+	var read time.Time // when Credit was last read, on the monotonic clock
 	capped := false
 	timer := time.NewTimer(min(watchEvery, limit))
 	defer timer.Stop()
@@ -189,24 +189,30 @@ wait:
 			why, stopper = asked, by
 			break wait
 		}
+		// Credit reads wait marks on the wall clock. The deadline goes by
+		// the later of the wall clock and the monotonic one: a freeze moves
+		// only the first, and a clock stepped back only the first too, so
+		// neither stretches the limit.
 		now := o.Now()
+		at := later(now, wall.Add(time.Since(mono)))
+		due := func() bool { return !at.Before(start.Add(limit + credit)) }
 		// While a wait goes on, the deadline moves as fast as the clock:
 		// read the waits no sooner than liveWait apart, not in a spin.
-		if !now.Before(start.Add(limit+credit)) && now.Sub(read) >= liveWait {
+		if due() && (read.IsZero() || time.Since(read) >= liveWait) {
 			credit, capped = Credit(dir, r.ID, start, now, limit)
-			read = now
-			if !now.Before(start.Add(limit + credit)) {
+			read = time.Now()
+			if due() {
 				// Read once more before it ends the run: a read that
 				// raced a wait's rename can miss that wait.
 				credit, capped = Credit(dir, r.ID, start, now, limit)
 			}
-			if !now.Before(start.Add(limit + credit)) {
+			if due() {
 				why = TimedOut
 				break wait
 			}
 		}
 		next := watchEvery
-		if left := start.Add(limit + credit).Sub(now); left > 0 {
+		if left := start.Add(limit + credit).Sub(at); left > 0 {
 			next = min(next, left)
 		}
 		timer.Reset(next)
@@ -265,6 +271,7 @@ wait:
 		}
 		if frozen >= FreezeGap {
 			r.Error += fmt.Sprintf("; the machine was frozen %s of it", frozen.Round(time.Second))
+			r.Frozen = wall.Add(time.Since(mono)).Before(start.Add(limit + credit))
 		}
 	case why == asked:
 		r.State, r.Error = Failed, "stopped by "+stopper
