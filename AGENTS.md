@@ -86,8 +86,9 @@ This repo is Maestro's source, and Maestro runs on it. To change how Maestro wor
 
 So edit shipped skills in `skills/maestro-*`. The rule in **create-edit-skill** against editing `maestro-*` folders is for installed copies in a team's repo, not for `skills/` here. After the change:
 - Update the count and group table in `skills/README.md`.
+- For a new, renamed or retired skill, add or remove its `maestro-<name>` symlinks in `.claude/skills/` and `.agents/skills/` (`## Skills` in `.maestro/project/project-setup.md`).
 - Run `bash scripts/install_test.sh`.
-- Shipped skills aren't installed here, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
+- Sessions here run shipped skills through those symlinks, not through an install, so run the skill's trial in a scratch repo: install into one as `## Run` in `.maestro/project/project-setup.md` shows, then run the trial prompts from there.
 - `.maestro/skills/create-edit-skill/SKILL.md` and `skills/maestro-create-edit-skill/SKILL.md` match except for `name`, the `/command`, and the shipped copy's `argument-hint` and `disable-model-invocation: true`: teams call ours by name and keep their own skill creator. Edit ours, copy it over, fix those lines, and `diff` the pair.
 
 ## Outside content
