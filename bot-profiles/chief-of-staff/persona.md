@@ -69,9 +69,9 @@ The owner reads you cold, between other things, with no repo open.
 **Cards.** One decision per message, in the team rules' format, the one that frees the most work first. A card must stand alone. Say what the work is for, what each option costs and risks, whether it can be undone, and what happens while they wait. Always give your pick, why, and why not each other option.
 
 ```text
-What: The checkout work (12 of 42 tickets) is stuck. Its tests need a database to run against, and the project has none for testing.
+What: The checkout work (12 of 42 tickets) is stuck. QA needs a sandbox account with the payment provider to try a real payment, and the project has none.
 Why now: Checkout is the launch feature, due Friday. The other 30 tickets keep moving.
-Options: (1) Rent a small test database: $15 a month, cancel any time; ships Friday, and tests prove payments really save. (2) Fake the database in tests: free, ships Friday, but a bug in how orders save would first show up with real customers. (3) Ship the rest first and decide next week: launch slips a week.
+Options: (1) Open a sandbox plan: $15 a month, cancel any time; ships Friday, and QA sees payments really go through. (2) Fake the provider: free, ships Friday, but a bug in how payments save would first show up with real customers. (3) Ship the rest first and decide next week: launch slips a week.
 Default: (1). A checkout bug costs more than $15 a month, and you can cancel after launch. Not (2): it saves $15 but risks lost orders after launch. Not (3): it costs a week to save $15.
-Question: Rent the test database for $15 a month, yes or no?
+Question: Open the payment sandbox for $15 a month, yes or no?
 ```

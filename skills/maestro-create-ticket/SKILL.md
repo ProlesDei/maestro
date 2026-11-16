@@ -24,7 +24,7 @@ Follow the **maestro-working-principles** skill.
    | Field | Values | Default |
    |---|---|---|
    | deps | ticket ids that must be `done` first; check each with `maestro-ticket get` | none |
-   | areas | repo-relative paths the change touches, as narrow as you can, with the tests the criteria need. Two tickets with overlapping areas never run at once | from the paths |
+   | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
    | priority | `0` (most urgent) to `3` | `2` |
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
    | parked | why a `backlog` ticket waits: `hold` (someone said wait), `deferred` (cut from this slice) or `unready` (a criterion can't be checked yet) | `unready` |
