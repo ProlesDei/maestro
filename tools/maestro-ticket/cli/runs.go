@@ -25,11 +25,80 @@ type claudeReply struct {
 	TotalCostUSD *float64 `json:"total_cost_usd"`
 	// ModelUsage holds every model the session called, its subagents' too.
 	ModelUsage map[string]struct {
-		InputTokens              int64 `json:"inputTokens"`
-		OutputTokens             int64 `json:"outputTokens"`
-		CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
-		CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+		InputTokens              int64    `json:"inputTokens"`
+		OutputTokens             int64    `json:"outputTokens"`
+		CacheReadInputTokens     int64    `json:"cacheReadInputTokens"`
+		CacheCreationInputTokens int64    `json:"cacheCreationInputTokens"`
+		CostUSD                  looseNum `json:"costUSD"`
 	} `json:"modelUsage"`
+	// Read only for stats.db, each loose, so a field Claude Code renames
+	// or retypes never costs a reply its cost log. The two strings are
+	// mapped to a list before anything keeps them.
+	Subtype        looseStr  `json:"subtype"`
+	IsError        looseBool `json:"is_error"`
+	StopReason     looseStr  `json:"stop_reason"`
+	DurationMS     looseNum  `json:"duration_ms"`
+	DurationAPIMS  looseNum  `json:"duration_api_ms"`
+	NumTurns       looseNum  `json:"num_turns"`
+	APIErrorStatus looseSet  `json:"api_error_status"`
+	Result         looseLen  `json:"result"`
+}
+
+// looseNum is a JSON number, or nothing: its decode never fails.
+type looseNum struct {
+	V  float64
+	OK bool
+}
+
+func (n *looseNum) UnmarshalJSON(b []byte) error {
+	if string(b) != "null" && json.Unmarshal(b, &n.V) == nil {
+		n.OK = true
+	}
+	return nil
+}
+
+// looseStr is a short JSON string, or "": its decode never fails.
+type looseStr struct{ V string }
+
+func (s *looseStr) UnmarshalJSON(b []byte) error {
+	if len(b) <= 66 && json.Unmarshal(b, &s.V) != nil {
+		s.V = ""
+	}
+	return nil
+}
+
+// looseBool is a JSON bool, or nothing: its decode never fails.
+type looseBool struct{ V, OK bool }
+
+func (f *looseBool) UnmarshalJSON(b []byte) error {
+	if string(b) != "null" && json.Unmarshal(b, &f.V) == nil {
+		f.OK = true
+	}
+	return nil
+}
+
+// looseSet notes a field that holds anything but null, and keeps none
+// of it.
+type looseSet struct{ Set bool }
+
+func (s *looseSet) UnmarshalJSON(b []byte) error {
+	s.Set = string(b) != "null"
+	return nil
+}
+
+// looseLen is a JSON string's length in bytes, or nothing; it keeps none
+// of the text, and its decode never fails.
+type looseLen struct {
+	N  int64
+	OK bool
+}
+
+func (l *looseLen) UnmarshalJSON(b []byte) error {
+	var s string
+	if string(b) != "null" && json.Unmarshal(b, &s) == nil {
+		l.N, l.OK = int64(len(s)), true
+	}
+	return nil
 }
 
 // lastResult finds the last result message in a reply: the one value
@@ -322,9 +391,19 @@ func quantile(v []float64, q float64) float64 {
 }
 
 func printCosts(w io.Writer, by string, rows []costRow, total costRow) {
+	if !printCostTable(w, by, rows, total) {
+		return
+	}
+	fmt.Fprintf(w, "tokens: input %d, output %d, cache write %d, cache read %d\n",
+		total.InputTokens, total.OutputTokens, total.CacheWriteTokens, total.CacheReadTokens)
+}
+
+// printCostTable prints a row per group and one for all, or a line for
+// none; it reports whether there were runs.
+func printCostTable(w io.Writer, by string, rows []costRow, total costRow) bool {
 	if total.Runs == 0 {
 		fmt.Fprintln(w, "no runs logged")
-		return
+		return false
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "%s\tRUNS\tUSD\tSHARE\tMEDIAN/RUN\tTICKETS\tMEDIAN/TICKET\tP90/TICKET\n", strings.ToUpper(by))
@@ -333,6 +412,5 @@ func printCosts(w io.Writer, by string, rows []costRow, total costRow) {
 			r.Key, r.Runs, r.USD, r.Percent, r.RunMedian, r.Tickets, r.TicketMedian, r.TicketP90)
 	}
 	tw.Flush()
-	fmt.Fprintf(w, "tokens: input %d, output %d, cache write %d, cache read %d\n",
-		total.InputTokens, total.OutputTokens, total.CacheWriteTokens, total.CacheReadTokens)
+	return true
 }

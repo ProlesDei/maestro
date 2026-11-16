@@ -4,6 +4,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 )
 
 // fakeClaude stands in for claude: it saves its arguments, stdin and
@@ -136,10 +138,19 @@ func TestJobBuildPicksTheModelByTier(t *testing.T) {
 	if got.stdin[0] != "/maestro-software-engineer T-1" {
 		t.Fatalf("prompt %q", got.stdin)
 	}
-	for f, want := range map[string]string{"--model": "sonnet", "--effort": "high", "--permission-mode": "bypassPermissions", "--output-format": "json"} {
+	// The record keeps json; claude gets stream-json when the side
+	// file asks for the stream.
+	format := "json"
+	if side, _ := readSide(filepath.Join(j.h.dir, "runs"), r.ID); side.Stream {
+		format = "stream-json"
+	}
+	for f, want := range map[string]string{"--model": "sonnet", "--effort": "high", "--permission-mode": "bypassPermissions", "--output-format": format} {
 		if v := got.flag(f); v != want {
 			t.Errorf("%s %q; want %q", f, v, want)
 		}
+	}
+	if v := flagValue(r.Command, "--output-format"); v != "json" {
+		t.Errorf("record --output-format %q", v)
 	}
 	if sid := got.flag("--session-id"); len(sid) != 36 || r.SessionID != sid {
 		t.Errorf("session id %q, record %q", sid, r.SessionID)
@@ -558,4 +569,128 @@ func TestPickupWaitsOutALimit(t *testing.T) {
 	if o, err := slot.CombinedOutput(); err == nil || !strings.Contains(string(o), "busy") {
 		t.Fatalf("a Claude session started in the slot line during a limit: %v %s", err, o)
 	}
+}
+
+// TestClaudeArgvEveryKind pins what claude gets for every job kind, for
+// job again and for every resume flag: the record's command, the argv
+// claude runs with, its stdin, and the environment words maestro-ticket
+// adds to the launcher's.
+//
+// It runs with stats off, so claude gets the record's json as on main;
+// TestStreamArgvSwap holds the stats-on argv to this one.
+func TestClaudeArgvEveryKind(t *testing.T) {
+	t.Parallel() // its runs go one at a time; it overlaps the other run pins
+	golden(t, "argv", argvPins(t, stats.OffEnv+"=off"))
+}
+
+// argvPins runs every job kind, job again and every resume flag with env
+// added to the harness's, and returns what claude got for each.
+func argvPins(t *testing.T, env ...string) string {
+	j := newJobHarness(t, "planner")
+	j.env = append(j.env, env...)
+	// gh is only looked for: with it, review-prep.sh routes the review.
+	if err := os.WriteFile(filepath.Join(j.bin, "gh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("git", "init", "-q")
+	c.Dir = j.h.dir
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	prep := filepath.Join(j.h.dir, ".claude", "skills", "maestro-code-review", "scripts")
+	os.MkdirAll(prep, 0o755)
+	os.WriteFile(filepath.Join(prep, "review-prep.sh"), []byte(`[ "$1" = --route ] || exit 9
+case $2 in
+T-3) echo pr=4; echo lines=900; echo route=light; echo "why=2 files, all docs" ;;
+*) echo pr=5; echo lines=30; echo route=full; echo "why=src/a.go is code" ;;
+esac
+`), 0o755)
+	j.h.ok(nil, "create", "--title", "a", "--tier", "junior") // T-1
+	for _, title := range []string{"b", "c", "d", "e", "f"} { // T-2 to T-6
+		j.h.ok(nil, "create", "--title", title)
+	}
+	for _, id := range []string{"T-3", "T-4"} {
+		for _, st := range []string{"in_progress", "in_review"} {
+			j.h.ok(nil, "transition", id, "--to", st)
+		}
+	}
+	base := map[string]bool{}
+	for _, kv := range j.cmd("").Env {
+		for _, l := range strings.Split(kv, "\n") {
+			base[l] = true
+		}
+	}
+	m := newMasker(j.h.dir, "<DIR>", j.exe, "<exe>", j.bin, "<bin>")
+	var b strings.Builder
+	kinds := map[string]bool{}
+	pin := func(what string, r runs.Record) {
+		kinds[r.Job] = true
+		read := func(name string) string {
+			got, err := os.ReadFile(filepath.Join(j.out, r.ID, name))
+			if err != nil {
+				t.Fatalf("run %s: %v", r.ID, err)
+			}
+			return string(got)
+		}
+		var env []string
+		for _, l := range strings.Split(strings.TrimRight(read("env"), "\n"), "\n") {
+			k, v, _ := strings.Cut(l, "=")
+			switch {
+			case base[l], k == "PWD", k == "OLDPWD", k == "SHLVL", k == "_":
+			case k == "TMPDIR":
+				env = append(env, k+"=<slot's own>") // slot's own folder
+			default:
+				env = append(env, k+"="+v)
+			}
+		}
+		slices.Sort(env)
+		args := strings.Split(strings.TrimRight(read("args"), "\n"), "\n")
+		fmt.Fprintf(&b, "## %s\nrecord: %q\nargv: %q\nstdin: %q\nenv: %q\n", what, r.Command, args, read("stdin"), env)
+	}
+	run := func(stdin string, args ...string) runs.Record {
+		_, r := j.job(stdin, args...)
+		pin("job "+strings.Join(args, " "), r)
+		return r
+	}
+	build := run("", "build", "T-1")
+	run("", "build", "T-2")
+	run("", "review", "T-3")
+	run("", "review", "T-3", "--full")
+	run("F2 was wrong: the test covers it\n", "review", "T-4", "--approved", "abc1234", "--drop", "F2", "--drop-file", "-")
+	qa := run("", "qa", "T-3", "--slots", "2")
+	run("", "live", "T-5")
+	run("why is the login slow?\n", "qa-ask")
+	run("goal demo: ship the login page\n", "plan")
+	run("split it in two\n", "rule", "T-5")
+	run("", "finish", "T-5")
+	run("Rows:\njudge: T-5 blocked: x\n", "judge", "T-5", "T-6")
+	run("", "design", "T-6")
+	run("is T-5 ready?\n", "cos", "--ticket", "T-5")
+	run("", "again", qa.ID)
+	for _, k := range jobKinds {
+		if !kinds[k.name] {
+			t.Errorf("job %s has no pin", k.name)
+		}
+	}
+
+	r := build
+	for _, c := range []struct {
+		stdin string
+		flags []string
+	}{
+		{"use the v2 endpoint\n", nil},
+		{"", []string{"--opus"}},
+		{"", []string{"--escalate"}},
+		{"", []string{"--decide"}},
+		{"", []string{"--died"}},
+		{"", []string{"--go-on"}},
+	} {
+		if slices.Contains(c.flags, "--died") {
+			r.State, r.Reply, r.SessionID = runs.Died, "", ""
+			runs.Save(filepath.Join(j.h.dir, "runs"), r)
+		}
+		_, r = j.resume(c.stdin, append([]string{r.ID}, c.flags...)...)
+		pin(strings.Join(append([]string{"resume", "<run>"}, c.flags...), " "), r)
+	}
+	return m.mask(b.String())
 }

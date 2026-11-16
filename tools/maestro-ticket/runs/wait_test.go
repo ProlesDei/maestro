@@ -4,6 +4,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -339,5 +340,52 @@ func TestShortFreezeMarksNoFrozen(t *testing.T) {
 	}
 	if got, _ := Load(dir, r.ID); got.State != TimedOut || got.Frozen || !strings.Contains(got.Error, "frozen 15m0s") {
 		t.Fatalf("record: %s, frozen %v: %s", got.State, got.Frozen, got.Error)
+	}
+}
+
+// AfterRing runs once, right after the first ring and before the rest,
+// with that ring's error; with a webhook it can't look up, once with that
+// error; with no webhook, once after the end.
+func TestSuperviseAfterRing(t *testing.T) {
+	dir := t.TempDir()
+	var rings, status atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		rings.Add(1)
+		w.WriteHeader(int(status.Load()))
+	}))
+	defer srv.Close()
+	for _, hook := range []string{"rang", "ok", "broken", "none"} {
+		r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"true"}, Dir: dir}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rings.Store(0)
+		var calls []string
+		o := Options{
+			Rings: []time.Duration{0, 200 * time.Millisecond},
+			AfterRing: func(r Record, err error) {
+				calls = append(calls, fmt.Sprintf("rings %d, rang %v, %s", rings.Load(), r.Rang, RingErrCode(err)))
+			},
+		}
+		want := "rings 0, rang false, none"
+		status.Store(http.StatusServiceUnavailable)
+		switch hook {
+		case "rang":
+			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
+			status.Store(http.StatusOK)
+			want = "rings 1, rang true, none"
+		case "ok":
+			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
+			want = "rings 1, rang false, http5xx"
+		case "broken":
+			o.Hook = func(string) (Hook, error) { return Hook{}, errors.New("bad notify file") }
+			want = "rings 0, rang false, other"
+		}
+		if err := Supervise(context.Background(), dir, r.ID, o); err != nil {
+			t.Fatal(err)
+		}
+		if len(calls) != 1 || calls[0] != want {
+			t.Fatalf("hook %s: AfterRing calls %q; want one: %s", hook, calls, want)
+		}
 	}
 }

@@ -4,6 +4,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -44,6 +45,9 @@ type Env struct {
 	// DiskFree measures a directory's filesystem for claim and slot; nil
 	// means envcheck.DiskFree. Tests use it to fake a full disk.
 	DiskFree func(dir string) (envcheck.Free, bool, error)
+	// StatsOpen opens stats.db for one write; nil means stats.Open. Tests
+	// use it to fake a broken file.
+	StatsOpen func(path string, create bool) (*sql.DB, error)
 }
 
 // OSEnv returns an Env wired to the real process.
@@ -246,6 +250,8 @@ var commands = []command{
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},
+	// Left out of the usage text: no bot reads it.
+	{"stats", runStats},
 }
 
 // call is one parsed invocation.
@@ -263,6 +269,12 @@ type call struct {
 		path, source string
 		err          error
 	}
+	storeChecks []ticket.Check // besideStore's checks of the store's dir
+	// Set in the supervisor: it alone creates or migrates stats.db.
+	inSupervisor bool
+	statsSha     string        // stats.sha, read once at its start
+	statsPrep    chan error    // its start's Prepare
+	statsWrote   chan struct{} // closed once its row write is over
 }
 
 // usageError marks errors caused by bad command-line input.
@@ -521,16 +533,20 @@ func (c *call) minFree() (int, error) {
 	return envcheck.ParseMinFree(c.env.Getenv(envcheck.MinFreeEnv))
 }
 
+// diskFree is how this call measures a directory's filesystem.
+func (c *call) diskFree() func(dir string) (envcheck.Free, bool, error) {
+	if c.env.DiskFree != nil {
+		return c.env.DiskFree
+	}
+	return envcheck.DiskFree
+}
+
 // headroom refuses, with ErrLowDisk, while the store's, the temp dir's or
 // the working directory's filesystem is under the min margin, as
 // envcheck.Headroom counts it. Work started there would die mid-run with
 // "no space left on device", and the store's own writes with it.
 func (c *call) headroom(store string, min int) error {
-	free := envcheck.DiskFree
-	if c.env.DiskFree != nil {
-		free = c.env.DiskFree
-	}
-	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, free)
+	err := envcheck.Headroom([]string{filepath.Dir(store), c.tempDir(), c.env.Dir}, min, c.diskFree())
 	if err != nil {
 		return fmt.Errorf("refused: %w; free space, such as with the maestro-prune skill, then retry (%s sets the margin). A full disk is an infra block, not the ticket's failure", err, envcheck.MinFreeEnv)
 	}

@@ -1,0 +1,8 @@
+# Code review: T-15 Add the payments webhook
+PR: https://github.com/acme/app/pull/43 | branch: maestro/T-15 | head: 9999999999999999999999999999999999999999 | base: main @ 2222222222222222222222222222222222222222 | gated on: none
+Verdict: ESCALATE
+Tier: 2, money | Mode: full
+## Gates          not run: outside step: VPN to the staging bank: owner: owner's call
+## Outcome        Escalation comment 97
+
+{"head": "9999999999999999999999999999999999999999", "verdict": "ESCALATE", "tier": 2, "mode": "full", "findings": []}

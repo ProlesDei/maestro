@@ -20,9 +20,13 @@
 #   browser: playwright-cli|none    the browser QA sessions open pages with,
 #                                   or none for an app with no screens
 #                                   (required: INSTALL.md step 7)
+#   stats: on|off                   local run stats in stats.db beside the
+#                                   store; off stops their writes, and no
+#                                   line leaves them as they are (on, at first)
 #
 # apply copies each skill in skills/ beside this script into every harness
-# folder, writes project-setup.md once, creates the ticket store and lists
+# folder, writes project-setup.md once, creates the ticket store, turns
+# local run stats on or off and lists
 # each file it placed, with its git blob hash, in the record:
 # .maestro/project/installed.list when committed, else
 # <git-common-dir>/maestro/installed.list. It never writes over a file it
@@ -115,7 +119,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha='' harnesses=() home='' bots=() graph='' browser=''
+sha='' harnesses=() home='' bots=() graph='' browser='' stats=''
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -135,6 +139,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	bots) read -ra bots <<<"$val" ;;
 	code-graph) graph=$val ;;
 	browser) browser=$val ;;
+	stats) stats=$val ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
 	esac
 done <"$choices"
@@ -153,6 +158,9 @@ head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git chec
 	die "install.yaml: code-graph wants mcp or none; INSTALL.md step 4 says how to pick"
 [ "$cmd" = uninstall ] || [[ $browser == playwright-cli || $browser == none ]] ||
 	die "install.yaml: browser wants playwright-cli or none; INSTALL.md step 4 says how to pick"
+# No line means on: an install from before the key asks nothing.
+[ "$cmd" = uninstall ] || [[ -z ${set[stats]-} || $stats == on || $stats == off ]] ||
+	die "install.yaml: stats wants on or off"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
 for h in "${harnesses[@]}"; do
@@ -773,6 +781,18 @@ out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
 	printf '%s\n' "$out" >&2
 	die "maestro-ticket doctor failed in $target; nothing was written"
 }
+# The STATS_OFF marker beside the store, and the sha each run's row
+# records. With no stats: line, only the sha: stats stay as they were
+# (on, unless a person ran maestro-ticket stats off). stats: on removes a
+# marker whoever made it, so apply says when it does. A maestro-ticket
+# too old to know stats is a stale copy on PATH.
+marker=$(dirname "${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}")/STATS_OFF
+reon=''
+[ "$stats" != on ] || [ ! -e "$marker" ] || reon=1
+out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
+	printf '%s\n' "$out" >&2
+	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
+}
 
 # Hide the old and new skills before the first copy, so a run that stops
 # partway shows nothing in git status. Each file lands whole (a temp file,
@@ -826,6 +846,20 @@ fi
 rm -f -- "$other"
 
 echo "ticket store ready"
+# Whether stats are on is maestro-ticket's to say: the marker, the shell's
+# MAESTRO_TICKET_STATS=off and an unsafe store each turn them off.
+health=$(cd "$target" && maestro-ticket stats health 2>/dev/null) || health=''
+case ${health%%$'\n'*} in
+"stats: on")
+	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
+	[ -z "$reon" ] || echo "stats: on in install.yaml turned run stats back on, over STATS_OFF; without that line, maestro-ticket stats off lasts through apply"
+	;;
+"stats: off ("*)
+	why=${health#stats: off (} why=${why%%): no run is written*}
+	echo "run stats off ($why): no run is written to stats.db"
+	;;
+*) echo "run stats: maestro-ticket stats health says whether they are on" ;;
+esac
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.

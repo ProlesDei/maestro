@@ -11,8 +11,8 @@ const CanScan = false
 // death leaves them be.
 func KillRun(string) {}
 
-func termRun(string)       {}
-func runAlive(string) bool { return false }
+func termRun(string, int) int { return 0 }
+func runAlive(string) bool    { return false }
 
 // Untracked needs /proc to read other processes' working directory and
 // environment.

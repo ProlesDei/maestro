@@ -8,8 +8,12 @@
 // the command's stdin, stdout and stderr; <id>.lock, which the supervisor
 // holds while it lives; <id>.acked, made once when the launcher says it
 // acted on the result; <id>.stop, made once when someone asks the run to
-// stop; and <id>.wait.* and <id>.waited.*, the slot waits
-// its command marked (wait.go). Only one process writes a record at a
+// stop; <id>.wait.* and <id>.waited.*, the slot waits its command marked
+// (wait.go); <id>.stats, the facts job, again and resume know at its start
+// that stats.db keeps and the record doesn't (cli); and <id>.stream, a
+// streamed run's stdout, which its supervisor reads once the command is
+// over and removes once its end is recorded (Options.Stream). Only one
+// process writes a record at a
 // time: launch until the supervisor starts, then whoever holds <id>.lock: the
 // supervisor, or, once it went away, a reader that Adopt let in.
 package runs
@@ -32,6 +36,7 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
 // States. Starting and running are live; the rest are ended. A reader
@@ -116,7 +121,42 @@ type Record struct {
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
 	AckedBy string     `json:"acked_by,omitempty"`
+	// End is what only the supervisor sees as the run ends, for its stats
+	// row: never stored, so no reader's bytes change. nil on a record
+	// read from disk.
+	End *EndFacts `json:"-"`
+	// Stream is what the supervisor read from a streamed run's stdout,
+	// never stored either; nil for a run that wasn't streamed.
+	Stream *streamfilter.Summary `json:"-"`
 }
+
+// Stop kinds: how the supervisor ended a run's command.
+const (
+	StopNone = "none" // it ended on its own
+	StopTerm = "term" // a stop or the time limit sent SIGTERM, and that did
+	StopKill = "kill" // the grace ran out, and SIGKILL followed
+)
+
+// EndFacts are a run's end as its supervisor saw it.
+type EndFacts struct {
+	// WaitMs is the slot waiting the run's limit left out, as Credit gave
+	// it once the command ended; WaitCapped says a cap cut it.
+	WaitMs     int64
+	WaitCapped bool
+	Stop       string
+	// Escaped counts the run's processes outside its group that the stop
+	// sent SIGTERM: what slot or Claude Code started in a group of its own.
+	Escaped int
+	// Cause is who stopped the run, if someone did: CauseAsked or
+	// CauseLauncher; "" for a run that ended or timed out.
+	Cause string
+}
+
+// Stop causes.
+const (
+	CauseAsked    = "asked"    // maestro-ticket stop
+	CauseLauncher = "launcher" // the launcher was stopped
+)
 
 // Owner is the bot whose pickup shows the run once it ends, who acks it
 // and whose webhook rings for it: its launcher, unless its end named
@@ -457,7 +497,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".stats", streamExt, ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -466,6 +506,12 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 	for _, e := range ents {
 		if id, _, ok := strings.Cut(e.Name(), "."); ok && pruned[id] && isWait(e.Name(), id) {
 			os.Remove(filepath.Join(dir, e.Name()))
+		}
+		// A side file's temp copy that a killed launch left.
+		if rest, ok := strings.CutPrefix(e.Name(), "."); ok {
+			if id, _, ok := strings.Cut(rest, ".stats.tmp-"); ok && pruned[id] {
+				os.Remove(filepath.Join(dir, e.Name()))
+			}
 		}
 		// An active-run mark a later start moved aside, or one whose run
 		// ended a day ago.
@@ -495,7 +541,9 @@ const maxReply = 64 << 10
 const OutputWindow = 8 << 20
 
 // ParseOutput reads the end of a run's stdout: the result and session id
-// of Claude's JSON output, or else the output's tail.
+// of Claude's JSON output, or else the output's tail. A streamed run's
+// .out holds no stream line but its result (streamfilter.Scan); a
+// command run on stream-json itself is read as before.
 func ParseOutput(out []byte) (text, session string, isError bool) {
 	parse := func(b []byte) bool {
 		var r reply

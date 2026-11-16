@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"syscall"
 	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
 // RunIDEnv names the variable every launched command gets, so a scan can
@@ -20,6 +23,9 @@ const RunIDEnv = "MAESTRO_RUN_ID"
 // SIGKILL.
 const KillGrace = 10 * time.Second
 
+// killGrace is KillGrace, a var only so tests can shorten it.
+var killGrace = KillGrace
+
 // watchEvery is how often a supervisor looks at the wall clock and for a
 // stop asked while its command runs. A var only so tests can shorten it.
 var watchEvery = 2 * time.Second
@@ -28,9 +34,6 @@ var watchEvery = 2 * time.Second
 // counts as the machine frozen: a VM paused by its host stops the
 // monotonic clock, and the wall clock jumps on waking.
 const FreezeGap = time.Minute
-
-// asked is why a run ends when someone asked stop.
-const asked = "asked"
 
 // pickPoll is how often a ringing supervisor looks for an ack.
 const pickPoll = 2 * time.Second
@@ -56,7 +59,18 @@ type Options struct {
 	// isn't acked, such as the end of the usage limit that stopped it, so
 	// its bot learns its run can go on; zero for none, 24h out at most.
 	RingAgain func(Record) time.Time
-	Now       func() time.Time
+	// AfterRing, if set, runs once after the first ring, with its error,
+	// or with the error looking up the webhook, or with nil once the
+	// supervisor knows no ring comes (no webhook, or the result acked
+	// first), so work that must not hold up the ring, such
+	// as a stats prune, waits for it.
+	AfterRing func(Record, error)
+	// Stream, when set, runs the command with stream-json in place of
+	// its exact --output-format json, its stdout in <id>.stream, and
+	// reads that file once the command is over: .out gets what it would
+	// have held with json, and the record's Stream the counts.
+	Stream *streamfilter.Names
+	Now    func() time.Time
 }
 
 // Supervise runs the command of a starting record to its end within its
@@ -87,9 +101,11 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 	}
 	r = run(ctx, dir, r, o)
 	if err := Save(dir, r); err != nil {
+		DropStream(dir, id)
 		return err
 	}
 	if r.Error != "" && r.PID == 0 {
+		DropStream(dir, id)
 		return nil // never started: launch reports it
 	}
 	if o.OnEnd != nil {
@@ -99,6 +115,7 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 			r = got
 		}
 	}
+	DropStream(dir, id)
 	// Stopped, as at a shutdown: leave the ring to the first reader after,
 	// which Adopt lets in once this exits.
 	if ctx.Err() == nil {
@@ -136,9 +153,18 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	}
 	defer errf.Close()
 
-	cmd := exec.Command(r.Command[0], r.Command[1:]...)
+	// The record keeps the command as given; only what runs changes.
+	argv, stdout := r.Command, out
+	var stream *os.File
+	if a, ok := StreamArgv(r.Command); ok && o.Stream != nil {
+		if f, err := os.OpenFile(path(dir, r.ID, streamExt), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600); err == nil {
+			argv, stdout, stream = a, f, f
+			defer f.Close()
+		}
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = r.Dir
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, errf
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, stdout, errf
 	cmd.Env = append(append([]string{}, o.Env...), RunIDEnv+"="+r.ID, "MAESTRO_TICKET_ACTOR="+r.Launcher)
 	// Its own process group, so a stop reaches all it started; on Linux it
 	// also dies if this supervisor dies. That signal follows the thread
@@ -186,12 +212,12 @@ wait:
 		case <-done:
 			break wait
 		case <-ctx.Done():
-			why = "stopped"
+			why = CauseLauncher
 			break wait
 		case <-timer.C:
 		}
 		if by, ok := StopAsked(dir, r.ID); ok {
-			why, stopper = asked, by
+			why, stopper = CauseAsked, by
 			break wait
 		}
 		// Credit reads wait marks on the wall clock. The deadline goes by
@@ -231,7 +257,10 @@ wait:
 	}
 	// Frozen is the wall time the monotonic clock never saw.
 	frozen := o.Now().Sub(wall) - time.Since(mono)
+	// Read once more before the marks go: the run's row keeps it.
+	wait, waitCapped := Credit(dir, r.ID, start, o.Now(), limit)
 	removeWaits(dir, r.ID)
+	end := &EndFacts{WaitMs: wait.Milliseconds(), WaitCapped: waitCapped, Stop: StopNone}
 	if why != "" {
 		// Anything the command left in its group goes with it on a stop,
 		// even when the command exits on SIGTERM and a child ignores it;
@@ -243,32 +272,35 @@ wait:
 		// or its slot's work. It gets the same SIGTERM and grace, so a git
 		// stopped mid-write removes its lock.
 		killGroup(r.PID, syscall.SIGTERM)
-		termRun(r.ID)
-		grace := time.After(KillGrace)
+		end.Stop, end.Escaped = StopTerm, termRun(r.ID, r.PID)
+		grace := time.After(killGrace)
 		select {
 		case <-done:
 		case <-grace:
 			killGroup(r.PID, syscall.SIGKILL)
 			<-done
-			grace = nil
+			grace, end.Stop = nil, StopKill
 		}
 		for grace != nil && (groupAlive(r.PID) || runAlive(r.ID)) {
 			select {
 			case <-grace:
 				killGroup(r.PID, syscall.SIGKILL)
-				grace = nil
+				grace, end.Stop = nil, StopKill
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
 		KillRun(r.ID)
 	}
 	now := o.Now()
-	r.EndedAt = &now
+	r.EndedAt, r.End = &now, end
 	code := cmd.ProcessState.ExitCode()
 	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 		code = 128 + int(ws.Signal())
 	}
 	r.Exit = &code
+	if stream != nil {
+		r.Stream = scanStream(dir, r.ID, out, *o.Stream, why != "")
+	}
 	outb, _ := ReadTail(path(dir, r.ID, ".out"), OutputWindow)
 	r.Reply, r.SessionID, r.IsError = ParseOutput(outb)
 	switch {
@@ -285,10 +317,10 @@ wait:
 			r.Error += fmt.Sprintf("; the machine was frozen %s of it", frozen.Round(time.Second))
 			r.Frozen = freezeOnly
 		}
-	case why == asked:
-		r.State, r.Error = Failed, "stopped by "+stopper
+	case why == CauseAsked:
+		r.State, r.Error, end.Cause = Failed, "stopped by "+stopper, why
 	case why != "":
-		r.State, r.Error = Failed, "the launcher was stopped, so it stopped the run"
+		r.State, r.Error, end.Cause = Failed, "the launcher was stopped, so it stopped the run", why
 	case code == 0:
 		r.State = Done
 	default:
@@ -302,6 +334,87 @@ wait:
 	return r
 }
 
+// streamExt ends the file a streamed run's stdout goes to while it runs.
+const streamExt = ".stream"
+
+// StreamArgv is cmd with its exact --output-format json pair made
+// --output-format stream-json --verbose, and whether it had one. Any
+// other command, such as one already on stream-json, has none.
+func StreamArgv(cmd []string) ([]string, bool) {
+	for i := 0; i+1 < len(cmd); i++ {
+		if cmd[i] == "--output-format" && cmd[i+1] == "json" {
+			out := append(slices.Clone(cmd[:i+1]), "stream-json", "--verbose")
+			return append(out, cmd[i+2:]...), true
+		}
+	}
+	return nil, false
+}
+
+// scanStream reads a streamed run's stdout, once its command is over,
+// and writes to .out what json would have: the command's own text, then
+// the result line. A grandchild that still holds the file
+// may write on; what it writes after this is never read.
+func scanStream(dir, id string, out *os.File, n streamfilter.Names, killed bool) *streamfilter.Summary {
+	f, err := os.Open(path(dir, id, streamExt))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	s, kept := streamfilter.Scan(f, n)
+	if killed {
+		// json mode prints its result only as the command exits on its
+		// own, so a killed run's .out holds its own text alone, and it
+		// gave no result.
+		kept, s.Result = kept[:s.PreLen], false
+	}
+	out.Write(kept)
+	return &s
+}
+
+// RecoverStream does for a run whose supervisor died what that
+// supervisor would have, so the result Claude printed still reaches the
+// run's end: when its stream file is there and its .out is empty, it
+// writes .out from the stream and returns the counts; otherwise nil. Its
+// caller has adopted the run, and drops the stream after.
+func RecoverStream(dir, id string, n streamfilter.Names) *streamfilter.Summary {
+	out, err := os.OpenFile(path(dir, id, ".out"), os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return nil
+	}
+	defer out.Close()
+	if fi, err := out.Stat(); err != nil || fi.Size() > 0 {
+		return nil
+	}
+	return scanStream(dir, id, out, n, false)
+}
+
+// LastOutput is when a died run last wrote its stream, stderr or
+// stdout: as close to its death as its files tell, where the record's end
+// is when a reader found it. A streamed run writes as it goes; one that
+// printed nothing reads as ending at its start. A .out RecoverStream
+// wrote (r.Stream set) is the reader's write, left out. It lies between
+// the run's start and its recorded end.
+func LastOutput(dir string, r Record) time.Time {
+	exts := []string{streamExt, ".err"}
+	if r.Stream == nil {
+		exts = append(exts, ".out")
+	}
+	end := r.StartedAt
+	for _, ext := range exts {
+		if fi, err := os.Stat(path(dir, r.ID, ext)); err == nil && fi.ModTime().After(end) {
+			end = fi.ModTime()
+		}
+	}
+	if r.EndedAt != nil && end.After(*r.EndedAt) {
+		end = *r.EndedAt
+	}
+	return end
+}
+
+// DropStream removes a run's stream file: its supervisor once the run's
+// end is recorded, and the reader that writes a died run's end.
+func DropStream(dir, id string) { os.Remove(path(dir, id, streamExt)) }
+
 func join(a, b string) string {
 	if a == "" {
 		return b
@@ -312,6 +425,14 @@ func join(a, b string) string {
 // ring rings the launcher's webhook at each of o.Rings after the end
 // while no one has acked the result.
 func ring(ctx context.Context, dir string, r Record, o Options) {
+	first := o.AfterRing
+	after := func(err error) {
+		if first != nil && ctx.Err() == nil {
+			first(r, err)
+		}
+		first = nil
+	}
+	defer after(nil) // no ring came
 	if o.Hook == nil {
 		return
 	}
@@ -319,6 +440,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	if err != nil {
 		r.RingError = err.Error()
 		Save(dir, r)
+		after(err)
 		return
 	}
 	if h.URL == "" {
@@ -358,6 +480,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 			r.RingError = err.Error()
 		}
 		Save(dir, r)
+		after(err)
 	}
 	if o.RingAgain == nil {
 		return

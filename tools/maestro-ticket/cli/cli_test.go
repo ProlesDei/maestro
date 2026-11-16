@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -43,6 +44,8 @@ type harness struct {
 	// disk measures each filesystem claim and slot check; nil reports
 	// half of everything free, so no test hangs on the real disk's state.
 	disk func(dir string) (envcheck.Free, bool, error)
+	// statsOpen replaces stats.Open when set.
+	statsOpen func(path string, create bool) (*sql.DB, error)
 }
 
 func halfFree(string) (envcheck.Free, bool, error) {
@@ -64,7 +67,7 @@ func (h *harness) run(stdin string, args ...string) (int, string, string) {
 	code := Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb,
 		Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, Now: h.now, StoreChecks: h.checks,
-		DiskFree: disk,
+		DiskFree: disk, StatsOpen: h.statsOpen,
 	})
 	return code, out.String(), errb.String()
 }

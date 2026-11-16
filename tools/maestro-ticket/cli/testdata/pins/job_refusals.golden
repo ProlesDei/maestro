@@ -1,0 +1,512 @@
+$ maestro-ticket job
+exit 2
+stderr:
+maestro-ticket: job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos
+$ maestro-ticket job deploy T-1
+exit 2
+stderr:
+maestro-ticket: job: unknown job "deploy": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos
+$ maestro-ticket job build
+exit 2
+stderr:
+maestro-ticket: job build: want one ticket id
+$ maestro-ticket job build T-1 T-2
+exit 2
+stderr:
+maestro-ticket: job build: want one ticket id
+$ maestro-ticket job build T-99
+exit 3
+stderr:
+maestro-ticket: not found: ticket T-99
+$ maestro-ticket job build nope
+exit 2
+stderr:
+maestro-ticket: invalid request: bad ticket id "nope" (want T-<n>)
+$ maestro-ticket job build T-1 --slots 2
+exit 2
+stderr:
+maestro-ticket: job build: --slots is for qa, live and qa-ask
+$ maestro-ticket job qa T-7 --slots -1
+exit 2
+stderr:
+maestro-ticket: job: --slots must be 1 or more
+$ maestro-ticket job build T-1 --approved abc1234
+exit 2
+stderr:
+maestro-ticket: job build: --approved, --drop, --drop-file and --full are for review
+$ maestro-ticket job review T-1 --drop F2
+exit 2
+stderr:
+maestro-ticket: job review: --drop names the findings and --drop-file gives why: pass both
+$ maestro-ticket job review T-1 --approved not-a-sha
+exit 2
+stderr:
+maestro-ticket: job review: --approved "not-a-sha": want a commit sha
+$ maestro-ticket job review T-1 --drop F 2 --drop-file -
+exit 2
+stderr:
+maestro-ticket: job review: --drop "F 2": want finding ids such as F1,F3
+$ maestro-ticket job plan
+exit 2
+stderr:
+maestro-ticket: job plan: send the ask on stdin, in a quoted heredoc
+$ maestro-ticket job plan T-1
+stdin: "x"
+exit 2
+stderr:
+maestro-ticket: job plan: takes no ticket id; give it as --ticket, and the ask on stdin
+$ maestro-ticket job judge T-1 --ticket T-2
+stdin: "x"
+exit 2
+stderr:
+maestro-ticket: job judge: the ids name its tickets; drop --ticket
+$ maestro-ticket job judge
+exit 2
+stderr:
+maestro-ticket: job judge: want one or more ticket ids
+$ maestro-ticket job live T-1
+exit 4
+stderr:
+maestro-ticket: status conflict: job live: T-1 is in_review, not todo or in_progress: nothing to do
+$ maestro-ticket job build T-1
+exit 4
+stderr:
+maestro-ticket: status conflict: job build: T-1 is in_review, not todo or in_progress: nothing to do
+$ maestro-ticket job review T-7
+exit 4
+stderr:
+maestro-ticket: status conflict: job review: T-7 passed review at its head: its GO stands, and QA takes it
+$ maestro-ticket job build T-8
+exit 4
+stderr:
+maestro-ticket: claimed by another holder: job build: run R-1, qa-lead's, already works on T-8
+$ maestro-ticket job build T-9 --limit 25h
+exit 2
+stderr:
+maestro-ticket: job: --limit 25h0m0s: want 1s to 24h
+$ maestro-ticket job build T-6
+exit 0
+stdout:
+R-2 already going: nothing to do
+$ maestro-ticket job again
+exit 2
+stderr:
+maestro-ticket: job again: want one run id, such as R-abcdefgh
+$ maestro-ticket job again R-zzzzzzzz
+exit 3
+stderr:
+maestro-ticket: not found: run R-zzzzzzzz
+$ maestro-ticket job again R-3
+exit 2
+stderr:
+maestro-ticket: not allowed for this actor: job again: run R-3 is reviewer's
+$ maestro-ticket job again R-4
+exit 2
+stderr:
+maestro-ticket: job again: run R-4 isn't a job's
+$ maestro-ticket job again R-2
+exit 4
+stderr:
+maestro-ticket: status conflict: job again: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2
+$ maestro-ticket resume
+exit 2
+stderr:
+maestro-ticket: resume: want one run id, such as R-abcdefgh
+$ maestro-ticket resume nope
+exit 2
+stderr:
+maestro-ticket: resume: want one run id, such as R-abcdefgh
+$ maestro-ticket resume R-zzzzzzzz
+exit 3
+stderr:
+maestro-ticket: not found: run R-zzzzzzzz
+$ maestro-ticket resume R-3
+exit 2
+stderr:
+maestro-ticket: not allowed for this actor: resume: run R-3 is reviewer's: only the bot that launched it resumes it
+$ maestro-ticket resume R-2
+exit 4
+stderr:
+maestro-ticket: status conflict: resume: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2
+$ maestro-ticket resume R-5 --died
+exit 4
+stderr:
+maestro-ticket: status conflict: resume --died: run R-5 done, it didn't die: a hung or failed run goes to whoever handed you the job
+$ maestro-ticket resume R-6
+exit 2
+stderr:
+maestro-ticket: resume: send the answer on stdin, in a quoted heredoc
+$ maestro-ticket resume R-5
+stdin: "go on"
+exit 4
+stderr:
+maestro-ticket: status conflict: resume: T-1 is in_review now: run R-5's session has nothing left to do there: maestro-ticket ack R-5
+$ maestro-ticket job build T-9
+exit 2
+stderr:
+maestro-ticket: job: set MAESTRO_TICKET_ACTOR (or --actor) to your bot id: a run's result goes back to whoever launched it
+$ maestro-ticket job build T-9
+exit 4
+stderr:
+maestro-ticket: refused: the kill switch is on: stopped: maestro/STOP is set: start no run
+$ maestro-ticket job build T-9
+exit 4
+stderr:
+maestro-ticket: refused: a usage limit holds: paused: usage limit, until T: start no run until then
+$ maestro-ticket resume R-6
+stdin: "x"
+exit 4
+stderr:
+maestro-ticket: refused: a usage limit holds: paused: usage limit, until T: start no run until then
+$ maestro-ticket job --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos"
+  }
+}
+$ maestro-ticket job deploy T-1 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job: unknown job \"deploy\": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos"
+  }
+}
+$ maestro-ticket job build --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job build: want one ticket id"
+  }
+}
+$ maestro-ticket job build T-1 T-2 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job build: want one ticket id"
+  }
+}
+$ maestro-ticket job build T-99 --json
+exit 3
+stdout:
+{
+  "error": {
+    "code": "not_found",
+    "message": "not found: ticket T-99"
+  }
+}
+$ maestro-ticket job build nope --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "invalid",
+    "message": "invalid request: bad ticket id \"nope\" (want T-<n>)"
+  }
+}
+$ maestro-ticket job build T-1 --slots 2 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job build: --slots is for qa, live and qa-ask"
+  }
+}
+$ maestro-ticket job qa T-7 --slots -1 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job: --slots must be 1 or more"
+  }
+}
+$ maestro-ticket job build T-1 --approved abc1234 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job build: --approved, --drop, --drop-file and --full are for review"
+  }
+}
+$ maestro-ticket job review T-1 --drop F2 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job review: --drop names the findings and --drop-file gives why: pass both"
+  }
+}
+$ maestro-ticket job review T-1 --approved not-a-sha --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job review: --approved \"not-a-sha\": want a commit sha"
+  }
+}
+$ maestro-ticket job review T-1 --drop F 2 --drop-file - --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job review: --drop \"F 2\": want finding ids such as F1,F3"
+  }
+}
+$ maestro-ticket job plan --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job plan: send the ask on stdin, in a quoted heredoc"
+  }
+}
+$ maestro-ticket job plan T-1 --json
+stdin: "x"
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job plan: takes no ticket id; give it as --ticket, and the ask on stdin"
+  }
+}
+$ maestro-ticket job judge T-1 --ticket T-2 --json
+stdin: "x"
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job judge: the ids name its tickets; drop --ticket"
+  }
+}
+$ maestro-ticket job judge --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job judge: want one or more ticket ids"
+  }
+}
+$ maestro-ticket job live T-1 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: job live: T-1 is in_review, not todo or in_progress: nothing to do"
+  }
+}
+$ maestro-ticket job build T-1 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: job build: T-1 is in_review, not todo or in_progress: nothing to do"
+  }
+}
+$ maestro-ticket job review T-7 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: job review: T-7 passed review at its head: its GO stands, and QA takes it"
+  }
+}
+$ maestro-ticket job build T-8 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "claimed",
+    "message": "claimed by another holder: job build: run R-1, qa-lead's, already works on T-8"
+  }
+}
+$ maestro-ticket job build T-9 --limit 25h --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job: --limit 25h0m0s: want 1s to 24h"
+  }
+}
+$ maestro-ticket job build T-6 --json
+exit 0
+stdout:
+{
+  "already_going": "R-2"
+}
+$ maestro-ticket job again --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job again: want one run id, such as R-abcdefgh"
+  }
+}
+$ maestro-ticket job again R-zzzzzzzz --json
+exit 3
+stdout:
+{
+  "error": {
+    "code": "not_found",
+    "message": "not found: run R-zzzzzzzz"
+  }
+}
+$ maestro-ticket job again R-3 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "forbidden",
+    "message": "not allowed for this actor: job again: run R-3 is reviewer's"
+  }
+}
+$ maestro-ticket job again R-4 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job again: run R-4 isn't a job's"
+  }
+}
+$ maestro-ticket job again R-2 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: job again: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2"
+  }
+}
+$ maestro-ticket resume --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "resume: want one run id, such as R-abcdefgh"
+  }
+}
+$ maestro-ticket resume nope --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "resume: want one run id, such as R-abcdefgh"
+  }
+}
+$ maestro-ticket resume R-zzzzzzzz --json
+exit 3
+stdout:
+{
+  "error": {
+    "code": "not_found",
+    "message": "not found: run R-zzzzzzzz"
+  }
+}
+$ maestro-ticket resume R-3 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "forbidden",
+    "message": "not allowed for this actor: resume: run R-3 is reviewer's: only the bot that launched it resumes it"
+  }
+}
+$ maestro-ticket resume R-2 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: resume: run R-2 is running, D into its 2h limit: wait for its end, or end it with maestro-ticket stop R-2"
+  }
+}
+$ maestro-ticket resume R-5 --died --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: resume --died: run R-5 done, it didn't die: a hung or failed run goes to whoever handed you the job"
+  }
+}
+$ maestro-ticket resume R-6 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "resume: send the answer on stdin, in a quoted heredoc"
+  }
+}
+$ maestro-ticket resume R-5 --json
+stdin: "go on"
+exit 4
+stdout:
+{
+  "error": {
+    "code": "status_conflict",
+    "message": "status conflict: resume: T-1 is in_review now: run R-5's session has nothing left to do there: maestro-ticket ack R-5"
+  }
+}
+$ maestro-ticket job build T-9 --json
+exit 2
+stdout:
+{
+  "error": {
+    "code": "usage",
+    "message": "job: set MAESTRO_TICKET_ACTOR (or --actor) to your bot id: a run's result goes back to whoever launched it"
+  }
+}
+$ maestro-ticket job build T-9 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "stopped",
+    "message": "refused: the kill switch is on: stopped: maestro/STOP is set: start no run"
+  }
+}
+$ maestro-ticket job build T-9 --json
+exit 4
+stdout:
+{
+  "error": {
+    "code": "paused",
+    "message": "refused: a usage limit holds: paused: usage limit, until T: start no run until then"
+  }
+}
+$ maestro-ticket resume R-6 --json
+stdin: "x"
+exit 4
+stdout:
+{
+  "error": {
+    "code": "paused",
+    "message": "refused: a usage limit holds: paused: usage limit, until T: start no run until then"
+  }
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/stats"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -46,7 +48,8 @@ func (c *call) besideStore(name string) (string, error) {
 			return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, path)
 		}
 	}
-	if err := envcheck.Err(c.envChecks(path)); err != nil {
+	c.storeChecks = c.envChecks(path)
+	if err := envcheck.Err(c.storeChecks); err != nil {
 		return "", err
 	}
 	return filepath.Join(filepath.Dir(path), name), nil
@@ -246,7 +249,7 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil)
 	if err != nil {
 		return err
 	}
@@ -261,8 +264,9 @@ func runLaunch(ctx context.Context, c *call) error {
 
 // startRun records a run for the actor and hands it to a detached
 // supervisor, and returns once its command runs. launch, job and resume
-// all start runs here.
-func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (runs.Record, error) {
+// all start runs here; job, again and resume give side, its facts for
+// stats, and launch none: its side file is empty, and never streams.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -275,6 +279,16 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration) (r
 	r, err := runs.Create(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
+	}
+	// Before the supervisor, which may end the run at once; stats off
+	// writes none.
+	if stats.Off(filepath.Dir(dir), c.env.Getenv, c.statsUnsafe()) == "" {
+		if side == nil {
+			side = &sideFacts{}
+		} else {
+			side.Stream = c.streamOK(store)
+		}
+		writeSide(dir, r.ID, side)
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
@@ -334,10 +348,13 @@ func runSupervise(ctx context.Context, c *call) error {
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGHUP)
 	defer stop()
+	c.startStats(filepath.Dir(dir))
+	defer c.waitStats() // the row of a run whose first ring never came
 	return runs.Supervise(ctx, dir, c.args[0], runs.Options{
-		Env:   os.Environ(),
-		Rings: rings,
-		Hook:  func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
+		Env:    os.Environ(),
+		Rings:  rings,
+		Stream: c.streamNames(dir, c.args[0]),
+		Hook:   func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
 		// The supervisor stands in for log-run: it lives as long as the
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
@@ -359,6 +376,8 @@ func runSupervise(ctx context.Context, c *call) error {
 			}
 			return time.Time{}
 		},
+		// Stats wait for the first ring: none may hold it up.
+		AfterRing: func(r runs.Record, err error) { c.afterRing(dir, r, err) },
 	})
 }
 
@@ -374,28 +393,37 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		}
 	}
 	id := runTicket(r)
-	s, err := c.open(ctx)
-	if err != nil {
-		warn(err)
-		return
-	}
-	defer s.Close()
 	out, _ := runs.ReadTail(filepath.Join(dir, r.ID+".out"), runs.OutputWindow)
 	if len(out) == runs.OutputWindow {
 		if i := bytes.IndexByte(out, '\n'); i >= 0 {
 			out = out[i+1:] // a cut first line isn't JSON
 		}
 	}
-	reply, err := lastResult(out)
+	reply, replyErr := lastResult(out)
+	// Last, after the claim is freed, and silent whatever fails. A died
+	// run's record holds no reply: its row reads the one its output does.
+	sr := r
+	if sr.State == runs.Died && sr.Reply == "" && replyErr == nil {
+		var session string
+		sr.Reply, session, sr.IsError = runs.ParseOutput(out)
+		sr.SessionID = cmp.Or(sr.SessionID, session)
+	}
+	defer c.writeStats(dir, sr, reply, replyErr)
+	s, err := c.open(ctx)
+	if err != nil {
+		warn(err)
+		return
+	}
+	defer s.Close()
 	outcome := ticket.LaunchResult
 	switch {
 	case r.State == runs.Died:
 		outcome = ticket.LaunchDied
-	case err != nil:
+	case replyErr != nil:
 		outcome = ticket.LaunchNoResult
 	}
 	c.endLaunch(ctx, s, r.LaunchID, outcome, reply.SessionID)
-	if err == nil {
+	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
 	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
@@ -439,8 +467,13 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 			if r.State == runs.Died && r.OrphanTries == 0 {
 				runs.KillRun(r.ID)
 				runs.Save(dir, r)
+				// What its supervisor would have read of its stream, so
+				// a result Claude printed still logs its cost.
+				r.Stream = runs.RecoverStream(dir, r.ID, scanNames())
 				c.endRun(ctx, dir, r)
 			}
+			// One killed after it saved the end leaves the file too.
+			runs.DropStream(dir, r.ID)
 			h, err := runs.Webhook(notify, r.Owner())
 			if err != nil || h.URL == "" {
 				msg := ""

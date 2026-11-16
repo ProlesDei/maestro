@@ -352,6 +352,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	}
 
 	m, why := k.model, ""
+	side := &sideFacts{Why: "fixed"}
 	runLimit := 2 * time.Hour
 	words := []string{k.skill}
 	if k.prefix != "" {
@@ -365,31 +366,40 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 		// A junior's ticket sent back twice goes to the senior, on Opus.
 		m, why = modelOpus, "tier "+dash(t.Tier)
+		side.fromTicket(t)
+		side.Why = "tier_" + side.Tier
 		if t.Tier == ticket.TierJunior && t.Tries < 2 {
 			m = modelSonnet
 		} else if t.Tier == ticket.TierJunior {
 			why += fmt.Sprintf(", sent back %d times", t.Tries)
+			side.Why = "sent_back"
 		}
 	case "route":
-		if _, err := c.ticketForJob(ctx, ticketID); err != nil {
+		t, err := c.ticketForJob(ctx, ticketID)
+		if err != nil {
 			return fail(err)
 		}
+		side.fromTicket(t)
 		r, err := c.reviewRoute(ctx, ticketID)
 		if err != nil {
 			return fail(err)
 		}
 		m, why = modelOpus, "full review"
+		side.Why = "route_full"
 		if r.light && !req.full {
 			m, why = modelSonnet, "light review: "+r.why
+			side.Why = "route_light"
 		}
 		if r.lines >= 0 {
 			runLimit = reviewLimit(r.lines)
 		}
 	default:
 		if ticketID != "" {
-			if _, err := c.ticketForJob(ctx, ticketID); err != nil {
+			t, err := c.ticketForJob(ctx, ticketID)
+			if err != nil {
 				return fail(err)
 			}
+			side.fromTicket(t)
 		}
 	}
 	words = append(words, ids...)
@@ -402,6 +412,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 		if req.drop != "" {
 			words = append(words, "--drop", req.drop+":", dropWhy)
+			side.Drops = strings.Split(req.drop, ",")
 		}
 	}
 	prompt := strings.Join(words, " ")
@@ -414,6 +425,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		prompt += " " + req.text
 	}
 	if req.model != "" {
+		if req.model != m {
+			side.Why = "override"
+		}
 		m = req.model
 	}
 	e := effortHigh
@@ -447,7 +461,8 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
 		}
 	}
-	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings)
+	side.PromptBytes = ptr(len(prompt) + 1)
+	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side)
 	if err != nil {
 		abort()
 		return fail(err)
@@ -839,7 +854,13 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 			return fmt.Errorf("job again %s: %w", r.ID, err)
 		}
 	}
-	nr, err := c.startRun(rec, prompt, runs.DefaultRings)
+	// Its facts carry on the run it retries; its drops, the prompt's.
+	side := &sideFacts{Why: "again", AgainOf: r.ID, PromptBytes: ptr(len(prompt))}
+	side.fromParent(dir, r.ID)
+	if p, ok := readSide(dir, first.ID); ok {
+		side.Drops = p.Drops
+	}
+	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side)
 	if err != nil {
 		abort()
 		return err
@@ -1015,7 +1036,9 @@ func resumeRun(ctx context.Context, c *call) error {
 			return fmt.Errorf("resume %s: %w", r.ID, err)
 		}
 	}
-	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings)
+	side := &sideFacts{Why: "resume", PromptBytes: ptr(len(text) + 1)}
+	side.fromParent(dir, r.ID)
+	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side)
 	if err != nil {
 		abortMark()
 		abortActive()

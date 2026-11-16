@@ -35,6 +35,38 @@ var (
 	fullSHA   = regexp.MustCompile(`^[0-9a-f]{40}(\W|$)`)
 )
 
+// fixedNotes are the verdict notes that open with fixed words, by those
+// words. Any other Kickback: is a review's.
+var fixedNotes = []struct {
+	prefix string
+	kind   noteKind
+}{
+	{"Review: GO at ", noteKind{name: "review-go", from: ticket.StatusInReview}},
+	{"QA: pass at ", noteKind{name: "qa-pass", from: ticket.StatusInReview}},
+	{"Rereview: QA at ", noteKind{name: "rereview", from: ticket.StatusInReview}},
+	{"Kickback: QA fail at ", noteKind{name: "qa-fail", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "QA fail at"}},
+	{"Escalation: review at ", noteKind{name: "review-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "Review escalated at"}},
+	{"Escalation: QA at ", noteKind{name: "qa-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "QA escalated at"}},
+}
+
+// reviewKickback is a review's Kickback:, which sends the change back.
+var reviewKickback = noteKind{name: "review-kickback", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "Kickback at"}
+
+// noteOpening is the kind a note's first line opens, and the fixed words
+// it opens with ("" for a review's Kickback:); ok is false for no kind.
+// It reads the first line only: verdictKind checks the rest.
+func noteOpening(first string) (k noteKind, prefix string, ok bool) {
+	for _, f := range fixedNotes {
+		if strings.HasPrefix(first, f.prefix) {
+			return f.kind, f.prefix, true
+		}
+	}
+	if strings.HasPrefix(first, "Kickback:") {
+		return reviewKickback, "", true
+	}
+	return noteKind{}, "", false
+}
+
 // verdictKind sorts a review's or QA's note by its first line and checks
 // the note says what its kind must. Only a blocker sends a change back
 // (docs/decisions.md, 22), so a Kickback: that lists anything else is
@@ -44,28 +76,11 @@ func verdictKind(body string) (noteKind, error) {
 	bad := func(format string, a ...any) (noteKind, error) {
 		return noteKind{}, fmt.Errorf("%w: verdict: %s", ticket.ErrInvalid, fmt.Sprintf(format, a...))
 	}
-	var k noteKind
-	prefix := ""
-	is := func(p string) bool {
-		if strings.HasPrefix(first, p) {
-			prefix = p
-		}
-		return prefix == p
-	}
+	k, prefix, ok := noteOpening(first)
 	switch {
-	case is("Review: GO at "):
-		k = noteKind{name: "review-go", from: ticket.StatusInReview}
-	case is("QA: pass at "):
-		k = noteKind{name: "qa-pass", from: ticket.StatusInReview}
-	case is("Rereview: QA at "):
-		k = noteKind{name: "rereview", from: ticket.StatusInReview}
-	case is("Kickback: QA fail at "):
-		k = noteKind{name: "qa-fail", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "QA fail at"}
-	case is("Escalation: review at "):
-		k = noteKind{name: "review-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "Review escalated at"}
-	case is("Escalation: QA at "):
-		k = noteKind{name: "qa-escalation", from: ticket.StatusInReview, to: ticket.StatusBlocked, release: true, note: "QA escalated at"}
-	case strings.HasPrefix(first, "Kickback:"):
+	case !ok:
+		return bad("the note opens %q; want Review: GO at, Kickback:, Escalation: review at, QA: pass at, Kickback: QA fail at, Escalation: QA at or Rereview: QA at", first)
+	case k.name == reviewKickback.name:
 		m := kickbackHead.FindStringSubmatch(first)
 		if m == nil {
 			return bad("a review's kickback opens %q, with the head's full sha or none; majors and minors go under ## Follow-ups in the report, not here", "Kickback: <n> blockers at <sha>")
@@ -97,10 +112,7 @@ func verdictKind(body string) (noteKind, error) {
 			return bad("the first line counts %d blockers, and %d finding lines follow (%s)", n, len(found), strings.Join(found, ", "))
 		}
 		// "at none" is a PR that isn't there: nothing to name in the note.
-		k = noteKind{name: "review-kickback", from: ticket.StatusInReview, to: ticket.StatusInProgress, release: true, note: "Kickback at"}
 		return k, nil
-	default:
-		return bad("the note opens %q; want Review: GO at, Kickback:, Escalation: review at, QA: pass at, Kickback: QA fail at, Escalation: QA at or Rereview: QA at", first)
 	}
 	if !fullSHA.MatchString(first[len(prefix):]) {
 		return bad("the first line wants the head's full sha right after %q: a verdict covers one head", strings.TrimSpace(prefix))
