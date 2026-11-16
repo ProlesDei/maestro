@@ -27,7 +27,7 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-// unackedAfter is how long an ended run may wait for its launcher's ack
+// unackedAfter is how long an ended run may wait for its owner's ack
 // before doctor flags it.
 const unackedAfter = 15 * time.Minute
 
@@ -517,9 +517,12 @@ func runPickup(ctx context.Context, c *call) error {
 				var rt routed
 				if err := json.Unmarshal(r.Routed, &rt); err != nil {
 					routeErr[r.ID] = err
-				} else {
-					routes[r.ID] = rt
+					break
 				}
+				if s != nil {
+					c.refileFollowUps(ctx, s, r, &rt)
+				}
+				routes[r.ID] = rt
 			case err != nil:
 				routeErr[r.ID] = err
 			default:
@@ -950,7 +953,7 @@ func (c *call) untracked() ([]runs.Session, error) {
 // runsCheck is doctor's view of the runs. First it rings for runs whose
 // supervisor went away, as pickup does. It warns, without failing doctor,
 // while a claude -p session in this repo runs outside launch, or a run's
-// result has waited over unackedAfter for its launcher's ack: neither
+// result has waited over unackedAfter for its owner's ack: neither
 // harms the store, and a doctor that failed would stop an install.
 func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 	dir := filepath.Join(filepath.Dir(store), "runs")

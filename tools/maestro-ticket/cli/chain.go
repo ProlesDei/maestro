@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // A chain is the fixed next step a run's end starts itself: a build in
@@ -104,6 +105,27 @@ func leftForBot(rt routed) bool {
 	return len(rt.Do) > 0 || rt.Reply != "" || slices.ContainsFunc(rt.Wrote, func(w string) bool {
 		return strings.HasPrefix(w, "follow-ups not filed") || strings.HasPrefix(w, "not parked")
 	})
+}
+
+// refileFollowUps tries again the follow-ups a stored route failed to
+// file, as routing the run again on each pickup did before it was stored.
+func (c *call) refileFollowUps(ctx context.Context, s ticket.Store, r runs.Record, rt *routed) {
+	i := slices.IndexFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "follow-ups not filed") })
+	if i < 0 {
+		return
+	}
+	tid, err := ticket.ParseID(r.Ticket)
+	if err != nil {
+		return
+	}
+	d, err := s.Get(ctx, tid)
+	if err != nil {
+		return
+	}
+	rt.Wrote = slices.Delete(rt.Wrote, i, i+1)
+	if err := c.fileFollowUps(ctx, s, r, d, rt); err != nil {
+		rt.Wrote = append(rt.Wrote, "follow-ups not filed: "+err.Error())
+	}
 }
 
 // handOn starts one send's job as the bot it was for, and reports whether

@@ -37,6 +37,7 @@ case $in in
 	fi ;;
 "/maestro-qa-lead T-1"*) mt transition T-1 --to done --actor-role qa-lead ;;
 esac
+sleep 1 # as long as job takes to record its run, which a real run outlasts
 printf '{"type":"result","subtype":"success","is_error":false,"result":"job: done: %s","session_id":"s","total_cost_usd":0.01,"usage":{},"modelUsage":{}}\n' "$MAESTRO_RUN_ID"
 `
 
@@ -395,5 +396,38 @@ func TestChainLimitStopsAHungRoute(t *testing.T) {
 	start := time.Now()
 	if _, err := c.reviewRoute(ctx, "T-1"); err == nil || time.Since(start) > 15*time.Second {
 		t.Fatalf("route: %v after %s", err, time.Since(start))
+	}
+}
+
+// A run whose route left a command for its bot is the bot's: the chain
+// neither acks it nor leaves it to the planner.
+func TestChainLeavesACommandToTheBot(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.hook("reviewer")
+	h.hook("planner")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "review: stopped: tier 2 needs the full model")
+	h.c.chain(context.Background(), dir, r)
+	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || got.Notify != "" || runs.Acked(dir, r.ID) {
+		t.Fatalf("a do: line: %+v acked %v", got, runs.Acked(dir, r.ID))
+	}
+	if rt := h.route(r); len(rt.Do) != 1 || !strings.Contains(rt.Do[0], "job again "+r.ID+" --full") {
+		t.Fatalf("pickup after: %+v", rt)
+	}
+}
+
+// A stored route's follow-ups that failed to file are tried again, as
+// routing the run again on each pickup did.
+func TestChainRefilesFollowUps(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a", "--areas", "api")
+	h.move("T-1", "in_progress", "in_review")
+	r := h.endedRun("review", "reviewer", "Verdict: GO\n## Follow-ups\n- logs print emails\n## Outcome")
+	rt := routed{Send: []send{}, Wrote: []string{"follow-ups not filed: store busy"}}
+	h.c.refileFollowUps(context.Background(), h.s, r, &rt)
+	if len(rt.Wrote) != 1 || !strings.HasPrefix(rt.Wrote[0], "1 follow-ups from T-1 on T-2") {
+		t.Fatalf("wrote: %q", rt.Wrote)
 	}
 }
