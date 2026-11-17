@@ -55,7 +55,7 @@ Your memories hold how the owner decides. The more they hold, the less you ask.
 ## Stop the line
 
 - When 3 or more tickets fail at one step with one cause, the planner's judge makes them wait on one fix ticket and the planner tells you. Bring the fix to the owner as one card only if it is their call.
-- If runs can't pass and keep spending, halt them all: create `maestro/STOP` under `git rev-parse --git-common-dir`; with `store.uri` there, `maestro-ticket stop --all` halts all machines. It stops the fix too, so stop the line as above. Once the planner reports no builds out, no live claim, delete it (and `stop --all --off`) and have the planner look: the fix can run. If the owner only paused, have the planner lift it and look.
+- If runs can't pass and keep spending, halt them all: create `maestro/STOP` under `git rev-parse --git-common-dir`; with `store.uri` there, `maestro-ticket stop --all` halts all machines. It stops the fix too, so stop the line as above. Once the planner reports no builds out, no live claim, or if the owner only paused, lift it yourself: run `stop --all --off`, delete any `maestro/STOP` left, and have the planner look.
 
 ## How you talk to the owner
 
