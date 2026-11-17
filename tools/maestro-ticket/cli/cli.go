@@ -1251,10 +1251,11 @@ func runEvents(ctx context.Context, c *call) error {
 }
 
 // backupPrefix and backupSuffix frame snapshot names, and backupName
-// matches them whole, so pruning only ever touches files backup wrote.
-const backupPrefix, backupSuffix = "tickets-", ".db"
+// matches them whole, so pruning only ever touches files backup wrote. A
+// MongoDB store's snapshot is a JSON dump, named with backupSuffixJSON.
+const backupPrefix, backupSuffix, backupSuffixJSON = "tickets-", ".db", ".json"
 
-var backupName = regexp.MustCompile(`^tickets-\d{8}T\d{6}\.\d{3}Z\.db$`)
+var backupName = regexp.MustCompile(`^tickets-\d{8}T\d{6}\.\d{3}Z\.(db|json)$`)
 
 func runBackup(ctx context.Context, c *call) error {
 	dir := c.fs.String("dir", "", "snapshot directory (default backups/ next to the store)")
@@ -1280,7 +1281,11 @@ func runBackup(ctx context.Context, c *call) error {
 		if now == nil {
 			now = time.Now
 		}
-		name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + backupSuffix
+		suffix := backupSuffix
+		if loc, err := c.location(); err == nil && loc.kind == kindMongoDB {
+			suffix = backupSuffixJSON
+		}
+		name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + suffix
 		path := filepath.Join(d, name)
 		if err := s.Backup(ctx, path); err != nil {
 			return err

@@ -2,14 +2,20 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -55,18 +61,29 @@ func TestStoreKindSQLiteDefault(t *testing.T) {
 	}
 }
 
+// stubMongo makes every MongoDB open fail as an unreachable server would,
+// quoting the URI, with no network.
+func stubMongo(t *testing.T) {
+	old := openMongo
+	t.Cleanup(func() { openMongo = old })
+	openMongo = func(ctx context.Context, uri string, opts storeOptions) (ticket.Store, error) {
+		return nil, fmt.Errorf("%w: stub: %s is unreachable", ticket.ErrInvalid, uri)
+	}
+}
+
 func TestStoreKindMongoStub(t *testing.T) {
+	stubMongo(t)
 	h := newHarness(t)
 	writeURI(t, h.dir, testURI+"\n")
 	for _, args := range [][]string{{"list"}, {"create", "--title", "a"}} {
 		code, out, errs := h.run("", append(args, "--json")...)
-		if code != 2 || !strings.Contains(out, "mongodb store not built yet") {
+		if code != 2 || !strings.Contains(out, "is unreachable") {
 			t.Fatalf("%v: exit %d %s %s", args, code, out, errs)
 		}
 		noSecret(t, args[0], out, errs)
 	}
 	code, out, errs := h.run("", "doctor")
-	if code == 0 || !strings.Contains(out, "mongodb at db.example.net:27017") || !strings.Contains(out, "mongodb store not built yet") {
+	if code == 0 || !strings.Contains(out, "mongodb at db.example.net:27017") || !strings.Contains(out, "is unreachable") {
 		t.Fatalf("doctor: exit %d\n%s%s", code, out, errs)
 	}
 	noSecret(t, "doctor", out, errs)
@@ -124,6 +141,7 @@ func TestStoreKindMongoGitDefault(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
+	stubMongo(t)
 	repo := t.TempDir()
 	git(t, repo, "init", "-q")
 	git(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
@@ -131,7 +149,7 @@ func TestStoreKindMongoGitDefault(t *testing.T) {
 	h := &harness{t: t, dir: repo, env: map[string]string{"MAESTRO_TICKET_ACTOR": "planner"}}
 	h.ok(nil, "pickup")
 	code, out, errs := h.run("", "list", "--json")
-	if code != 2 || strings.Contains(out, "no ticket store") || !strings.Contains(out, "mongodb store not built yet") {
+	if code != 2 || strings.Contains(out, "no ticket store") || !strings.Contains(out, "is unreachable") {
 		t.Fatalf("list: exit %d %s %s", code, out, errs)
 	}
 	noSecret(t, "list", out, errs)
@@ -190,5 +208,67 @@ func TestHostID(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, hostIDFile), nil, 0o644)
 	if _, err := HostID(dir); !errors.Is(err, ticket.ErrInvalid) {
 		t.Fatalf("empty host-id: %v", err)
+	}
+}
+
+// With a test replica set, the CLI runs on a real MongoDB board: writes,
+// the kill switch beside it, doctor and a JSON backup.
+func TestStoreKindMongoLive(t *testing.T) {
+	uri := os.Getenv("MAESTRO_TICKET_TEST_MONGO")
+	if uri == "" {
+		t.Skip("set MAESTRO_TICKET_TEST_MONGO to a replica set URI to run the MongoDB CLI test")
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := make([]byte, 8)
+	rand.Read(b)
+	db := "mt_cli_" + hex.EncodeToString(b)
+	u.Path = "/" + db
+	t.Cleanup(func() {
+		c, err := mongo.Connect(options.Client().ApplyURI(uri))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer c.Disconnect(context.Background())
+		c.Database(db).Drop(context.Background())
+	})
+	h := newHarness(t)
+	writeURI(t, h.dir, u.String())
+	var tk ticket.Ticket
+	h.ok(&tk, "create", "--title", "a")
+	h.ok(nil, "comment", tk.ID.String(), "--body", "hi")
+	var c ticket.Ticket
+	h.ok(&c, "claim", "--next", "--holder", "jse/s1", "--ttl", "10m")
+	if c.ID != tk.ID || c.Claim == nil || c.Claim.Token != 1 {
+		t.Fatalf("claim: %+v", c)
+	}
+	var list struct{ Tickets []ticket.Ticket }
+	h.ok(&list, "list", "--claimed")
+	if len(list.Tickets) != 1 {
+		t.Fatalf("list: %+v", list)
+	}
+	if err := os.WriteFile(filepath.Join(h.dir, "STOP"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.ok(nil, "create", "--title", "b")
+	if code, out, _ := h.run("", "claim", "--next", "--holder", "jse/s2", "--json"); code == 0 || !strings.Contains(out, "stopped") {
+		t.Fatalf("claim under STOP: exit %d %s", code, out)
+	}
+	os.Remove(filepath.Join(h.dir, "STOP"))
+	var doc struct{ OK bool }
+	h.ok(&doc, "doctor")
+	if !doc.OK {
+		t.Fatal("doctor failed")
+	}
+	var bk struct{ Path string }
+	h.ok(&bk, "backup")
+	if filepath.Ext(bk.Path) != ".json" || !backupName.MatchString(filepath.Base(bk.Path)) {
+		t.Fatalf("backup path %s", bk.Path)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "tickets.db")); !os.IsNotExist(err) {
+		t.Fatalf("a SQLite store was made: %v", err)
 	}
 }

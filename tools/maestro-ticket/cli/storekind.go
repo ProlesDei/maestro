@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -43,12 +44,18 @@ type storeLoc struct {
 
 // storeOptions are what a store's open takes from the call.
 type storeOptions struct {
-	Now func() time.Time // clock for the store; nil means the database's
+	Now      func() time.Time // clock for the store; nil means the database's
+	StopFile string           // the kill switch's path, in the local folder
 }
 
 // openMongo opens a MongoDB store. Its error must not hold the URI.
+// Tests swap it for a fake.
 var openMongo = func(ctx context.Context, uri string, opts storeOptions) (ticket.Store, error) {
-	return nil, fmt.Errorf("%w: mongodb store not built yet", ticket.ErrInvalid)
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: opts.Now, StopFile: opts.StopFile})
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // location resolves the store, once a call: storePath's folder, then
@@ -101,7 +108,7 @@ func (loc storeLoc) missing() bool {
 // returns a nil Store, never a nil pointer in one, so callers can test
 // s != nil.
 func (c *call) openStore(ctx context.Context, loc storeLoc) (ticket.Store, error) {
-	opts := storeOptions{Now: c.env.Now}
+	opts := storeOptions{Now: c.env.Now, StopFile: filepath.Join(loc.localDir, sqlitestore.StopFile)}
 	if loc.kind == kindMongoDB {
 		s, err := openMongo(ctx, loc.uri, opts)
 		if err != nil {
