@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -454,5 +455,134 @@ func TestDoctorWarnsMissingBoardAndRules(t *testing.T) {
 	h.must("", "rules", "text")
 	if warn, d := check(); warn {
 		t.Fatalf("both set: %s", d)
+	}
+}
+
+// fakeSupervisor stands in for a run's supervisor: it marks each run it
+// gets as running, with no process, so startRun returns at once, and
+// returns the runs folder. A test that calls it must not run in parallel.
+func fakeSupervisor(h *harness) string {
+	h.t.Helper()
+	dir := filepath.Join(h.dir, "runs")
+	old := startSupervisor
+	h.t.Cleanup(func() { startSupervisor = old })
+	startSupervisor = func(sup *exec.Cmd) error {
+		r, err := runs.Load(dir, sup.Args[2])
+		if err != nil {
+			return err
+		}
+		r.State = runs.Running
+		return runs.Save(dir, r)
+	}
+	return dir
+}
+
+// startedRun is the run a job printed it started, with its prompt as lines.
+func startedRun(h *harness, dir, stdin string, args ...string) (runs.Record, []string) {
+	h.t.Helper()
+	var s struct{ Run runs.Record }
+	code, out, errs := h.run(stdin, append([]string{"job", "--json"}, args...)...)
+	if code != 0 {
+		h.t.Fatalf("job %v: exit %d\n%s%s", args, code, out, errs)
+	}
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		h.t.Fatalf("job %v: %v: %s", args, err, out)
+	}
+	r, err := runs.Load(dir, s.Run.ID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return r, promptOf(h, dir, r.ID)
+}
+
+func promptOf(h *harness, dir, id string) []string {
+	h.t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, id+".in"))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+}
+
+// With no rules.md, look --judge starts no judge and frees the rows it
+// claimed; an empty rules.md gives the judge "none" as its rules.
+func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
+	h := newRulesHarness(t, "planner")
+	dir := fakeSupervisor(h)
+	h.ok(nil, "create", "--title", "x")
+	h.ok(nil, "transition", "T-1", "--to", "blocked")
+	if code, out := h.try("Escalation: build at abc: which key?\nReturn-role: engineer", "comment", "T-1", "--body-file", "-"); code != 0 {
+		t.Fatal(out)
+	}
+	code, out := h.try("", "look", "--limit", "2", "--judge")
+	if code == 0 || strings.Contains(out, "judging:") || !strings.Contains(out, "judge: no maestro/rules.md") {
+		t.Fatalf("no rules.md: exit %d\n%s", code, out)
+	}
+	if fileExists(filepath.Join(h.dir, "handouts", "T-1.judge")) {
+		t.Fatal("a judge row stayed claimed with no judge")
+	}
+	if ids, _ := filepath.Glob(filepath.Join(dir, "R-*.in")); len(ids) != 0 {
+		t.Fatalf("a judge run started with no rules.md: %q", ids)
+	}
+	os.WriteFile(filepath.Join(h.dir, rulesFile), []byte("# via: rules\n"), 0o644)
+	var j []string
+	for _, l := range strings.Split(h.must("", "look", "--limit", "2", "--judge"), "\n") {
+		if strings.HasPrefix(l, "judging: ") {
+			j = append(j, l)
+		}
+	}
+	if len(j) != 1 {
+		t.Fatalf("empty rules.md: %q", j)
+	}
+	s := promptOf(h, dir, strings.Fields(strings.TrimPrefix(j[0], "judging: "))[0])
+	if len(s) < 2 || s[len(s)-2] != "Standing rules:" || s[len(s)-1] != "none" {
+		t.Fatalf("judge prompt %q", s)
+	}
+}
+
+// A QA run waits in a slot group of 6 by default, of qa_slots once rules
+// set it, and of --slots over both.
+func TestQASlotsOrder(t *testing.T) {
+	h := newRulesHarness(t, "qa-lead")
+	dir := fakeSupervisor(h)
+	for _, id := range []string{"T-1", "T-2", "T-3"} {
+		h.ok(nil, "create", "--title", "x")
+		h.ok(nil, "transition", id, "--to", "in_progress")
+		h.ok(nil, "transition", id, "--to", "in_review")
+	}
+	max := func(r runs.Record) string {
+		i := slices.Index(r.Command, "slot")
+		if i < 0 {
+			t.Fatalf("no slot: %q", r.Command)
+		}
+		return flagValue(r.Command[i:], "--max")
+	}
+	if r, _ := startedRun(h, dir, "", "qa", "T-1"); max(r) != "6" {
+		t.Fatalf("default: %q", r.Command)
+	}
+	h.must("", "rules", "set", "qa_slots", "4")
+	if r, _ := startedRun(h, dir, "", "qa", "T-2"); max(r) != "4" {
+		t.Fatalf("qa_slots: %q", r.Command)
+	}
+	if r, _ := startedRun(h, dir, "", "qa", "T-3", "--slots", "2"); max(r) != "2" {
+		t.Fatalf("flag: %q", r.Command)
+	}
+}
+
+// The plan and rule prompts end with the standing rules, once there are any.
+func TestPlanAndRulePromptsCarryRules(t *testing.T) {
+	h := newRulesHarness(t, "planner")
+	dir := fakeSupervisor(h)
+	h.ok(nil, "create", "--title", "x")
+	if _, s := startedRun(h, dir, "goal g: ship it\n", "plan"); slices.Contains(s, "Standing rules:") {
+		t.Fatalf("no rules.md, yet the plan prompt has rules: %q", s)
+	}
+	h.must("api/: senior only\n", "rules", "text")
+	rule := "api/: senior only (set by planner, " + today() + ")"
+	if _, s := startedRun(h, dir, "goal g: ship it\n", "plan"); !slices.Equal(s, []string{"/maestro-planner goal g: ship it", "Standing rules:", rule}) {
+		t.Fatalf("plan prompt %q", s)
+	}
+	if _, s := startedRun(h, dir, "drop it\n", "rule", "T-1"); !slices.Equal(s, []string{"/maestro-planner rule T-1: drop it", "Standing rules:", rule}) {
+		t.Fatalf("rule prompt %q", s)
 	}
 }
