@@ -56,7 +56,7 @@ func Ping(ctx context.Context, uri string) error {
 // Move is the board's move state.
 type Move struct {
 	To    string // the store a move under way copies the board to; "" for none
-	Host  string // the host id of the machine that move runs on
+	Host  string // the host id of the machine that move runs on, or that set Moved
 	Moved bool   // the tombstone: the board was handed back to SQLite
 }
 
@@ -139,7 +139,10 @@ func (s *Store) EndMove(ctx context.Context, moved bool) error {
 		}
 		up := bson.D{{Key: "$unset", Value: bson.D{{Key: "moving", Value: ""}, {Key: "moving_host", Value: ""}}}}
 		if moved {
-			up = append(up, bson.E{Key: "$set", Value: bson.D{{Key: "moved", Value: true}}})
+			// The tombstone keeps the host that moved the board back, so
+			// only it may finish the move.
+			up = bson.D{{Key: "$unset", Value: bson.D{{Key: "moving", Value: ""}}},
+				{Key: "$set", Value: bson.D{{Key: "moved", Value: true}, {Key: "moving_host", Value: s.mover}}}}
 		}
 		_, err := tx.coll(cMeta).update(bson.D{{Key: "_id", Value: writerID}}, up)
 		return err

@@ -108,7 +108,7 @@ type writerDoc struct {
 	Schema   int           `bson:"schema"`
 	Moved    bool          `bson:"moved"`
 	Moving   string        `bson:"moving,omitempty"`      // the store a migrate is moving the board to
-	MoveHost string        `bson:"moving_host,omitempty"` // the machine that migrate runs on
+	MoveHost string        `bson:"moving_host,omitempty"` // the machine that migrate runs on, or that moved the board back
 	Halt     bool          `bson:"halt"`
 	Writes   int64         `bson:"writes"`
 	Now      bson.DateTime `bson:"now"`

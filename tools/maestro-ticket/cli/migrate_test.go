@@ -554,3 +554,38 @@ func TestMigrateMovedFileRefusesANewDatabase(t *testing.T) {
 		t.Fatalf("store.uri written: %v", err)
 	}
 }
+
+// Once one machine moved the board back to SQLite, a rerun there finishes
+// it, but no other machine may copy the tombstoned board into a SQLite
+// file of its own: that would fork the board.
+func TestMigrateBackOnlyOnTheMover(t *testing.T) {
+	m := newMigrateBoard(t)
+	m.stop(t)
+	if code, _, out := m.migrate(m.uri, "--to", "mongodb", "--uri-file", "-"); code != 0 {
+		t.Fatalf("migrate: exit %d %s", code, out)
+	}
+	b := newHarness(t)
+	b.now = m.clk.Now
+	if code, out, errs := b.run(m.uri, "store", "--uri-file", "-", "--json"); code != 0 {
+		t.Fatalf("store on B: exit %d %s %s", code, out, errs)
+	}
+	b.ok(nil, "list")
+	m.h.ok(nil, "stop", "--all")
+	if code, _, out := m.migrate("", "--to", "sqlite"); code != 0 {
+		t.Fatalf("migrate back: exit %d %s", code, out)
+	}
+	// Cut short before store.uri went: a rerun here finishes it.
+	if err := writeStoreURI(m.h.dir, m.uri); err != nil {
+		t.Fatal(err)
+	}
+	if code, rep, out := m.migrate("", "--to", "sqlite"); code != 0 || !rep.Already {
+		t.Fatalf("rerun on the mover: exit %d %+v %s", code, rep, out)
+	}
+	code, out, errs := b.run("", "migrate", "--to", "sqlite", "--json")
+	if code != 2 || !strings.Contains(out, "another machine") || !strings.Contains(out, "store --clear") {
+		t.Fatalf("migrate back on B: exit %d %s %s", code, out, errs)
+	}
+	if got := (&migrateBoard{h: b, clk: m.clk}).board(t); !got.Empty() {
+		t.Fatalf("B has a SQLite board: %d tickets", len(got.Tickets))
+	}
+}
