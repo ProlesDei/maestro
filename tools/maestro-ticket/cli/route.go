@@ -94,7 +94,7 @@ func outcomeOf(r runs.Record) (outcome, reset string) {
 	text := r.Reply + "\n" + r.Error
 	failed := r.IsError || r.State != runs.Done
 	switch {
-	case r.State == runs.Died:
+	case r.State == runs.Died, r.LauncherStopped():
 		return outDied, ""
 	case r.State == runs.TimedOut:
 		return outTimedOut, ""

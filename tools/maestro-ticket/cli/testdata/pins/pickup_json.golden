@@ -233,17 +233,12 @@ stdout:
       "run": "R-3",
       "job": "build",
       "ticket": "T-3",
-      "outcome": "failed",
-      "status": "in_progress",
+      "outcome": "died",
       "first": "the launcher was stopped, so it stopped the run",
-      "mismatch": "in_review with a Handoff:, found in_progress with no note",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "build T-3 stopped in_progress: the launcher was stopped, so it stopped the run"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket resume R-3 --died"
       ],
-      "do": [],
       "wrote": []
     },
     {
@@ -542,17 +537,12 @@ stdout:
       "run": "R-3",
       "job": "build",
       "ticket": "T-3",
-      "outcome": "failed",
-      "status": "in_progress",
+      "outcome": "died",
       "first": "the launcher was stopped, so it stopped the run",
-      "mismatch": "in_review with a Handoff:, found in_progress with no note",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "build T-3 stopped in_progress: the launcher was stopped, so it stopped the run"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket resume R-3 --died"
       ],
-      "do": [],
       "wrote": []
     },
     {
