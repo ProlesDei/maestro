@@ -359,24 +359,6 @@ while IFS=$'\t' read -r a d f; do
 done < <(gd --numstat --no-renames "$B" "$H")
 touch "$C/files.txt"
 
-# The code graph's leads, graph.md, where the install asks for the graph:
-# review only, since QA reads no code. A failure costs the review its
-# leads, never the review.
-graph=
-if [ -z "$qa" ]; then
-	gconf=
-	[ ! -f "$mainwt/.maestro/project/install.yaml" ] ||
-		gconf=$(sed -n 's/^code-graph:[[:space:]]*\([a-z]*\).*/\1/p' "$mainwt/.maestro/project/install.yaml" | head -n 1)
-	if [ "$gconf" != mcp ]; then
-		graph="none: install.yaml's code-graph isn't mcp"
-	elif g=$(bash "$(dirname "${BASH_SOURCE[0]}")/graph-leads.sh" "$R" "$B" "$C/graph.md" 2>"$C/graph.err"); then
-		graph=${g#graph=}
-	else
-		graph="failed: $(tail -n 1 "$C/graph.err")"
-	fi
-	rm -f -- "$C/graph.err"
-fi
-
 # K: the sha after the first "at" in review's latest verdict, a Review:
 # or a Kickback: that isn't a Kickback: QA fail. On a ticket, from the
 # ticket; with none, from PR comments by the repo's owner, members or
@@ -470,6 +452,33 @@ if [ -n "$qa" ]; then
 	if [ -n "$qa_main" ] && git cat-file -e "$qa_main^{commit}" 2>/dev/null; then
 		msince=$(gd --name-only --no-renames "$qa_main" "$G" | classes)
 	fi
+fi
+
+# The code graph's leads, graph.md, where the install asks for the graph
+# and the change holds code: review only, since QA reads no code. An
+# incremental review's leads cover the delta, from T, as its pack does.
+# A failure, or a run past its limit, costs the review its leads, never
+# the review.
+graph=
+if [ -z "$qa" ]; then
+	gconf=
+	[ ! -f "$mainwt/.maestro/project/install.yaml" ] ||
+		gconf=$(sed -n 's/^code-graph:[[:space:]]*\([a-z]*\).*/\1/p' "$mainwt/.maestro/project/install.yaml" | head -n 1)
+	gbase=$B
+	[ "$mode" != incremental ] || [ -z "$T" ] || gbase=$T
+	limit=()
+	command -v timeout >/dev/null && limit=(timeout --kill-after=10 600)
+	if [ "$gconf" != mcp ]; then
+		graph="none: install.yaml's code-graph isn't mcp"
+	elif ! cut -f4 "$C/files.txt" | grep -qx code; then
+		graph="none: no code file changed"
+	elif g=$("${limit[@]}" bash "$(dirname "${BASH_SOURCE[0]}")/graph-leads.sh" "$R" "$gbase" "$C/graph.md" 2>"$C/graph.err"); then
+		graph=${g#graph=}
+	else
+		graph="failed: $(tail -n 1 "$C/graph.err")"
+		rm -f -- "$C/graph.md"
+	fi
+	rm -f -- "$C/graph.err"
 fi
 
 {

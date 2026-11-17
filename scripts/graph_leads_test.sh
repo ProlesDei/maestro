@@ -50,6 +50,8 @@ def read_all(path):
     with open(path, "rb") as handle:
         return handle.read()
 EOF
+# Past a pipe's buffer, so a grep -q that stops early would cut its writer off.
+for i in $(seq 1 4000); do printf '# padding line %d, so the base file passes a pipe buffer\n' "$i"; done >>"$r/app/store.py"
 cat >"$r/app/main.py" <<'EOF'
 from app.store import read_all, write_atomic
 
@@ -96,18 +98,33 @@ EOF
 	for i in $(seq 1 16); do printf '    if n == %d:\n        return "g%d"\n' "$i" "$i"; done
 	printf '    return "none"\n'
 } >"$r/app/main.py"
-git -C "$r" commit -qam change
+# A change to a function already there, in the big file; and the change's
+# own .gitattributes, which must hide no hunk.
+sed -i 's/return handle.read()/return handle.read() or b""/' "$r/app/store.py"
+echo '*.py -diff' >"$r/.gitattributes"
+git -C "$r" add -A && git -C "$r" commit -qm change
 
 # The four lists.
 bash "$leads" "$r" "$base" "$tmp/md" >"$tmp/out" || fail "exit $?"
-grep -qx 'graph=yes changed=4 new=3 uncalled=1 lookalikes=1 complex=1' "$tmp/out" || fail "counts: $(cat "$tmp/out")"
+grep -qx 'graph=yes changed=5 new=3 uncalled=1 lookalikes=1 complex=1' "$tmp/out" || fail "counts: $(cat "$tmp/out")"
 has "- app/main.py:7-10 main: "
 has "app/main.py:13-23 save_report (new): app/main.py:7 main"
 has "- app/main.py:26 never_used"
 has "- app/main.py:13 save_report ~ app/store.py:5 write_atomic"
 has "- app/main.py:30 grade: "
-lacks "read_all"
+has "- app/store.py:18-20 read_all: "
+lacks "read_all (new)"
 [ "$(indexes)" -eq "$before" ] || fail "an index was left behind"
+
+# A tree as the base, as review's delta base T is: the same leads.
+bash "$leads" "$r" "$(git -C "$r" rev-parse "$base^{tree}")" "$tmp/md-tree" >"$tmp/out" || fail "tree base: exit $?"
+cmp -s "$tmp/md" "$tmp/md-tree" || fail "tree base: graph.md differs"
+
+# Uncommitted changes: refused, since the index reads the disk.
+echo "# draft" >>"$r/app/main.py"
+code=0; bash "$leads" "$r" "$base" "$tmp/md4" >"$tmp/out" 2>&1 || code=$?
+{ [ $code -eq 1 ] && grep -q "uncommitted changes" "$tmp/out"; } || fail "dirty tree: exit $code"
+git -C "$r" checkout -q -- app/main.py
 
 # No tool: graph=none, nothing written.
 mkdir "$tmp/bin"
