@@ -22,8 +22,9 @@
 # Grok's limit refuses, and memories go in a message apart; uninstall
 # runs off the pin; stats: on or off sets the marker and says which, on
 # says when it removed a marker, no line leaves a person's stats off, and
-# any other value or a second line refuses; store: mongodb wants a
-# store.uri, 0600 for check, and a SQLite board with tickets moved first,
+# any other value or a second line refuses; store: mongodb with no
+# store.uri places the skills, makes no store and says to join the board,
+# check wants a store.uri, 0600, and a SQLite board with tickets moved first,
 # while store: sqlite or no line refuses a store.uri; the install.yaml that
 # project-setup.md's ## Run writes applies; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
@@ -740,13 +741,25 @@ printf 'SQLite format 3\0' >"$r15/.git/maestro/stats.db"
 ok uninstall "$r15"
 [ -e "$r15/.git/maestro/stats.db" ] && [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "uninstall removed stats.db or STATS_OFF"
 
-# --- store: mongodb needs store.uri, and a SQLite board with tickets moved
-# first; check wants store.uri 0600 and a passing doctor; sqlite, or no
+# --- store: mongodb with no store.uri makes no store; with one, a SQLite
+# board with tickets moved first; check wants store.uri 0600 and a passing
+# doctor; sqlite, or no
 # line, refuses a store.uri ---
 r17=$tmp/mongo
 repo "$r17" "harnesses: claude" "skills-home: hidden" "store: mongodb"
 d17=$(cd "$r17" && pwd -P)/.git/maestro
-for c in apply check; do refuses "store is mongodb, but there is no $d17/store.uri: at the repo's root, run maestro-ticket store --uri-file -" "$r17" $c "$r17"; done
+# A teammate's clone with no store.uri yet: apply places the skills and
+# makes no store, since a SQLite one would be a second board.
+: >"$STUB_LOG"
+ok apply "$r17"
+installed "$r17" .claude
+says "next: join the team's board: at the repo's root, run maestro-ticket store --uri-file - and paste the MongoDB URI, from the owner, on stdin"
+! grep -qF "store: sqlite" "$tmp/out" || fail "apply with no store.uri says to set store: sqlite, which forks the board"
+! grep -qF "ticket store ready" "$tmp/out" || fail "apply with no store.uri says the store is ready"
+[ ! -e "$d17/tickets.db" ] || fail "apply with no store.uri made a SQLite store"
+[ ! -s "$STUB_LOG" ] || fail "apply with no store.uri ran maestro-ticket: $(cat "$STUB_LOG")"
+refuses "problem: store is mongodb, but there is no $d17/store.uri: at the repo's root, run maestro-ticket store --uri-file -" "$r17" check "$r17"
+! grep -qF "store: sqlite" "$tmp/out" || fail "check with no store.uri says to set store: sqlite, which forks the board"
 mkdir -p "$d17" && echo 'mongodb+srv://u:p@h/x' >"$d17/store.uri" && chmod 644 "$d17/store.uri"
 : >"$STUB_LOG"
 ok apply "$r17"
