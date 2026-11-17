@@ -527,6 +527,49 @@ func TestMigrateAbort(t *testing.T) {
 	}
 }
 
+// A move to SQLite that another machine started, and that machine gone:
+// abort and a rerun refuse here, naming --force, and --abort --force
+// calls it off, so the board takes writes again. The gone machine's move,
+// if it comes back, can't then mark the board moved.
+func TestMigrateAbortFromAnotherMachine(t *testing.T) {
+	m := newMigrateBoard(t)
+	ctx := context.Background()
+	m.stop(t)
+	if code, _, out := m.migrate(m.uri, "--to", "mongodb", "--uri-file", "-"); code != 0 {
+		t.Fatalf("migrate: exit %d %s", code, out)
+	}
+	m.h.ok(nil, "stop", "--all")
+	gone, err := mongostore.Open(ctx, m.uri, mongostore.Options{Now: m.clk.Now, Mover: "ffffffffffffffffffffffffffffffff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gone.Close()
+	if err := gone.StartMove(ctx, mongostore.MoveOut); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"--to", "sqlite", "--abort"}, {"--to", "sqlite"}} {
+		if code, _, out := m.migrate("", args...); code != 2 || !strings.Contains(out, "--abort --force") {
+			t.Fatalf("%v on another machine's move: exit %d %s", args, code, out)
+		}
+	}
+	if code, _, _ := m.migrate("", "--to", "sqlite", "--force"); code != 2 {
+		t.Fatalf("--force with no --abort: exit %d", code)
+	}
+	if code, rep, out := m.migrate("", "--to", "sqlite", "--abort", "--force"); code != 0 || !rep.Aborted {
+		t.Fatalf("abort --force: exit %d %s", code, out)
+	}
+	plain := m.mongo(t, false)
+	if _, err := plain.List(ctx, ticket.ListFilter{}); err != nil {
+		t.Fatalf("MongoDB after the abort: %v", err)
+	}
+	if err := gone.EndMove(ctx, true); err == nil {
+		t.Fatal("the called-off move marked the board moved")
+	}
+	if _, err := plain.List(ctx, ticket.ListFilter{}); err != nil {
+		t.Fatalf("MongoDB after the gone machine came back: %v", err)
+	}
+}
+
 // A file that moved already holds no board of its own: copying it into a
 // second, empty database would fork the board, so migrate refuses.
 func TestMigrateMovedFileRefusesANewDatabase(t *testing.T) {

@@ -239,11 +239,15 @@ func runMigrate(ctx context.Context, c *call) error {
 	to := c.fs.String("to", "", "mongodb or sqlite")
 	file := c.fs.String("uri-file", "", "with --to mongodb, the MongoDB URI's file, or - for stdin, when store.uri isn't written")
 	abort := c.fs.Bool("abort", false, "with --to sqlite, call off this machine's move cut short: the MongoDB board takes writes again")
+	force := c.fs.Bool("force", false, "with --abort, call off a move another machine started, once that machine is gone; if it still runs the move, its copy goes stale while the board takes writes")
 	if err := c.parse(); err != nil {
 		return err
 	}
 	if err := c.noArgs(); err != nil {
 		return err
+	}
+	if *force && !*abort {
+		return usagef("migrate: --force goes with --abort")
 	}
 	var rep moveReport
 	var err error
@@ -258,7 +262,7 @@ func runMigrate(ctx context.Context, c *call) error {
 			return usagef("migrate: --uri-file goes with --to mongodb")
 		}
 		if *abort {
-			rep, err = c.abortOut(ctx)
+			rep, err = c.abortOut(ctx, *force)
 			break
 		}
 		rep, err = c.migrateOut(ctx)
@@ -358,10 +362,14 @@ func (c *call) openMover(ctx context.Context, loc storeLoc, uri string, create b
 
 // movingElsewhere refuses a move another machine runs.
 func movingElsewhere(st mongostore.Move, host string) error {
-	if st.To != "" && st.Host != host {
-		return fmt.Errorf("%w: maestro-ticket migrate --to %s is under way on another machine (host id %s); finish it there", ticket.ErrInvalid, st.To, st.Host)
+	if st.To == "" || st.Host == host {
+		return nil
 	}
-	return nil
+	err := fmt.Errorf("%w: maestro-ticket migrate --to %s is under way on another machine (host id %s); finish it there", ticket.ErrInvalid, st.To, st.Host)
+	if st.To == mongostore.MoveOut {
+		err = fmt.Errorf("%w, or call it off there with migrate --to sqlite --abort; if that machine is gone, call it off here with migrate --to sqlite --abort --force", err)
+	}
+	return err
 }
 
 // migrateIn moves the SQLite board here to MongoDB: in one SQLite write
@@ -700,8 +708,10 @@ func (c *call) migrateOut(ctx context.Context) (moveReport, error) {
 // abortOut calls off this machine's move to SQLite before it marks the
 // MongoDB board moved: a copy it made in the SQLite file gets the moved
 // triggers back, then the moving mark comes off, so every machine uses
-// the MongoDB board again. The halt stays.
-func (c *call) abortOut(ctx context.Context) (moveReport, error) {
+// the MongoDB board again. The halt stays. With force, it calls off
+// another machine's move too: the owner's way out once that machine is
+// gone, which would hold the board moving for good.
+func (c *call) abortOut(ctx context.Context, force bool) (moveReport, error) {
 	rep := moveReport{To: kindSQLite, Aborted: true}
 	loc, err := c.location()
 	if err != nil {
@@ -724,8 +734,10 @@ func (c *call) abortOut(ctx context.Context) (moveReport, error) {
 	if err != nil {
 		return rep, redactURI(err, loc.uri)
 	}
-	if err := movingElsewhere(st, host); err != nil {
-		return rep, err
+	if !force {
+		if err := movingElsewhere(st, host); err != nil {
+			return rep, err
+		}
 	}
 	switch {
 	case st.Moved:
@@ -761,7 +773,12 @@ func (c *call) abortOut(ctx context.Context) (moveReport, error) {
 			return rep, err
 		}
 	}
-	if err := mg.EndMove(ctx, false); err != nil {
+	if st.Host == host {
+		err = mg.EndMove(ctx, false)
+	} else {
+		err = mg.CallOffMove(ctx, st.Host)
+	}
+	if err != nil {
 		return rep, redactURI(err, loc.uri)
 	}
 	return rep, nil

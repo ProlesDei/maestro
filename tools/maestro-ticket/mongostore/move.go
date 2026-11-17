@@ -128,7 +128,8 @@ func (s *Store) StartMove(ctx context.Context, to string) error {
 }
 
 // EndMove ends this machine's move; with moved, it also sets the moved
-// tombstone, after which every call to the board fails.
+// tombstone, after which every call to the board fails. A move to SQLite
+// that CallOffMove ended can't then set it: the board took writes since.
 func (s *Store) EndMove(ctx context.Context, moved bool) error {
 	if s.mover == "" {
 		return errNotMover
@@ -137,11 +138,32 @@ func (s *Store) EndMove(ctx context.Context, moved bool) error {
 		if err := s.mine(*tx.w); err != nil {
 			return err
 		}
+		if moved && !tx.w.Moved && tx.w.Moving != MoveOut {
+			return fmt.Errorf("%w: no move to sqlite is under way on database %s: it was called off, and the board may have taken writes since; nothing is marked moved, so run migrate --to sqlite again", ticket.ErrInvalid, s.name)
+		}
 		up := bson.D{{Key: "$unset", Value: bson.D{{Key: "moving", Value: ""}, {Key: "moving_host", Value: ""}}}}
 		if moved {
 			up = append(up, bson.E{Key: "$set", Value: bson.D{{Key: "moved", Value: true}}})
 		}
 		_, err := tx.coll(cMeta).update(bson.D{{Key: "_id", Value: writerID}}, up)
+		return err
+	})
+}
+
+// CallOffMove ends the move to SQLite that the machine host runs, from
+// another machine: the owner's way out when host is gone, as a move held
+// open would refuse every call for good. It changes nothing unless that
+// move is still the one under way.
+func (s *Store) CallOffMove(ctx context.Context, host string) error {
+	if s.mover == "" {
+		return errNotMover
+	}
+	return s.write(ctx, func(tx *txn) error {
+		if w := tx.w; w.Moved || w.Moving != MoveOut || w.MoveHost != host {
+			return fmt.Errorf("%w: the move to sqlite from host id %s is no longer under way on database %s; run migrate --to sqlite --abort again to see what is", ticket.ErrInvalid, host, s.name)
+		}
+		_, err := tx.coll(cMeta).update(bson.D{{Key: "_id", Value: writerID}},
+			bson.D{{Key: "$unset", Value: bson.D{{Key: "moving", Value: ""}, {Key: "moving_host", Value: ""}}}})
 		return err
 	})
 }

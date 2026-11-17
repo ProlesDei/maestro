@@ -437,6 +437,9 @@ func (s *Store) checkWriter(w writerDoc) error {
 		return nil
 	case w.Moved:
 		return fmt.Errorf("%w: %s", ticket.ErrInvalid, movedMsg)
+	case w.Moving == MoveOut:
+		return fmt.Errorf("%w: board moving: maestro-ticket migrate --to %s is copying it, or was cut short; wait for it, or run it again on the machine that started it; if that machine is gone, call it off with migrate --to sqlite --abort --force",
+			ticket.ErrInvalid, w.Moving)
 	case w.Moving != "":
 		return fmt.Errorf("%w: board moving: maestro-ticket migrate --to %s is copying it, or was cut short; wait for it, or run it again on the machine that started it",
 			ticket.ErrInvalid, w.Moving)
