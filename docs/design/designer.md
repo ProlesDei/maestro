@@ -96,6 +96,7 @@ Problem:     <who, what they're trying to do, what happens if we don't build it>
 Breadboard:  <each place, the route or file it lives at, what you can do there, where each action goes>
 Directions:  <2–3, one line each> | Pick: <one, why>
 States:      <for each place: empty, loading, error, long text, many items, phone>
+Motion:      <each motion: its cue, what moves, ms, easing, the reduced-motion version> | none
 Reuses:      <components and tokens> | New: <each, and why the old one won't do> | none
 Criteria:    <numbered, each one QA can see in a browser at a named width>
 Taste calls: <each, with the Designer's default> | none
@@ -211,6 +212,7 @@ Building and running slice 1 settled a few details the plan left open:
 - Playwright CLI refuses `file:` pages, so `screens.sh` serves the prototype folder on 127.0.0.1, port 0, with a small Node server that stops when the script does. Node is already there, since Playwright CLI runs on it.
 - One `run-code` call shoots every page, width and colour scheme; a second shoots the sheets. Three directions at two widths in both schemes took under four seconds.
 - `screens.sh` takes `--shoot --out <dir> --widths <list> [--dark] [--run <name>]` today; `--check`, `--base` and `--design` come with slice 2.
+- `screens.sh --motion` clips what moves for animation-heavy designs: the page's `window.motion(cue)` starts each motion, a fake clock steps it 40ms a frame, and it writes a looping animated PNG for the owner and a frame strip for the session. `design-pr.sh` asks for a clip of the pick unless the spec's `Motion:` is `none`, and puts every direction's clips in the PR. An animated PNG plays in a PR's image with no encoder to install; a GIF needs ffmpeg, and a video in the repo won't play in a PR body.
 - The design branch holds its files under `.maestro/design/<id>/`, so they never clash with a team's own; the PR body shows them by their blob URLs at the pushed sha.
 - Each direction's page is named after its letter (`b.html`, or `b-<place>.html`), so `design-pr.sh` finds the pick's shots by name.
 

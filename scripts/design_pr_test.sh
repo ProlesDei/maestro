@@ -5,8 +5,9 @@
 # Covers bad arguments; each spec gap, refused before any write; a ticket
 # that isn't ours to hand up; the first hand-up (branch, files, [skip ci],
 # draft PR on the main branch the setup names, spec and card comments in
-# order, the block) past hooks that fail; a rework that updates the PR
-# and swaps the shots; a rerun that repeats nothing; and a repo with no
+# order, the block) past hooks that fail; motion clips, every
+# direction's and never a strip; a rework that updates the PR and swaps
+# the shots; a rerun that repeats nothing; and a repo with no
 # draft PRs.
 # Run from anywhere: bash scripts/design_pr_test.sh
 set -euo pipefail
@@ -90,6 +91,7 @@ A: three cards in a row, Pro raised.
 B: a table with one row per feature.
 Pick: $2: easiest to compare.
 States: empty: none; loading: none; error: none; long names wrap; phone: cards stack.
+Motion: hover lifts a plan 4px over 160ms, ease-out; reduced motion: no lift.
 Reuses: Card, Button | New: none
 Criteria:
 1. At 375px the three plans stack, Pro first.
@@ -100,7 +102,7 @@ EOF
 run_dir=$tmp/run
 mkdir -p "$run_dir"
 spec "$run_dir" B
-for f in sheet-375 sheet-1280 a-375 a-1280 b-375 b-1280; do echo "$f" >"$run_dir/$f.png"; done
+for f in sheet-375 sheet-1280 a-375 a-1280 b-375 b-1280 a-hover-1280-motion b-hover-1280-motion b-hover-1280-strip; do echo "$f" >"$run_dir/$f.png"; done
 run() { bash "$dpr" "$@" >"$tmp/out" 2>&1; }
 writes() { [ -s "$FX/log" ] && grep -qE '^(comment|transition|gh pr)' "$FX/log"; }
 
@@ -135,6 +137,13 @@ gap "each its own letter" 's/^B: /A: /'
 gap "'2.' names no width as" 's/^2\. At 1280px every plan/2. A 16px gap between plans, every plan/'
 gap "no sheet" '' 'sheet-*.png'
 gap "no b-\*.png shots" '' 'b-*.png'
+gap "no 'Motion:' line" '/^Motion:/d'
+gap "Motion: no b-\*-motion.png clip" '' 'b-*-motion.png'
+
+# Motion: none needs no clip (it stops at the ticket instead).
+cp -R "$run_dir" "$tmp/still" && sed -i 's/^Motion: .*/Motion: none/' "$tmp/still/spec.md" && rm "$tmp/still"/*-motion.png
+ticket blocked ""
+if run T-7 "$tmp/still" --holder "$H" --token 3; then fail "passed a blocked ticket"; else rc=$?; [ $rc = 3 ] || fail "exit $rc for Motion: none and no clips"; fi
 
 # A spec with CRLF line ends passes the spec checks (it stops at the
 # ticket instead).
@@ -165,7 +174,7 @@ has "pr=https://github.com/o/r/pull/9"
 sha=$(sed -n 's/^sha=//p' "$tmp/out")
 [ "$(git ls-remote --heads origin maestro/T-7 | cut -f1)" = "$sha" ] || fail "maestro/T-7 isn't at $sha"
 files=$(git ls-tree -r --name-only "$sha" -- .maestro/design/T-7 | tr '\n' ' ')
-[ "$files" = ".maestro/design/T-7/b-1280.png .maestro/design/T-7/b-375.png .maestro/design/T-7/sheet-1280.png .maestro/design/T-7/sheet-375.png .maestro/design/T-7/spec.md " ] ||
+[ "$files" = ".maestro/design/T-7/a-hover-1280-motion.png .maestro/design/T-7/b-1280.png .maestro/design/T-7/b-375.png .maestro/design/T-7/b-hover-1280-motion.png .maestro/design/T-7/sheet-1280.png .maestro/design/T-7/sheet-375.png .maestro/design/T-7/spec.md " ] ||
 	fail "branch files: $files"
 git log -1 --format=%s "$sha" | grep -qF "[skip ci]" || fail "the commit doesn't skip CI"
 git merge-base --is-ancestor "$(git rev-parse origin/trunk)" "$sha" || fail "the branch didn't start from trunk"
@@ -173,6 +182,10 @@ grep -qE "^gh pr create --draft --base trunk --head maestro/T-7 --title Design: 
 grep -qF "![sheet-375](https://github.com/o/r/blob/$sha/.maestro/design/T-7/sheet-375.png?raw=true)" "$FX/body" || fail "the PR body doesn't show the sheet"
 grep -qF "![b-1280](https://github.com/o/r/blob/$sha/.maestro/design/T-7/b-1280.png?raw=true)" "$FX/body" || fail "the PR body doesn't show the pick"
 ! grep -q "a-375" "$FX/body" || fail "the PR body shows a direction that wasn't picked"
+grep -A4 -xF "Motion: each clip loops." "$FX/body" | grep -qF "![b-hover-1280-motion](https://github.com/o/r/blob/$sha/.maestro/design/T-7/b-hover-1280-motion.png?raw=true)" ||
+	fail "the PR body doesn't show the pick's clip first under Motion"
+grep -qF "![a-hover-1280-motion](" "$FX/body" || fail "the PR body doesn't show the other direction's clip"
+! grep -q "strip" "$FX/body" || fail "the PR body shows a strip"
 grep -qxF "comment 1 $H-spec-$sha actor=designer" "$FX/log" || fail "spec comment: $(grep comment "$FX/log")"
 grep -qxF "comment 2 $H-escalation-$sha actor=designer" "$FX/log" || fail "escalation comment: $(grep comment "$FX/log")"
 head -1 "$FX/comment-1" | grep -qxF "Design spec: PR https://github.com/o/r/pull/9 at $sha" || fail "spec comment head"
@@ -207,7 +220,7 @@ sha2=$(sed -n 's/^sha=//p' "$tmp/out")
 [ "$sha2" != "$sha" ] || fail "the rework made no commit"
 git merge-base --is-ancestor "$sha" "$sha2" || fail "the rework didn't build on the branch"
 files=$(git ls-tree -r --name-only "$sha2" -- .maestro/design/T-7 | tr '\n' ' ')
-[ "$files" = ".maestro/design/T-7/a-1280.png .maestro/design/T-7/a-375.png .maestro/design/T-7/sheet-1280.png .maestro/design/T-7/sheet-375.png .maestro/design/T-7/spec.md " ] ||
+[ "$files" = ".maestro/design/T-7/a-1280.png .maestro/design/T-7/a-375.png .maestro/design/T-7/a-hover-1280-motion.png .maestro/design/T-7/b-hover-1280-motion.png .maestro/design/T-7/sheet-1280.png .maestro/design/T-7/sheet-375.png .maestro/design/T-7/spec.md " ] ||
 	fail "rework files: $files"
 grep -qE "^gh pr edit https://github.com/o/r/pull/9 --body-file " "$FX/log" || fail "the PR wasn't updated"
 ! grep -q "^gh pr create" "$FX/log" || fail "a second PR was opened"
