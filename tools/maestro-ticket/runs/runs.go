@@ -333,7 +333,15 @@ var sharedStore = func() bool { return os.Getenv(envcheck.AllowEnv) == "1" }
 // for clocks that differ between machines.
 func overdue(r Record, now time.Time) bool {
 	limit := r.LimitDuration()
-	return limit > 0 && now.Sub(r.StartedAt) > limit+maxSlotCredit+KillGrace+time.Hour
+	return limit > 0 && Overdue(r.StartedAt, limit, now)
+}
+
+// Overdue reports whether a run with limit, started at started, is past
+// any time a supervisor on any machine would let it run, as overdue says.
+// Another machine's run, known only by its start and limit, holds until
+// then.
+func Overdue(started time.Time, limit time.Duration, now time.Time) bool {
+	return now.Sub(started) > limit+maxSlotCredit+KillGrace+time.Hour
 }
 
 // List reads the records in dir, oldest first; with acked false, only

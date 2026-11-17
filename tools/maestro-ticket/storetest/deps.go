@@ -1,10 +1,9 @@
-package sqlitestore
+package storetest
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -12,28 +11,9 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-func create(t *testing.T, s *Store, req ticket.CreateRequest) ticket.Ticket {
-	t.Helper()
-	tk, err := s.Create(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tk
-}
-
-func shipToDone(t *testing.T, s *Store, id ticket.ID) {
-	t.Helper()
-	for _, to := range []ticket.Status{ticket.StatusInProgress, ticket.StatusInReview} {
-		move(t, s, id, to)
-	}
-	if _, err := s.Transition(context.Background(), ticket.TransitionRequest{ID: id, To: ticket.StatusDone, ActorRole: ticket.RoleQALead}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // ClaimNext only hands out tickets whose dependencies are all done.
-func TestClaimWaitsOnDeps(t *testing.T) {
-	s, _ := newStore(t)
+func testClaimWaitsOnDeps(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	p0 := 0
 	base := mustCreate(t, s, "base", "", 2)
@@ -72,8 +52,8 @@ func TestClaimWaitsOnDeps(t *testing.T) {
 	}
 }
 
-func TestDepsValidation(t *testing.T) {
-	s, _ := newStore(t)
+func testDepsValidation(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "a", "", 2)
 	b := create(t, s, ticket.CreateRequest{Title: "b", DependsOn: []ticket.ID{a.ID}})
@@ -110,8 +90,8 @@ func TestDepsValidation(t *testing.T) {
 
 // List with Ready shows what ClaimNext would hand out, in its order: no
 // ticket waiting on a dep or a busy area, and none under a live claim.
-func TestListReadyMatchesClaimNext(t *testing.T) {
-	s, clk := newStore(t)
+func testListReadyMatchesClaimNext(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	ready := func(limit int) string {
 		t.Helper()
@@ -174,8 +154,8 @@ func TestListReadyMatchesClaimNext(t *testing.T) {
 }
 
 // Tickets whose areas overlap never run at the same time.
-func TestClaimSkipsBusyAreas(t *testing.T) {
-	s, _ := newStore(t)
+func testClaimSkipsBusyAreas(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	p0, p1 := 0, 1
 	a := create(t, s, ticket.CreateRequest{Title: "store", Priority: &p0, Areas: []string{"tools/maestro-ticket/sqlitestore"}})
@@ -226,12 +206,11 @@ func TestClaimSkipsBusyAreas(t *testing.T) {
 }
 
 // Many claimers at once never run two tickets with overlapping areas.
-func TestRaceAreaLocks(t *testing.T) {
-	t.Parallel()
+func testRaceAreaLocks(t *testing.T, f Factory) {
 	const groups, perGroup, workers = 5, 10, 100
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "tickets.db")
-	seed := openMany(t, path, 1)[0]
+	open := f(t, NewClock().Now)
+	seed := openMany(t, open, 1)[0]
 	for g := 0; g < groups; g++ {
 		for i := 0; i < perGroup; i++ {
 			area := fmt.Sprintf("pkg%d", g)
@@ -243,11 +222,11 @@ func TestRaceAreaLocks(t *testing.T) {
 			}
 		}
 	}
-	stores := openMany(t, path, workers)
+	stores := openMany(t, open, workers)
 	var mu sync.Mutex
 	won := 0
 	var other []error
-	runAll(workers, func(i int) {
+	RunAll(workers, func(i int) {
 		_, err := stores[i].ClaimNext(ctx, ticket.ClaimRequest{Holder: fmt.Sprintf("jse/s%d", i)})
 		mu.Lock()
 		defer mu.Unlock()
@@ -281,8 +260,8 @@ func TestRaceAreaLocks(t *testing.T) {
 // A claim on a backlog ticket skips the dependency and area checks, since
 // grooming does no work. Its holder can't then move it out of backlog into
 // work past them.
-func TestBacklogClaimCantStartPastChecks(t *testing.T) {
-	s, _ := newStore(t)
+func testBacklogClaimCantStartPastChecks(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	held := create(t, s, ticket.CreateRequest{Title: "held", Areas: []string{"src"}})
 	hc, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: held.ID, Holder: "jse/1"})
@@ -328,8 +307,8 @@ func TestBacklogClaimCantStartPastChecks(t *testing.T) {
 
 // The holder of a working ticket can't widen its areas onto another live
 // claim's.
-func TestUpdateAreasChecksLiveClaims(t *testing.T) {
-	s, _ := newStore(t)
+func testUpdateAreasChecksLiveClaims(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	a := create(t, s, ticket.CreateRequest{Title: "a", Areas: []string{"src"}})
 	b := create(t, s, ticket.CreateRequest{Title: "b", Areas: []string{"docs"}})
@@ -361,8 +340,8 @@ func TestUpdateAreasChecksLiveClaims(t *testing.T) {
 // Only work that writes code (todo, in_progress) waits on dependencies and
 // areas, or holds areas. Review and answering an escalation
 // neither wait for nor block an engineer on the same code.
-func TestOnlyWorkClaimsUseAreasAndDeps(t *testing.T) {
-	s, _ := newStore(t)
+func testOnlyWorkClaimsUseAreasAndDeps(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	work := create(t, s, ticket.CreateRequest{Title: "work", Areas: []string{"src"}})
 	esc := create(t, s, ticket.CreateRequest{Title: "escalated", Areas: []string{"src/x"}})
@@ -397,8 +376,8 @@ func TestOnlyWorkClaimsUseAreasAndDeps(t *testing.T) {
 
 // Claimed or not, a ticket can't start from todo before its deps are done,
 // even a dep added after the claim. Done never waits on deps.
-func TestStartWaitsOnDeps(t *testing.T) {
-	s, _ := newStore(t)
+func testStartWaitsOnDeps(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	base := mustCreate(t, s, "base", "", 2)
 	top := create(t, s, ticket.CreateRequest{Title: "top", DependsOn: []ticket.ID{base.ID}})
@@ -432,8 +411,8 @@ func TestStartWaitsOnDeps(t *testing.T) {
 // A cancelled dependency never finishes, so its dependents would wait
 // forever: the store refuses to cancel a ticket open tickets depend on,
 // and to add a dependency on a cancelled one.
-func TestNoOpenTicketWaitsOnCancelled(t *testing.T) {
-	s, _ := newStore(t)
+func testNoOpenTicketWaitsOnCancelled(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	base := mustCreate(t, s, "base", "", 2)
 	dep := create(t, s, ticket.CreateRequest{Title: "dependent", DependsOn: []ticket.ID{base.ID}})
