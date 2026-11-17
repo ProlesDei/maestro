@@ -243,7 +243,7 @@ func (s *Store) Backup(ctx context.Context, path string) error {
 	}
 	defer os.Remove(partial)
 	var out backupFile
-	err = s.read(ctx, func(tx *txn) error {
+	err = s.snapshot(ctx, func(tx *txn) error {
 		out = backupFile{
 			backupHeader: backupHeader{Format: backupFormat, SchemaVersion: schemaVersion, Database: s.name,
 				TakenAt: msTime(tx.now), Counts: map[string]int64{}},
@@ -342,7 +342,7 @@ func checkBackup(path string, counts map[string]int64) error {
 // Export implements ticket.Store.
 func (s *Store) Export(ctx context.Context) (ticket.Export, error) {
 	var out ticket.Export
-	err := s.read(ctx, func(tx *txn) error {
+	err := s.snapshot(ctx, func(tx *txn) error {
 		out = ticket.Export{SchemaVersion: schemaVersion, Tickets: []ticket.Detail{}, Events: []ticket.Event{}}
 		byID := map[ticket.ID]int{}
 		var docs []ticketDoc

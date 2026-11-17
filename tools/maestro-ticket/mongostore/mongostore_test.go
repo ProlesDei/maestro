@@ -209,6 +209,30 @@ func TestBackupKeepsEveryCollection(t *testing.T) {
 	}
 }
 
+// Export and Backup read a board too big to read inside one
+// transaction's limit: here, a limit no transaction meets.
+func TestWholeBoardReadsOutlastATransaction(t *testing.T) {
+	s, _ := newStore(t, Options{})
+	ctx := context.Background()
+	tk, err := s.Create(ctx, ticket.CreateRequest{Title: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: tk.ID, Body: "note"}); err != nil {
+		t.Fatal(err)
+	}
+	old := txnLimit
+	txnLimit = time.Nanosecond
+	t.Cleanup(func() { txnLimit = old })
+	ex, err := s.Export(ctx)
+	if err != nil || len(ex.Tickets) != 1 || len(ex.Tickets[0].Comments) != 1 || ex.LastSeq != 2 {
+		t.Fatalf("export: %+v %v", ex, err)
+	}
+	if err := s.Backup(ctx, filepath.Join(t.TempDir(), "tickets-1.json")); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+}
+
 func TestDoctorPassesOnAFreshBoard(t *testing.T) {
 	s, _ := newStore(t, Options{})
 	ctx := context.Background()

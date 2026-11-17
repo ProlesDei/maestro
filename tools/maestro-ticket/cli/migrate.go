@@ -182,6 +182,8 @@ type moveReport struct {
 	// Already says an earlier run had made the copy; this one checked it.
 	Already bool   `json:"already,omitempty"`
 	Kept    string `json:"kept,omitempty"` // the SQLite file left as the way back
+	// Aborted says the move was called off; nothing moved.
+	Aborted bool `json:"aborted,omitempty"`
 }
 
 type tableCheck struct {
@@ -236,6 +238,7 @@ func exportText(e ticket.Export) ([]byte, error) {
 func runMigrate(ctx context.Context, c *call) error {
 	to := c.fs.String("to", "", "mongodb or sqlite")
 	file := c.fs.String("uri-file", "", "with --to mongodb, the MongoDB URI's file, or - for stdin, when store.uri isn't written")
+	abort := c.fs.Bool("abort", false, "with --to sqlite, call off this machine's move cut short: the MongoDB board takes writes again")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -246,10 +249,17 @@ func runMigrate(ctx context.Context, c *call) error {
 	var err error
 	switch *to {
 	case kindMongoDB:
+		if *abort {
+			return usagef("migrate: --abort goes with --to sqlite")
+		}
 		rep, err = c.migrateIn(ctx, *file)
 	case kindSQLite:
 		if *file != "" {
 			return usagef("migrate: --uri-file goes with --to mongodb")
+		}
+		if *abort {
+			rep, err = c.abortOut(ctx)
+			break
 		}
 		rep, err = c.migrateOut(ctx)
 	default:
@@ -262,6 +272,11 @@ func runMigrate(ctx context.Context, c *call) error {
 }
 
 func printMove(w io.Writer, r moveReport) {
+	if r.Aborted {
+		fmt.Fprintf(w, "called off the move to sqlite: database %s at %s takes writes again from every machine, and %s takes none; the halt stays until stop --all --off\n",
+			r.Database, r.Host, r.Kept)
+		return
+	}
 	n := func(t string) int { return r.Tables[t].Rows }
 	how := "moved"
 	if r.Already {
@@ -440,6 +455,12 @@ func (c *call) migrateIn(ctx context.Context, file string) (moveReport, error) {
 				}
 				rep.Already = true
 				break
+			}
+			// The board lives where the file moved to; a second copy
+			// would fork it.
+			if gone {
+				return fmt.Errorf("%w: %s moved to MongoDB already, so its board is in the database it moved to, not in %s; give migrate that database's URI",
+					ticket.ErrInvalid, loc.sqlitePath, rep.Database)
 			}
 			if err := mg.StartMove(ctx, mongostore.MoveIn); err != nil {
 				return redactURI(err, uri)
@@ -666,5 +687,75 @@ func (c *call) migrateOut(ctx context.Context) (moveReport, error) {
 	// goes now, as stop --all --off would take it. A STOP made by hand
 	// stays.
 	mirrorHalt(loc.localDir, false)
+	return rep, nil
+}
+
+// abortOut calls off this machine's move to SQLite before it marks the
+// MongoDB board moved: a copy it made in the SQLite file gets the moved
+// triggers back, then the moving mark comes off, so every machine uses
+// the MongoDB board again. The halt stays.
+func (c *call) abortOut(ctx context.Context) (moveReport, error) {
+	rep := moveReport{To: kindSQLite, Aborted: true}
+	loc, err := c.location()
+	if err != nil {
+		return rep, err
+	}
+	if loc.kind != kindMongoDB {
+		return rep, fmt.Errorf("%w: no move to sqlite to call off: the board is on SQLite already", ticket.ErrInvalid)
+	}
+	rep.Host, rep.Kept = uriHost(loc.uri), loc.sqlitePath
+	if err := envcheck.Err(c.envChecks(loc.sqlitePath)); err != nil {
+		return rep, err
+	}
+	mg, host, err := c.openMover(ctx, loc, loc.uri)
+	if err != nil {
+		return rep, err
+	}
+	defer mg.Close()
+	rep.Database = mg.Database()
+	st, err := mg.State(ctx)
+	if err != nil {
+		return rep, redactURI(err, loc.uri)
+	}
+	if err := movingElsewhere(st, host); err != nil {
+		return rep, err
+	}
+	switch {
+	case st.Moved:
+		return rep, fmt.Errorf("%w: the move to sqlite marked database %s moved already; run migrate --to sqlite again to finish it", ticket.ErrInvalid, rep.Database)
+	case st.To != mongostore.MoveOut:
+		return rep, fmt.Errorf("%w: no move to sqlite to call off on database %s", ticket.ErrInvalid, rep.Database)
+	}
+	if _, err := os.Stat(loc.sqlitePath); err == nil {
+		b, err := mg.Board(ctx)
+		if err != nil {
+			return rep, redactURI(err, loc.uri)
+		}
+		for i := range b.Launches {
+			b.Launches[i].Host = ""
+		}
+		sq, err := sqlitestore.Open(ctx, loc.sqlitePath, sqlitestore.Options{Now: c.env.Now})
+		if err != nil {
+			return rep, err
+		}
+		defer sq.Close()
+		err = sq.Move(ctx, func(m *sqlitestore.Mover) error {
+			gone, err := m.Moved()
+			if err != nil || gone {
+				return err
+			}
+			have, err := m.Board()
+			if err != nil || have.Empty() || b.Diff(have) != "" {
+				return err // no copy of this move's: leave the file as it is
+			}
+			return m.Block()
+		})
+		if err != nil {
+			return rep, err
+		}
+	}
+	if err := mg.EndMove(ctx, false); err != nil {
+		return rep, redactURI(err, loc.uri)
+	}
 	return rep, nil
 }

@@ -459,3 +459,98 @@ func TestMigrateInterrupted(t *testing.T) {
 	}
 	m.h.ok(nil, "list")
 }
+
+// A move to SQLite cut short, before its copy or after it, is called off
+// with --abort: the MongoDB board takes writes again from every machine,
+// the file takes none, and the move can run again later.
+func TestMigrateAbort(t *testing.T) {
+	m := newMigrateBoard(t)
+	ctx := context.Background()
+	m.stop(t)
+	if code, _, out := m.migrate(m.uri, "--to", "mongodb", "--uri-file", "-"); code != 0 {
+		t.Fatalf("migrate: exit %d %s", code, out)
+	}
+	m.h.ok(nil, "stop", "--all")
+	plain := m.mongo(t, false)
+	mv := m.mongo(t, true)
+	if code, _, out := m.migrate("", "--to", "sqlite", "--abort"); code != 2 || !strings.Contains(out, "no move to sqlite") {
+		t.Fatalf("nothing to call off: exit %d %s", code, out)
+	}
+	if code, _, _ := m.migrate("", "--to", "mongodb", "--abort"); code != 2 {
+		t.Fatalf("--abort with --to mongodb: exit %d", code)
+	}
+	for _, copied := range []bool{false, true} {
+		if err := mv.StartMove(ctx, mongostore.MoveOut); err != nil {
+			t.Fatal(err)
+		}
+		if copied {
+			b, err := mv.Board(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range b.Launches {
+				b.Launches[i].Host = ""
+			}
+			s := m.sqlite(t)
+			if err := s.Move(ctx, func(mo *sqlitestore.Mover) error { return mo.Replace(b) }); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+		}
+		if _, err := plain.List(ctx, ticket.ListFilter{}); err == nil || !strings.Contains(err.Error(), "board moving") {
+			t.Fatalf("mid-move: %v", err)
+		}
+		if !copied {
+			if code, rep, out := m.migrate("", "--to", "sqlite", "--abort"); code != 0 || !rep.Aborted {
+				t.Fatalf("abort: exit %d %s", code, out)
+			}
+		} else if code, out, errs := m.h.run("", "migrate", "--to", "sqlite", "--abort"); code != 0 || !strings.Contains(out, "stop --all --off") {
+			t.Fatalf("abort after the copy: exit %d %s %s", code, out, errs)
+		}
+		if _, err := plain.List(ctx, ticket.ListFilter{}); err != nil {
+			t.Fatalf("MongoDB after the abort: %v", err)
+		}
+		s := m.sqlite(t)
+		gone, err := s.Moved(ctx)
+		s.Close()
+		if !gone || err != nil {
+			t.Fatalf("the file takes writes after the abort (copied %v): %v", copied, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(m.h.dir, uriFile)); err != nil {
+		t.Fatalf("store.uri after the abort: %v", err)
+	}
+	m.h.ok(nil, "list")
+	if code, _, out := m.migrate("", "--to", "sqlite"); code != 0 {
+		t.Fatalf("migrate after the abort: exit %d %s", code, out)
+	}
+}
+
+// A file that moved already holds no board of its own: copying it into a
+// second, empty database would fork the board, so migrate refuses.
+func TestMigrateMovedFileRefusesANewDatabase(t *testing.T) {
+	m := newMigrateBoard(t)
+	m.stop(t)
+	if code, _, out := m.migrate(m.uri, "--to", "mongodb", "--uri-file", "-"); code != 0 {
+		t.Fatalf("migrate: exit %d %s", code, out)
+	}
+	m.h.ok(nil, "store", "--clear")
+	u, _ := url.Parse(m.uri)
+	other := m.db + "_b"
+	u.Path = "/" + other
+	t.Cleanup(func() {
+		c, err := mongo.Connect(options.Client().ApplyURI(m.uri))
+		if err != nil {
+			return
+		}
+		defer c.Disconnect(context.Background())
+		c.Database(other).Drop(context.Background())
+	})
+	code, _, out := m.migrate(u.String(), "--to", "mongodb", "--uri-file", "-")
+	if code != 2 || !strings.Contains(out, "moved to MongoDB already") {
+		t.Fatalf("a second database: exit %d %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(m.h.dir, uriFile)); !os.IsNotExist(err) {
+		t.Fatalf("store.uri written: %v", err)
+	}
+}
