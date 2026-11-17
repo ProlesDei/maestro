@@ -53,10 +53,17 @@ const setupVersion = 1
 // DefaultDatabase holds the board when the URI names no database.
 const DefaultDatabase = "maestro"
 
+// txnBudget is how long a call keeps retrying transactions that lost to
+// another writer before it gives up with ErrBusy. Tests shorten it.
+var txnBudget = 30 * time.Second
+
+// maxBackoff is the longest a lost transaction waits before its next try.
+// Writers take turns, so a burst of them queues for seconds; waits that
+// grow this far keep their failed tries from flooding the server, and no
+// further, so a waiter isn't still asleep long after the board frees.
+const maxBackoff = 2 * time.Second
+
 const (
-	// txnBudget is how long a call keeps retrying transactions that lost
-	// to another writer before it gives up with ErrBusy.
-	txnBudget = 30 * time.Second
 	// txnLimit is each transaction's own deadline: under the server's
 	// transactionLifetimeLimitSeconds, which doctor wants at 10 or less,
 	// so a call that stalls gives up before the server kills it.
@@ -468,13 +475,14 @@ func (s *Store) retryRun(ctx context.Context, run func(ctx context.Context) erro
 		if time.Since(start) > txnBudget {
 			return fmt.Errorf("%w after %d tries in %s; try again later: %v", ticket.ErrBusy, attempt, time.Since(start).Round(time.Millisecond), err)
 		}
-		d := backoff/2 + rand.N(backoff/2+1)
+		// The last wait ends as the budget does, so one more try lands.
+		d := min(backoff/2+rand.N(backoff/2+1), txnBudget-time.Since(start))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(d):
 		}
-		backoff = min(backoff*2, 200*time.Millisecond)
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 

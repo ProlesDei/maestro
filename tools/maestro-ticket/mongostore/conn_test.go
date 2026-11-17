@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -81,5 +82,32 @@ func TestOpenBuildsOnlyABoardNotSetUp(t *testing.T) {
 	}
 }
 
-// keep errors imported for the tests below.
-var _ = errors.Is
+// A transaction that keeps losing to other writers waits longer each try,
+// past 200ms, so a burst of writers doesn't flood the server, and still
+// gives up with ErrBusy once the budget is spent.
+func TestRetryBacksOffTowardTheBudget(t *testing.T) {
+	defer func(b time.Duration) { txnBudget = b }(txnBudget)
+	txnBudget = 4 * time.Second
+	s := &Store{client: &sharedClient{}}
+	lost := mongo.CommandError{Code: 112, Name: "WriteConflict", Labels: []string{"TransientTransactionError"}}
+	var tries []time.Time
+	start := time.Now()
+	err := s.retryRun(context.Background(), func(context.Context) error {
+		tries = append(tries, time.Now())
+		return lost
+	})
+	took := time.Since(start)
+	if !errors.Is(err, ticket.ErrBusy) {
+		t.Fatalf("err = %v; want ErrBusy", err)
+	}
+	var gap time.Duration
+	for i := 1; i < len(tries); i++ {
+		gap = max(gap, tries[i].Sub(tries[i-1]))
+	}
+	if gap < 400*time.Millisecond {
+		t.Errorf("%d tries in %s, the longest wait %s: backoff stopped growing", len(tries), took.Round(time.Millisecond), gap.Round(time.Millisecond))
+	}
+	if took > txnBudget+500*time.Millisecond {
+		t.Errorf("gave up after %s; budget %s", took.Round(time.Millisecond), txnBudget)
+	}
+}
