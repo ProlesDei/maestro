@@ -12,8 +12,7 @@ R-2 failed (exit 1) on T-2 by senior-engineer after D
 error:
     Error: something went wrong
 R-2 build failed on T-2 (in_progress): Error: something went wrong
-mismatch: want in_review with a Handoff:, found in_progress with no note
-send planner: build T-2 stopped in_progress: Error: something went wrong
+do: maestro-ticket job again R-2
 R-3 failed (exit 143) on T-3 by senior-engineer after D, session U-2
 error:
     the launcher was stopped, so it stopped the run
@@ -24,7 +23,7 @@ R-4 timed_out (exit 143) on T-4 by senior-engineer after D
 error:
     the 2h time limit ended it
 R-4 build timed_out on T-4 (in_progress): the 2h time limit ended it
-send planner: timed_out T-4
+do: maestro-ticket job again R-4 --limit 4h
 R-5 died on T-5 by senior-engineer after D
 error: its supervisor went away with no result (the machine restarted, or it was killed)
 error:
@@ -35,7 +34,7 @@ R-6 done (exit 0) by senior-engineer after D, session U-3
 reply:
     hello
 running: R-7 (T-6, D)
-ack each once you have acted on it: maestro-ticket ack R-1 R-2 R-3 R-4 R-6
+ack each once you have acted on it: maestro-ticket ack R-1 R-3 R-6
 $ maestro-ticket pickup --full
 exit 0
 stdout:
@@ -50,8 +49,7 @@ R-2 failed (exit 1) on T-2 by senior-engineer after D
 error:
     Error: something went wrong
 R-2 build failed on T-2 (in_progress): Error: something went wrong
-mismatch: want in_review with a Handoff:, found in_progress with no note
-send planner: build T-2 stopped in_progress: Error: something went wrong
+do: maestro-ticket job again R-2
 R-3 failed (exit 143) on T-3 by senior-engineer after D, session U-2
 error:
     the launcher was stopped, so it stopped the run
@@ -62,7 +60,7 @@ R-4 timed_out (exit 143) on T-4 by senior-engineer after D
 error:
     the 2h time limit ended it
 R-4 build timed_out on T-4 (in_progress): the 2h time limit ended it
-send planner: timed_out T-4
+do: maestro-ticket job again R-4 --limit 4h
 R-5 died on T-5 by senior-engineer after D
 error: its supervisor went away with no result (the machine restarted, or it was killed)
 error:
@@ -73,4 +71,4 @@ R-6 done (exit 0) by senior-engineer after D, session U-3
 reply:
     hello
 running: R-7 (T-6, D)
-ack each once you have acted on it: maestro-ticket ack R-1 R-2 R-3 R-4 R-6
+ack each once you have acted on it: maestro-ticket ack R-1 R-3 R-6

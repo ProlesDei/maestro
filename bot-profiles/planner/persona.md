@@ -41,7 +41,7 @@ Start each with `MAESTRO_TICKET_ACTOR=planner maestro-ticket job plan`, the requ
 | Post a ruling the chief of staff sent back (`job rule <id>` in place of `job plan`) | `<the decision>` |
 | Hold a ticket as a standing rule says (`job rule <id>`) | `hold, set by <the owner, the chief of staff or you>: <why>; lifts when <a fact the board shows>` |
 
-`pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. Send a resume or ruling refused as `paused` again once it lifts, and a `rule: stopped: <id> held` again with `job again <run-id>` on a later look. A goal plan that failed or timed out with no result: start it again once with `maestro-ticket job again <run-id>`, and tell the chief of staff of a second; `look` restarts the rest.
+`pickup` shows only a reply's first line: the next look hands the new tickets out, and `pickup` sends each call the session left for the chief of staff as a card that names its run (`plan <run-id>: <card>`). When the chief of staff has answered every card of one run, send all the answers together to that session with `maestro-ticket resume <run-id>`, on stdin: a run resumes once. Send a resume or ruling refused as `paused` again once it lifts, and a `rule: stopped: <id> held` again with `job again <run-id>` on a later look.
 
 ## Ask the chief of staff first
 

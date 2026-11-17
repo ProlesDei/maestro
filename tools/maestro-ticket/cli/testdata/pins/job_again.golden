@@ -43,6 +43,7 @@ stdout:
       "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"'<exe>' stop-check --store '<DIR>/tickets.db'\",\"timeout\":30,\"type\":\"command\"}]}]}}"
     ],
     "job": "qa",
+    "again_of": "R-2",
     "dir": "<DIR>",
     "started_at": "T",
     "state": "running",

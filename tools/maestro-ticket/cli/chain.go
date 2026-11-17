@@ -40,11 +40,12 @@ const chainBy = "chain"
 // chain runs in a job run's supervisor once the run ended, before the
 // first ring, while the record is settling. It routes the run as pickup
 // would and stores the route, so the ring's body and every pickup show
-// the same lines. For a run that ended done, it starts each fixed handoff
-// itself, as the bot it was for. What is left only tells the planner
-// something goes to the planner; a run that leaves nothing to do is
-// acked, and rings no one. A failure, a limit or a full disk starts
-// nothing: its route stays for the launcher.
+// the same lines. It runs a fixed do: line itself first, as the launcher
+// (a retry, a died run's resume), so no bot wakes to type it. For a run
+// that ended done, it starts each fixed handoff itself, as the bot it was
+// for. What is left only tells the planner something goes to the
+// planner; a run that leaves nothing to do is acked, and rings no one. A
+// run that ended short with nothing routed is never acked here.
 func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if r.Job == "" {
 		return
@@ -62,15 +63,29 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	now := time.Now().UTC().Round(time.Millisecond)
 	var chained []string
 	done, toPlanner := false, false
-	if out, _ := outcomeOf(r); chainJobs[r.Job] && out == outDone {
-		// As pickup would: a job a look handed out lately is on its way.
-		sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
-		left := []send{}
-		for _, sd := range sends {
-			if c.handOn(ctx, dir, notify, r, sd) {
-				chained = append(chained, sd.Bot+": "+sd.Line)
+	if chainJobs[r.Job] {
+		before := rt
+		// First, so a retry runs before anything counts its slot free.
+		keep := []string{}
+		for _, l := range rt.Do {
+			if c.runDo(ctx, dir, notify, r, l) {
+				chained = append(chained, r.Launcher+": "+l)
 			} else {
-				left = append(left, sd)
+				keep = append(keep, l)
+			}
+		}
+		rt.Do = keep
+		left := rt.Send
+		if rt.Outcome == outDone {
+			// As pickup would: a job a look handed out lately is on its way.
+			sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
+			left = []send{}
+			for _, sd := range sends {
+				if c.handOn(ctx, dir, notify, r, sd) {
+					chained = append(chained, sd.Bot+": "+sd.Line)
+				} else {
+					left = append(left, sd)
+				}
 			}
 		}
 		rt.Send = left
@@ -78,7 +93,7 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// leave it what it would have seen.
 		bot := hasHook(notify, r.Launcher)
 		rest := leftForBot(rt)
-		done = bot && len(left) == 0 && !rest
+		done = bot && len(left) == 0 && !rest && ackable(before)
 		toPlanner = bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
 			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
 	}
@@ -98,6 +113,61 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if runs.Save(dir, rec) == nil && done {
 		runs.Ack(dir, r.ID, chainBy, now)
 	}
+}
+
+// ackable reports whether a route, as first made, may be acked once
+// nothing is left of it: a run that ended done, or one whose end routed
+// something. A run that ended short with nothing routed stays for its
+// launcher, never acked unseen.
+func ackable(rt routed) bool {
+	return rt.Outcome == outDone || len(rt.Send)+len(rt.Do) > 0 || rt.Reply != "" || rt.quiet
+}
+
+// doGrammar is every do: line a run's end runs itself: a died run's one
+// resume, a limited one's go-on, and one job again. Nothing else, and
+// never a rules write: the supervisor runs outside any run, as the
+// launcher, so a looser grammar would let a reply set what only a bot
+// outside a run may.
+var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on)|job again (R-[a-z2-7]{8})(?: --limit ([0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
+
+// runDo runs one do: line of r's route as r's launcher would, and reports
+// whether the work goes on: started now, or by another start of the same
+// line. It runs none for a launcher with no webhook, such as a person,
+// who reads its pickup, and none that names another run. A refusal, such
+// as a pause, leaves the line for the launcher.
+func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) bool {
+	m := doGrammar.FindStringSubmatch(line)
+	if m == nil || !hasHook(notify, r.Launcher) {
+		return false
+	}
+	cc := *c
+	cc.actor, cc.runCache = r.Launcher, nil
+	var err error
+	switch {
+	case m[1] != "":
+		if m[1] != r.ID {
+			return false
+		}
+		_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on"})
+	default:
+		if m[3] != r.ID {
+			return false
+		}
+		var lim time.Duration
+		if m[4] != "" {
+			if lim, err = time.ParseDuration(m[4]); err != nil {
+				return false
+			}
+		}
+		_, err = cc.again(ctx, againOpts{run: m[3], limit: lim})
+	}
+	var a alreadyGoing
+	if errors.As(err, &a) {
+		// Only a start that exists carries the work on.
+		_, gerr := runs.Get(dir, a.run, time.Now())
+		return gerr == nil
+	}
+	return err == nil
 }
 
 // leftForBot reports whether a route holds more than sends for a bot to

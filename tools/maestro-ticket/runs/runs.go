@@ -79,6 +79,9 @@ type Record struct {
 	// the one resume a session gets after its run died.
 	ResumeOf   string `json:"resume_of,omitempty"`
 	AfterDeath bool   `json:"after_death,omitempty"`
+	// AgainOf is the run this one started afresh (job again): a run goes
+	// again once, so a run that already did goes up when it stops.
+	AgainOf string `json:"again_of,omitempty"`
 	// Nudge is the fixed resume a run began with (opus, escalate,
 	// decide): each comes once per session, so a session that asks again
 	// goes up instead of round and round.
@@ -95,7 +98,8 @@ type Record struct {
 	Error     string     `json:"error,omitempty"`
 	// Frozen marks a time limit that ended a run only because the machine
 	// was frozen: by the monotonic clock it had time left. Pickup counts
-	// it as no repeat timeout, so one freeze escalates nothing.
+	// it as no repeat timeout, so one freeze escalates nothing; it reruns
+	// it at its limit twice at most per head.
 	Frozen    bool   `json:"frozen,omitempty"`
 	Rings     int    `json:"rings,omitempty"`
 	RingError string `json:"ring_error,omitempty"`
@@ -165,6 +169,10 @@ const (
 	CauseAsked    = "asked"    // maestro-ticket stop
 	CauseLauncher = "launcher" // the launcher was stopped
 )
+
+// LauncherStopped opens the error of a run its supervisor stopped because
+// the launcher was stopped: a stop on purpose, which pickup never retries.
+const LauncherStopped = "the launcher was stopped"
 
 // Owner is the bot whose pickup shows the run once it ends, who acks it
 // and whose webhook rings for it: its launcher, unless its end named
@@ -518,7 +526,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}

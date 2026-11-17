@@ -37,6 +37,7 @@ case $in in
 		mt transition T-1 --to in_progress
 	fi ;;
 "/maestro-qa-lead T-1"*) mt transition T-1 --to done --actor-role qa-lead ;;
+"/maestro-qa-lead T-3"*) mt transition T-3 --to done --actor-role qa-lead ;;
 esac
 sleep 1 # as long as job takes to record its run, which a real run outlasts
 printf '{"type":"result","subtype":"success","is_error":false,"result":"job: done: %s","session_id":"s","total_cost_usd":0.01,"usage":{},"modelUsage":{}}\n' "$MAESTRO_RUN_ID"

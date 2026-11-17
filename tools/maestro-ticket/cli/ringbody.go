@@ -35,13 +35,21 @@ var (
 		`usage_limit(?: ` + tid + `)?(?: resets (?:` + rfc + `|[0-9]{1,2}(?::[0-9]{2})? ?[ap]m))?`,
 		`block ` + tid + `: (?:review ran past ` + limitD + `|QA ran past ` + limitD + ` twice)`,
 	}, "|") + `)$`)
+	// bodyFault are the fault lines a send to the chief of staff may carry:
+	// a run that keeps failing, never a card.
+	bodyFault = regexp.MustCompile(`^(?:` + strings.Join([]string{
+		`(?:failed twice|failed|refused) (?:plan|rule|finish) ` + rid + `(?: ` + tid + `| goal [a-z0-9][a-z0-9-]{0,59})?`,
+		`[a-z][a-z-]{0,11} (?:failed|timed_out|refused|question) ` + rid + `(?: ` + tid + `)?: nothing routed`,
+	}, "|") + `)$`)
 	// bodyWrote are the writes a route reports, after "wrote: ".
 	bodyWrote = regexp.MustCompile(`^(?:` + strings.Join([]string{
 		`paused every job until ` + rfc,
-		`released ` + tid + ` (?:till the limit lifts|for the planner)`,
+		`released ` + tid + ` (?:till the limit lifts|for the planner|for the retry)`,
+		tid + ` moved on`,
+		tid + ` sent up: (?:failed twice|failed|refused)`,
 		tid + ` sent up: design ready`,
 		tid + ` waits on the card, sent up`,
-		tid + ` blocked: its builds stopped 3 times`,
+		tid + ` blocked: its builds (?:stopped 3 times|timed out or failed twice)`,
 		tid + ` blocked: its [a-z]{1,12} ended 3 times with no verdict`,
 		tid + ` blocked: QA ran past ` + limitD + ` twice`,
 		tid + ` blocked: Escalation: review at [0-9a-f]{7,40}: ran past ` + limitD,
@@ -91,7 +99,8 @@ func routeLines(rt routed) []string {
 // may carry the run at all. It leaves out the head line and the mismatch
 // detail, which only inform: what to do rides on the sends. A reply, or
 // any line of a shape not listed, holds the whole run for pickup. An owner
-// card never rides: every line to the chief of staff is held.
+// card never rides: a line to the chief of staff rides only as a fixed
+// fault line.
 func bodyLines(rt routed) ([]string, bool) {
 	if rt.Reply != "" {
 		return nil, false
@@ -110,7 +119,12 @@ func bodyLines(rt routed) ([]string, bool) {
 		lines = append(lines, "do: "+x)
 	}
 	for _, x := range rt.Send {
-		if !runs.BotPattern.MatchString(x.Bot) || x.Bot == "chief-of-staff" || !bodySend.MatchString(x.Line) {
+		switch {
+		case x.Bot == "chief-of-staff":
+			if !bodyFault.MatchString(x.Line) {
+				return nil, false
+			}
+		case !runs.BotPattern.MatchString(x.Bot) || !bodySend.MatchString(x.Line):
 			return nil, false
 		}
 		lines = append(lines, x.String())

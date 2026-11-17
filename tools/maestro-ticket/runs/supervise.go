@@ -340,7 +340,7 @@ wait:
 	case why == CauseAsked:
 		r.State, r.Error, end.Cause = Failed, "stopped by "+stopper, why
 	case why != "":
-		r.State, r.Error, end.Cause = Failed, "the launcher was stopped, so it stopped the run", why
+		r.State, r.Error, end.Cause = Failed, LauncherStopped+", so it stopped the run", why
 	case code == 0:
 		r.State = Done
 	default:
