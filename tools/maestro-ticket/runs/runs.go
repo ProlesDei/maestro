@@ -55,8 +55,12 @@ const (
 )
 
 // startGrace is how long a record may stay starting before a reader that
-// finds no supervisor calls it died.
-const startGrace = 30 * time.Second
+// finds no supervisor calls it died. It runs from before the record's
+// first write, through the supervisor's exec, to its lock: on a box busy
+// with hundreds of runs that can take far longer than usual, and a run
+// adopted as died before its supervisor locks never runs. A start that
+// truly died holds its slot this long.
+const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
