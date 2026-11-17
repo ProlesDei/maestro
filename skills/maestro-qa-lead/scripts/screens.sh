@@ -20,13 +20,13 @@
 #     Animations API, timers and requestAnimationFrame all keep that
 #     clock. With #<cue>, the page first settles, so what load starts
 #     (timers, animations, what their endings start) runs its course;
-#     then it calls the page's window.motion("<cue>") at 0ms. A run
-#     first deletes every *-motion.png and *-strip.png in <dir>, so the
-#     folder holds this run's clips only: clip every motion in one run.
-#     Writes <name>[-<cue>]-<width>-motion.png, an animated PNG that
-#     loops, and <name>[-<cue>]-<width>-strip.png, up to eight of its
-#     frames in a grid, each labelled with its ms. Prints run=, then
-#     clip= and strip= per pair; still=<name>[-<cue>]-<width> for each
+#     then it calls the page's window.motion("<cue>") at 0ms. Writes
+#     <name>[+<cue>]-<width>-motion.png, an animated PNG that loops, and
+#     <name>[+<cue>]-<width>-strip.png, up to eight of its frames in a
+#     grid, each labelled with its ms. A run first deletes every clip
+#     and strip in <dir> of each page it clips, so clip every cue of a
+#     page in one run; other pages' clips stay. Prints run=, then
+#     clip= and strip= per pair; still=<name>[+<cue>]-<width> for each
 #     clip where nothing moved, which writes no file; and cut=<same> for
 #     each clip still moving on its last frame; then ok=1. If nothing
 #     moved in any clip, it fails.
@@ -83,6 +83,7 @@ fi
 # Under --motion, a #<cue> after a page names the motion to play.
 pdir=
 names=()
+pnames=()
 urls=()
 cues=()
 seen=" "
@@ -105,8 +106,12 @@ for p in "${pages[@]}"; do
 		n=${b%.*}
 		urls+=("@/p/$b")
 	fi
-	n=$(printf '%s' "$n${cue:+-$cue}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')
+	n=$(printf '%s' "$n" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')
 	case $n in sheet-*) n=page-$n ;; esac
+	pnames+=("$n")
+	# A + (never in a page's name) sets the cue apart, so a-cart, a page,
+	# and a+cart, a's cue, never share a clip name.
+	[ -z "$cue" ] || n=$n+$cue
 	case $seen in *" $n "*) die 2 "two pages would share the name $n" ;; esac
 	seen="$seen$n "
 	names+=("$n")
@@ -163,9 +168,9 @@ schemes=light
 IFS=, read -r -a ws <<<"$widths"
 
 # One entry per shot, made from "url|path|width|scheme" lines; the
-# browser shoots them all in one call. Animations run to their end
-# first, so a shot never catches one part way; one that loops stays
-# where it is.
+# browser shoots them all in one call. Running animations run to their
+# end first, so a shot never catches one part way; one that loops stays
+# where it is, and one the page paused (a bar held at 30%) stays paused.
 mkjobs() { # <file>
 	jq -R -s 'split("\n") | map(select(length > 0) | split("|") | {url: .[0], path: .[1], width: (.[2] | tonumber), scheme: .[3]})' >"$1"
 }
@@ -175,7 +180,12 @@ cat >"$tmp/shoot.tail" <<'EOF'
     await page.emulateMedia({ colorScheme: j.scheme });
     await page.setViewportSize({ width: j.width, height: 900 });
     await page.goto(j.url, { waitUntil: "load", timeout: 30000 });
-    await page.evaluate(() => { for (const a of document.getAnimations()) try { a.finish(); } catch {} });
+    await page.evaluate(() => {
+      for (const a of document.getAnimations()) {
+        if (a.playState !== "running") continue;
+        try { a.finish(); } catch {}
+      }
+    });
     await page.screenshot({ path: j.path, fullPage: true });
   }
   return "shot " + jobs.length;
@@ -197,7 +207,9 @@ EOF
 cat >"$tmp/motion.tail" <<'EOF'
 ;
   for (const j of jobs) {
-    const ctx = await page.context().browser().newContext();
+    const browser = page.context().browser();
+    if (!browser) throw new Error("--motion needs a browser of its own, not a persistent profile");
+    const ctx = await browser.newContext();
     try {
       const p = await ctx.newPage();
       await p.clock.install({ time: 0 });
@@ -302,9 +314,17 @@ url_of() { # <index>
 
 if [ -n "$motion" ]; then
 	step=40
-	# Clips of an earlier run (a cue since renamed, a width since dropped)
-	# would reach the owner as current: this run's clips replace them all.
-	rm -f "$out"/*-motion.png "$out"/*-strip.png
+	# Clips an earlier run made of these pages (a cue since renamed, a
+	# width since dropped) would reach the owner as current: this run's
+	# replace them. Other pages' clips stay. A name is <page>[+<cue>]-<w>.
+	for f in "$out"/*-motion.png "$out"/*-strip.png; do
+		[ -e "$f" ] || continue
+		s=${f##*/}
+		s=${s%-*}
+		s=${s%-*}
+		s=${s%%+*}
+		for pn in "${pnames[@]}"; do [ "$s" != "$pn" ] || rm -f "$f"; done
+	done
 	# Frames: one folder per clip, under /f/; then one call shoots them all.
 	for i in "${!names[@]}"; do
 		for w in "${ws[@]}"; do

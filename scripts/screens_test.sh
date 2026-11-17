@@ -164,14 +164,14 @@ has "ok=1"
 count clip 4
 count strip 4
 count shot 0
-for c in a-375 a-1280 a-open-375 a-open-1280; do
+for c in a-375 a-1280 a+open-375 a+open-1280; do
 	has "clip=$tmp/m/$c-motion.png"
 	has "strip=$tmp/m/$c-strip.png"
 	[ -s "$tmp/m/$c-strip.png" ] || fail "no strip $c"
 done
 grep -qxF "clip http://127.0.0.1:PORT/p/a.html 375 # 6x40" "$LOG" || fail "no clip from load at 375: $(grep ^clip "$LOG")"
 grep -qxF "clip http://127.0.0.1:PORT/p/a.html 1280 #open 6x40" "$LOG" || fail "the cue didn't reach the browser: $(grep ^clip "$LOG")"
-grep -qxF "job http://127.0.0.1:PORT/f/a-open-1280.html 1600 light" "$LOG" || fail "no strip shot from /f/"
+grep -qxF "job http://127.0.0.1:PORT/f/a+open-1280.html 1600 light" "$LOG" || fail "no strip shot from /f/"
 # Frames 0, 1 and 2 differ and 3 to 5 repeat 2: three frames, looping,
 # the first held 600ms longer, the last 1200ms plus the repeats.
 "$node" -e '
@@ -183,18 +183,19 @@ for (let i = 8; i < b.length;) {
   i += 12 + n;
 }
 const want = "frames=3 plays=0 640/1000 40/1000 1360/1000";
-if (got.join(" ") !== want) { console.error("clip chunks: " + got.join(" ")); process.exit(1); }' "$tmp/m/a-open-1280-motion.png" || fail "the clip isn't the looping APNG wanted"
+if (got.join(" ") !== want) { console.error("clip chunks: " + got.join(" ")); process.exit(1); }' "$tmp/m/a+open-1280-motion.png" || fail "the clip isn't the looping APNG wanted"
 grep -q "^t-mo close " "$LOG" || fail "the browser wasn't closed after clips"
 
-# A run first clears every clip and strip an earlier run left (a cue
-# since renamed, a page now still), but no other file. A page where
+# A run first clears every clip and strip an earlier run left of the
+# pages it clips (a cue since renamed, a page now still), but not
+# another page's (a-cart, other) and no shot or sheet. A page where
 # nothing moves gets a still= line and no files, and the run goes on; a
 # page still moving on its last frame gets a cut= line. If nothing moves
 # anywhere, it fails, naming each.
 echo '<h1>still</h1>' >"$tmp/pages/still.html"
 echo '<h1>moving</h1>' >"$tmp/pages/moving.html"
 mkdir -p "$tmp/m2"
-for f in still-375-motion still-375-strip a-gone-1280-motion a-gone-1280-strip a-375 sheet-375; do echo old >"$tmp/m2/$f.png"; done
+for f in still-375-motion still-375-strip a+gone-1280-motion a+gone-1280-strip a-cart-375-motion other-375-motion a-375 sheet-375; do echo old >"$tmp/m2/$f.png"; done
 run --motion --out "$tmp/m2" --widths 375 --ms 200 "$tmp/pages/a.html" "$tmp/pages/still.html" "$tmp/pages/moving.html" || fail "one still clip failed the run"
 has "clip=$tmp/m2/a-375-motion.png"
 has "clip=$tmp/m2/moving-375-motion.png"
@@ -202,8 +203,9 @@ has "still=still-375"
 has "cut=moving-375"
 ! grep -q "^cut=a-375" "$tmp/out" || fail "a clip that settled was called cut"
 has "ok=1"
-! ls "$tmp/m2"/still-* "$tmp/m2"/a-gone-* >/dev/null 2>&1 || fail "an old clip or strip was left"
+! ls "$tmp/m2"/still-* "$tmp/m2"/a+gone-* >/dev/null 2>&1 || fail "an old clip or strip was left"
 [ -s "$tmp/m2/a-375.png" ] && [ -s "$tmp/m2/sheet-375.png" ] || fail "the clear took a shot or sheet"
+[ -s "$tmp/m2/a-cart-375-motion.png" ] && [ -s "$tmp/m2/other-375-motion.png" ] || fail "the clear took another page's clip"
 if run --motion --out "$tmp/m3" --widths 375,1280 --ms 200 "$tmp/pages/still.html"; then fail "passed when nothing moved"; else rc=$?; [ $rc = 1 ] || fail "exit $rc when nothing moved"; fi
 grep -q "nothing moved in still-1280,still-375" "$tmp/out" || fail "no word on the still clips"
 

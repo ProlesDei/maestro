@@ -7,15 +7,16 @@
 #     Checks the spec (spec.md in the run folder) has every field, two or
 #     more directions, a pick among them, numbered criteria that each
 #     name a width in px, and, unless its Motion: is just none, a
-#     clip of the pick (<pick>-*-motion.png, from screens.sh --motion);
+#     clip of the pick (<pick>[+<cue>]-<width>-motion.png, from
+#     screens.sh --motion);
 #     on a gap it prints problem= lines, exit 2, and writes nothing.
 #     With Motion: none, no clip goes up.
 #     Checks the ticket is a "Design:" scout ticket in in_progress under
 #     this holder's claim; else stop=<why>, exit 3.
 #     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
 #     (<pick>-*.png, the pick's letter in lowercase) and every clip
-#     of a direction (<letter>-*-motion.png, the pick's first), but no
-#     strip (*-strip.png), to
+#     of a direction (<letter>[-+]*-motion.png, the pick's first), but
+#     no strip (*-strip.png), to
 #     .maestro/design/<T-n>/ on branch maestro/<T-n>, pushed with
 #     [skip ci]; opens a draft PR for it, or updates the open one; posts
 #     "Design spec:" and then "Escalation: design ready: PR <url>: owner's
@@ -88,11 +89,13 @@ if [ -n "$pick" ]; then
 	for f in "$dir/$lp"-*.png; do
 		case $f in *-motion.png | *-strip.png) ;; *) stills+=("$f") ;; esac
 	done
-	clips=("$dir/$lp"-*-motion.png)
+	# A clip is <page>[+<cue>]-<width>-motion.png, and a direction's
+	# pages are <letter>.html or <letter>-<place>.html.
+	clips=("$dir/$lp"[-+]*-motion.png)
 	n_pick=${#clips[@]}
 	for f in "$dir"/*-motion.png; do
 		b=${f##*/}
-		[ "${b:1:1}" = - ] && [ "${b:0:1}" != "$lp" ] && grep -qx "${b:0:1}" <<<"${dirs,,}" && clips+=("$f")
+		[[ ${b:1:1} == [-+] ]] && [ "${b:0:1}" != "$lp" ] && grep -qx "${b:0:1}" <<<"${dirs,,}" && clips+=("$f")
 	done
 	shopt -u nullglob
 	[ ${#stills[@]} -gt 0 ] || probs+=("no $lp-*.png shots of the pick in the run folder")
@@ -102,7 +105,7 @@ if [ -n "$pick" ]; then
 		# show the owner motion the design dropped.
 		clips=()
 	elif [ "$n_pick" = 0 ]; then
-		probs+=("Motion: no $lp-*-motion.png clip of the pick in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
+		probs+=("Motion: no clip of the pick (${lp}[+<cue>]-<width>-motion.png) in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
 	fi
 fi
 if [ ${#probs[@]} -gt 0 ]; then
