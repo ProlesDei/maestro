@@ -138,9 +138,9 @@ stderr:
 maestro-ticket: resume: send the answer on stdin, in a quoted heredoc
 $ maestro-ticket resume R-5
 stdin: "go on"
-exit 4
-stderr:
-maestro-ticket: status conflict: resume: T-1 is in_review now: run R-5's session has nothing left to do there: maestro-ticket ack R-5
+exit 0
+stdout:
+resume: T-1 is in_review now: run R-5's session has nothing left to do there: acked R-5
 $ maestro-ticket job build T-9
 exit 2
 stderr:
@@ -465,13 +465,11 @@ stdout:
 }
 $ maestro-ticket resume R-5 --json
 stdin: "go on"
-exit 4
+exit 0
 stdout:
 {
-  "error": {
-    "code": "status_conflict",
-    "message": "status conflict: resume: T-1 is in_review now: run R-5's session has nothing left to do there: maestro-ticket ack R-5"
-  }
+  "acked": "R-5",
+  "moved_on": "resume: T-1 is in_review now: run R-5's session has nothing left to do there"
 }
 $ maestro-ticket job build T-9 --json
 exit 2

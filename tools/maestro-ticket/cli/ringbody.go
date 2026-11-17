@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 )
 
 // A ring's body is the routine's own input, a stronger place for a planted
@@ -136,7 +137,9 @@ func bodyLines(rt routed) ([]string, bool) {
 // left to it that it hasn't acked, in pickup's order and with pickup's
 // rules (a send a look made lately left out, a usage limit's runs waiting
 // as one line while the pause holds, a run with a do: line left out of
-// ack, since the command acks it). It returns the runs the body covers:
+// ack, since the command acks it), but for one: while STOP or a pause
+// holds, a run with a do: line is left out, so no ring wakes a bot only to
+// be refused. It returns the runs the body covers:
 // those whose lines ride, those it holds for pickup and those waiting;
 // one only counted in More is not covered.
 func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
@@ -148,13 +151,19 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 	}
 	handouts := filepath.Join(filepath.Dir(dir), "handouts")
 	pause, paused := readPause(filepath.Dir(dir), now)
+	_, held := startsHeld(dir, now)
 	var listed, ack, waiting []string
-	held, size := false, 0
+	cards, size := false, 0
 	for _, r := range list {
 		var rt routed
 		ok := r.Job != "" && len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil
 		if ok && paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
 			waiting = append(waiting, r.ID)
+			continue
+		}
+		if ok && held && doWaits(rt) {
+			// Nothing to say till it lifts: no line, and not covered,
+			// so a ring after the lift, or the orphan sweep's, carries it.
 			continue
 		}
 		if len(n.Runs) == runs.MaxRingRuns || size >= maxBodyLines {
@@ -180,7 +189,7 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 		if !ok {
 			// Whole in pickup: not acked here, and counted in More so the
 			// bot reads it there.
-			held = true
+			cards = true
 			n.More++
 			continue
 		}
@@ -194,7 +203,7 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 		n.Lines = append(n.Lines, waitingLine(len(waiting), pause.Until))
 		listed = append(listed, waiting...)
 	}
-	if held {
+	if cards {
 		n.Lines = append(n.Lines, cardWaiting)
 	}
 	if len(ack) > 0 {
@@ -202,6 +211,31 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 	}
 	n.Text = fmt.Sprintf("Maestro: %d results for %s. Do each line, then run ack.", len(list), bot)
 	return n, listed
+}
+
+// startsHeld says why no run may start now, as mayStart refuses: STOP is
+// set, or a pause holds. dir is the runs folder beside the store.
+func startsHeld(dir string, now time.Time) (string, bool) {
+	if fileExists(filepath.Join(filepath.Dir(dir), sqlitestore.StopFile)) {
+		return "maestro/STOP is set", true
+	}
+	if p, ok := readPause(filepath.Dir(dir), now); ok {
+		return "jobs are paused until " + p.Until.Format(time.RFC3339), true
+	}
+	return "", false
+}
+
+// doWaits reports whether a run waits while starts are held: it has a do:
+// line, which would only be refused, so neither pickup nor a ring shows
+// its lines, nor does ack count it as more. The run that set the pause shows
+// whole, so its bot tells the planner.
+func doWaits(rt routed) bool {
+	return len(rt.Do) > 0 && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") })
+}
+
+// heldLine is pickup's one line for the runs doWaits holds.
+func heldLine(n int, why string) string {
+	return fmt.Sprintf("%d runs wait to go on while %s: nothing to do till then", n, why)
 }
 
 // waitingLine is pickup's one line for the runs a usage limit holds.

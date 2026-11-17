@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 )
 
 // storedRun writes an ended job run of bot whose end stored rt.
@@ -266,6 +267,62 @@ func TestAckPrintsMore(t *testing.T) {
 	h.ok(&res, "ack", c.ID)
 	if res.More != 0 {
 		t.Fatalf("more after the last: %d", res.More)
+	}
+}
+
+// While STOP or a pause holds, a run with a do: line waits: pickup shows
+// one line for all, a ring leaves them out, ack counts none of them, and
+// nothing says run pickup, so no bot reruns a refused command in a loop.
+// Once it lifts, pickup shows them again.
+func TestDoWaitsWhileHeld(t *testing.T) {
+	h := newRouteHarness(t)
+	dir := filepath.Join(h.dir, "runs")
+	h.env["MAESTRO_TICKET_ACTOR"] = "senior-engineer"
+	for range 25 {
+		storedRun(t, dir, "senior-engineer", &routed{Outcome: outTimedOut, Do: []string{"maestro-ticket job again R-abcdefgh"}})
+	}
+	plain := storedRun(t, dir, "senior-engineer", &routed{Outcome: outDone, Send: []send{{"planner", "slot free T-1"}}})
+	for _, hold := range []func() func(){
+		func() func() {
+			p := filepath.Join(h.dir, sqlitestore.StopFile)
+			os.WriteFile(p, nil, 0o644)
+			return func() { os.Remove(p) }
+		},
+		func() func() {
+			setPause(h.dir, pause{Until: time.Now().Add(time.Hour), Why: "API outage"}, time.Now())
+			return func() { os.Remove(pausePath(h.dir)) }
+		},
+	} {
+		lift := hold()
+		_, out, _ := h.run("", "pickup")
+		if !strings.Contains(out, "25 runs wait to go on while ") || strings.Contains(out, "run pickup") || strings.Contains(out, "do: ") ||
+			!strings.HasSuffix(out, "maestro-ticket ack "+plain.ID+"\n") {
+			t.Fatalf("pickup while held: %s", out)
+		}
+		n, covered := ringDigest(dir, "senior-engineer", time.Now())
+		if n.More != 0 || !slices.Equal(n.Lines, []string{"send planner: slot free T-1"}) ||
+			n.Ack != "MAESTRO_TICKET_ACTOR=senior-engineer maestro-ticket ack "+plain.ID || !slices.Equal(covered, []string{plain.ID}) {
+			t.Fatalf("ring while held: %+v", n)
+		}
+		// As the bot's ack of the plain run counts what is left.
+		cc := *h.c
+		cc.actor, cc.args = "senior-engineer", []string{plain.ID}
+		if m := cc.moreUnacked(dir, time.Now()); m != 0 {
+			t.Fatalf("ack counts %d more while held", m)
+		}
+		lift()
+	}
+	// With only those left, a ring has nothing to say, so none wakes the bot.
+	stop := filepath.Join(h.dir, sqlitestore.StopFile)
+	os.WriteFile(stop, nil, 0o644)
+	runs.Ack(dir, plain.ID, "senior-engineer", time.Now())
+	if n, covered := ringDigest(dir, "senior-engineer", time.Now()); len(n.Runs)+len(n.Lines)+n.More+len(covered) != 0 {
+		t.Fatalf("ring of held runs only: %+v", n)
+	}
+	os.Remove(stop)
+	_, out, _ := h.run("", "pickup")
+	if strings.Contains(out, "wait to go on") || strings.Count(out, "do: maestro-ticket job again") != 20 || !strings.Contains(out, "and 5 more ended") {
+		t.Fatalf("pickup once lifted: %s", out)
 	}
 }
 

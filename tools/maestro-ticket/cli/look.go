@@ -413,7 +413,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			// Until the limit is a --stall past lifting: a ring lost to a
 			// reboot must not hold it for good.
 			limited := r.Ended() && r.Job != "" && func() bool {
-				out, reset := outcomeOf(r)
+				out, reset := routeOutcome(r)
 				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
 			}()
 			if (!r.Ended() || fresh || limited) && r.Ticket != "" {

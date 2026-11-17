@@ -202,6 +202,7 @@ stdout:
       "host": "<host>"
     }
   ],
+  "held": [],
   "routes": [
     {
       "run": "R-1",
@@ -516,6 +517,7 @@ stdout:
       "host": "<host>"
     }
   ],
+  "held": [],
   "routes": [
     {
       "run": "R-1",

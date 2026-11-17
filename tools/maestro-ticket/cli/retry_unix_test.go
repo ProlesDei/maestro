@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -212,6 +214,64 @@ func TestDiedResumeRace(t *testing.T) {
 	j.waitEnded(got[0].ID, 20*time.Second)
 }
 
+// A retry or resume whose ticket moved on is refused for good: the bot's
+// command acks the run, so neither ack nor pickup asks for it again, and
+// a run's end drops the line rather than leave it to the bot.
+func TestDoMovedOnAcks(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.hook("senior-engineer")
+	dir := filepath.Join(h.dir, "runs")
+	notify := filepath.Join(h.dir, "notify")
+	ended := func(state, do string) runs.Record {
+		r, err := runs.Create(dir, runs.Record{Launcher: "senior-engineer", Limit: "1h", Job: "build", Ticket: "T-1",
+			Command: []string{"claude", "-p", "--session-id", "S1"}}, []byte("/maestro-software-engineer T-1\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		r.State, r.StartedAt, r.EndedAt = state, now.Add(-time.Minute), &now
+		r.Routed, _ = json.Marshal(routed{Run: r.ID, Job: "build", Ticket: "T-1", Outcome: state, Send: []send{}, Do: []string{do + r.ID}})
+		if err := runs.Save(dir, r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	h.env["MAESTRO_TICKET_ACTOR"] = "senior-engineer"
+	again := ended(runs.TimedOut, "maestro-ticket job again ")
+	died := ended(runs.Died, "maestro-ticket resume ")
+	for _, c := range []struct {
+		r    runs.Record
+		args []string
+	}{
+		{again, []string{"job", "again", again.ID}},
+		{died, []string{"resume", died.ID, "--died"}},
+	} {
+		code, out, errs := h.run("", c.args...)
+		if code != 0 || !strings.Contains(out, "T-1 is in_review") || !strings.HasSuffix(out, ": acked "+c.r.ID+"\n") || !runs.Acked(dir, c.r.ID) {
+			t.Fatalf("%v: %d %q %q", c.args, code, out, errs)
+		}
+	}
+	if len(againsOf(t, dir, again.ID)) != 0 {
+		t.Fatal("a retry started on a ticket that moved on")
+	}
+	if _, out, _ := h.run("", "pickup"); out != "no run of yours ended or running\n" {
+		t.Fatalf("pickup: %q", out)
+	}
+	// In a run's end, the line goes for good.
+	r := ended(runs.TimedOut, "maestro-ticket job again ")
+	if on, gone := h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID); on || !gone {
+		t.Fatalf("end's do: on %v, gone %v", on, gone)
+	}
+	// A refusal that may lift, such as STOP, leaves it.
+	h.move("T-1", "in_progress")
+	os.WriteFile(filepath.Join(h.dir, sqlitestore.StopFile), nil, 0o644)
+	if on, gone := h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID); on || gone {
+		t.Fatalf("under STOP: on %v, gone %v", on, gone)
+	}
+}
+
 // runDo runs only the fixed grammar, for this run, for a launcher with a
 // webhook, and keeps the line on a refusal or a start under way.
 func TestRunDoGrammar(t *testing.T) {
@@ -231,25 +291,25 @@ func TestRunDoGrammar(t *testing.T) {
 		"maestro-ticket job again " + r.ID + " --limit 4h --model sonnet",
 		"maestro-ticket job build T-1",
 	} {
-		if h.c.runDo(context.Background(), dir, notify, r, line) {
+		if on, _ := h.c.runDo(context.Background(), dir, notify, r, line); on {
 			t.Errorf("ran %q", line)
 		}
 	}
 	// A launcher with no webhook reads its pickup.
 	o := h.saveRun(runs.Record{Launcher: "senior-engineer", Job: "plan", State: runs.Failed, IsError: true})
-	if h.c.runDo(context.Background(), dir, notify, o, "maestro-ticket job again "+o.ID) {
+	if on, _ := h.c.runDo(context.Background(), dir, notify, o, "maestro-ticket job again "+o.ID); on {
 		t.Error("ran for a launcher with no webhook")
 	}
 	// Another start of the same again under way: the line stays.
 	os.WriteFile(filepath.Join(dir, r.ID+".again"), nil, 0o644)
-	if h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID) {
+	if on, _ := h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID); on {
 		t.Error("ran beside a start under way")
 	}
 	os.Remove(filepath.Join(dir, r.ID+".again"))
 	// Under a pause, the line stays for the launcher, which runs it once
 	// the pause lifts.
 	setPause(h.dir, pause{Until: time.Now().Add(time.Hour), Why: "usage limit"}, time.Now())
-	if h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID) {
+	if on, _ := h.c.runDo(context.Background(), dir, notify, r, "maestro-ticket job again "+r.ID); on {
 		t.Error("ran under a pause")
 	}
 	if n := len(againsOf(t, dir, r.ID)); n != 0 {

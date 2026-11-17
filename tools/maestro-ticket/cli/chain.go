@@ -68,9 +68,10 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// First, so a retry runs before anything counts its slot free.
 		keep := []string{}
 		for _, l := range rt.Do {
-			if c.runDo(ctx, dir, notify, r, l) {
+			switch on, gone := c.runDo(ctx, dir, notify, r, l); {
+			case on:
 				chained = append(chained, r.Launcher+": "+l)
-			} else {
+			case !gone:
 				keep = append(keep, l)
 			}
 		}
@@ -132,13 +133,14 @@ var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --
 
 // runDo runs one do: line of r's route as r's launcher would, and reports
 // whether the work goes on: started now, or by another start of the same
-// line. It runs none for a launcher with no webhook, such as a person,
-// who reads its pickup, and none that names another run. A refusal, such
-// as a pause, leaves the line for the launcher.
-func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) bool {
+// line; and whether the line is gone for good, its ticket moved on. It
+// runs none for a launcher with no webhook, such as a person, who reads
+// its pickup, and none that names another run. Any other refusal, such as
+// a pause, leaves the line for the launcher.
+func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) (on, gone bool) {
 	m := doGrammar.FindStringSubmatch(line)
 	if m == nil || !hasHook(notify, r.Launcher) {
-		return false
+		return false, false
 	}
 	cc := *c
 	cc.actor, cc.runCache = r.Launcher, nil
@@ -146,17 +148,17 @@ func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, lin
 	switch {
 	case m[1] != "":
 		if m[1] != r.ID {
-			return false
+			return false, false
 		}
 		_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on"})
 	default:
 		if m[3] != r.ID {
-			return false
+			return false, false
 		}
 		var lim time.Duration
 		if m[4] != "" {
 			if lim, err = time.ParseDuration(m[4]); err != nil {
-				return false
+				return false, false
 			}
 		}
 		_, err = cc.again(ctx, againOpts{run: m[3], limit: lim})
@@ -165,9 +167,9 @@ func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, lin
 	if errors.As(err, &a) {
 		// Only a start that exists carries the work on.
 		_, gerr := runs.Get(dir, a.run, time.Now())
-		return gerr == nil
+		return gerr == nil, false
 	}
-	return err == nil
+	return err == nil, errors.As(err, new(movedOn))
 }
 
 // leftForBot reports whether a route holds more than sends for a bot to

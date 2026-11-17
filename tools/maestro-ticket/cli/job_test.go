@@ -531,24 +531,28 @@ func TestJobHonoursOlderRuns(t *testing.T) {
 	}
 }
 
-// A session isn't resumed on a ticket that moved on; a run with a do:
-// line is left off pickup's ack line, its command acks it.
+// A session isn't resumed on a ticket that moved on, and the refusal acks
+// its run; a run with a do: line is left off pickup's ack line, its
+// command acks it.
 func TestResumeFitsAndAckLine(t *testing.T) {
 	j := newJobHarness(t, "senior-engineer")
 	j.h.ok(nil, "create", "--title", "a")
+	j.h.ok(nil, "create", "--title", "b")
 	_, r := j.job("", "build", "T-1")
+	_, r2 := j.job("", "build", "T-2")
 	for _, st := range []string{"in_progress", "in_review"} {
 		j.h.ok(nil, "transition", "T-1", "--to", st)
 	}
-	if o := j.fails(4, "go on\n", "resume", r.ID); !strings.Contains(o, "is in_review now") || !strings.Contains(o, "maestro-ticket ack "+r.ID) {
-		t.Fatalf("resume on a ticket in review: %s", o)
-	}
 	dir := filepath.Join(j.h.dir, "runs")
-	dead := r
+	if o, err := j.cmd("go on\n", "resume", r.ID).CombinedOutput(); err != nil || !strings.Contains(string(o), "is in_review now") ||
+		!strings.HasSuffix(string(o), ": acked "+r.ID+"\n") || !runs.Acked(dir, r.ID) {
+		t.Fatalf("resume on a ticket in review: %v %s", err, o)
+	}
+	dead := r2
 	dead.State, dead.Reply = runs.Died, ""
 	runs.Save(dir, dead)
 	out, _ := j.cmd("", "pickup").Output()
-	if strings.Contains(string(out), "maestro-ticket ack "+r.ID) || !strings.Contains(string(out), "do: maestro-ticket resume "+r.ID+" --died") {
+	if strings.Contains(string(out), "maestro-ticket ack "+r2.ID) || !strings.Contains(string(out), "do: maestro-ticket resume "+r2.ID+" --died") {
 		t.Fatalf("pickup:\n%s", out)
 	}
 }

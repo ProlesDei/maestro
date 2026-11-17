@@ -551,7 +551,7 @@ func (c *call) resumeFits(ctx context.Context, r runs.Record) error {
 		moved = moved || (t.Status != ticket.StatusInReview && t.Status != ticket.StatusBlocked)
 	}
 	if moved {
-		return fmt.Errorf("%w: resume: %s is %s now: run %s's session has nothing left to do there: maestro-ticket ack %s", ticket.ErrStatusConflict, r.Ticket, t.Status, r.ID, r.ID)
+		return fmt.Errorf("%w: resume: %s is %s now: run %s's session has nothing left to do there", ticket.ErrStatusConflict, r.Ticket, t.Status, r.ID)
 	}
 	return nil
 }
@@ -606,10 +606,38 @@ func (a alreadyGoing) Error() string {
 	return "already going as " + a.run
 }
 
-// goingOn prints a start another session of this bot made, and reports
-// whether err was one.
+// movedOn is a retry or resume refused for good: the run's ticket moved
+// on without it, so no later try starts it. The command a bot runs acks
+// the run, so it never waits unacked for a start that can't come; a
+// run's own end drops the line.
+type movedOn struct {
+	run string
+	err error
+}
+
+func (m movedOn) Error() string { return m.err.Error() }
+func (m movedOn) Unwrap() error { return m.err }
+
+// goingOn prints a start another session of this bot made, or a run
+// whose ticket moved on, which it acks, and reports whether err was one.
+// An ack that fails leaves the refusal to stand.
 func (c *call) goingOn(err error) bool {
 	var a alreadyGoing
+	var m movedOn
+	if errors.As(err, &m) {
+		dir, derr := c.besideStore("runs")
+		if derr == nil {
+			_, derr = runs.Ack(dir, m.run, c.actor, time.Now().UTC().Round(time.Millisecond))
+		}
+		if derr != nil {
+			return false
+		}
+		why := strings.TrimPrefix(m.err.Error(), ticket.ErrStatusConflict.Error()+": ")
+		c.out(map[string]any{"acked": m.run, "moved_on": why}, func(w io.Writer) {
+			fmt.Fprintf(w, "%s: acked %s\n", why, m.run)
+		})
+		return true
+	}
 	if !errors.As(err, &a) {
 		return false
 	}
@@ -870,6 +898,9 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	k, _ := findJob(r.Job)
 	if r.Ticket != "" {
 		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
+			if errors.Is(err, ticket.ErrStatusConflict) {
+				err = movedOn{run: r.ID, err: err}
+			}
 			return fail(err)
 		}
 	}
@@ -950,6 +981,9 @@ const diedText = "Your run died. Go on from your last step."
 
 // goOnText is what a session a usage limit stopped is resumed with.
 const goOnText = "A usage limit stopped your run; it has lifted. Go on from your last step."
+
+// apiGoOnText is what a session an API outage stopped is resumed with.
+const apiGoOnText = "An API outage stopped your run; its pause has lifted. Go on from your last step."
 
 // escalateText is what a build session that ended on a question, with
 // no Escalation: posted, is resumed with, so the planner can answer it.
@@ -1076,6 +1110,8 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		text = escalateText
 	case o.decide:
 		text = decideText
+	case o.goOn && apiDown(r):
+		text = apiGoOnText
 	case o.goOn:
 		text = goOnText
 	default:
@@ -1105,6 +1141,9 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		return fail(err)
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
+		if errors.Is(err, ticket.ErrStatusConflict) {
+			err = movedOn{run: r.ID, err: err}
+		}
 		return fail(err)
 	}
 	// A run resumes once: of resumes at once, one makes its marker.

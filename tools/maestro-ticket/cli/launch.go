@@ -373,7 +373,7 @@ func runSupervise(ctx context.Context, c *call) error {
 		// A run a usage limit stopped rings once more as the limit lifts:
 		// nothing else wakes its bot then.
 		RingAgain: func(r runs.Record) time.Time {
-			if out, reset := outcomeOf(r); out == outUsageLimit {
+			if out, reset := routeOutcome(r); out == outUsageLimit {
 				return limitLifts(r, reset).Add(30 * time.Second)
 			}
 			return time.Time{}
@@ -658,7 +658,8 @@ func runPickup(ctx context.Context, c *call) error {
 	// to retry, no ack, one line for all; they ring again as it lifts.
 	// The rest come first, 20 at most a call.
 	pause, paused := readPause(filepath.Dir(dir), now)
-	waiting, shown := []string{}, []runs.Record{}
+	why, held := startsHeld(dir, now)
+	waiting, stuck, shown := []string{}, []string{}, []runs.Record{}
 	more := 0
 	for _, r := range ended {
 		rt, ok := routes[r.ID]
@@ -667,6 +668,10 @@ func runPickup(ctx context.Context, c *call) error {
 		// planner; the rest of those it stopped wait.
 		case ok && paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }):
 			waiting = append(waiting, r.ID)
+		// While STOP or a pause holds, a do: line is only refused: the
+		// run waits, one line for all, so no pickup reruns it in a loop.
+		case ok && held && doWaits(rt):
+			stuck = append(stuck, r.ID)
 		case len(shown) == maxPickup:
 			more++ // the next pickup, after these are acked, shows them
 		default:
@@ -687,7 +692,7 @@ func runPickup(ctx context.Context, c *call) error {
 			routeList = append(routeList, rt)
 		}
 	}
-	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting}, func(w io.Writer) {
+	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting, "held": stuck}, func(w io.Writer) {
 		ids := []string{}
 		for _, r := range ended {
 			// A run with a do: line is acked by that command when it
@@ -709,6 +714,9 @@ func runPickup(ctx context.Context, c *call) error {
 		defer func() {
 			if len(waiting) > 0 {
 				fmt.Fprintln(w, waitingLine(len(waiting), pause.Until))
+			}
+			if len(stuck) > 0 {
+				fmt.Fprintln(w, heldLine(len(stuck), why))
 			}
 			if more > 0 {
 				fmt.Fprintf(w, "and %d more ended: run pickup again once these are acked\n", more)
@@ -824,19 +832,26 @@ func runAck(ctx context.Context, c *call) error {
 // moreUnacked counts the actor's settled results still to ack, past the
 // ones just acked: those a ring only counted, or held for pickup, or that
 // ended since. Runs a usage limit holds while its pause holds don't
-// count: they ring again as it lifts.
+// count: they ring again as it lifts. Nor, while STOP or a pause holds,
+// does any run with a do: line: its command is refused till then, so a
+// pickup for it would only run it to be refused again.
 func (c *call) moreUnacked(dir string, now time.Time) int {
 	list, _ := runs.Unacked(dir, c.actor, now)
 	_, paused := readPause(filepath.Dir(dir), now)
+	_, held := startsHeld(dir, now)
 	n := 0
 	for _, r := range list {
 		if slices.Contains(c.args, r.ID) || runs.Acked(dir, r.ID) {
 			continue
 		}
 		var rt routed
-		if paused && len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && rt.Outcome == outUsageLimit &&
-			!slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
-			continue
+		if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil {
+			if paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
+				continue
+			}
+			if held && len(rt.Do) > 0 {
+				continue
+			}
 		}
 		n++
 	}

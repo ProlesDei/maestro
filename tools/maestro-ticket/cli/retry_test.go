@@ -156,7 +156,7 @@ func TestBuildFailedRetriesOnce(t *testing.T) {
 	}
 	h.move("T-1", "in_progress")
 	h.claim("T-1", "senior-engineer/s1")
-	fail := runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Exit: exitCode(1), Reply: "API Error: 529 overloaded"}
+	fail := runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Exit: exitCode(1), Reply: "Error: the session crashed"}
 	first := h.saveRun(fail)
 	rt := h.route(first)
 	if !slices.Equal(rt.Do, []string{"maestro-ticket job again " + first.ID}) || len(rt.Send) != 0 || !slices.Contains(rt.Wrote, "released T-1 for the retry") {
@@ -187,6 +187,51 @@ func TestBuildFailedRetriesOnce(t *testing.T) {
 	}
 }
 
+// An API outage is the team's, not the build's: its run waits on a short
+// pause for every job and goes on as it lifts, spending no retry, so a
+// second one at the same head blocks nothing. Stats keep it failed.
+func TestBuildAPIOutagePauses(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress")
+	h.claim("T-1", "senior-engineer/s1")
+	fail := runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Exit: exitCode(1), Reply: "API Error: 529 overloaded"}
+	for i := range 2 {
+		r := h.saveRun(fail)
+		rt := h.route(r)
+		if rt.Outcome != outUsageLimit || rt.Status == "blocked" || !slices.Equal(rt.Do, []string{"maestro-ticket resume " + r.ID + " --go-on"}) {
+			t.Fatalf("outage %d: %+v", i, rt)
+		}
+		p, ok := readPause(h.dir, time.Now())
+		if !ok || !strings.HasPrefix(p.Why, "API outage resets ") || p.Until.Sub(*r.EndedAt) > apiPause+time.Second {
+			t.Fatalf("outage %d: pause %+v %v", i, p, ok)
+		}
+		if i == 0 && (!slices.Equal(sends(rt), []string{"send planner: usage_limit T-1 resets " + p.Until.Format(time.RFC3339)}) || !slices.Contains(rt.Wrote, "released T-1 till the limit lifts")) {
+			t.Fatalf("outage %d: %+v", i, rt)
+		}
+		if _, ok := bodyLines(rt); !ok {
+			t.Fatalf("outage %d: held from the body: %+v", i, rt)
+		}
+		if out, _ := outcomeOf(r); out != outFailed {
+			t.Fatalf("stats read outage %d as %s", i, out)
+		}
+		os.Remove(pausePath(h.dir))
+	}
+	for reply, want := range map[string]bool{
+		"API Error: 500 Internal server error":      true,
+		"API Error: Repeated 529 Overloaded errors": true,
+		"API Error: 400 bad request":                false,
+		"Error: the session crashed":                false,
+	} {
+		if got := apiDown(runs.Record{State: runs.Failed, IsError: true, Reply: reply}); got != want {
+			t.Errorf("%q: outage %v", reply, got)
+		}
+	}
+	if apiDown(runs.Record{State: runs.Done, Reply: "API Error: 500 is what the handler returns"}) {
+		t.Error("a done reply about API errors is an outage")
+	}
+}
+
 // A first failure after one stop on purpose still gets its retry.
 func TestBuildStopAskedNotRetried(t *testing.T) {
 	h := newRouteHarness(t)
@@ -198,7 +243,7 @@ func TestBuildStopAskedNotRetried(t *testing.T) {
 	if rt := h.route(asked); len(rt.Do) != 0 || !strings.HasPrefix(sends(rt)[0], "send planner: build T-1 stopped") {
 		t.Fatalf("asked: %+v", rt)
 	}
-	r := h.saveRun(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Exit: exitCode(1), Reply: "API Error: 500"})
+	r := h.saveRun(runs.Record{Job: "build", Ticket: "T-1", State: runs.Failed, IsError: true, Exit: exitCode(1), Reply: "Error: the session crashed"})
 	if rt := h.route(r); !slices.Equal(rt.Do, []string{"maestro-ticket job again " + r.ID}) {
 		t.Fatalf("a failure after a stop asked: %+v", rt)
 	}
@@ -298,7 +343,7 @@ func TestRoutePlanFailRetriesOnce(t *testing.T) {
 					id = "T-" + strconv.Itoa(n)
 					recordHandouts(hdir, []send{{"planner-job", id}})
 				}
-				r := h.saveRun(runs.Record{Launcher: "planner", Job: job, Ticket: id, State: state, IsError: state == runs.Failed, Reply: "API Error: 500"})
+				r := h.saveRun(runs.Record{Launcher: "planner", Job: job, Ticket: id, State: state, IsError: state == runs.Failed, Reply: "Error: the session crashed"})
 				rt := h.route(r)
 				if !slices.Equal(rt.Do, []string{"maestro-ticket job again " + r.ID}) || len(rt.Send) != 0 {
 					t.Fatalf("%s %s %q first: %+v", job, state, id, rt)
@@ -306,7 +351,7 @@ func TestRoutePlanFailRetriesOnce(t *testing.T) {
 				if ticketed && !fileExists(handoutPath(hdir, id, "planner-job")) {
 					t.Fatalf("%s %s %s: the retry's handout went", job, state, id)
 				}
-				again := h.saveRun(runs.Record{Launcher: "planner", Job: job, Ticket: id, State: state, IsError: state == runs.Failed, AgainOf: r.ID, Reply: "API Error: 500"})
+				again := h.saveRun(runs.Record{Launcher: "planner", Job: job, Ticket: id, State: state, IsError: state == runs.Failed, AgainOf: r.ID, Reply: "Error: the session crashed"})
 				rt = h.route(again)
 				want := strings.TrimSpace("failed twice " + job + " " + again.ID + " " + id)
 				if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send chief-of-staff: " + want}) {
@@ -401,7 +446,7 @@ func TestRouteNonDoneNeverEmpty(t *testing.T) {
 	h.ok(nil, "create", "--title", "b")
 	h.move("T-2", "in_progress", "in_review", "done")
 	ends := []runs.Record{
-		{State: runs.Failed, IsError: true, Reply: "API Error: 500"},
+		{State: runs.Failed, IsError: true, Reply: "Error: the session crashed"},
 		{State: runs.TimedOut},
 		{State: runs.Done, Reply: "x: refused: no"},
 		{State: runs.Done, Reply: "which one?"},
@@ -420,7 +465,7 @@ func TestRouteNonDoneNeverEmpty(t *testing.T) {
 		}
 	}
 	// A judge that failed with no line goes up as a fault.
-	r := h.saveRun(runs.Record{Launcher: "planner", Job: "judge", Tickets: []string{"T-1"}, State: runs.Failed, IsError: true, Reply: "API Error: 500"})
+	r := h.saveRun(runs.Record{Launcher: "planner", Job: "judge", Tickets: []string{"T-1"}, State: runs.Failed, IsError: true, Reply: "Error: the session crashed"})
 	if rt := h.route(r); !slices.Equal(sends(rt), []string{"send chief-of-staff: judge failed " + r.ID + ": nothing routed"}) {
 		t.Fatalf("judge: %+v", rt)
 	}

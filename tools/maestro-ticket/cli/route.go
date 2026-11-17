@@ -71,9 +71,12 @@ var (
 	diskFullText    = regexp.MustCompile(`(?i)(infra block: disk full|infra block: low_disk)`)
 	diskFailText    = regexp.MustCompile(`(?i)(\blow_disk\b|no space left on device)`)
 	refusedText     = regexp.MustCompile(`(?i)^[a-z][a-z -]*: refused\b`)
-	fullModelText   = regexp.MustCompile(`^review: stopped: tier \d+ needs the full model`)
-	hexSHA          = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
-	shortSHA        = regexp.MustCompile(`\bat ([0-9a-f]{7,40})\b`)
+	// Claude Code's error reply once the API stayed down or overloaded
+	// past its own retries: the whole team's outage, not the run's.
+	apiDownText   = regexp.MustCompile(`(?i)^API Error: (?:5[0-9]{2}\b|.*\boverloaded)`)
+	fullModelText = regexp.MustCompile(`^review: stopped: tier \d+ needs the full model`)
+	hexSHA        = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+	shortSHA      = regexp.MustCompile(`\bat ([0-9a-f]{7,40})\b`)
 )
 
 // headLine is a reply's first line, cut to 200 bytes, since a bot reads
@@ -121,6 +124,31 @@ func outcomeOf(r runs.Record) (outcome, reset string) {
 		return outQuestion, ""
 	}
 	return outDone, ""
+}
+
+// apiPause is how long every job waits once an API outage ended a run.
+const apiPause = 10 * time.Minute
+
+// apiDown reports whether an API outage failed r.
+func apiDown(r runs.Record) bool {
+	out, _ := outcomeOf(r)
+	return out == outFailed && apiDownText.MatchString(firstLine(r.Reply))
+}
+
+// routeOutcome sorts an ended run for routing: as outcomeOf, but a run an
+// API outage failed waits as one a usage limit stopped does, on a short
+// pause for the whole team, and its session goes on as it lifts. A retry
+// spent inside the outage would only fail again and block its ticket.
+// Stats keep outcomeOf's failed.
+func routeOutcome(r runs.Record) (outcome, reset string) {
+	if !apiDown(r) {
+		return outcomeOf(r)
+	}
+	ended := time.Now()
+	if r.EndedAt != nil {
+		ended = *r.EndedAt
+	}
+	return outUsageLimit, ended.Add(apiPause).UTC().Format(time.RFC3339)
 }
 
 // latest is a ticket's newest comment, or the zero comment.
@@ -245,7 +273,7 @@ func ensureRouted(r runs.Record, out *routed) {
 
 func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (routed, error) {
 	out := routed{Run: r.ID, Job: r.Job, Ticket: r.Ticket, First: headLine(r.Reply), Send: []send{}, Do: []string{}, Wrote: []string{}}
-	out.Outcome, out.Reset = outcomeOf(r)
+	out.Outcome, out.Reset = routeOutcome(r)
 	if out.First == "" {
 		out.First = headLine(r.Error)
 	}
@@ -272,7 +300,11 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		until := limitLifts(r, out.Reset)
 		if store, _, err := c.storePath(); err == nil && until.After(time.Now()) {
 			// One line to the planner per pause, not one per stopped run.
-			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
+			why := "usage limit"
+			if apiDown(r) {
+				why = "API outage"
+			}
+			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
@@ -699,7 +731,7 @@ func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Re
 	var list []runs.Record
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) {
 				list = append(list, o)
 			}
 		}
@@ -809,7 +841,7 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && !o.Frozen {
 				n++
 			}
 		}
@@ -871,7 +903,7 @@ func (c *call) hardStops(r runs.Record, since time.Time) int {
 		if o.ID == r.ID || o.Job != "build" || o.Ticket != r.Ticket || !o.Ended() || !o.StartedAt.After(since) {
 			continue
 		}
-		if out, _ := outcomeOf(o); (o.State == runs.TimedOut && !o.Frozen) || c.retryableFail(o, out) {
+		if out, _ := routeOutcome(o); (o.State == runs.TimedOut && !o.Frozen) || c.retryableFail(o, out) {
 			n++
 		}
 	}
