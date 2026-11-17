@@ -26,7 +26,6 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -268,6 +267,11 @@ type call struct {
 		done         bool
 		path, source string
 		err          error
+	}
+	loc struct { // location's answer
+		done bool
+		v    storeLoc
+		err  error
 	}
 	storeChecks []ticket.Check // besideStore's checks of the store's dir
 	// Set in the supervisor: it alone creates or migrates stats.db.
@@ -567,24 +571,23 @@ func (c *call) git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// open opens the store. From the git default it opens only a store that
-// exists: a separate clone of the repo has its own git common dir, so a
+// open opens the store. From the git default it opens only a SQLite store
+// that exists: a separate clone of the repo has its own git common dir, so a
 // store made there would be a second, empty one. doctor, which
 // install.sh apply runs, makes it.
-func (c *call) open(ctx context.Context) (*sqlitestore.Store, error) {
-	path, source, err := c.storePath()
+func (c *call) open(ctx context.Context) (ticket.Store, error) {
+	loc, err := c.location()
 	if err != nil {
 		return nil, err
 	}
-	if source == "git common dir" {
-		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and don't make one there with doctor: it would be an empty second board", ticket.ErrInvalid, path)
-		}
+	if loc.missing() {
+		return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and don't make one there with doctor: it would be an empty second board", ticket.ErrInvalid, loc.sqlitePath)
 	}
-	if err := envcheck.Err(c.envChecks(path)); err != nil {
+	// Runs and slots stay on this machine, with file locks, for either kind.
+	if err := envcheck.Err(c.envChecks(loc.sqlitePath)); err != nil {
 		return nil, err
 	}
-	return sqlitestore.Open(ctx, path, sqlitestore.Options{Now: c.env.Now})
+	return c.openStore(ctx, loc)
 }
 
 // withStore parses flags, opens the store and runs fn.
@@ -1428,20 +1431,25 @@ func runDoctor(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
-	path, source, err := c.storePath()
+	loc, err := c.location()
 	if err != nil {
 		return err
 	}
-	rep := ticket.DoctorReport{Checks: []ticket.Check{{Name: "store", OK: true, Detail: fmt.Sprintf("%s (from %s)", path, source)}}}
-	checks, err := c.doctorChecks(ctx, path)
+	store, detail := loc.sqlitePath, fmt.Sprintf("%s (from %s)", loc.sqlitePath, loc.source)
+	if loc.kind == kindMongoDB {
+		store = "mongodb at " + uriHost(loc.uri)
+		detail = fmt.Sprintf("%s (from %s)", store, filepath.Join(loc.localDir, uriFile))
+	}
+	rep := ticket.DoctorReport{Checks: []ticket.Check{{Name: "store", OK: true, Detail: detail}}}
+	checks, err := c.doctorChecks(ctx, loc)
 	if err != nil {
 		return err
 	}
 	rep.Checks = append(rep.Checks, checks...)
 	if envcheck.Err(checks) == nil {
-		rep.Checks = append(rep.Checks, c.runsCheck(ctx, path))
+		rep.Checks = append(rep.Checks, c.runsCheck(ctx, loc.sqlitePath))
 	}
-	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
+	res := map[string]any{"ok": rep.OK(), "store": store, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {
 		return err
 	}
@@ -1455,13 +1463,14 @@ func runDoctor(ctx context.Context, c *call) error {
 }
 
 // doctorChecks runs the environment checks and, if they pass, the store's
-// own. It never opens a store on a filesystem that can lose its writes.
-func (c *call) doctorChecks(ctx context.Context, path string) ([]ticket.Check, error) {
-	checks := c.envChecks(path)
+// own. It never opens a store on a filesystem that can lose its writes;
+// for MongoDB, the checks are of the local folder its runs and slots use.
+func (c *call) doctorChecks(ctx context.Context, loc storeLoc) ([]ticket.Check, error) {
+	checks := c.envChecks(loc.sqlitePath)
 	if envcheck.Err(checks) != nil {
 		return checks, nil
 	}
-	s, err := sqlitestore.Open(ctx, path, sqlitestore.Options{Now: c.env.Now})
+	s, err := c.openStore(ctx, loc)
 	if err != nil {
 		return append(checks, ticket.Check{Name: "open", OK: false, Detail: err.Error()}), nil
 	}
