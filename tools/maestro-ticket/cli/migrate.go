@@ -441,6 +441,12 @@ func (c *call) migrateIn(ctx context.Context, file string) (moveReport, error) {
 				rep.Already = true
 				break
 			}
+			// The board lives where the file moved to; a second copy
+			// would fork it.
+			if gone {
+				return fmt.Errorf("%w: %s moved to MongoDB already, so its board is in the database it moved to, not in %s; give migrate that database's URI",
+					ticket.ErrInvalid, loc.sqlitePath, rep.Database)
+			}
 			if err := mg.StartMove(ctx, mongostore.MoveIn); err != nil {
 				return redactURI(err, uri)
 			}

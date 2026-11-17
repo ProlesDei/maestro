@@ -459,3 +459,32 @@ func TestMigrateInterrupted(t *testing.T) {
 	}
 	m.h.ok(nil, "list")
 }
+
+// A file that moved already holds no board of its own: copying it into a
+// second, empty database would fork the board, so migrate refuses.
+func TestMigrateMovedFileRefusesANewDatabase(t *testing.T) {
+	m := newMigrateBoard(t)
+	m.stop(t)
+	if code, _, out := m.migrate(m.uri, "--to", "mongodb", "--uri-file", "-"); code != 0 {
+		t.Fatalf("migrate: exit %d %s", code, out)
+	}
+	m.h.ok(nil, "store", "--clear")
+	u, _ := url.Parse(m.uri)
+	other := m.db + "_b"
+	u.Path = "/" + other
+	t.Cleanup(func() {
+		c, err := mongo.Connect(options.Client().ApplyURI(m.uri))
+		if err != nil {
+			return
+		}
+		defer c.Disconnect(context.Background())
+		c.Database(other).Drop(context.Background())
+	})
+	code, _, out := m.migrate(u.String(), "--to", "mongodb", "--uri-file", "-")
+	if code != 2 || !strings.Contains(out, "moved to MongoDB already") {
+		t.Fatalf("a second database: exit %d %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(m.h.dir, uriFile)); !os.IsNotExist(err) {
+		t.Fatalf("store.uri written: %v", err)
+	}
+}
