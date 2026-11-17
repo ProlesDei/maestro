@@ -26,7 +26,8 @@ func claimJudge(dir, id, fp string, now time.Time) bool {
 func pruneHandouts(dir string, now time.Time) { handoutsAt(dir).pruneHandouts(now) }
 
 func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time) []send {
-	return handoutsAt(dir).pickupSends(runID, since, sends, now)
+	out, _ := handoutsAt(dir).pickupSends(runID, since, sends, now)
+	return out
 }
 
 func pausePath(dir string) string { return filepath.Join(dir, pauseFlag) }

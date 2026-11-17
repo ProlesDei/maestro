@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
@@ -169,6 +170,51 @@ func lookAt(t *testing.T, h *harness) lookOut {
 	var out lookOut
 	h.ok(&out, "look", "--limit", "10")
 	return out
+}
+
+// refuseBodies makes the board at uri turn down any mark in space that
+// holds a body: a create, which holds none, lands; a write fails, as one
+// does when the store goes away mid-call.
+func refuseBodies(t *testing.T, uri, space string) {
+	t.Helper()
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Disconnect(context.Background())
+	v := bson.D{{Key: "$or", Value: bson.A{
+		bson.D{{Key: "space", Value: bson.D{{Key: "$ne", Value: space}}}},
+		bson.D{{Key: "body", Value: ""}},
+	}}}
+	cmd := bson.D{{Key: "collMod", Value: "marks"}, {Key: "validator", Value: v}}
+	if err := c.Database(strings.TrimPrefix(u.Path, "/")).RunCommand(context.Background(), cmd).Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A pickup whose handout mark the board turns down keeps the send and
+// says why: one dropped there is a handoff lost, and chain would ack its
+// run unseen.
+func TestSharedPickupKeepsSendOnMarkError(t *testing.T) {
+	uri := sharedBoard(t)
+	h := onBoard(t, uri, "planner")
+	h.ok(nil, "create", "--title", "x")
+	refuseBodies(t, uri, handoutMarks)
+	c := &call{env: Env{Getenv: func(k string) string { return h.env[k] }, Dir: h.dir}}
+	defer c.closeBoard()
+	co, err := c.coord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	got, err := co.pickupSends("R-aaaaaaaa", now.Add(-time.Hour), []send{{"reviewer", "review T-1"}}, now)
+	if len(got) != 1 || err == nil {
+		t.Fatalf("sends %v, error %v; want the review kept and the error", got, err)
+	}
 }
 
 // On a shared store, of takers that all find a mark stale one moves it,

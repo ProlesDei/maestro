@@ -247,7 +247,7 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,8 @@ func runLaunch(ctx context.Context, c *call) error {
 // supervisor, and returns once its command runs. launch, job and resume
 // all start runs here; job, again and resume give side, its facts for
 // stats, and launch none: its side file is empty, and never streams.
-func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts) (runs.Record, error) {
+// mark, if set, writes the run's id in its marks before it can run.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -287,6 +288,16 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 			side.Stream = c.streamOK(store)
 		}
 		writeSide(dir, r.ID, side)
+	}
+	// A run going under an empty mark is any start's to take over once
+	// activeGrace passes, so a mark that can't name it stops it here.
+	if mark != nil {
+		if err := mark(r.ID); err != nil {
+			r.State, r.Error = runs.Failed, "mark the run: "+err.Error()
+			runs.Save(dir, r)
+			runs.Ack(dir, r.ID, c.actor, time.Now())
+			return runs.Record{}, fmt.Errorf("launch %s: mark the run: %w", r.ID, err)
+		}
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
@@ -600,7 +611,9 @@ func runPickup(ctx context.Context, c *call) error {
 		if rt, ok := routes[r.ID]; ok {
 			// A job a look handed out lately goes out once: pickup drops
 			// its own line for it, and holds the rest from the next look.
-			rt.Send = co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
+			if rt.Send, err = co.pickupSends(r.ID, r.StartedAt, rt.Send, now); err != nil {
+				routeErr[r.ID] = fmt.Errorf("handouts not checked, so a send may go twice: %w", err)
+			}
 			routes[r.ID] = rt
 			routeList = append(routeList, rt)
 		}
@@ -811,9 +824,12 @@ const maxPickup = 20
 // marked as this run's, so a second pickup of the run shows it again and
 // the next look sends none of them. A handout made before the run began
 // was for the step before it, such as the review a kickback answered, so
-// this run's send takes its place.
-func (co coord) pickupSends(runID string, since time.Time, sends []send, now time.Time) []send {
+// this run's send takes its place. A send whose mark the store fails to
+// make or read is kept, and the first such error returned: a job sent
+// twice is refused at its start, and one dropped is lost.
+func (co coord) pickupSends(runID string, since time.Time, sends []send, now time.Time) ([]send, error) {
 	out := []send{}
+	var failed error
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
 		if id == "" || s.Bot == "planner" || !runs.BotPattern.MatchString(s.Bot) {
@@ -821,21 +837,26 @@ func (co coord) pickupSends(runID string, since time.Time, sends []send, now tim
 			continue
 		}
 		mine := "pickup " + runID
-		if co.claimHandout(id, s.Bot, mine, ticket.DefaultStall, now) {
-			out = append(out, s)
-			continue
-		}
 		name := handoutName(id, s.Bot)
-		if m, err := co.s.read(handoutMarks, name); err == nil && m.at.Before(since) && co.moveStale(handoutMarks, name, m) &&
-			co.claimHandout(id, s.Bot, mine, ticket.DefaultStall, now) {
-			out = append(out, s)
-			continue
+		took, err := co.tryHandout(id, s.Bot, mine, ticket.DefaultStall, now)
+		if !took && err == nil {
+			if m, rerr := co.s.read(handoutMarks, name); rerr == nil && m.at.Before(since) && co.moveStale(handoutMarks, name, m) {
+				took, err = co.tryHandout(id, s.Bot, mine, ticket.DefaultStall, now)
+			}
 		}
-		if co.handoutBody(id, s.Bot) == mine {
+		if !took && err == nil {
+			var m mark
+			if m, err = co.s.read(handoutMarks, name); errors.Is(err, fs.ErrNotExist) {
+				err = nil
+			}
+			took = strings.TrimSpace(m.body) == mine
+		}
+		if took || err != nil {
 			out = append(out, s)
 		}
+		failed = cmp.Or(failed, err)
 	}
-	return out
+	return out, failed
 }
 
 // printRoute prints a routed job: one line for what happened, then each

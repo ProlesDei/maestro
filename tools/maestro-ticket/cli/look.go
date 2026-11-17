@@ -72,20 +72,34 @@ func urgentSince(d ticket.Detail) (ticket.Comment, bool) {
 // looks that both find it stale, one still wins the create. body is what
 // the mark holds.
 func (co coord) claimHandout(id, bot, body string, d time.Duration, now time.Time) bool {
+	took, _ := co.tryHandout(id, bot, body, d, now)
+	return took
+}
+
+// tryHandout is claimHandout that also says when the store, not a mark,
+// stopped the claim.
+func (co coord) tryHandout(id, bot, body string, d time.Duration, now time.Time) (bool, error) {
 	name := handoutName(id, bot)
 	for range 2 {
-		if co.s.create(handoutMarks, name, body+"\n") == nil {
-			return true
+		err := co.s.create(handoutMarks, name, body+"\n")
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return false, err
 		}
 		m, err := co.s.read(handoutMarks, name)
 		if err == nil && now.Sub(m.at) < d {
-			return false
+			return false, nil
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return false, err
 		}
 		if !co.moveStale(handoutMarks, name, m) {
-			return false
+			return false, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // moveStale moves a stale mark aside under a takeover lock, and only if it
