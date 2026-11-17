@@ -7,7 +7,8 @@
 # history or a redone delta; a fork, merged or other-base PR stopped
 # with nothing fetched; a PR with no ticket, read from trusted PR
 # comments and fetched from pull/<n>/head; a merge conflict; bad
-# targets; and a failed prep that leaves no worktree.
+# targets; graph= with and without the code graph asked for; and a
+# failed prep that leaves no worktree.
 # Run from anywhere: bash scripts/review_prep_test.sh
 set -euo pipefail
 
@@ -136,6 +137,18 @@ grep -q '^+three' "$C/diff.patch" || fail "diff.patch lacks the change"
 grep -qxF "$(printf '2\t0\tsrc/a.go\tcode')" "$C/files.txt" || fail "files.txt: $(cat "$C/files.txt")"
 grep -qxF "$(printf '1\t0\tREADME.md\tdocs')" "$C/files.txt" || fail "files.txt lacks README.md"
 cmp -s "$tmp/out" "$C/prep.txt" || fail "prep.txt differs from the output"
+has "graph=none: install.yaml's code-graph isn't mcp"
+# Where the install asks for the code graph: graph.md, or none without the tool.
+printf 'code-graph: mcp\n' >.maestro/project/install.yaml
+bash "$prep" T-7 >"$tmp/out" || fail "prep with the graph exited $?"
+if command -v codebase-memory-mcp >/dev/null; then
+	grep -q '^graph=yes changed=' "$tmp/out" || fail "graph: $(grep '^graph=' "$tmp/out")"
+	[ -s "$(val C)/graph.md" ] || fail "no graph.md"
+	grep -q ' graph.md prep.txt$' "$tmp/out" || fail "wrote= lacks graph.md"
+else
+	has "graph=none: no codebase-memory-mcp on PATH"
+fi
+rm .maestro/project/install.yaml
 bash "$prep" maestro/T-7 >"$tmp/out" || fail "prep maestro/T-7 exited $?"
 has ticket=T-7
 # The main branch reads as install.sh check reads it: a bullet,

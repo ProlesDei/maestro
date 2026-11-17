@@ -6,7 +6,9 @@
 #     Finds the PR, its ticket and the main branch, fetches, makes a
 #     detached worktree at the head, writes the diff and its stats to a
 #     folder of its own, checks the merge, sorts the changed files and
-#     picks full or incremental mode. Prints key=value lines, also saved
+#     picks full or incremental mode, and where install.yaml asks for the
+#     code graph, writes graph-leads.sh's graph.md (graph=yes, none or
+#     failed, with why). Prints key=value lines, also saved
 #     to $C/prep.txt; wrote= lists the files in $C. A fork's PR, a merged
 #     one or one on another base gets no review: it prints stop=<why>
 #     and the PR's keys, and fetches and writes nothing.
@@ -357,6 +359,24 @@ while IFS=$'\t' read -r a d f; do
 done < <(gd --numstat --no-renames "$B" "$H")
 touch "$C/files.txt"
 
+# The code graph's leads, graph.md, where the install asks for the graph:
+# review only, since QA reads no code. A failure costs the review its
+# leads, never the review.
+graph=
+if [ -z "$qa" ]; then
+	gconf=
+	[ ! -f "$mainwt/.maestro/project/install.yaml" ] ||
+		gconf=$(sed -n 's/^code-graph:[[:space:]]*\([a-z]*\).*/\1/p' "$mainwt/.maestro/project/install.yaml" | head -n 1)
+	if [ "$gconf" != mcp ]; then
+		graph="none: install.yaml's code-graph isn't mcp"
+	elif g=$(bash "$(dirname "${BASH_SOURCE[0]}")/graph-leads.sh" "$R" "$B" "$C/graph.md" 2>"$C/graph.err"); then
+		graph=${g#graph=}
+	else
+		graph="failed: $(tail -n 1 "$C/graph.err")"
+	fi
+	rm -f -- "$C/graph.err"
+fi
+
 # K: the sha after the first "at" in review's latest verdict, a Review:
 # or a Kickback: that isn't a Kickback: QA fail. On a ticket, from the
 # ticket; with none, from PR comments by the repo's owner, members or
@@ -469,6 +489,7 @@ fi
 		echo "C=$C"
 		echo "B=$B"
 		echo "merges=$merges"
+		echo "graph=$graph"
 	fi
 	echo "files=$nfiles"
 	echo "lines=$lines"
@@ -491,5 +512,5 @@ fi
 	fi
 	echo "mode=$mode"
 	echo "mode_why=$why"
-	echo "wrote=$C: pr.json diff.patch stat.txt log.txt files.txt$([ -f "$C/delta.patch" ] && echo ' delta.patch') prep.txt"
+	echo "wrote=$C: pr.json diff.patch stat.txt log.txt files.txt$([ -f "$C/delta.patch" ] && echo ' delta.patch')$([ -f "$C/graph.md" ] && echo ' graph.md') prep.txt"
 } | tee "$C/prep.txt"
