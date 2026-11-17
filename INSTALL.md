@@ -154,7 +154,7 @@ To move back to SQLite:
 
 ## A teammate's checkout
 
-`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp` and its browser for `browser: playwright-cli`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from.
+`install.yaml` is there but `.maestro/src/` isn't. Do steps 1 to 3, checking out the `maestro-sha` it names, and step 7's binary on `PATH` for `code-graph: mcp` and its browser for `browser: playwright-cli`, then run `apply` and `check`. The choices and `project-setup.md` are already made; don't ask them again. On SQLite, `apply` gives this clone its own, empty ticket store: tell the person the team's board and bots stay in the checkout the bots run from. With `store: mongodb`, `apply` places the skills but makes no store, since one here would be a second board, and says how to join the team's: the person gets the URI from the owner, runs `maestro-ticket store --uri-file -` at the repo's root and pastes it on stdin, then runs `apply` and `check` again. Until then `check` names the missing `store.uri`.
 
 ## Uninstall
 
