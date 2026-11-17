@@ -58,8 +58,12 @@ const (
 )
 
 // startGrace is how long a record may stay starting before a reader that
-// finds no supervisor calls it died.
-const startGrace = 30 * time.Second
+// finds no supervisor calls it died. It runs from before the record's
+// first write, through the supervisor's exec, to its lock: on a box busy
+// with hundreds of runs that can take far longer than usual, and a run
+// adopted as died before its supervisor locks never runs. A start that
+// truly died holds its slot this long.
+const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
@@ -170,10 +174,6 @@ const (
 	CauseLauncher = "launcher" // the launcher was stopped
 )
 
-// LauncherStopped opens the error of a run its supervisor stopped because
-// the launcher was stopped: a stop on purpose, which pickup never retries.
-const LauncherStopped = "the launcher was stopped"
-
 // Owner is the bot whose pickup shows the run once it ends, who acks it
 // and whose webhook rings for it: its launcher, unless its end named
 // another in Notify.
@@ -186,6 +186,17 @@ func (r Record) Owner() string {
 
 // Ended reports whether the run is over.
 func (r Record) Ended() bool { return r.State != Starting && r.State != Running }
+
+// LauncherStoppedText opens the error of a run whose supervisor was
+// stopped, as at a shutdown or reboot, and stopped the run with it.
+const LauncherStoppedText = "the launcher was stopped, so it stopped the run"
+
+// LauncherStopped reports whether the run's supervisor was stopped, so it
+// stopped the run: the machine went down under it, as a died run's did,
+// though its supervisor lived to save the end.
+func (r Record) LauncherStopped() bool {
+	return r.State == Failed && strings.HasPrefix(r.Error, LauncherStoppedText)
+}
 
 // LimitDuration is the run's time limit.
 func (r Record) LimitDuration() time.Duration {

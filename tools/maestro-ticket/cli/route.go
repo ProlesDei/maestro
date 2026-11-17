@@ -456,6 +456,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
 			// The first end with no verdict at a head runs again, in code.
 			out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
@@ -503,6 +504,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
 			out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // the first with no verdict, as for review
 		default:
@@ -617,6 +619,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		if err := c.blockStopped(ctx, s, r, d, stoppedThrice, &out); err != nil {
 			return out, err
 		}
+	case c.stoppedMidWork(r, id, &out):
 	default:
 		out.Mismatch = "in_review with a Handoff:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 		planner("build " + id + " stopped " + string(t.Status) + ": " + out.First)
@@ -731,7 +734,7 @@ func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Re
 	var list []runs.Record
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) && !o.LauncherStopped() {
 				list = append(list, o)
 			}
 		}
@@ -841,7 +844,7 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && !o.Frozen {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && !o.Frozen && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -918,7 +921,7 @@ func (c *call) stoppedOnPurpose(r runs.Record) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(r.Error, runs.LauncherStopped)
+	return r.LauncherStopped()
 }
 
 // retryableFail: r failed in a way a fresh run may not, such as an API
@@ -1126,6 +1129,21 @@ func (c *call) nudged(r runs.Record, nudge string) bool {
 // resume refuses.
 func (c *call) diedBefore(r runs.Record) bool {
 	return c.sessionHad(r, func(o runs.Record) bool { return o.AfterDeath })
+}
+
+// stoppedMidWork offers a resume to a run its supervisor stopped as the
+// machine shut down, before its work landed: like a died run's, its
+// session goes on where it stopped, once, and a second stop goes up.
+func (c *call) stoppedMidWork(r runs.Record, id string, out *routed) bool {
+	if !r.LauncherStopped() {
+		return false
+	}
+	if r.AfterDeath || c.diedBefore(r) {
+		out.Send = append(out.Send, send{"planner", strings.TrimSpace("died twice " + id)})
+	} else {
+		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --died")
+	}
+	return true
 }
 
 // neverRan: a run whose supervisor never started it counts for nothing.

@@ -978,13 +978,16 @@ const maxPickup = 20
 // was for the step before it, such as the review a kickback answered, so
 // this run's send takes its place. A send whose mark the store fails to
 // make or read is kept, and the first such error returned: a job sent
-// twice is refused at its start, and one dropped is lost.
+// twice is refused at its start, and one dropped is lost. Lines to the
+// planner and cards to the chief of staff start no job, so they pass: two
+// runs' cards on one ticket both go up, and one that keys its own card,
+// such as designUp, dedupes it there.
 func (co coord) pickupSends(runID string, since time.Time, sends []send, now time.Time) ([]send, error) {
 	out := []send{}
 	var failed error
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
-		if id == "" || s.Bot == "planner" || !runs.BotPattern.MatchString(s.Bot) {
+		if id == "" || s.Bot == "planner" || s.Bot == "chief-of-staff" || !runs.BotPattern.MatchString(s.Bot) {
 			out = append(out, s)
 			continue
 		}

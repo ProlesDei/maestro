@@ -171,12 +171,14 @@ func TestBuildFailedRetriesOnce(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	asked := h.saveRun(runs.Record{Job: "build", Ticket: "T-2", State: runs.Failed, Exit: exitCode(143), Error: "stopped by planner"})
 	runs.AskStop(dir, asked.ID, "planner", time.Now())
-	launcher := h.saveRun(runs.Record{Job: "build", Ticket: "T-2", State: runs.Failed, Exit: exitCode(143), Error: runs.LauncherStopped + ", so it stopped the run"})
-	for _, r := range []runs.Record{asked, launcher} {
-		rt := h.route(r)
-		if len(rt.Do) != 0 || len(rt.Send) != 1 || !strings.HasPrefix(rt.Send[0].Line, "build T-2 stopped") {
-			t.Fatalf("a stop on purpose: %+v", rt)
-		}
+	launcher := h.saveRun(runs.Record{Job: "build", Ticket: "T-2", State: runs.Failed, Exit: exitCode(143), Error: runs.LauncherStoppedText})
+	if rt := h.route(asked); len(rt.Do) != 0 || len(rt.Send) != 1 || !strings.HasPrefix(rt.Send[0].Line, "build T-2 stopped") {
+		t.Fatalf("a stop on purpose: %+v", rt)
+	}
+	// A shutdown stopped it mid-work: it goes on as a died run would, no
+	// retry spent.
+	if rt := h.route(launcher); !slices.Equal(rt.Do, []string{"maestro-ticket resume " + launcher.ID + " --died"}) || len(rt.Send) != 0 {
+		t.Fatalf("stopped at a shutdown: %+v", rt)
 	}
 	refused := h.saveRun(runs.Record{Job: "build", Ticket: "T-2", State: runs.Failed, Exit: exitCode(1), Reply: "build: refused: tier 3 needs senior"})
 	if rt := h.route(refused); len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send planner: refused T-2: build: refused: tier 3 needs senior"}) {

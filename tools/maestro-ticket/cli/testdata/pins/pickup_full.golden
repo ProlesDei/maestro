@@ -17,8 +17,7 @@ R-3 failed (exit 143) on T-3 by senior-engineer after D, session U-2
 error:
     the launcher was stopped, so it stopped the run
 R-3 build failed on T-3 (in_progress): the launcher was stopped, so it stopped the run
-mismatch: want in_review with a Handoff:, found in_progress with no note
-send planner: build T-3 stopped in_progress: the launcher was stopped, so it stopped the run
+do: maestro-ticket resume R-3 --died
 R-4 timed_out (exit 143) on T-4 by senior-engineer after D
 error:
     the 2h time limit ended it
@@ -34,7 +33,7 @@ R-6 done (exit 0) by senior-engineer after D, session U-3
 reply:
     hello
 running: R-7 (T-6, D)
-ack each once you have acted on it: maestro-ticket ack R-1 R-3 R-6
+ack each once you have acted on it: maestro-ticket ack R-1 R-6
 $ maestro-ticket pickup --full
 exit 0
 stdout:
@@ -54,8 +53,7 @@ R-3 failed (exit 143) on T-3 by senior-engineer after D, session U-2
 error:
     the launcher was stopped, so it stopped the run
 R-3 build failed on T-3 (in_progress): the launcher was stopped, so it stopped the run
-mismatch: want in_review with a Handoff:, found in_progress with no note
-send planner: build T-3 stopped in_progress: the launcher was stopped, so it stopped the run
+do: maestro-ticket resume R-3 --died
 R-4 timed_out (exit 143) on T-4 by senior-engineer after D
 error:
     the 2h time limit ended it
@@ -71,4 +69,4 @@ R-6 done (exit 0) by senior-engineer after D, session U-3
 reply:
     hello
 running: R-7 (T-6, D)
-ack each once you have acted on it: maestro-ticket ack R-1 R-3 R-6
+ack each once you have acted on it: maestro-ticket ack R-1 R-6

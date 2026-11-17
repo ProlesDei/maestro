@@ -1101,7 +1101,7 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		return fail(fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher)))
 	case !r.Ended():
 		return fail(fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r)))
-	case o.died && r.State != runs.Died:
+	case o.died && r.State != runs.Died && !r.LauncherStopped():
 		return fail(fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State))
 	}
 	session := r.SessionID
