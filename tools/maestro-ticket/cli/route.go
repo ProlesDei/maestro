@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -236,9 +234,9 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	// unless it died: then its resume works them.
 	// A usage limit doesn't free them either: the run goes on once it lifts.
 	if r.Job == "judge" && out.Outcome != outDone && out.Outcome != outUsageLimit && !(out.Outcome == outDied && !r.AfterDeath) {
-		if dir, err := c.besideStore("handouts"); err == nil {
+		if co, err := c.coord(); err == nil {
 			for _, tk := range append(slices.Clone(r.Tickets), "cause") {
-				os.Remove(handoutPath(dir, tk, "judge"))
+				co.dropHandout(tk, "judge")
 			}
 		}
 	}
@@ -248,9 +246,9 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		// The limit is the team's plan's: no bot starts a run until it
 		// lifts. A reset pickup can't read waits an hour.
 		until := limitLifts(r, out.Reset)
-		if store, _, err := c.storePath(); err == nil && until.After(time.Now()) {
+		if co, err := c.coord(); err == nil && until.After(time.Now()) {
 			// One line to the planner per pause, not one per stopped run.
-			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
+			if co.setPause(pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
@@ -290,8 +288,8 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 	// A plan, rule or finish run that gave no result frees its ticket for
 	// the next look to start again.
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && out.Outcome != outDone && out.Outcome != outQuestion && r.Ticket != "" {
-		if dir, err := c.besideStore("handouts"); err == nil {
-			os.Remove(handoutPath(dir, r.Ticket, "planner-job"))
+		if co, err := c.coord(); err == nil {
+			co.dropHandout(r.Ticket, "planner-job")
 		}
 	}
 	if textJobs[r.Job] {
@@ -396,6 +394,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		default:
 			out.Mismatch = "a Review: GO, a Kickback: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -440,6 +439,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		default:
 			out.Mismatch = "done, a Kickback: QA fail, a Rereview: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -546,6 +546,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		if err := c.blockStopped(ctx, s, r, d, &out); err != nil {
 			return out, err
 		}
+	case c.stoppedMidWork(r, id, &out):
 	default:
 		out.Mismatch = "in_review with a Handoff:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 		planner("build " + id + " stopped " + string(t.Status) + ": " + out.First)
@@ -651,7 +652,7 @@ func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -724,7 +725,7 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -803,6 +804,21 @@ func (c *call) nudged(r runs.Record, nudge string) bool {
 // resume refuses.
 func (c *call) diedBefore(r runs.Record) bool {
 	return c.sessionHad(r, func(o runs.Record) bool { return o.AfterDeath })
+}
+
+// stoppedMidWork offers a resume to a run its supervisor stopped as the
+// machine shut down, before its work landed: like a died run's, its
+// session goes on where it stopped, once, and a second stop goes up.
+func (c *call) stoppedMidWork(r runs.Record, id string, out *routed) bool {
+	if !r.LauncherStopped() {
+		return false
+	}
+	if r.AfterDeath || c.diedBefore(r) {
+		out.Send = append(out.Send, send{"planner", strings.TrimSpace("died twice " + id)})
+	} else {
+		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --died")
+	}
+	return true
 }
 
 // neverRan: a run whose supervisor never started it counts for nothing.
@@ -884,13 +900,13 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 		return nil
 	}
 	key := fmt.Sprintf("design-up-%s-%d", d.ID, e.ID)
-	dir, err := c.besideStore("handouts")
+	co, err := c.coord()
 	if err != nil {
 		return err
 	}
 	mine, hid := key+" "+sender, fmt.Sprintf("%s-design%d", d.ID, e.ID)
-	if !claimHandout(dir, hid, "chief-of-staff", mine, 24*time.Hour, time.Now()) {
-		if b, _ := os.ReadFile(handoutPath(dir, hid, "chief-of-staff")); strings.TrimSpace(string(b)) != mine {
+	if !co.claimHandout(hid, "chief-of-staff", mine, 24*time.Hour, time.Now()) {
+		if co.handoutBody(hid, "chief-of-staff") != mine {
 			return nil // another look or pickup sends this card
 		}
 	}
@@ -902,7 +918,7 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 	}
 	card := strings.Join(strings.Fields(strings.Join(lines, " | ")), " ")
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: d.ID, Body: "Sent up: chief of staff: approve the design on " + d.ID.String() + "?", Actor: c.actor, IdempotencyKey: key}); err != nil {
-		os.Remove(handoutPath(dir, hid, "chief-of-staff")) // the next one tries again
+		co.dropHandout(hid, "chief-of-staff") // the next one tries again
 		return err
 	}
 	out.Wrote = append(out.Wrote, d.ID.String()+" sent up: design ready")

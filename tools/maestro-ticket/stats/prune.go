@@ -103,10 +103,19 @@ func prune(ctx context.Context, db *sql.DB, now time.Time, l limits) (bool, erro
 	return true, err
 }
 
-// batchRuns picks the oldest runs to go: those past the age, or any while
-// the file is over its size. Each statement of a batch picks the same
-// runs, since run_facts changes only in the last.
-const batchRuns = `SELECT run FROM run_facts WHERE (?1 OR ended_at < ?2) ORDER BY ended_at, run LIMIT ?3`
+// batchRuns picks the oldest runs to go: those past the age (?2), or any
+// while the file is over its size; ?3 is the batch. Each statement of a
+// batch picks the same runs, since run_facts changes only in the last. The
+// two forms stay apart so the age test seeks run_facts_ended: an OR in
+// the WHERE makes SQLite walk the whole index whenever fewer than a batch
+// of runs are old, as in every prune's last batch, and the lock held for
+// that walk grows with the table until writers time out.
+func batchRuns(over bool) string {
+	if over {
+		return `SELECT run FROM run_facts ORDER BY ended_at, run LIMIT ?3`
+	}
+	return `SELECT run FROM run_facts WHERE ended_at < ?2 ORDER BY ended_at, run LIMIT ?3`
+}
 
 // streamSrc is the cost_src id of a run_models row from a stream.
 const streamSrc = `(SELECT id FROM codes WHERE kind = 'cost_src' AND name = 'stream')`
@@ -159,7 +168,7 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `WITH b AS (`+batchRuns+`),
+	if _, err := tx.ExecContext(ctx, `WITH b AS (`+batchRuns(over)+`),
 		`+spendCTE(`f.run IN (SELECT run FROM b)
 				OR f.session IN (SELECT session FROM run_facts WHERE run IN (SELECT run FROM b))`)+`,
 		r AS (
@@ -201,7 +210,7 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 					ELSE m.input_cum + m.output_cum + m.cache_read_cum + m.cache_write_cum END AS tok,
 				ROW_NUMBER() OVER (PARTITION BY f.session, m.model ORDER BY f.ended_at DESC, f.run DESC) AS rn
 			FROM run_models m JOIN run_facts f ON f.run = m.run
-			WHERE f.run IN (`+batchRuns+`) AND f.session IS NOT NULL
+			WHERE f.run IN (`+batchRuns(over)+`) AND f.session IS NOT NULL
 		) WHERE rn = 1
 		ON CONFLICT (session, model) DO UPDATE SET
 			ended_at = excluded.ended_at, cost_cum = excluded.cost_cum, tok_cum = excluded.tok_cum
@@ -210,7 +219,7 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoff int64, over bool, batch 
 	}
 	var n int64
 	for _, t := range []string{"run_models", "run_steps", "findings", "run_facts"} {
-		res, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE run IN (`+batchRuns+`)`, over, cutoff, batch)
+		res, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE run IN (`+batchRuns(over)+`)`, over, cutoff, batch)
 		if err != nil {
 			return 0, err
 		}

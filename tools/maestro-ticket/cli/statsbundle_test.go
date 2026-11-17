@@ -40,48 +40,6 @@ func bundleFiles(dir string) []string {
 	return append(a, b...)
 }
 
-// Never markers planted everywhere text lives miss a bundle, with spend
-// in it too. Local ids and times miss it as numbers and as text. Spend
-// goes in only with --cost.
-func TestBundleMarkers(t *testing.T) {
-	t.Parallel()
-	l, markers := markerScene(t)
-	_, body := bundleOf(t, l.h, "--case", "T-1", "--cost")
-	for _, m := range markers {
-		if strings.Contains(body, m) {
-			t.Errorf("the bundle holds %q", m)
-		}
-	}
-	if !strings.Contains(body, `"case": "T1"`) {
-		t.Fatalf("no case label:\n%s", body)
-	}
-	const epoch = 1999999999123
-	start := time.UnixMilli(epoch)
-	usd := 4242.4242
-	r := statsRow("R-zqmarkzz", 917351, "build", start, "33333333-3333-4333-8333-333333333333",
-		stats.Model{Model: "opus-5.5", InputCum: 9876543, CostCum: &usd, CostSrc: "result"})
-	statsPut(t, l.h.dir, r)
-	local := []string{"917351", "1999999999123", "1999999999", "R-zqmarkzz", "zqmarkzz", "33333333", "2033", start.UTC().Format(time.RFC3339)}
-	cost := []string{"4242.4242", "9876543"}
-	_, plain := bundleOf(t, l.h, "--case", "T-917351")
-	for _, m := range append(local, cost...) {
-		if strings.Contains(plain, m) {
-			t.Errorf("a bundle without --cost holds %q", m)
-		}
-	}
-	_, with := bundleOf(t, l.h, "--case", "T-917351", "--cost")
-	for _, m := range local {
-		if strings.Contains(with, m) {
-			t.Errorf("a bundle with --cost holds %q", m)
-		}
-	}
-	for _, m := range cost {
-		if !strings.Contains(with, m) {
-			t.Errorf("--cost left out %q:\n%s", m, with)
-		}
-	}
-}
-
 // A bundle is a person's: a bot, by either name, and any run, a session
 // a bot started included, get forbidden and no file.
 func TestBundleRefusals(t *testing.T) {

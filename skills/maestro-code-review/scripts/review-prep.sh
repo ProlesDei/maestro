@@ -270,11 +270,19 @@ if [ -n "$stop" ]; then
 	exit 0
 fi
 
-# Once more after a pause of 1 to 5 seconds: many sessions fetching in
-# one checkout can collide on a ref lock, and must not retry together.
-git fetch -q origin || { sleep $((RANDOM % 5 + 1)) && git fetch -q origin; } || die 1 "git fetch origin failed"
-git cat-file -e "$H^{commit}" 2>/dev/null || git fetch -q origin "pull/$pr/head" ||
-	{ sleep $((RANDOM % 5 + 1)) && git fetch -q origin "pull/$pr/head"; } ||
+# Many sessions fetching in one checkout collide on ref locks: each fetch
+# takes only main, not every branch others push, and a failure gets a
+# random pause and two more tries, as the working principles ask.
+retry() {
+	local i
+	for i in 1 2 3; do
+		"$@" && return 0
+		[ "$i" = 3 ] || sleep $((RANDOM % 5 + 1))
+	done
+	return 1
+}
+retry git fetch -q origin "+refs/heads/$main:refs/remotes/origin/$main" || die 1 "git fetch origin $main failed"
+git cat-file -e "$H^{commit}" 2>/dev/null || retry git fetch -q origin "pull/$pr/head" ||
 	die 1 "can't fetch PR $pr's head $H"
 git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die 3 "no origin/$main after the fetch"
 load_rules

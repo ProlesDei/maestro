@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -451,23 +450,27 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if k.ids {
 		rec.Tickets = ids
 	}
-	commit, abort := func(string) {}, func() {}
+	var commit func(string) error
+	abort := func() {}
 	if ticketID != "" {
 		dir, err := c.besideStore("runs")
 		if err != nil {
 			return fail(err)
 		}
-		if commit, abort, err = takeActive(dir, activeFile(dir, ticketID, k.name), c.actor); err != nil {
+		co, err := c.coord()
+		if err != nil {
+			return fail(err)
+		}
+		if commit, abort, err = co.takeActive(dir, ticketID, k.name, c.actor, runLimit); err != nil {
 			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
 		}
 	}
 	side.PromptBytes = ptr(len(prompt) + 1)
-	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side)
+	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side, commit)
 	if err != nil {
 		abort()
 		return fail(err)
 	}
-	commit(r.ID)
 	return r, m, why, nil
 }
 
@@ -559,17 +562,40 @@ func (c *call) detailForJob(ctx context.Context, id string) (ticket.Detail, erro
 	return s.Get(ctx, tid)
 }
 
-// activeFile marks the one live run of a job on a ticket: made with
-// O_EXCL before the run starts, it holds the run's id, and the run's end
+// activeName marks the one live run of a job on a ticket: made exclusive
+// before the run starts, it holds the run's id, and the run's end
 // removes it. Of starts at once only one makes it.
-func activeFile(dir, ticketID, job string) string {
-	return filepath.Join(dir, ticketID+"."+job+".active")
-}
+func activeName(ticketID, job string) string { return ticketID + "." + job + ".active" }
 
-// takeActive makes the file at p for a run about to start, or names the
-// live run that holds it. A file left by a run that ended is taken over.
-func takeActive(dir, p, actor string) (commit func(runID string), abort func(), err error) {
-	return takeMark(dir, p, func(id string) error {
+// takeActive makes a ticket's job mark for a run about to start, or names
+// the live run that holds it. A mark left by a run that ended is taken
+// over. dir holds the runs; limit is the new run's.
+//
+// On a shared store the mark says whose run it is, as an activeMark: a
+// run on another machine has no record here to read, so it holds until
+// it is overdue, past any limit its own supervisor would let it run.
+func (co coord) takeActive(dir, ticketID, job, actor string, limit time.Duration) (commit func(runID string) error, abort func(), err error) {
+	body := func(id string) string { return id }
+	if co.host != "" {
+		body = func(id string) string {
+			b, _ := json.Marshal(activeMark{Run: id, Host: co.host, By: actor, Started: time.Now().UTC().Round(time.Second), Limit: short(limit)})
+			return string(b)
+		}
+	}
+	return co.takeMark(activeName(ticketID, job), body, func(id string, m mark) error {
+		if a, ok := readActive(m.body); ok && a.Host != "" && a.Host != co.host {
+			lim, err := time.ParseDuration(a.Limit)
+			if err != nil || lim <= 0 {
+				lim = 24 * time.Hour // the most any job's limit may be
+			}
+			if runs.Overdue(m.at, lim, time.Now()) {
+				return nil
+			}
+			if a.By == actor {
+				return alreadyGoing{a.Run}
+			}
+			return fmt.Errorf("%w: run %s, %s's on another machine, already does it", ticket.ErrClaimed, a.Run, dash(a.By))
+		}
 		if r, err := runs.Get(dir, id, time.Now()); err == nil && !r.Ended() {
 			if r.Launcher == actor {
 				return alreadyGoing{r.ID}
@@ -578,6 +604,34 @@ func takeActive(dir, p, actor string) (commit func(runID string), abort func(), 
 		}
 		return nil
 	})
+}
+
+// activeMark is what a shared store's .active mark holds. A file's holds
+// the run id alone.
+type activeMark struct {
+	Run     string    `json:"run"`
+	Host    string    `json:"host"`
+	By      string    `json:"by,omitempty"`
+	Started time.Time `json:"started"`
+	Limit   string    `json:"limit"`
+}
+
+// readActive reads a mark's body as an activeMark, if it is one.
+func readActive(body string) (activeMark, bool) {
+	var a activeMark
+	b := strings.TrimSpace(body)
+	if !strings.HasPrefix(b, "{") || json.Unmarshal([]byte(b), &a) != nil {
+		return activeMark{}, false
+	}
+	return a, true
+}
+
+// markRun is the run a run mark names, or "" for none yet.
+func markRun(body string) string {
+	if a, ok := readActive(body); ok {
+		return a.Run
+	}
+	return strings.TrimSpace(body)
 }
 
 // alreadyGoing is a start a session of the same bot already made: the
@@ -599,45 +653,32 @@ func (c *call) goingOn(err error) bool {
 	return true
 }
 
-// takeMark makes the mark file at p with O_EXCL, so of takers at once one
-// wins. A mark that names a run holds while held says so; a mark with no
-// run yet, left by a taker that died before its commit, holds for
-// activeGrace. A taker that finds one stale moves it aside under a
-// takeover lock, and only if it still names what it read, so two takers
-// that both find it stale can't both win.
-func takeMark(dir, p string, held func(id string) error) (commit func(runID string), abort func(), err error) {
-	os.MkdirAll(dir, 0o755)
+// takeMark makes the run mark name exclusive, so of takers at once one
+// wins; its commit writes body(run id) in it. A mark that names a run
+// holds while held says so; a mark with no run yet, left by a taker that
+// died before its commit, holds for activeGrace. A taker that finds one
+// stale moves it aside under a takeover lock, and only if it still holds
+// what it read, so two takers that both find it stale can't both win.
+func (co coord) takeMark(name string, body func(runID string) string, held func(id string, m mark) error) (commit func(runID string) error, abort func(), err error) {
 	busy := fmt.Errorf("%w: another start of this run is under way", ticket.ErrClaimed)
 	for range 3 {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.Close()
-			commit = func(id string) { os.WriteFile(p, []byte(id), 0o644) }
-			return commit, func() { os.Remove(p) }, nil
+		if co.s.create(runMarks, name, "") == nil {
+			commit = func(id string) error { return co.s.write(runMarks, name, body(id)) }
+			return commit, func() { co.s.remove(runMarks, name) }, nil
 		}
-		b, _ := os.ReadFile(p)
-		id := strings.TrimSpace(string(b))
+		m, _ := co.s.read(runMarks, name)
+		id := markRun(m.body)
 		if id == "" {
-			if fi, err := os.Stat(p); err == nil && time.Since(fi.ModTime()) < activeGrace {
+			if m.ver != nil && time.Since(m.at) < activeGrace {
 				return nil, nil, busy
 			}
-		} else if err := held(id); err != nil {
+		} else if err := held(id, m); err != nil {
 			return nil, nil, err
 		}
-		lock := p + ".takeover"
-		lf, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err != nil {
-			if fi, err := os.Stat(lock); err == nil && time.Since(fi.ModTime()) > activeGrace {
-				os.Remove(lock) // its taker died
-				continue
-			}
+		took, cleared := co.s.takeOver(runMarks, name, func(now mark) bool { return markRun(now.body) == id })
+		if !took && !cleared {
 			return nil, nil, busy
 		}
-		lf.Close()
-		if b2, _ := os.ReadFile(p); strings.TrimSpace(string(b2)) == id {
-			os.Rename(p, p+".stale"+newSessionID()[:8])
-		}
-		os.Remove(lock)
 	}
 	return nil, nil, busy
 }
@@ -646,15 +687,15 @@ func takeMark(dir, p string, held func(id string) error) (commit func(runID stri
 // writes its run's id.
 const activeGrace = 30 * time.Second
 
-// dropActive removes a run's active file when the run ends, if it is
+// dropActive removes a run's active mark when the run ends, if it is
 // still the run's.
-func dropActive(dir string, r runs.Record) {
+func (co coord) dropActive(r runs.Record) {
 	if r.Ticket == "" || r.Job == "" {
 		return
 	}
-	p := activeFile(dir, r.Ticket, r.Job)
-	if b, err := os.ReadFile(p); err == nil && strings.TrimSpace(string(b)) == r.ID {
-		os.Remove(p)
+	name := activeName(r.Ticket, r.Job)
+	if m, err := co.s.read(runMarks, name); err == nil && markRun(m.body) == r.ID {
+		co.s.remove(runMarks, name)
 	}
 }
 
@@ -670,14 +711,16 @@ func joinStatuses(st []ticket.Status) string {
 // or while a usage limit pickup saw holds: such a run only stops, or fails
 // again, and spends a start.
 func (c *call) mayStart() error {
-	store, _, err := c.storePath()
+	co, err := c.coord()
 	if err != nil {
 		return err
 	}
-	if fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)) {
+	if stop, err := co.s.stopped(); err != nil {
+		return err
+	} else if stop {
 		return fmt.Errorf("%w: stopped: maestro/STOP is set: start no run", ticket.ErrStopped)
 	}
-	if p, ok := readPause(filepath.Dir(store), time.Now()); ok {
+	if p, ok := co.readPause(time.Now()); ok {
 		return fmt.Errorf("%w: paused: %s, until %s: start no run until then", ticket.ErrPaused, p.Why, p.Until.Format(time.RFC3339))
 	}
 	return nil
@@ -690,11 +733,9 @@ type pause struct {
 	Why   string    `json:"why"`
 }
 
-func pausePath(dir string) string { return filepath.Join(dir, "paused.json") }
-
-// readPause reads the pause next to the store, if one holds now.
-func readPause(dir string, now time.Time) (pause, bool) {
-	b, err := os.ReadFile(pausePath(dir))
+// readPause reads the pause, if one holds now.
+func (co coord) readPause(now time.Time) (pause, bool) {
+	b, err := co.s.flag(pauseFlag)
 	if err != nil {
 		return pause{}, false
 	}
@@ -707,15 +748,12 @@ func readPause(dir string, now time.Time) (pause, bool) {
 
 // setPause records a pause until the later of its time and any pause
 // already set, written whole so a reader never sees half of one.
-func setPause(dir string, p pause, now time.Time) bool {
-	if old, ok := readPause(dir, now); ok && !p.Until.After(old.Until) {
+func (co coord) setPause(p pause, now time.Time) bool {
+	if old, ok := co.readPause(now); ok && !p.Until.After(old.Until) {
 		return false // as long a pause holds already
 	}
 	b, _ := json.Marshal(p)
-	tmp := pausePath(dir) + ".tmp" + newSessionID()[:8]
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, pausePath(dir))
-	}
+	co.s.setFlag(pauseFlag, b)
 	return true
 }
 
@@ -848,9 +886,14 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		return usagef("job again: --limit %s: want 1s to 24h", lim)
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd}
-	commit, abort := func(string) {}, func() {}
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	var commit func(string) error
+	abort := func() {}
 	if r.Ticket != "" {
-		if commit, abort, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job), c.actor); err != nil {
+		if commit, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, lim); err != nil {
 			return fmt.Errorf("job again %s: %w", r.ID, err)
 		}
 	}
@@ -860,19 +903,16 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	if p, ok := readSide(dir, first.ID); ok {
 		side.Drops = p.Drops
 	}
-	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side)
+	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side, commit)
 	if err != nil {
 		abort()
 		return err
 	}
-	commit(nr.ID)
 	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
 		// The rerun holds the ticket, as look's start would, so no look
 		// starts a second planner run beside it.
-		if hdir, err := c.besideStore("handouts"); err == nil {
-			recordHandouts(hdir, []send{{"planner-job", r.Ticket}})
-		}
+		co.recordHandouts([]send{{"planner-job", r.Ticket}})
 	}
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "again: "+r.ID)
 }
@@ -947,7 +987,7 @@ func resumeRun(ctx context.Context, c *call) error {
 		return fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher))
 	case !r.Ended():
 		return fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r))
-	case *died && r.State != runs.Died:
+	case *died && r.State != runs.Died && !r.LauncherStopped():
 		return fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State)
 	}
 	session := r.SessionID
@@ -1022,30 +1062,33 @@ func resumeRun(ctx context.Context, c *call) error {
 		return err
 	}
 	// A run resumes once: of resumes at once, one makes its marker.
-	commitMark, abortMark, err := takeMark(dir, filepath.Join(dir, r.ID+".resumed"), func(id string) error {
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	commitMark, abortMark, err := co.takeMark(r.ID+".resumed", func(id string) string { return id }, func(id string, _ mark) error {
 		return alreadyGoing{id}
 	})
 	if err != nil {
 		return err
 	}
 	// And one run of a job on a ticket at a time, resumed or not.
-	commitActive, abortActive := func(string) {}, func() {}
+	commitActive, abortActive := func(string) error { return nil }, func() {}
 	if r.Ticket != "" && r.Job != "" {
-		if commitActive, abortActive, err = takeActive(dir, activeFile(dir, r.Ticket, r.Job), c.actor); err != nil {
+		if commitActive, abortActive, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, rec.LimitDuration()); err != nil {
 			abortMark()
 			return fmt.Errorf("resume %s: %w", r.ID, err)
 		}
 	}
 	side := &sideFacts{Why: "resume", PromptBytes: ptr(len(text) + 1)}
 	side.fromParent(dir, r.ID)
-	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side)
+	commit := func(id string) error { return errors.Join(commitMark(id), commitActive(id)) }
+	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side, commit)
 	if err != nil {
 		abortMark()
 		abortActive()
 		return err
 	}
-	commitMark(nr.ID)
-	commitActive(nr.ID)
 	// Its result is acted on: pickup stops showing it, and its rings stop.
 	runs.Ack(dir, r.ID, c.actor, time.Now())
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)

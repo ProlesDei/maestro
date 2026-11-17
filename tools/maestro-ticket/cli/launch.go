@@ -39,20 +39,18 @@ const keepAcked = 7 * 24 * time.Hour
 // besideStore returns the folder name next to the ticket store, which every
 // worktree shares, refusing where open would.
 func (c *call) besideStore(name string) (string, error) {
-	path, source, err := c.storePath()
+	loc, err := c.location()
 	if err != nil {
 		return "", err
 	}
-	if source == "git common dir" {
-		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, path)
-		}
+	if loc.missing() {
+		return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, loc.sqlitePath)
 	}
-	c.storeChecks = c.envChecks(path)
+	c.storeChecks = c.envChecks(loc.sqlitePath)
 	if err := envcheck.Err(c.storeChecks); err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(path), name), nil
+	return filepath.Join(loc.localDir, name), nil
 }
 
 func (c *call) needActor(cmd string) error {
@@ -249,7 +247,7 @@ func runLaunch(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil)
+	r, err := c.startRun(runs.Record{Ticket: ticketID, Limit: short(*limit), Command: command}, stdin, rings, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -266,7 +264,8 @@ func runLaunch(ctx context.Context, c *call) error {
 // supervisor, and returns once its command runs. launch, job and resume
 // all start runs here; job, again and resume give side, its facts for
 // stats, and launch none: its side file is empty, and never streams.
-func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts) (runs.Record, error) {
+// mark, if set, writes the run's id in its marks before it can run.
+func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -289,6 +288,16 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 			side.Stream = c.streamOK(store)
 		}
 		writeSide(dir, r.ID, side)
+	}
+	// A run going under an empty mark is any start's to take over once
+	// activeGrace passes, so a mark that can't name it stops it here.
+	if mark != nil {
+		if err := mark(r.ID); err != nil {
+			r.State, r.Error = runs.Failed, "mark the run: "+err.Error()
+			runs.Save(dir, r)
+			runs.Ack(dir, r.ID, c.actor, time.Now())
+			return runs.Record{}, fmt.Errorf("launch %s: mark the run: %w", r.ID, err)
+		}
 	}
 	// The supervisor outlives this command, in a session of its own: a
 	// harness ends the command's session when it returns.
@@ -359,7 +368,7 @@ func runSupervise(ctx context.Context, c *call) error {
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
 			c.actor = r.Launcher
-			return c.startLaunch(ctx, runTicket(r))
+			return c.startLaunch(ctx, runTicket(r), r)
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
@@ -386,7 +395,9 @@ func runSupervise(ctx context.Context, c *call) error {
 // on its ticket, unless another run of that bot on that ticket still
 // goes. Neither may hold up the ring, so failures only warn on stderr.
 func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
-	dropActive(dir, r)
+	if co, err := c.coord(); err == nil {
+		co.dropActive(r)
+	}
 	warn := func(err error) {
 		if err != nil {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: %v\n", r.ID, err)
@@ -415,21 +426,27 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		return
 	}
 	defer s.Close()
-	outcome := ticket.LaunchResult
+	end := ticket.EndLaunchRequest{ID: r.LaunchID, Outcome: ticket.LaunchResult, Session: reply.SessionID}
 	switch {
 	case r.State == runs.Died:
-		outcome = ticket.LaunchDied
+		end.Outcome = ticket.LaunchDied
 	case replyErr != nil:
-		outcome = ticket.LaunchNoResult
+		end.Outcome = ticket.LaunchNoResult
 	}
-	c.endLaunch(ctx, s, r.LaunchID, outcome, reply.SessionID)
+	// Another machine holds the ticket for it until the limit lifts, as
+	// this machine's look does from its record.
+	if out, reset := outcomeOf(r); out == outUsageLimit {
+		end.Lifts = limitLifts(r, reset)
+	}
+	c.endLaunch(ctx, s, end)
 	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
 	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
-	_, err = freeRunClaim(ctx, s, logActor(r.Launcher), id, logActor(r.Launcher))
+	host, _ := c.hostID()
+	_, err = freeRunClaim(ctx, s, logActor(r.Launcher), id, logActor(r.Launcher), host)
 	warn(err)
 }
 
@@ -552,7 +569,7 @@ func runPickup(ctx context.Context, c *call) error {
 					routeErr[r.ID] = err
 					break
 				}
-				if s != nil {
+				if err == nil {
 					c.refileFollowUps(ctx, s, r, &rt)
 				}
 				routes[r.ID] = rt
@@ -573,7 +590,11 @@ func runPickup(ctx context.Context, c *call) error {
 	// While a usage limit holds, the runs it stopped wait: no do: line
 	// to retry, no ack, one line for all; they ring again as it lifts.
 	// The rest come first, 20 at most a call.
-	pause, paused := readPause(filepath.Dir(dir), now)
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	pause, paused := co.readPause(now)
 	waiting, shown := []string{}, []runs.Record{}
 	more := 0
 	for _, r := range ended {
@@ -595,7 +616,9 @@ func runPickup(ctx context.Context, c *call) error {
 		if rt, ok := routes[r.ID]; ok {
 			// A job a look handed out lately goes out once: pickup drops
 			// its own line for it, and holds the rest from the next look.
-			rt.Send = pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
+			if rt.Send, err = co.pickupSends(r.ID, r.StartedAt, rt.Send, now); err != nil {
+				routeErr[r.ID] = fmt.Errorf("handouts not checked, so a send may go twice: %w", err)
+			}
 			routes[r.ID] = rt
 			routeList = append(routeList, rt)
 		}
@@ -733,11 +756,22 @@ const stopWait = runs.KillGrace + 10*time.Second
 // the asker, rung to its launcher like any end, so job again and resume
 // work once pickup shows it. Its launcher or the planner may ask.
 func runStop(ctx context.Context, c *call) error {
+	all := c.fs.Bool("all", false, "halt every claim and start, on every machine on the store")
+	off := c.fs.Bool("off", false, "with --all: lift the halt")
 	if err := c.parse(); err != nil {
 		return err
 	}
+	if *all {
+		if len(c.args) > 0 {
+			return usagef("stop --all takes no run id")
+		}
+		return c.halt(ctx, !*off)
+	}
+	if *off {
+		return usagef("stop: --off goes with --all")
+	}
 	if len(c.args) != 1 || !runs.ValidID(c.args[0]) {
-		return usagef("stop: want one run id, such as R-abcdefgh")
+		return usagef("stop: want one run id, such as R-abcdefgh, or --all")
 	}
 	if !runs.Supported {
 		return usagef("stop needs a unix system")
@@ -795,31 +829,42 @@ const maxPickup = 20
 // marked as this run's, so a second pickup of the run shows it again and
 // the next look sends none of them. A handout made before the run began
 // was for the step before it, such as the review a kickback answered, so
-// this run's send takes its place.
-func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time) []send {
+// this run's send takes its place. A send whose mark the store fails to
+// make or read is kept, and the first such error returned: a job sent
+// twice is refused at its start, and one dropped is lost. Lines to the
+// planner and cards to the chief of staff start no job, so they pass: two
+// runs' cards on one ticket both go up, and one that keys its own card,
+// such as designUp, dedupes it there.
+func (co coord) pickupSends(runID string, since time.Time, sends []send, now time.Time) ([]send, error) {
 	out := []send{}
+	var failed error
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
-		if id == "" || s.Bot == "planner" || !runs.BotPattern.MatchString(s.Bot) {
+		if id == "" || s.Bot == "planner" || s.Bot == "chief-of-staff" || !runs.BotPattern.MatchString(s.Bot) {
 			out = append(out, s)
 			continue
 		}
 		mine := "pickup " + runID
-		if claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
-			out = append(out, s)
-			continue
+		name := handoutName(id, s.Bot)
+		took, err := co.tryHandout(id, s.Bot, mine, ticket.DefaultStall, now)
+		if !took && err == nil {
+			if m, rerr := co.s.read(handoutMarks, name); rerr == nil && m.at.Before(since) && co.moveStale(handoutMarks, name, m) {
+				took, err = co.tryHandout(id, s.Bot, mine, ticket.DefaultStall, now)
+			}
 		}
-		p := handoutPath(dir, id, s.Bot)
-		if fi, err := os.Stat(p); err == nil && fi.ModTime().Before(since) && moveStale(p, fi) &&
-			claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
-			out = append(out, s)
-			continue
+		if !took && err == nil {
+			var m mark
+			if m, err = co.s.read(handoutMarks, name); errors.Is(err, fs.ErrNotExist) {
+				err = nil
+			}
+			took = strings.TrimSpace(m.body) == mine
 		}
-		if b, _ := os.ReadFile(p); strings.TrimSpace(string(b)) == mine {
+		if took || err != nil {
 			out = append(out, s)
 		}
+		failed = cmp.Or(failed, err)
 	}
-	return out
+	return out, failed
 }
 
 // printRoute prints a routed job: one line for what happened, then each

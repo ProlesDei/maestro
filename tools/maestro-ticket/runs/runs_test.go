@@ -89,7 +89,7 @@ func TestCreateAndAckOnce(t *testing.T) {
 	if got, _ := Get(dir, r.ID, time.Now()); got.State != Starting {
 		t.Fatalf("fresh record: %s", got.State)
 	}
-	if got, _ := Get(dir, r.ID, time.Now().Add(time.Minute)); got.State != Died {
+	if got, _ := Get(dir, r.ID, time.Now().Add(startGrace+time.Minute)); got.State != Died {
 		t.Fatalf("record with no supervisor past the grace: %s", got.State)
 	}
 	now := time.Now()
@@ -148,7 +148,7 @@ func TestAdoptOnce(t *testing.T) {
 	if _, _, ok := Adopt(dir, r.ID, now); ok {
 		t.Fatal("adopted a run still inside its start grace")
 	}
-	later := now.Add(time.Minute)
+	later := now.Add(startGrace + time.Minute)
 	if ids, _ := Orphans(dir, later); len(ids) != 1 || ids[0] != r.ID {
 		t.Fatalf("orphans: %v", ids)
 	}
