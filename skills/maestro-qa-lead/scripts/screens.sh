@@ -175,16 +175,21 @@ cat >"$tmp/shoot.tail" <<'EOF'
   return "shot " + jobs.length;
 }
 EOF
-# A clip: a page of its own on a fake clock. Each step moves the clock
-# and every animation by the same ms, then shoots; an animation that
-# starts mid-clip (a class a timer adds) counts from the step it shows
-# up in. Under a cue, load's animations keep the place finish() gave.
+# A clip: a page on a fake clock, paused so only the steps move it. A
+# clock covers its whole browser context, and a paused one would stall
+# the session's own page, so each clip gets a context of its own. Each
+# step moves the clock and every animation by the same ms, then shoots;
+# an animation that starts mid-clip (a class a timer adds) counts from
+# the step it shows up in. Under a cue, load's animations keep the place
+# finish() gave.
 cat >"$tmp/motion.tail" <<'EOF'
 ;
   for (const j of jobs) {
-    const p = await page.context().newPage();
+    const ctx = await page.context().browser().newContext();
     try {
+      const p = await ctx.newPage();
       await p.clock.install({ time: 0 });
+      await p.clock.pauseAt(1000);
       await p.setViewportSize({ width: j.width, height: 900 });
       await p.goto(j.url, { waitUntil: "load", timeout: 30000 });
       await p.evaluate(([cue, name]) => {
@@ -216,7 +221,7 @@ cat >"$tmp/motion.tail" <<'EOF'
         await p.screenshot({ path: j.dir + "/" + String(i).padStart(3, "0") + ".png" });
       }
     } finally {
-      await p.close();
+      await ctx.close();
     }
   }
   return "clips " + jobs.length;
