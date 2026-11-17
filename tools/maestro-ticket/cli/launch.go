@@ -795,12 +795,15 @@ const maxPickup = 20
 // marked as this run's, so a second pickup of the run shows it again and
 // the next look sends none of them. A handout made before the run began
 // was for the step before it, such as the review a kickback answered, so
-// this run's send takes its place.
+// this run's send takes its place. Lines to the planner and cards to the
+// chief of staff start no job, so they pass: two runs' cards on one
+// ticket both go up, and one that keys its own card, such as designUp,
+// dedupes it there.
 func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time) []send {
 	out := []send{}
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
-		if id == "" || s.Bot == "planner" || !runs.BotPattern.MatchString(s.Bot) {
+		if id == "" || s.Bot == "planner" || s.Bot == "chief-of-staff" || !runs.BotPattern.MatchString(s.Bot) {
 			out = append(out, s)
 			continue
 		}
