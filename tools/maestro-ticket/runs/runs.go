@@ -518,7 +518,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".stats", streamExt, ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}

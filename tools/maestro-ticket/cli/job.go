@@ -49,17 +49,20 @@ type jobKind struct {
 	// slot names the slot the run waits in, at most --slots at once: each
 	// QA run holds its own copy of the app and a browser.
 	slot string
-	help string
+	// stopHook runs stop-check as the session's Stop hook (stopcheck.go):
+	// a job whose end is a note on its ticket.
+	stopHook bool
+	help     string
 }
 
 var jobKinds = []jobKind{
-	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier",
+	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier", stopHook: true,
 		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior, until it is sent back twice)"},
-	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route",
+	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route", stopHook: true,
 		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
-	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa",
+	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
 		help: "qa <id>: test the reviewed PR and merge it on a pass"},
-	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa",
+	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
 		help: "live <id>: a goal's live run"},
 	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus, slot: "qa",
 		help: "qa-ask [--ticket T-1] < ask: a second look, a repro, a test plan"},
@@ -73,7 +76,7 @@ var jobKinds = []jobKind{
 		help: "finish <id>: finish a split, drop or merge that stopped short"},
 	{name: "judge", skill: "/maestro-planner", prefix: "judge", ids: true, text: "need", model: modelOpus, lean: true,
 		help: "judge <id>... < rows and standing rules: the planner's calls that need reading"},
-	{name: "design", skill: "/maestro-designer", prefix: "design", ticket: true, model: modelOpus, lean: true,
+	{name: "design", skill: "/maestro-designer", prefix: "design", ticket: true, model: modelOpus, lean: true, stopHook: true,
 		help: "design <id>: a goal's Design: ticket, new or sent back with changes"},
 	{name: "cos", skill: "/maestro-chief-of-staff", text: "need", model: modelOpus, lean: true,
 		help: "cos [--ticket T-1] < ask: a check, second opinion, audit or card draft"},
@@ -445,7 +448,10 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if runLimit < time.Second || runLimit > 24*time.Hour {
 		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
-	cmd := claudeCommand(newSessionID(), m, e, k.lean)
+	cmd, err := c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
+	if err != nil {
+		return fail(err)
+	}
 	if k.slot != "" {
 		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
 	}
@@ -832,8 +838,10 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 			return err
 		}
 	}
-	cmd := slices.Clone(first.Command)
-	cmd = thisSlotBinary(cmd)
+	cmd, err := c.stopHook(thisSlotBinary(first.Command), r.Job)
+	if err != nil {
+		return err
+	}
 	for i := 0; i+1 < len(cmd); i++ {
 		switch {
 		case cmd[i] == "--session-id":
@@ -1015,7 +1023,10 @@ func resumeRun(ctx context.Context, c *call) error {
 			return usagef("resume: send the answer on stdin, in a quoted heredoc")
 		}
 	}
-	cmd := resumeCommand(r.Command, session, *opus)
+	cmd, err := c.stopHook(resumeCommand(r.Command, session, *opus), r.Job)
+	if err != nil {
+		return err
+	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
 		ResumeOf: r.ID, AfterDeath: *died, Nudge: nudge,

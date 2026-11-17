@@ -255,8 +255,10 @@ var commands = []command{
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},
-	// Left out of the usage text: no bot reads it.
+	// Left out of the usage text: no bot reads them. Claude Code runs
+	// stop-check as a job's Stop hook.
 	{"stats", runStats},
+	{"stop-check", runStopCheck},
 }
 
 // call is one parsed invocation.
@@ -659,7 +661,7 @@ func runCreate(ctx context.Context, c *call) error {
 	parked := c.fs.String("parked", "", "why a backlog ticket waits: hold, deferred, unready or planning (required for backlog)")
 	goal := c.fs.String("goal", "", "slug of the goal the ticket serves")
 	tier := c.fs.String("tier", "", "which engineer builds it: senior or junior (default: the split's, else none, which means senior)")
-	lint := c.fs.Bool("lint", false, "refuse an engineer's ship ticket with no numbered criterion, no Not handled: list or no areas")
+	lint := c.fs.Bool("lint", false, "refuse an engineer's ship ticket with no numbered criterion, no Not handled: list or no areas, and a qa-lead or designer ticket that isn't a scout titled Live run: or Design:")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -692,7 +694,7 @@ func runCreate(ctx context.Context, c *call) error {
 			return err
 		}
 		if *lint {
-			refuse, warn := lintTicket(ty, strings.TrimSpace(*role), b, ticket.SplitList(*areas))
+			refuse, warn := lintTicket(ty, strings.TrimSpace(*role), *title, b, ticket.SplitList(*areas))
 			if len(refuse) > 0 {
 				return lintError(refuse)
 			}

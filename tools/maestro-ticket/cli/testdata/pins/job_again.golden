@@ -38,7 +38,9 @@ stdout:
       "--permission-mode",
       "bypassPermissions",
       "--output-format",
-      "json"
+      "json",
+      "--settings",
+      "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"command\":\"'<exe>' stop-check --store '<DIR>/tickets.db'\",\"timeout\":30,\"type\":\"command\"}]}]}}"
     ],
     "job": "qa",
     "dir": "<DIR>",

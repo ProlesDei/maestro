@@ -392,7 +392,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("block " + id + ": " + firstLine(last.Body))
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Handoff:") >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
@@ -436,7 +436,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Review: GO") >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
@@ -642,21 +642,35 @@ func limitLifts(r runs.Record, reset string) time.Time {
 
 // noVerdictRuns counts the other runs of r's job on its ticket since its
 // latest mark (a Handoff: for review, a Review: GO for QA) that ended
-// with no verdict, deaths and limits aside.
+// with no verdict, deaths and limits aside. A run that ended past the Stop
+// hook's blocks counts even if it then timed out: the hook kept it going.
 func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
+	return len(c.noVerdicts(r, d, mark))
+}
+
+func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Record {
 	since := d.CreatedAt
 	if cm, ok := latestWith(d, mark); ok {
 		since = cm.CreatedAt
 	}
-	n := 0
+	var list []runs.Record
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut {
-				n++
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) {
+				list = append(list, o)
 			}
 		}
 	}
-	return n
+	return list
+}
+
+// verdictMark is the note a review or QA run's count of runs with no
+// verdict starts from.
+func verdictMark(job string) string {
+	if job == "qa" || job == "live" {
+		return "Review: GO"
+	}
+	return "Handoff:"
 }
 
 // blockNoVerdict blocks a ticket whose review or QA keeps ending with no
@@ -667,7 +681,19 @@ func (c *call) blockNoVerdict(ctx context.Context, s ticket.Store, r runs.Record
 	if r.Job == "qa" {
 		role = ticket.RoleQALead
 	}
-	body := fmt.Sprintf("Escalation: %s ended 3 times with no verdict; the last said: %s\n%s\nReturn-role: %s", r.Job, trim(out.First, 200), postedBy(r), role)
+	// Say how many ended past the Stop hook: those sessions were told to
+	// post a verdict and still didn't.
+	capped := 0
+	for _, o := range append(c.noVerdicts(r, d, verdictMark(r.Job)), r) {
+		if c.stopCapped(o.ID) {
+			capped++
+		}
+	}
+	hook := ""
+	if capped > 0 {
+		hook = fmt.Sprintf(", %d of them past the Stop hook's blocks", capped)
+	}
+	body := fmt.Sprintf("Escalation: %s ended 3 times with no verdict%s; the last said: %s\n%s\nReturn-role: %s", r.Job, hook, trim(out.First, 200), postedBy(r), role)
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-noverdict"}); err != nil {
 		return err
 	}

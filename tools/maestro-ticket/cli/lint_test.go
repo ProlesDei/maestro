@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // create --lint refuses an engineer's ship ticket that lacks the shape
@@ -47,9 +49,58 @@ func TestCreateLint(t *testing.T) {
 	h.ok(nil, "create", "--title", "Live run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead", "--lint")
 	// Without --lint, as before.
 	h.ok(nil, "create", "--title", "quick")
+	h.ok(nil, "create", "--title", "QA run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead")
 	var l struct{ Tickets []struct{ ID string } }
 	h.ok(&l, "list")
-	if len(l.Tickets) != 6 {
-		t.Fatalf("%d tickets; want 6: the refused ones made none", len(l.Tickets))
+	if len(l.Tickets) != 7 {
+		t.Fatalf("%d tickets; want 7: the refused ones made none", len(l.Tickets))
+	}
+}
+
+// create --lint refuses a qa-lead or designer ticket its job would refuse
+// once its session started: look hands any qa-lead ticket out as a live
+// run and any designer ticket as a design, and each skill takes only a
+// scout titled "Live run:" or "Design:".
+func TestLintRoleTitles(t *testing.T) {
+	for _, c := range []struct {
+		typ, role, title string
+		want             []string // each refusal, in order; none for a pass
+	}{
+		{"scout", "qa-lead", "Live run: sign up", nil},
+		{"scout", "qa-lead", "QA run: sign up", []string{`a qa-lead ticket's title must start "Live run:"`}},
+		{"ship", "qa-lead", "Live run: sign up", []string{"a qa-lead ticket is a scout: pass --type scout"}},
+		{"ship", "qa-lead", "sign up", []string{"a qa-lead ticket is a scout", `title must start "Live run:"`}},
+		{"scout", "designer", "Design: onboarding", nil},
+		{"scout", "designer", "onboarding screens", []string{`a designer ticket's title must start "Design:"`}},
+		// Other roles and scouts are as they were.
+		{"scout", "reviewer", "QA run: x", nil},
+		{"scout", "", "QA run: x", nil},
+	} {
+		ty, err := ticket.ParseType(c.typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refuse, warn := lintTicket(ty, c.role, c.title, "", nil)
+		if len(refuse) != len(c.want) || len(warn) != 0 {
+			t.Errorf("%+v: refuse %q, warn %q", c, refuse, warn)
+			continue
+		}
+		for i, w := range c.want {
+			if !strings.Contains(refuse[i], w) {
+				t.Errorf("%+v: refusal %d is %q; want %q", c, i, refuse[i], w)
+			}
+		}
+	}
+	// Through create, a refusal names the fix and makes no ticket.
+	h := newHarness(t)
+	_, stdout, _ := h.run("", "create", "--title", "QA run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead", "--lint", "--json")
+	if !strings.Contains(stdout, `title it \"Live run: ...\"`) {
+		t.Fatalf("refusal: %s", stdout)
+	}
+	h.fails(2, "create", "--title", "QA run: x", "--type", "scout", "--role", "qa-lead", "--owner", "qa-lead", "--lint")
+	var l struct{ Tickets []struct{ ID string } }
+	h.ok(&l, "list")
+	if len(l.Tickets) != 0 {
+		t.Fatalf("%d tickets; want none", len(l.Tickets))
 	}
 }
