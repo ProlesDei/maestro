@@ -10,12 +10,12 @@ From `tools/maestro-ticket/`:
 
 ```sh
 go build -o bin/maestro-ticket ./cmd/maestro-ticket   # build
-go test -race ./...                                   # unit, race and multi-process tests
+go test -race ./...                                   # unit tests, race detector on
 gofmt -l . && go vet ./...                            # lint
 go install ./cmd/maestro-ticket                       # put maestro-ticket on $GOBIN
 ```
 
-`go test -short ./...` skips the test that spawns 200 processes.
+Tests are unit tests only, as AGENTS.md says. `unitonly/` lints them, and `cli`'s `TestMain` fails the package when a test starts the CLI, such as a launch's supervisor.
 
 ## Where the data lives
 

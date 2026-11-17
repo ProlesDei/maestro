@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,49 +78,6 @@ func TestStartWaitNeedsTheRun(t *testing.T) {
 	w.End(start.Add(time.Second))
 	if got := SlotWait(dir, r.ID, start.Add(-time.Minute), time.Now()); got != time.Second {
 		t.Fatalf("SlotWait after End = %s; want 1s", got)
-	}
-}
-
-// The time limit leaves out slot waits, but only up to the cap, and the
-// result says what it left out.
-func TestSuperviseLeavesOutSlotWaits(t *testing.T) {
-	old := maxSlotCredit
-	maxSlotCredit = 2 * time.Second
-	t.Cleanup(func() { maxSlotCredit = old })
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "qa-lead", Limit: "1s", Command: []string{"sleep", "30"}, Dir: dir}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w, err := StartWait(dir, r.ID, time.Now(), false)
-	if err != nil || w == nil {
-		t.Fatalf("StartWait: %v, %v", w, err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { // a waiter that never gets its slot
-		for ctx.Err() == nil {
-			w.Touch(time.Now())
-			time.Sleep(200 * time.Millisecond)
-		}
-	}()
-	begun := time.Now()
-	if err := Supervise(context.Background(), dir, r.ID, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	took := time.Since(begun)
-	got, err := Load(dir, r.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.State != TimedOut || !strings.Contains(got.Error, "the 1s time limit ended it, which left out 2s waiting for a slot (the most it leaves out)") {
-		t.Fatalf("record: %s: %s", got.State, got.Error)
-	}
-	if took < 3*time.Second || took > 10*time.Second {
-		t.Fatalf("took %s; want the 1s limit plus the 2s cap", took)
-	}
-	if n := len(waits(dir, r.ID)); n != 0 {
-		t.Fatalf("%d wait marks left after the run", n)
 	}
 }
 
@@ -201,74 +157,6 @@ func TestTouchSplitsAtAFreeze(t *testing.T) {
 	}
 }
 
-// The limit runs on the wall clock: a machine frozen past it, whose
-// monotonic clock never moved, ends the run within one look of waking,
-// and the result says how long it was frozen.
-func TestSuperviseLimitRunsOnTheWallClock(t *testing.T) {
-	old := watchEvery
-	watchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { watchEvery = old })
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "designer", Limit: "2h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var jump atomic.Int64
-	time.AfterFunc(300*time.Millisecond, func() { jump.Store(int64(4 * time.Hour)) })
-	begun := time.Now()
-	err = Supervise(context.Background(), dir, r.ID, Options{
-		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(dir, r.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.State != TimedOut || !got.Frozen || !strings.Contains(got.Error, "the 2h time limit ended it; the machine was frozen 4h0m0s of it") {
-		t.Fatalf("record: %s: %s", got.State, got.Error)
-	}
-	if took := time.Since(begun); took > 5*time.Second {
-		t.Fatalf("took %s; want the run ended soon after the jump", took)
-	}
-}
-
-// A stop asked ends a live run as its limit would, failed and stopped by
-// the asker; only the first ask counts.
-func TestSuperviseStopsOnAsk(t *testing.T) {
-	old := watchEvery
-	watchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { watchEvery = old })
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "designer", Limit: "1h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.AfterFunc(300*time.Millisecond, func() {
-		if ok, err := AskStop(dir, r.ID, "planner", time.Now()); !ok || err != nil {
-			t.Errorf("AskStop: %v, %v", ok, err)
-		}
-		if ok, _ := AskStop(dir, r.ID, "designer", time.Now()); ok {
-			t.Error("a second AskStop counted")
-		}
-	})
-	begun := time.Now()
-	if err := Supervise(context.Background(), dir, r.ID, Options{}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := Load(dir, r.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.State != Failed || got.Error != "stopped by planner" || *got.Exit != 128+15 {
-		t.Fatalf("record: %s, exit %v: %q", got.State, got.Exit, got.Error)
-	}
-	if took := time.Since(begun); took > 5*time.Second {
-		t.Fatalf("took %s to stop", took)
-	}
-}
-
 // A wait that ends right after a freeze, with no touch between, ends at
 // its last touch, so the freeze earns no credit either.
 func TestEndAfterAFreeze(t *testing.T) {
@@ -288,58 +176,6 @@ func TestEndAfterAFreeze(t *testing.T) {
 	}
 	if got, _ := Credit(dir, r.ID, t0.Add(-time.Minute), t0.Add(4*time.Hour), time.Hour); got != time.Second {
 		t.Fatalf("Credit = %s; want the 1s before the freeze", got)
-	}
-}
-
-// A wall clock stepped back stretches no limit: the monotonic clock
-// still ends the run.
-func TestSuperviseLimitSurvivesAClockStepBack(t *testing.T) {
-	old := watchEvery
-	watchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { watchEvery = old })
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "designer", Limit: "1s", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var jump atomic.Int64
-	time.AfterFunc(200*time.Millisecond, func() { jump.Store(int64(-time.Hour)) })
-	begun := time.Now()
-	err = Supervise(context.Background(), dir, r.ID, Options{
-		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := Load(dir, r.ID); got.State != TimedOut {
-		t.Fatalf("record: %s: %s", got.State, got.Error)
-	}
-	if took := time.Since(begun); took > 5*time.Second {
-		t.Fatalf("took %s; want about the 1s limit", took)
-	}
-}
-
-// A short freeze near the end of a run that hangs isn't the freeze's
-// doing: the run times out as any other, not marked frozen.
-func TestShortFreezeMarksNoFrozen(t *testing.T) {
-	old := watchEvery
-	watchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { watchEvery = old })
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "reviewer", Limit: "2h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC().Add(-110 * time.Minute)}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var jump atomic.Int64
-	time.AfterFunc(300*time.Millisecond, func() { jump.Store(int64(15 * time.Minute)) })
-	err = Supervise(context.Background(), dir, r.ID, Options{
-		Now: func() time.Time { return time.Now().UTC().Round(0).Add(time.Duration(jump.Load())) },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := Load(dir, r.ID); got.State != TimedOut || got.Frozen || !strings.Contains(got.Error, "frozen 15m0s") {
-		t.Fatalf("record: %s, frozen %v: %s", got.State, got.Frozen, got.Error)
 	}
 }
 

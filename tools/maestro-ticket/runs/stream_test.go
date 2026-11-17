@@ -4,13 +4,10 @@ package runs
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,19 +102,6 @@ func TestStreamOutFile(t *testing.T) {
 	}
 }
 
-// A run its limit kills keeps no result in .out, as in json mode, where
-// Claude Code prints its one result only as it exits on its own: a
-// result line a session printed while it waited on background work
-// must not become the reply.
-func TestStreamKilledKeepsNoResult(t *testing.T) {
-	dir := t.TempDir()
-	got := superviseEnd(t, dir, Record{Limit: "1s", Command: streamScript(t, "warn: x\n"+streamResult+"\n", "sleep 30")}, Options{Stream: names})
-	b, _ := os.ReadFile(path(dir, got.ID, ".out"))
-	if got.State != TimedOut || string(b) != "warn: x\n" || got.SessionID != "" || strings.Contains(got.Reply, "done: T-1") || got.Stream == nil || got.Stream.Result {
-		t.Fatalf("state %s, .out %q, record %+v", got.State, b, got)
-	}
-}
-
 // The stream file is mode 0600 while the run goes, and gone once its end
 // is recorded; Prune takes one a dead supervisor left.
 func TestStreamFileRemoved(t *testing.T) {
@@ -157,32 +141,4 @@ func TestStreamFileRemoved(t *testing.T) {
 	if _, err := os.Lstat(path(dir, r.ID, streamExt)); err == nil {
 		t.Fatal("prune left the stream file")
 	}
-}
-
-// A grandchild that holds the command's stdout holds up neither the end
-// nor the first ring.
-func TestStreamGrandchildHoldsStdout(t *testing.T) {
-	dir := t.TempDir()
-	var rang atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { rang.Add(1) }))
-	defer srv.Close()
-	cmd := streamScript(t, streamResult+"\n", "sleep 60 &")
-	r, err := Create(dir, Record{Launcher: "planner", Limit: "30s", Command: cmd, Dir: dir}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got Record
-	o := Options{Stream: names, Rings: []time.Duration{0}, OnEnd: func(r Record) { got = r },
-		Hook: func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }}
-	start := time.Now()
-	if err := Supervise(context.Background(), dir, r.ID, o); err != nil {
-		t.Fatal(err)
-	}
-	if took := time.Since(start); took > 10*time.Second || rang.Load() != 1 {
-		t.Fatalf("took %s, %d rings", took, rang.Load())
-	}
-	if got.State != Done || got.Stream == nil || !got.Stream.Result {
-		t.Fatalf("record %+v", got)
-	}
-	KillRun(r.ID)
 }
