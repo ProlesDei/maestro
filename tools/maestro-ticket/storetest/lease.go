@@ -1,4 +1,4 @@
-package sqlitestore
+package storetest
 
 import (
 	"context"
@@ -11,24 +11,11 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-func eventTypes(t *testing.T, s *Store, since int64) []string {
-	t.Helper()
-	evs, err := s.Events(context.Background(), ticket.EventFilter{Since: since})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var types []string
-	for _, e := range evs {
-		types = append(types, e.Type)
-	}
-	return types
-}
-
 // A write by someone who holds no lease used to clear an expired
 // lease silently (a terminal move logged it as "released"), or leave it
 // unreported. Every write now logs lease_expired first.
-func TestUnclaimedWritesLogExpiredLease(t *testing.T) {
-	s, clk := newStore(t)
+func testUnclaimedWritesLogExpiredLease(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "cancel me", "", 2)
 	b := mustCreate(t, s, "comment on me", "", 2)
@@ -80,8 +67,8 @@ func TestUnclaimedWritesLogExpiredLease(t *testing.T) {
 }
 
 // Expiries are counted per ticket, across sessions.
-func TestLeaseExpiriesCount(t *testing.T) {
-	s, clk := newStore(t)
+func testLeaseExpiriesCount(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "flaky", "", 2)
 	for i := 1; i <= 3; i++ {
@@ -105,12 +92,12 @@ func TestLeaseExpiriesCount(t *testing.T) {
 	}
 }
 
-// One reap call frees every expired lease, in batches of reapBatch, and
+// One reap call frees every expired lease, across the store's batches, and
 // leaves live leases alone.
-func TestReapBatches(t *testing.T) {
-	s, clk := newStore(t)
+func testReapBatches(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
-	n := reapBatch*2 + 7
+	n := ReapTickets
 	for i := 0; i < n; i++ {
 		mustCreate(t, s, fmt.Sprint("t", i), "", 2)
 		if _, err := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: fmt.Sprintf("jse/s%d", i), TTL: time.Minute}); err != nil {
@@ -133,8 +120,8 @@ func TestReapBatches(t *testing.T) {
 }
 
 // A lease is expired at its exact expiry millisecond, not after.
-func TestLeaseExpiresAtExactMillisecond(t *testing.T) {
-	s, clk := newStore(t)
+func testLeaseExpiresAtExactMillisecond(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	c, _ := s.ClaimNext(ctx, ticket.ClaimRequest{Holder: "jse/s1", TTL: time.Minute})
@@ -159,8 +146,8 @@ func TestLeaseExpiresAtExactMillisecond(t *testing.T) {
 
 // A heartbeat with the default TTL used to cut a longer lease short: a
 // planner that claimed for 2h and renewed with no --ttl was left 30m.
-func TestHeartbeatNeverShortensLease(t *testing.T) {
-	s, clk := newStore(t)
+func testHeartbeatNeverShortensLease(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "planner/p1", TTL: 2 * time.Hour})
@@ -182,8 +169,8 @@ func TestHeartbeatNeverShortensLease(t *testing.T) {
 // A session that lost its lease claims again and retries a keyed write
 // under the new token: the retry replays the first result. With the token
 // in the request hash it failed as a different request.
-func TestKeyedWriteReplaysUnderNewToken(t *testing.T) {
-	s, clk := newStore(t)
+func testKeyedWriteReplaysUnderNewToken(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	first, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "reviewer/r1", TTL: time.Minute})
@@ -233,8 +220,8 @@ func TestKeyedWriteReplaysUnderNewToken(t *testing.T) {
 // release --died frees the lease of a run that hung or died and counts it
 // as an expiry, so the planner's count of dead runs holds when a bot frees
 // the ticket before the lease runs out. A plain release counts nothing.
-func TestReleaseDiedCountsExpiry(t *testing.T) {
-	s, _ := newStore(t)
+func testReleaseDiedCountsExpiry(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	tk := mustCreate(t, s, "x", "", 2)
 	for i, died := range []bool{true, false, true} {

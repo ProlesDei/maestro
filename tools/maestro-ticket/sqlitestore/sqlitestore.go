@@ -11,9 +11,7 @@ package sqlitestore
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -699,12 +697,10 @@ func idempotent[T any](ctx context.Context, tx *sql.Tx, key, op string, req any,
 	if key == "" {
 		return do()
 	}
-	reqJSON, err := json.Marshal(req)
+	hash, err := ticket.RequestHash(op, req)
 	if err != nil {
 		return zero, err
 	}
-	sum := sha256.Sum256(append([]byte(op+"\x00"), reqJSON...))
-	hash := hex.EncodeToString(sum[:])
 
 	var gotOp, gotHash, result string
 	err = tx.QueryRowContext(ctx, "SELECT op, request_hash, result FROM idempotency WHERE key = ?", key).
@@ -1786,94 +1782,36 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	if err != nil {
 		return rep, err
 	}
-	var live, expired, total int
-	err = conn.QueryRowContext(ctx, `SELECT
-		COUNT(*),
-		COALESCE(SUM(lease_holder IS NOT NULL AND lease_expires_at > ?), 0),
-		COALESCE(SUM(lease_holder IS NOT NULL AND lease_expires_at <= ?), 0)
-		FROM tickets`, now, now).Scan(&total, &live, &expired)
+	// The shared checks read only these columns of each ticket.
+	var tickets []ticket.Ticket
+	trows, err := conn.QueryContext(ctx, `SELECT id, status, role, COALESCE(blocked_from, ''), parked,
+		lease_holder IS NOT NULL, COALESCE(lease_expires_at, 0), updated_at FROM tickets ORDER BY id`)
 	if err != nil {
 		return rep, err
 	}
-	add("leases", true, "%d tickets; %d live claims, %d expired (claimable; reap frees them)", total, live, expired)
-
-	// A handoff no one picked up is a stall, not a broken store: report it
-	// and pass, so install.sh check still passes on a busy board.
-	var stalled []string
-	srows, err := conn.QueryContext(ctx, `SELECT id FROM tickets WHERE status = 'in_review'
-		AND (lease_holder IS NULL OR lease_expires_at <= ?) AND updated_at <= ? ORDER BY id`,
-		now, now-ticket.DefaultStall.Milliseconds())
-	if err != nil {
-		return rep, err
-	}
-	for srows.Next() {
-		var id ticket.ID
-		if err := srows.Scan(&id); err != nil {
-			srows.Close()
+	for trows.Next() {
+		var (
+			t                           ticket.Ticket
+			status, blockedFrom, parked string
+			held                        bool
+			expires, updated            int64
+		)
+		if err := trows.Scan(&t.ID, &status, &t.Role, &blockedFrom, &parked, &held, &expires, &updated); err != nil {
+			trows.Close()
 			return rep, err
 		}
-		stalled = append(stalled, id.String())
+		t.Status, t.BlockedFrom, t.Parked = ticket.Status(status), ticket.Status(blockedFrom), ticket.Parked(parked)
+		t.UpdatedAt = msTime(updated)
+		if held {
+			t.Claim = &ticket.Claim{ExpiresAt: msTime(expires)}
+		}
+		tickets = append(tickets, t)
 	}
-	srows.Close()
-	if err := srows.Err(); err != nil {
+	trows.Close()
+	if err := trows.Err(); err != nil {
 		return rep, err
 	}
-	if len(stalled) == 0 {
-		add("stalls", true, "no in_review ticket has waited %d minutes with no one on it", int(ticket.DefaultStall.Minutes()))
-	} else {
-		if len(stalled) > 10 {
-			stalled = append(stalled[:10], fmt.Sprintf("and %d more", len(stalled)-10))
-		}
-		add("stalls", true, "warning: in_review with no one on it for %d minutes or more: %s (maestro-ticket alerts lists them)",
-			int(ticket.DefaultStall.Minutes()), strings.Join(stalled, ", "))
-	}
-
-	// Statuses and roles are checked in Go, not by the schema: list the
-	// open tickets whose values this build doesn't know.
-	var badStatus, badRole, badParked []string
-	vrows, err := conn.QueryContext(ctx, `SELECT id, status, role, COALESCE(blocked_from, ''), parked
-		FROM tickets WHERE status NOT IN ('done', 'cancelled') ORDER BY id`)
-	if err != nil {
-		return rep, err
-	}
-	for vrows.Next() {
-		var id ticket.ID
-		var status, role, blockedFrom, parked string
-		if err := vrows.Scan(&id, &status, &role, &blockedFrom, &parked); err != nil {
-			vrows.Close()
-			return rep, err
-		}
-		if !ticket.Status(status).Valid() {
-			badStatus = append(badStatus, fmt.Sprintf("%s (%s)", id, status))
-		}
-		if role != "" && !ticket.ValidRole(role) {
-			badRole = append(badRole, fmt.Sprintf("%s (%s)", id, role))
-		}
-		slot := ticket.ParkedSlot(ticket.Status(status), ticket.Status(blockedFrom))
-		if p := ticket.Parked(parked); (slot && !p.Valid()) || (!slot && p != "") {
-			badParked = append(badParked, fmt.Sprintf("%s (%s, parked %q)", id, status, parked))
-		}
-	}
-	vrows.Close()
-	if err := vrows.Err(); err != nil {
-		return rep, err
-	}
-	if len(badStatus) == 0 {
-		add("statuses", true, "every open ticket has a known status")
-	} else {
-		add("statuses", false, "unknown status on %s", strings.Join(badStatus, ", "))
-	}
-	if len(badRole) == 0 {
-		add("roles", true, "every open ticket has a known role or none")
-	} else {
-		add("roles", false, "unknown role on %s (want %s; fix: transition it to another status with --role, then back)",
-			strings.Join(badRole, ", "), strings.Join(ticket.Roles, ", "))
-	}
-	if len(badParked) == 0 {
-		add("parked", true, "every backlog ticket says why it waits, and no other does")
-	} else {
-		add("parked", false, "bad parked reason on %s (fix: update <id> --parked <reason> in backlog)", strings.Join(badParked, ", "))
-	}
+	rep.Checks = append(rep.Checks, ticket.DoctorChecks(tickets, msTime(now))...)
 
 	var lastSeq int64
 	var triggers int

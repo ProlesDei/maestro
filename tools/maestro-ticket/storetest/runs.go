@@ -1,4 +1,4 @@
-package sqlitestore
+package storetest
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-func TestLogRunKeepsTheSessionsNewestTotal(t *testing.T) {
-	s, clk := newStore(t)
+func testLogRunKeepsTheSessionsNewestTotal(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "a", "engineer", 1)
 	log := func(req ticket.LogRunRequest) ticket.Run {
@@ -47,8 +47,8 @@ func TestLogRunKeepsTheSessionsNewestTotal(t *testing.T) {
 	}
 }
 
-func TestLogRunRefuses(t *testing.T) {
-	s, _ := newStore(t)
+func testLogRunRefuses(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	_, err := s.LogRun(ctx, ticket.LogRunRequest{Session: "s1", Ticket: 9, Actor: "qa-lead", CostUSD: 1})
 	wantErr(t, err, ticket.ErrNotFound)
@@ -67,8 +67,8 @@ func TestLogRunRefuses(t *testing.T) {
 	}
 }
 
-func TestRunsCarryTheTicketsOrigin(t *testing.T) {
-	s, clk := newStore(t)
+func testRunsCarryTheTicketsOrigin(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	planned := mustCreate(t, s, "planned", "engineer", 1)
 	found, err := s.Create(ctx, ticket.CreateRequest{Title: "found", Role: "engineer", Actor: "reviewer", Goal: "speed"})
@@ -103,8 +103,8 @@ func TestRunsCarryTheTicketsOrigin(t *testing.T) {
 
 // A cancelled ticket rewritten as one other carries its runs to it, down
 // the chain; one split into several, or still open, keeps them.
-func TestRunsCountTowardTheRewrite(t *testing.T) {
-	s, clk := newStore(t)
+func testRunsCountTowardTheRewrite(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	splitOf := func(from ticket.ID, title string) ticket.Ticket {
 		t.Helper()
@@ -169,8 +169,8 @@ func TestRunsCountTowardTheRewrite(t *testing.T) {
 
 // A ticket re-filed by hand links to the cancelled one it replaces: it
 // adds that ticket's tries and gets its runs. Each wrong link is refused.
-func TestUpdateSplitFromLinksARefile(t *testing.T) {
-	s, _ := newStore(t)
+func testUpdateSplitFromLinksARefile(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	old := mustCreate(t, s, "old", "engineer", 1)
 	for _, to := range []ticket.Status{ticket.StatusInProgress, ticket.StatusInReview, ticket.StatusInProgress,
@@ -227,8 +227,8 @@ func TestUpdateSplitFromLinksARefile(t *testing.T) {
 // A link carries the old ticket's goal, as create --split-from does,
 // unless the new ticket has one or the request sets one; and retrying a
 // link made at create is a no-op, even while the old ticket is open.
-func TestUpdateSplitFromCarriesTheGoal(t *testing.T) {
-	s, _ := newStore(t)
+func testUpdateSplitFromCarriesTheGoal(t *testing.T, f Factory) {
+	s, _ := newStore(t, f)
 	ctx := context.Background()
 	mk := func(title, goal string) ticket.Ticket {
 		t.Helper()
