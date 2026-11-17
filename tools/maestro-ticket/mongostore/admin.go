@@ -53,7 +53,7 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		add("schema", false, "can't read the board's meta: %v", err)
 		return rep, nil
 	}
-	if err := checkWriter(w); err != nil {
+	if err := s.checkWriter(w); err != nil {
 		add("schema", false, "%v", err)
 		return rep, nil
 	}

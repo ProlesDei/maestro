@@ -138,9 +138,8 @@ The person sets up MongoDB Atlas; you can't sign in for them:
 On the machine that holds the board:
 
 1. Stop new work: create `maestro/STOP` under `git rev-parse --git-common-dir`, and wait until `maestro-ticket runs` shows none running and no ticket holds a live claim.
-2. The person runs `maestro-ticket store --uri-file -` at the repo's root and pastes the URI on stdin. It writes `store.uri` beside the store, readable by them alone, and prints only the host. The URI never goes in chat or on a command line.
-3. Run `maestro-ticket migrate --to mongodb`. It copies the board, checks the copy matches, and blocks writes to the SQLite file, which stays as the way back.
-4. Add `store: mongodb` to `install.yaml`, run `apply` and `check`, then delete `maestro/STOP` and tell the person to message the planner.
+2. The person runs `maestro-ticket migrate --to mongodb --uri-file -` at the repo's root and pastes the URI on stdin. It copies the board, checks the copy matches, blocks writes to the SQLite file, which stays as the way back, and writes `store.uri` beside the store, readable by them alone. It prints only the host; the URI never goes in chat or on a command line. If it stops partway, run it again: it finishes the move. `store --uri-file` refuses here, since it would point this machine at an empty board.
+3. Add `store: mongodb` to `install.yaml`, run `apply` and `check`, then delete `maestro/STOP` and tell the person to message the planner.
 
 On each other machine, install as usual with `store: mongodb`, with the person running `maestro-ticket store --uri-file -` before `apply`. If that machine already has a SQLite board with tickets, `apply` refuses: it is a second board, so settle with the person what happens to its tickets.
 
