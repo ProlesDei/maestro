@@ -341,13 +341,14 @@ func noClaims(ctx context.Context, s ticket.Store) error {
 }
 
 // openMover opens the MongoDB board as this machine's move's own store,
-// and returns this machine's host id.
-func (c *call) openMover(ctx context.Context, loc storeLoc, uri string) (*mongostore.Store, string, error) {
+// and returns this machine's host id. With create, a database with no
+// board gets one: a move in starts it.
+func (c *call) openMover(ctx context.Context, loc storeLoc, uri string, create bool) (*mongostore.Store, string, error) {
 	host, err := HostID(loc.localDir)
 	if err != nil {
 		return nil, "", err
 	}
-	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: c.env.Now, Mover: host,
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: c.env.Now, Mover: host, Create: create,
 		StopFile: filepath.Join(loc.localDir, sqlitestore.StopFile)})
 	if err != nil {
 		return nil, "", redactURI(err, uri)
@@ -415,7 +416,13 @@ func (c *call) migrateIn(ctx context.Context, file string) (moveReport, error) {
 			return rep, err
 		}
 	}
-	mg, host, err := c.openMover(ctx, loc, uri)
+	// A file that moved already made its board; a database with none
+	// is the wrong one, and gets none.
+	mg, host, err := c.openMover(ctx, loc, uri, !gone)
+	if gone && errors.Is(err, mongostore.ErrNoBoard) {
+		return rep, fmt.Errorf("%w: %s moved to MongoDB already, so its board is in the database it moved to, not in the one this URI names; give migrate that database's URI",
+			ticket.ErrInvalid, loc.sqlitePath)
+	}
 	if err != nil {
 		return rep, err
 	}
@@ -579,7 +586,7 @@ func (c *call) migrateOut(ctx context.Context) (moveReport, error) {
 	if err := envcheck.Err(c.envChecks(loc.sqlitePath)); err != nil {
 		return rep, err
 	}
-	mg, host, err := c.openMover(ctx, loc, loc.uri)
+	mg, host, err := c.openMover(ctx, loc, loc.uri, false)
 	if err != nil {
 		return rep, err
 	}
@@ -707,7 +714,7 @@ func (c *call) abortOut(ctx context.Context) (moveReport, error) {
 	if err := envcheck.Err(c.envChecks(loc.sqlitePath)); err != nil {
 		return rep, err
 	}
-	mg, host, err := c.openMover(ctx, loc, loc.uri)
+	mg, host, err := c.openMover(ctx, loc, loc.uri, false)
 	if err != nil {
 		return rep, err
 	}

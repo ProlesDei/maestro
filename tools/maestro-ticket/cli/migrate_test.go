@@ -152,10 +152,11 @@ func (m *migrateBoard) sqlite(t *testing.T) *sqlitestore.Store {
 	return s
 }
 
-// mongo opens the MongoDB board; with mover, as this machine's move.
+// mongo opens the MongoDB board, made if the database holds none; with
+// mover, as this machine's move.
 func (m *migrateBoard) mongo(t *testing.T, mover bool) *mongostore.Store {
 	t.Helper()
-	opts := mongostore.Options{Now: m.clk.Now}
+	opts := mongostore.Options{Now: m.clk.Now, Create: true}
 	if mover {
 		host, err := HostID(m.h.dir)
 		if err != nil {

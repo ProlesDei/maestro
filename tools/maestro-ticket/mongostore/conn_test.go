@@ -3,6 +3,7 @@ package mongostore
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestOpenBuildsOnlyABoardNotSetUp(t *testing.T) {
 	uri := testURI(t)
 	ctx := context.Background()
 	name := freshDB(t, uri)
-	s, err := Open(ctx, uri, Options{Database: name})
+	s, err := Open(ctx, uri, Options{Database: name, Create: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,4 +267,29 @@ func TestEightCallsAtOnceEachGetAConnection(t *testing.T) {
 		t.Fatalf("a write beside %d stalled calls (%d on the server): %v", stalled, reached, err)
 	}
 	end()
+}
+
+// Open refuses a database that holds no board, and makes nothing there:
+// a URI naming the wrong database would start a second, empty board, and
+// the team would split across two.
+func TestOpenRefusesADatabaseWithNoBoard(t *testing.T) {
+	uri := testURI(t)
+	ctx := context.Background()
+	name := freshDB(t, uri)
+	s, err := Open(ctx, uri, Options{Database: name})
+	if err == nil {
+		s.Close()
+		t.Fatal("open made a board in an empty database")
+	}
+	wantErr(t, err, ticket.ErrInvalid)
+	if !strings.Contains(err.Error(), "holds no board") || !strings.Contains(err.Error(), "migrate --to mongodb") {
+		t.Fatalf("the refusal says no way out: %v", err)
+	}
+	have, err := ownDB(t, uri, name).ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) > 0 {
+		t.Fatalf("a refused open made %v", have)
+	}
 }

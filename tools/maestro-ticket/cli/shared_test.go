@@ -129,8 +129,8 @@ func TestLaunchOverLeavesAnotherMachinesRuns(t *testing.T) {
 	}
 }
 
-// sharedBoard makes a MongoDB database for t and returns a URI naming
-// it, or skips with no test replica set.
+// sharedBoard makes a MongoDB board for t and returns a URI naming its
+// database, or skips with no test replica set.
 func sharedBoard(t *testing.T) string {
 	t.Helper()
 	uri := os.Getenv("MAESTRO_TICKET_TEST_MONGO")
@@ -154,7 +154,19 @@ func sharedBoard(t *testing.T) string {
 		defer c.Disconnect(context.Background())
 		c.Database(db).Drop(context.Background())
 	})
+	makeBoard(t, u.String())
 	return u.String()
+}
+
+// makeBoard starts a board in the database uri names, as a move in does:
+// no other command makes one.
+func makeBoard(t *testing.T, uri string) {
+	t.Helper()
+	s, err := mongostore.Open(context.Background(), uri, mongostore.Options{Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
 }
 
 // onBoard is a harness with a local folder of its own, on the board at

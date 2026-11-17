@@ -63,7 +63,7 @@ func TestConformance(t *testing.T) {
 	storetest.Run(t, func(t *testing.T, now func() time.Time) func() (ticket.Store, error) {
 		db := freshDB(t, uri)
 		return func() (ticket.Store, error) {
-			s, err := Open(context.Background(), uri, Options{Database: db, Now: now})
+			s, err := Open(context.Background(), uri, Options{Database: db, Now: now, Create: true})
 			if err != nil {
 				return nil, err
 			}
@@ -78,6 +78,7 @@ func newStore(t *testing.T, opts Options) (*Store, string) {
 	if opts.Database == "" {
 		opts.Database = freshDB(t, uri)
 	}
+	opts.Create = true
 	s, err := Open(context.Background(), uri, opts)
 	if err != nil {
 		t.Fatal(err)
