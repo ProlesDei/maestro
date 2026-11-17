@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -24,7 +25,18 @@ import (
 // maestro-ticket CLI. The multi-process race test uses this.
 const childEnv = "MAESTRO_TICKET_CLI_CHILD"
 
+// testGateEnv carries the ring gate's window to the supervisors a test
+// starts: tests ring on schedules of seconds, where a gate of minutes
+// would hold each second ring back. Only this test binary reads it.
+const testGateEnv = "MAESTRO_TICKET_TEST_GATE"
+
 func TestMain(m *testing.M) {
+	if d, err := time.ParseDuration(os.Getenv(testGateEnv)); err == nil {
+		runs.GateWindow = d
+	} else {
+		runs.GateWindow = 500 * time.Millisecond
+		os.Setenv(testGateEnv, runs.GateWindow.String())
+	}
 	if os.Getenv(childEnv) == "1" {
 		os.Exit(Main(os.Args[1:]))
 	}

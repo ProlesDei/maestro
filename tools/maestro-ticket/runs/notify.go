@@ -149,32 +149,47 @@ func Host(u string) string {
 	return p.Scheme + "://" + p.Host + "/…"
 }
 
-// Notification is the body of a ring. It names the run and says how to
-// read it; the result itself never leaves the machine.
+// Notification is the body of a ring: a digest of the ended runs left to
+// one bot that it hasn't acked. The body carries only lines that match
+// fixed patterns, which the bot acts on as pickup would print them; text
+// Claude wrote stays on this machine until pickup. Run, Ticket and State
+// name the newest run, for a URL that routes on them, and Launcher is the
+// bot the ring is for, as Bot is.
 type Notification struct {
-	Text     string `json:"text"`
-	Run      string `json:"run"`
-	Ticket   string `json:"ticket,omitempty"`
-	Launcher string `json:"launcher"`
-	State    string `json:"state"`
+	Text     string   `json:"text"`
+	Bot      string   `json:"bot"`
+	Launcher string   `json:"launcher"`
+	Run      string   `json:"run"`
+	Ticket   string   `json:"ticket,omitempty"`
+	State    string   `json:"state"`
+	Lines    []string `json:"lines,omitempty"`
+	Ack      string   `json:"ack,omitempty"`
+	Runs     []string `json:"runs,omitempty"`
+	More     int      `json:"more,omitempty"`
 }
 
-// Notice is the ring for an ended run.
-func Notice(r Record) Notification {
-	on := ""
-	if r.Ticket != "" {
-		on = " on " + r.Ticket
+// MaxRingRuns is how many runs one ring names; the rest count in More.
+const MaxRingRuns = 10
+
+// NoticeFor is the plain digest of recs, the ended runs left to bot, oldest
+// first: their ids and nothing of their results, so the bot reads them
+// with pickup. A ring with nothing to say has no runs.
+func NoticeFor(bot string, recs []Record) Notification {
+	n := Notification{Bot: bot, Launcher: bot}
+	if len(recs) == 0 {
+		return n
 	}
-	return Notification{
-		Text:   fmt.Sprintf("Maestro run %s%s ended: %s. Run maestro-ticket pickup to read it, then ack it.", r.ID, on, r.State),
-		Run:    r.ID,
-		Ticket: r.Ticket,
-		// The bot the ring is for, which a URL serving several bots
-		// routes on: the run's owner, as a chain may have left it to
-		// the planner.
-		Launcher: r.Owner(),
-		State:    r.State,
+	last := recs[len(recs)-1]
+	n.Run, n.Ticket, n.State = last.ID, last.Ticket, last.State
+	for i, r := range recs {
+		if i == MaxRingRuns {
+			n.More = len(recs) - i
+			break
+		}
+		n.Runs = append(n.Runs, r.ID)
 	}
+	n.Text = fmt.Sprintf("Maestro: %d results for %s. Run maestro-ticket pickup to read them, then ack them.", len(recs), bot)
+	return n
 }
 
 // Ring POSTs n as JSON to h, with its key as a bearer token if it has

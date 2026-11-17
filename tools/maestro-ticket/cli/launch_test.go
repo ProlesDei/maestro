@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -76,13 +77,14 @@ func (l *launcher) get(id string) runs.Record {
 	return r
 }
 
-// waitEnded waits for a run to end and returns it.
+// waitEnded waits for a run to end, and its end to be handled, and
+// returns it.
 func (l *launcher) waitEnded(id string, within time.Duration) runs.Record {
 	l.t.Helper()
 	deadline := time.Now().Add(within)
 	for {
 		r := l.get(id)
-		if r.Ended() {
+		if r.Ended() && !r.Settling { // its end routed, as a ring sees it
 			return r
 		}
 		if time.Now().After(deadline) {
@@ -230,7 +232,8 @@ func TestLaunchRingsUntilAckedOnce(t *testing.T) {
 	l.h.fails(4, "ack", r.ID) // not ended yet
 
 	n := k.wait(t, 10*time.Second)
-	if n.Run != r.ID || n.Ticket != "T-1" || n.Launcher != "planner" || n.State != runs.Done || !strings.Contains(n.Text, "maestro-ticket pickup") {
+	if n.Run != r.ID || n.Ticket != "T-1" || n.Launcher != "planner" || n.State != runs.Done || n.Bot != "planner" ||
+		!slices.Equal(n.Runs, []string{r.ID}) || !slices.Equal(n.Lines, []string{cardWaiting}) || n.Ack != "" || n.More != 1 {
 		t.Fatalf("ring: %+v", n)
 	}
 	if a := k.lastAuth(); a != "Bearer sender-key-1" {
@@ -619,13 +622,13 @@ func TestNotifyCommand(t *testing.T) {
 
 // A bot that writes "timeout 1s" before the command, as the older
 // time-limit rule says, gets that as the limit; sub-second rings reach the
-// supervisor as given; and a stdin pipe nobody closes doesn't hang launch.
+// supervisor as given, each past the bot's gate; and a stdin pipe nobody closes doesn't hang launch.
 func TestLaunchTimeoutPrefixRingsAndOpenStdin(t *testing.T) {
 	l := newLauncher(t, "qa-lead")
 	k, url := newHook(t)
 	l.h.run(url, "notify", "qa-lead", "--url-file", "-")
 
-	r := l.launch("", "--rings", "0s,400ms", "--", "timeout", "1s", "sleep", "300")
+	r := l.launch("", "--rings", "0s,700ms", "--", "timeout", "1s", "sleep", "300")
 	if r.Limit != "1s" || r.Command[0] != "sleep" {
 		t.Fatalf("timeout prefix: %+v", r)
 	}
@@ -633,7 +636,7 @@ func TestLaunchTimeoutPrefixRingsAndOpenStdin(t *testing.T) {
 		t.Fatalf("run: %+v", e)
 	}
 	k.wait(t, 5*time.Second)
-	k.wait(t, 5*time.Second) // the 400ms ring
+	k.wait(t, 5*time.Second) // the 700ms ring, past the gate's window
 	l.ackAll()
 	if code, _, _ := l.h.run("", "launch", "--limit", "5s", "--", "timeout", "1s", "true"); code != 2 {
 		t.Fatalf("--limit and timeout both: exit %d", code)
@@ -676,13 +679,14 @@ func TestStoppedSupervisorRingsOnNextLook(t *testing.T) {
 	if e.State != runs.Failed || e.Rings != 0 || !strings.Contains(e.Error, "launcher was stopped") {
 		t.Fatalf("stopped run: %+v", e)
 	}
-	l.pickup() // the look rings, and the dead webhook fails it
+	l.h.ok(nil, "doctor") // the look rings, and the dead webhook fails it
 	if e = l.get(r.ID); e.Rang || e.OrphanTries != 1 || e.RingError == "" {
 		t.Fatalf("after a failed ring: %+v", e)
 	}
 	k, url := newHook(t)
 	l.h.run(url, "notify", "planner", "--url-file", "-")
-	l.pickup()
+	time.Sleep(runs.GateWindow) // the failed ring holds the gate shut till then
+	l.h.ok(nil, "doctor")
 	if n := k.wait(t, 5*time.Second); n.Run != r.ID || n.State != runs.Failed {
 		t.Fatalf("ring: %+v", n)
 	}
@@ -701,14 +705,14 @@ func TestLookWithoutWebhookWritesOnce(t *testing.T) {
 	r := l.launch("", "--", "true")
 	l.waitEnded(r.ID, 10*time.Second)
 	l.waitSupervisors()
-	l.pickup()
+	l.h.ok(nil, "doctor")
 	rec := filepath.Join(l.h.dir, "runs", r.ID+".json")
 	before, err := os.Stat(rec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * time.Millisecond)
-	l.pickup()
+	l.h.ok(nil, "doctor")
 	l.h.ok(nil, "doctor")
 	after, err := os.Stat(rec)
 	if err != nil {

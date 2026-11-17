@@ -12,10 +12,13 @@
 // (wait.go); <id>.stats, the facts job, again and resume know at its start
 // that stats.db keeps and the record doesn't (cli); and <id>.stream, a
 // streamed run's stdout, which its supervisor reads once the command is
-// over and removes once its end is recorded (Options.Stream). Only one
-// process writes a record at a
-// time: launch until the supervisor starts, then whoever holds <id>.lock: the
-// supervisor, or, once it went away, a reader that Adopt let in.
+// over and removes once its end is recorded (Options.Stream). A record
+// saved as it ended is settling while its supervisor still routes it and
+// starts its next step (Options.OnEnd): no reader lists it as a result
+// until that is over, so no bot acts on a send the end starts itself.
+// Only one process writes a record at a time: launch until the supervisor
+// starts, then whoever holds <id>.lock: the supervisor, or, once it went
+// away, a reader that Adopt let in.
 package runs
 
 import (
@@ -118,6 +121,11 @@ type Record struct {
 	Chained []string        `json:"chained,omitempty"`
 	Routed  json.RawMessage `json:"routed,omitempty"`
 	Notify  string          `json:"notify,omitempty"`
+	// Settling is true while the run's end is still being handled: saved
+	// ended, but not yet routed and chained. Readers leave it out of the
+	// results until whoever holds its lock clears it. Missing means
+	// settled, so an older record reads as before.
+	Settling bool `json:"settling,omitempty"`
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
 	AckedBy string     `json:"acked_by,omitempty"`
@@ -418,6 +426,19 @@ func once(name string, body []byte) (bool, error) {
 // orphanTries caps how often readers ring for one orphan whose rings
 // fail, so a webhook that is down can't slow every pickup for good.
 const orphanTries = 5
+
+// Unacked lists the ended runs left to bot that it hasn't acked and whose
+// end is settled, oldest first: what its ring and its pickup carry.
+func Unacked(dir, bot string, now time.Time) ([]Record, error) {
+	list, err := List(dir, now, false)
+	out := []Record{}
+	for _, r := range list {
+		if r.State != Unreadable && r.Ended() && !r.Settling && r.Owner() == bot {
+			out = append(out, r)
+		}
+	}
+	return out, err
+}
 
 // Orphans lists the unacked runs whose supervisor may have gone away
 // before a ring reached the launcher: a died run, or an ended one that

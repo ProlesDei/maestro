@@ -165,8 +165,19 @@ stdout:
       "pid": N,
       "ended_at": "T",
       "error": "its supervisor went away with no result: the machine restarted, or it was killed",
-      "orphan_tries": 1,
-      "host": "<host>"
+      "host": "<host>",
+      "routed": {
+        "run": "R-5",
+        "job": "build",
+        "ticket": "T-5",
+        "outcome": "died",
+        "first": "its supervisor went away with no result: the machine restarted, or it was killed",
+        "send": [],
+        "do": [
+          "maestro-ticket resume R-5 --died"
+        ],
+        "wrote": []
+      }
     },
     {
       "id": "R-6",
@@ -474,8 +485,20 @@ stdout:
       "pid": N,
       "ended_at": "T",
       "error": "its supervisor went away with no result: the machine restarted, or it was killed",
-      "orphan_tries": 1,
-      "host": "<host>"
+      "rang": true,
+      "host": "<host>",
+      "routed": {
+        "run": "R-5",
+        "job": "build",
+        "ticket": "T-5",
+        "outcome": "died",
+        "first": "its supervisor went away with no result: the machine restarted, or it was killed",
+        "send": [],
+        "do": [
+          "maestro-ticket resume R-5 --died"
+        ],
+        "wrote": []
+      }
     },
     {
       "id": "R-6",

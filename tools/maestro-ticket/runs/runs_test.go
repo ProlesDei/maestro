@@ -257,6 +257,7 @@ func TestRecordJSONKeys(t *testing.T) {
 		"Rang rang,omitempty", "OrphanTries orphan_tries,omitempty", "LaunchID launch_id,omitempty",
 		"Host host,omitempty", "ChainOf chain_of,omitempty", "Hops hops,omitempty",
 		"Chained chained,omitempty", "Routed routed,omitempty", "Notify notify,omitempty",
+		"Settling settling,omitempty",
 		"AckedAt acked_at,omitempty", "AckedBy acked_by,omitempty",
 	}
 	var got []string

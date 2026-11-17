@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -214,7 +215,7 @@ func TestChainRunsTheHandoffs(t *testing.T) {
 	}
 	// A start lists the runs left to the planner, as its pickup does.
 	out, err = j.chainCmd("planner", "the board\n", "job", "plan").CombinedOutput()
-	if err != nil || !strings.Contains(string(out), build.ID+" ended: run maestro-ticket pickup") {
+	if err != nil || !strings.Contains(string(out), "3 ended, unacked: run pickup") {
 		t.Fatalf("planner's job: %v\n%s", err, out)
 	}
 	plan := strings.Fields(string(out))[0]
@@ -314,13 +315,13 @@ func TestChainLeavesALooksHandout(t *testing.T) {
 	h.c.actor = "junior-engineer"
 
 	// A launcher with no webhook, such as a person, reads its own pickup:
-	// the run stays for it.
+	// the run stays for it, routed.
 	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
 		t.Fatal("no handout")
 	}
 	r := h.endedRun("build", "junior-engineer", "build: done")
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || runs.Acked(dir, r.ID) {
+	if got, _ := runs.Load(dir, r.ID); len(got.Routed) == 0 || len(got.Chained) != 0 || runs.Acked(dir, r.ID) {
 		t.Fatalf("a launcher with no webhook: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
 	h.hook("junior-engineer")
@@ -336,9 +337,10 @@ func TestChainLeavesALooksHandout(t *testing.T) {
 	}
 }
 
-// A run that hit the usage limit is pickup's to route: the chain leaves
-// it whole, so the planner still hears of the pause.
-func TestChainLeavesALimitToPickup(t *testing.T) {
+// A run that hit the usage limit starts nothing, but its end routes it
+// and keeps the route: the pause is set once, and the planner hears of it
+// from the run's ring and pickup, which show that route.
+func TestChainStoresALimitsRoute(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
@@ -347,14 +349,13 @@ func TestChainLeavesALimitToPickup(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "Claude AI usage limit reached|"+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || got.Notify != "" || runs.Acked(dir, r.ID) {
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || got.Notify != "" || len(got.Chained) != 0 || runs.Acked(dir, r.ID) {
 		t.Fatalf("chained a limit: %+v", got)
 	}
-	if fileExists(pausePath(h.dir)) {
-		t.Fatal("the chain set the pause, which pickup shows the planner once")
-	}
-	if rt := h.route(r); len(sends(rt)) != 1 || !strings.HasPrefix(sends(rt)[0], "send planner: usage_limit T-1") {
-		t.Fatalf("pickup after: %+v", rt)
+	if !fileExists(pausePath(h.dir)) || len(sends(rt)) != 1 || !strings.HasPrefix(sends(rt)[0], "send planner: usage_limit T-1") {
+		t.Fatalf("stored route: %+v", rt)
 	}
 }
 
@@ -410,11 +411,13 @@ func TestChainLeavesACommandToTheBot(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "review: stopped: tier 2 needs the full model")
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || got.Notify != "" || runs.Acked(dir, r.ID) {
+	got, _ := runs.Load(dir, r.ID)
+	if got.Notify != "" || runs.Acked(dir, r.ID) {
 		t.Fatalf("a do: line: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
-	if rt := h.route(r); len(rt.Do) != 1 || !strings.Contains(rt.Do[0], "job again "+r.ID+" --full") {
-		t.Fatalf("pickup after: %+v", rt)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || len(rt.Do) != 1 || !strings.Contains(rt.Do[0], "job again "+r.ID+" --full") {
+		t.Fatalf("stored route: %+v", rt)
 	}
 }
 

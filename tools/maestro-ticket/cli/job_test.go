@@ -378,6 +378,12 @@ func TestPickupRoutesAJob(t *testing.T) {
 	j.h.ok(nil, "transition", "T-1", "--to", "in_progress")
 	_, r := j.job("", "build", "T-1")
 	j.h.ok(nil, "transition", "T-1", "--to", "in_review") // as the session would
+	// Its end stored the route it found then; a record with none, from
+	// before ends kept routes, pickup routes itself.
+	dir := filepath.Join(j.h.dir, "runs")
+	r, _ = runs.Load(dir, r.ID)
+	r.Routed = nil
+	runs.Save(dir, r)
 	out, err := j.cmd("", "pickup").Output()
 	if err != nil {
 		t.Fatalf("pickup: %v\n%s", err, out)
@@ -558,7 +564,8 @@ func TestPickupWaitsOutALimit(t *testing.T) {
 	_, r := j.job("", "qa", "T-1")
 	dir := filepath.Join(j.h.dir, "runs")
 	lifts := time.Now().Add(time.Hour)
-	r.State, r.IsError, r.Reply = runs.Failed, true, "Claude AI usage limit reached|"+strconv.FormatInt(lifts.Unix(), 10)
+	r, _ = runs.Load(dir, r.ID)
+	r.State, r.IsError, r.Reply, r.Routed = runs.Failed, true, "Claude AI usage limit reached|"+strconv.FormatInt(lifts.Unix(), 10), nil
 	runs.Save(dir, r)
 	setPause(j.h.dir, pause{Until: lifts, Why: "usage limit"}, time.Now())
 	out, _ := j.cmd("", "pickup").Output()

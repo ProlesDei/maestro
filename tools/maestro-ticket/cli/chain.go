@@ -38,15 +38,15 @@ const chainLimit = 2 * time.Minute
 const chainBy = "chain"
 
 // chain runs in a job run's supervisor once the run ended, before the
-// first ring. It routes a run that ended done as pickup would and starts
-// each fixed handoff itself, as the bot it was for. What is left only tells the
-// planner something goes to the planner; a run that leaves nothing to do
-// is acked, and rings no one.
+// first ring, while the record is settling. It routes the run as pickup
+// would and stores the route, so the ring's body and every pickup show
+// the same lines. For a run that ended done, it starts each fixed handoff
+// itself, as the bot it was for. What is left only tells the planner
+// something goes to the planner; a run that leaves nothing to do is
+// acked, and rings no one. A failure, a limit or a full disk starts
+// nothing: its route stays for the launcher.
 func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
-	// A failure, a limit or a full disk stays the launcher's: routing one
-	// here would spend what pickup shows once, such as a usage limit's
-	// line to the planner.
-	if out, _ := outcomeOf(r); !chainJobs[r.Job] || out != outDone {
+	if r.Job == "" {
 		return
 	}
 	s, err := c.open(ctx)
@@ -60,28 +60,30 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	now := time.Now().UTC().Round(time.Millisecond)
-	// As pickup would: a job a look handed out lately is on its way.
-	sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
 	var chained []string
-	left := []send{}
-	for _, sd := range sends {
-		if c.handOn(ctx, dir, notify, r, sd) {
-			chained = append(chained, sd.Bot+": "+sd.Line)
-		} else {
-			left = append(left, sd)
+	done, toPlanner := false, false
+	if out, _ := outcomeOf(r); chainJobs[r.Job] && out == outDone {
+		// As pickup would: a job a look handed out lately is on its way.
+		sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
+		left := []send{}
+		for _, sd := range sends {
+			if c.handOn(ctx, dir, notify, r, sd) {
+				chained = append(chained, sd.Bot+": "+sd.Line)
+			} else {
+				left = append(left, sd)
+			}
 		}
+		rt.Send = left
+		// A launcher with no webhook, such as a person, reads its pickup:
+		// leave it what it would have seen.
+		bot := hasHook(notify, r.Launcher)
+		rest := leftForBot(rt)
+		done = bot && len(left) == 0 && !rest
+		toPlanner = bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
+			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
 	}
-	rt.Send = left
-	// A launcher with no webhook, such as a person, reads its pickup:
-	// leave it what it would have seen.
-	bot := hasHook(notify, r.Launcher)
-	rest := leftForBot(rt)
-	done := bot && len(left) == 0 && !rest
-	toPlanner := bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
-		!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
-	if len(chained) == 0 && !done && !toPlanner {
-		return // as before: the launcher's pickup routes it
-	}
+	// One save, after every start: no reader sees the route before the
+	// handoffs it names have started.
 	rec, err := runs.Load(dir, r.ID)
 	if err != nil {
 		return

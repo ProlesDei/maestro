@@ -44,5 +44,4 @@ $ maestro-ticket job build T-1 --model opus --limit 30m
 exit 0
 stdout:
 R-3 started: build T-1 on opus, limit 30m, tier junior
-R-1 ended: run maestro-ticket pickup
-R-2 ended: run maestro-ticket pickup
+2 ended, unacked: run pickup

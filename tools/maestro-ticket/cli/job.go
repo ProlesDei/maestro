@@ -744,9 +744,9 @@ func (c *call) ticketForJob(ctx context.Context, id string) (ticket.Ticket, erro
 // prompt's flag.
 func oneLineText(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// printStarted prints a started run in one line, then one line for each
-// of the actor's runs that ended and aren't acked, so a turn that starts
-// a run needs no pickup to learn of them.
+// printStarted prints a started run in one line, then, if any of the
+// actor's runs ended and aren't acked, one line that counts them, so a
+// turn that starts a run learns of them.
 func (c *call) printStarted(r runs.Record, model, why string) error {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -755,7 +755,7 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 	list, _ := runs.List(dir, time.Now(), false)
 	ended := []string{}
 	for _, o := range list {
-		if o.Owner() == c.actor && o.Ended() && o.ID != r.ID {
+		if o.Owner() == c.actor && o.Ended() && !o.Settling && o.ID != r.ID {
 			ended = append(ended, o.ID)
 		}
 	}
@@ -770,8 +770,8 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 			extra = ", " + why
 		}
 		fmt.Fprintf(w, "%s started: %s%s on %s, limit %s%s\n", r.ID, dash(r.Job), on, model, r.Limit, extra)
-		for _, id := range ended {
-			fmt.Fprintf(w, "%s ended: run maestro-ticket pickup\n", id)
+		if len(ended) > 0 {
+			fmt.Fprintf(w, "%d ended, unacked: run pickup\n", len(ended))
 		}
 	})
 }
