@@ -594,6 +594,8 @@ func (c *call) migrateOut(ctx context.Context) (moveReport, error) {
 	}
 	done := st.Moved
 	switch {
+	case done && st.Host != host:
+		return rep, fmt.Errorf("%w: this board moved back to SQLite on another machine (host id %s); run maestro-ticket store --clear here", ticket.ErrInvalid, dash(st.Host))
 	case st.To == mongostore.MoveIn:
 		return rep, fmt.Errorf("%w: maestro-ticket migrate --to mongodb never finished; run it again first", ticket.ErrInvalid)
 	case st.To == "" && !done:
