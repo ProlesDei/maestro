@@ -12,8 +12,9 @@
 //
 // Collections: tickets (with deps, areas, lease and the latest comment's
 // start on each), comments, events, idempotency, runs, launches, etas and
-// meta. Events are only ever inserted, never updated or deleted, so a
-// server role with insert and find alone on events is enough.
+// meta. Events are only ever inserted, never updated or deleted, so once
+// the board is set up, a server role with insert and find alone on events
+// is enough.
 package mongostore
 
 import (
@@ -43,6 +44,11 @@ import (
 // schemaVersion is the layout this build reads and writes. A store on a
 // newer one is refused with ErrStoreTooNew.
 const schemaVersion = 1
+
+// setupVersion is the collections and indexes this build makes. Raise it
+// when build makes something new, so each board builds it on its next
+// open.
+const setupVersion = 1
 
 // DefaultDatabase holds the board when the URI names no database.
 const DefaultDatabase = "maestro"
@@ -99,6 +105,8 @@ type writerDoc struct {
 	// id's last.
 	Code  int            `bson:"code"`
 	Hosts map[string]int `bson:"hosts"`
+	// Setup is the setupVersion the board was last set up at.
+	Setup int `bson:"setup"`
 }
 
 // Code is this build's code: it goes up when what this package writes
@@ -144,10 +152,9 @@ var _ ticket.Store = (*Store)(nil)
 // sharedClient is one process's connection pool to one URI: stores opened
 // on the same URI share it, and the last Close disconnects it.
 type sharedClient struct {
-	c     *mongo.Client
-	uri   string
-	refs  int
-	ready map[string]bool // databases set up by this process
+	c    *mongo.Client
+	uri  string
+	refs int
 }
 
 var clients = struct {
@@ -156,7 +163,8 @@ var clients = struct {
 }{m: map[string]*sharedClient{}}
 
 // Open connects to the replica set at uri (reusing this process's client
-// for it), sets up the database if it is new, and checks its schema. No
+// for it), sets up the database if it is new or an older build set it up,
+// and checks its schema. No
 // error it returns holds the URI.
 func Open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	s, err := open(ctx, uri, opts)
@@ -205,7 +213,7 @@ func acquire(uri string) (*sharedClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to MongoDB: %w", err)
 	}
-	sc := &sharedClient{c: c, uri: uri, refs: 1, ready: map[string]bool{}}
+	sc := &sharedClient{c: c, uri: uri, refs: 1}
 	clients.m[uri] = sc
 	return sc, nil
 }
@@ -232,25 +240,25 @@ func (s *Store) Close() error {
 // Database names the store's database.
 func (s *Store) Database() string { return s.name }
 
-// setup makes the collections, indexes and writer document of a new
-// board, once per process and database, then checks the schema. Each step
-// is safe to run from many processes at once. It is the one place that
-// touches collections outside a transaction: MongoDB builds indexes there.
+// setup checks the schema, first making the collections, indexes and
+// writer document of a board not set up at setupVersion: a new one, or
+// one an older build set up. A board set up already costs one read, and
+// needs no grant to build indexes. Each step is safe to run from many
+// processes at once. It is the one place that touches collections outside
+// a transaction: MongoDB builds indexes there.
 func (s *Store) setup(ctx context.Context) error {
-	clients.Lock()
-	ready := s.client.ready[s.name]
-	clients.Unlock()
-	if !ready {
+	var w writerDoc
+	err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return fmt.Errorf("read the board's meta: %w", err)
+	}
+	if err != nil || w.Setup < setupVersion {
 		if err := s.build(ctx); err != nil {
 			return err
 		}
-		clients.Lock()
-		s.client.ready[s.name] = true
-		clients.Unlock()
-	}
-	var w writerDoc
-	if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
-		return fmt.Errorf("read the board's meta: %w", err)
+		if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
+			return fmt.Errorf("read the board's meta: %w", err)
+		}
 	}
 	return s.checkWriter(w)
 }
@@ -298,14 +306,15 @@ func (s *Store) build(ctx context.Context) error {
 			return fmt.Errorf("index %s: %w", c, err)
 		}
 	}
-	// The writer document: made once, never replaced.
+	// The writer document: made once, never replaced. It notes the setup
+	// last, so a build cut short runs again.
 	_, err = s.db.Collection(cMeta).UpdateOne(ctx, bson.D{{Key: "_id", Value: writerID}},
 		bson.D{{Key: "$setOnInsert", Value: bson.D{
 			{Key: "schema", Value: schemaVersion}, {Key: "moved", Value: false}, {Key: "writes", Value: int64(0)},
 			{Key: "now", Value: bson.NewDateTimeFromTime(time.Now())},
 			{Key: "tickets", Value: int64(0)}, {Key: "comments", Value: int64(0)},
 			{Key: "events", Value: int64(0)}, {Key: "launches", Value: int64(0)},
-		}}}, options.UpdateOne().SetUpsert(true))
+		}}, {Key: "$max", Value: bson.D{{Key: "setup", Value: setupVersion}}}}, options.UpdateOne().SetUpsert(true))
 	if err != nil && !mongo.IsDuplicateKeyError(err) {
 		return fmt.Errorf("make the writer document: %w", err)
 	}
