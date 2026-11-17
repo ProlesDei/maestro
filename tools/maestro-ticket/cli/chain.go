@@ -58,10 +58,14 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if err != nil {
 		return
 	}
+	co, err := c.coord()
+	if err != nil {
+		return
+	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	now := time.Now().UTC().Round(time.Millisecond)
 	// As pickup would: a job a look handed out lately is on its way.
-	sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
+	sends := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
 	var chained []string
 	left := []send{}
 	for _, sd := range sends {
