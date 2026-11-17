@@ -68,9 +68,12 @@ const (
 	commitLimit = 10 * time.Second
 	// selectTimeout is how long a call waits to find the server.
 	selectTimeout = 5 * time.Second
-	// maxPool caps a client's connections to each server: a process makes
-	// few calls at once, and writers take turns on the server anyway.
-	maxPool = 2
+	// maxPool caps a client's connections to each server. A call waiting
+	// for one spends its transaction's deadline, so it fits the most
+	// calls one process makes at once: ringOrphans' 8. The pool opens a
+	// connection only when calls overlap, so a process making one call at
+	// a time holds one.
+	maxPool = 8
 )
 
 // idleClose is how long a client no call uses stays connected. Tests
