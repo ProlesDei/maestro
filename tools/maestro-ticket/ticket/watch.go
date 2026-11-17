@@ -35,6 +35,10 @@ type Launch struct {
 	Job     string `json:"job,omitempty"`
 	Tickets []ID   `json:"tickets,omitempty"` // a judge run's
 	Limit   string `json:"limit,omitempty"`   // as a run record writes it, such as 45m
+	// Lifts is when the usage limit that stopped the run lifts, so another
+	// machine holds its ticket for it; zero if none stopped it. A store on
+	// one machine keeps none.
+	Lifts time.Time `json:"lifts,omitzero"`
 }
 
 // LimitOr is the launch's time limit, or d when it names none.
@@ -108,6 +112,7 @@ type EndLaunchRequest struct {
 	ID      int64
 	Outcome string
 	Session string
+	Lifts   time.Time // as Launch's; a store on one machine ignores it
 }
 
 // Validate checks the request.

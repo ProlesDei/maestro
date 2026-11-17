@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -403,5 +404,83 @@ func TestTwoMachinesShareCoordination(t *testing.T) {
 	b.ok(nil, "stop", "--all", "--off")
 	if o := lookAt(t, a); !o.Stopped {
 		t.Fatal("A's own STOP was lifted from B")
+	}
+}
+
+// A board this machine can't read is no halt: a start fails with the
+// board's error, not stopped. A STOP file here still stops it.
+func TestBoardErrorIsNoHalt(t *testing.T) {
+	h := onBoard(t, "mongodb://127.0.0.1:1/x?serverSelectionTimeoutMS=200&connectTimeoutMS=200", "planner")
+	c := &call{env: Env{Getenv: func(k string) string { return h.env[k] }, Dir: h.dir}}
+	defer c.closeBoard()
+	if err := c.mayStart(); err == nil || errors.Is(err, ticket.ErrStopped) {
+		t.Fatalf("a start on a board it can't reach: %v", err)
+	}
+	os.WriteFile(filepath.Join(h.dir, "STOP"), nil, 0o644)
+	if err := c.mayStart(); !errors.Is(err, ticket.ErrStopped) {
+		t.Fatalf("a start with STOP here: %v", err)
+	}
+}
+
+// A heartbeat on a shared store copies the halt to this machine's STOP
+// file, so a session already going sees stop --all; the lift removes it.
+func TestHeartbeatSeesTheHalt(t *testing.T) {
+	uri := sharedBoard(t)
+	a, b := onBoard(t, uri, "planner"), onBoard(t, uri, "planner")
+	a.ok(nil, "create", "--title", "x")
+	var got tk
+	a.ok(&got, "claim", "T-1", "--holder", "jse/s1")
+	beat := func() { a.ok(nil, "heartbeat", "T-1", "--holder", "jse/s1", "--token", fmt.Sprint(got.Claim.Token)) }
+	stop := filepath.Join(a.dir, "STOP")
+	b.ok(nil, "stop", "--all")
+	beat()
+	if bs, err := os.ReadFile(stop); err != nil || string(bs) != haltBody {
+		t.Fatalf("A's STOP after a heartbeat under the halt: %q %v", bs, err)
+	}
+	b.ok(nil, "stop", "--all", "--off")
+	beat()
+	if _, err := os.Stat(stop); !os.IsNotExist(err) {
+		t.Fatalf("A's copy stayed after the lift: %v", err)
+	}
+}
+
+// Another machine's run that a usage limit stopped holds its ticket
+// until the limit is a stall past lifting, as this machine's own do.
+func TestLookHoldsALimitedRunElsewhere(t *testing.T) {
+	uri := sharedBoard(t)
+	a, b := onBoard(t, uri, "planner"), onBoard(t, uri, "planner")
+	a.ok(nil, "create", "--title", "x")
+	ha, err := HostID(a.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	l, err := s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: "senior-engineer", Ticket: 1, PID: os.Getpid(), Host: ha, Job: "build", Limit: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: l.ID, Outcome: ticket.LaunchResult, Lifts: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	// It ended long ago, so only the limit holds it.
+	c, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Disconnect(ctx)
+	u, _ := url.Parse(uri)
+	if _, err := c.Database(strings.TrimPrefix(u.Path, "/")).Collection("launches").UpdateByID(ctx, l.ID,
+		bson.D{{Key: "$set", Value: bson.D{{Key: "ended_at", Value: bson.NewDateTimeFromTime(time.Now().Add(-5 * time.Hour))}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range lookAt(t, b).Send {
+		if strings.Contains(s.Line, "T-1") {
+			t.Fatalf("B handed out T-1, which A's limited run holds: %+v", s)
+		}
 	}
 }

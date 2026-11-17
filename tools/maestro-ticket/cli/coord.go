@@ -69,8 +69,8 @@ type coordStore interface {
 	clearFlag(name string) error
 	// stopped reports the halt: while it stands no run starts and no
 	// claim is made. A shared store must still honour this machine's own
-	// STOP file.
-	stopped() bool
+	// STOP file. An error says the halt couldn't be read: it is no halt.
+	stopped() (bool, error)
 }
 
 // coord does the takes and checks on a coordStore that every command
@@ -293,7 +293,9 @@ func (f fileCoord) clearFlag(name string) error {
 }
 
 // stopped reports the STOP file in dir, set by hand or by a bot.
-func (f fileCoord) stopped() bool { return fileExists(filepath.Join(f.dir, sqlitestore.StopFile)) }
+func (f fileCoord) stopped() (bool, error) {
+	return fileExists(filepath.Join(f.dir, sqlitestore.StopFile)), nil
+}
 
 // markTimeout bounds each call to a shared store's marks.
 const markTimeout = 15 * time.Second
@@ -424,22 +426,24 @@ func (s sharedCoord) setFlag(name string, b []byte) error { return s.write(flagM
 func (s sharedCoord) clearFlag(name string) error { return s.remove(flagMarks, name) }
 
 // stopped reports the halt stop --all set on the board, or this
-// machine's STOP file. A board it can't read counts as halted: no claim
-// could land on it either. It copies a halt it read into the STOP file
-// first, for the skills and bots that look for the file, as
-// mirrorHalt says.
-func (s sharedCoord) stopped() bool {
-	halted := true
+// machine's STOP file. A board it can't read is no halt, so the error
+// comes back, unless the STOP file stops this machine anyway. It copies a
+// halt it read into the STOP file first, for the skills and bots that
+// look for the file, as mirrorHalt says.
+func (s sharedCoord) stopped() (bool, error) {
+	var halted bool
 	err := s.with(func(ctx context.Context, b *mongostore.Store) error {
 		var err error
 		halted, err = b.Halted(ctx)
 		return err
 	})
-	if err != nil {
-		return true
+	if err == nil {
+		mirrorHalt(s.local.dir, halted)
 	}
-	mirrorHalt(s.local.dir, halted)
-	return halted || s.local.stopped()
+	if here, _ := s.local.stopped(); here || halted {
+		return true, nil
+	}
+	return false, err
 }
 
 // haltBody is what a STOP file stop --all made holds: the mark that tells

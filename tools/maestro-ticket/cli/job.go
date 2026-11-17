@@ -715,7 +715,9 @@ func (c *call) mayStart() error {
 	if err != nil {
 		return err
 	}
-	if co.s.stopped() {
+	if stop, err := co.s.stopped(); err != nil {
+		return err
+	} else if stop {
 		return fmt.Errorf("%w: stopped: maestro/STOP is set: start no run", ticket.ErrStopped)
 	}
 	if p, ok := co.readPause(time.Now()); ok {

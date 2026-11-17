@@ -176,12 +176,12 @@ func runLogRun(ctx context.Context, c *call) error {
 	case asked:
 		return usagef("log-run takes no --json: stdout carries the reply as it came")
 	case copyErr != nil:
-		c.endLaunch(ctx, nil, launch, ticket.LaunchNoResult, "")
+		c.endLaunch(ctx, nil, ticket.EndLaunchRequest{ID: launch, Outcome: ticket.LaunchNoResult})
 		return fmt.Errorf("pass the reply through: %w", copyErr)
 	}
 	r, err := lastResult(buf.Bytes())
 	if err != nil {
-		c.endLaunch(ctx, nil, launch, ticket.LaunchNoResult, "")
+		c.endLaunch(ctx, nil, ticket.EndLaunchRequest{ID: launch, Outcome: ticket.LaunchNoResult})
 		c.freeClaim(ctx, launch, id)
 		return err
 	}
@@ -190,7 +190,7 @@ func runLogRun(ctx context.Context, c *call) error {
 		return err
 	}
 	defer s.Close()
-	c.endLaunch(ctx, s, launch, ticket.LaunchResult, r.SessionID)
+	c.endLaunch(ctx, s, ticket.EndLaunchRequest{ID: launch, Outcome: ticket.LaunchResult, Session: r.SessionID})
 	return logRun(ctx, s, r, id, c.actor, c.env.Stderr)
 }
 

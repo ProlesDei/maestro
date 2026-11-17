@@ -138,7 +138,10 @@ func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Durat
 			return wasHeld
 		}
 		_, paused := co.readPause(time.Now())
-		heldAt, wasHeld = time.Now(), paused || co.s.stopped()
+		// A board it can't read holds no session: one started then meets
+		// the error itself.
+		stop, _ := co.s.stopped()
+		heldAt, wasHeld = time.Now(), paused || stop
 		return wasHeld
 	}
 	use := c.slotUser(sdir, command)

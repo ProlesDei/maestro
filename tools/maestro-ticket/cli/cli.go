@@ -1026,12 +1026,35 @@ func runHeartbeat(ctx context.Context, c *call) error {
 		if c.idemKey != "" {
 			return usagef("heartbeat: --idempotency-key not supported; a heartbeat must always act on the lease as it is now")
 		}
-		t, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
+		t, err := c.heartbeat(ctx, s, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
 		if err != nil {
 			return err
 		}
 		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "renewed %s\n", oneLine(t)) })
 	})
+}
+
+// haltBeater is a shared store's heartbeat, which reads the halt too.
+type haltBeater interface {
+	HeartbeatHalt(ctx context.Context, req ticket.HeartbeatRequest) (ticket.Ticket, bool, error)
+}
+
+// heartbeat renews a lease. On a shared store it copies the halt the
+// heartbeat read to this machine's STOP file, as mirrorHalt says, so a
+// session already going sees stop --all at its next STOP check.
+func (c *call) heartbeat(ctx context.Context, s ticket.Store, req ticket.HeartbeatRequest) (ticket.Ticket, error) {
+	hb, ok := s.(haltBeater)
+	if !ok {
+		return s.Heartbeat(ctx, req)
+	}
+	t, halted, err := hb.HeartbeatHalt(ctx, req)
+	if err != nil {
+		return t, err
+	}
+	if loc, err := c.location(); err == nil {
+		mirrorHalt(loc.localDir, halted)
+	}
+	return t, nil
 }
 
 // unwatchable says why a keepalive can't watch pid, or "" if it can.
@@ -1106,7 +1129,7 @@ func runKeepalive(ctx context.Context, c *call) error {
 				return nil
 			}
 			if !time.Now().Before(next) {
-				_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
+				_, err := c.heartbeat(ctx, s, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
 				switch {
 				case ctx.Err() != nil:
 					return nil

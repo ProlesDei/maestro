@@ -426,14 +426,19 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		return
 	}
 	defer s.Close()
-	outcome := ticket.LaunchResult
+	end := ticket.EndLaunchRequest{ID: r.LaunchID, Outcome: ticket.LaunchResult, Session: reply.SessionID}
 	switch {
 	case r.State == runs.Died:
-		outcome = ticket.LaunchDied
+		end.Outcome = ticket.LaunchDied
 	case replyErr != nil:
-		outcome = ticket.LaunchNoResult
+		end.Outcome = ticket.LaunchNoResult
 	}
-	c.endLaunch(ctx, s, r.LaunchID, outcome, reply.SessionID)
+	// Another machine holds the ticket for it until the limit lifts, as
+	// this machine's look does from its record.
+	if out, reset := outcomeOf(r); out == outUsageLimit {
+		end.Lifts = limitLifts(r, reset)
+	}
+	c.endLaunch(ctx, s, end)
 	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
