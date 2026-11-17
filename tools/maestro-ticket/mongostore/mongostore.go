@@ -12,8 +12,9 @@
 //
 // Collections: tickets (with deps, areas, lease and the latest comment's
 // start on each), comments, events, idempotency, runs, launches, etas and
-// meta. Events are only ever inserted, never updated or deleted, so a
-// server role with insert and find alone on events is enough.
+// meta. Events are only ever inserted, never updated or deleted, so once
+// the board is set up, a server role with insert and find alone on events
+// is enough.
 package mongostore
 
 import (
@@ -44,13 +45,25 @@ import (
 // newer one is refused with ErrStoreTooNew.
 const schemaVersion = 1
 
+// setupVersion is the collections and indexes this build makes. Raise it
+// when build makes something new, so each board builds it on its next
+// open.
+const setupVersion = 1
+
 // DefaultDatabase holds the board when the URI names no database.
 const DefaultDatabase = "maestro"
 
+// txnBudget is how long a call keeps retrying transactions that lost to
+// another writer before it gives up with ErrBusy. Tests shorten it.
+var txnBudget = 30 * time.Second
+
+// maxBackoff is the longest a lost transaction waits before its next try.
+// Writers take turns, so a burst of them queues for seconds; waits that
+// grow this far keep their failed tries from flooding the server, and no
+// further, so a waiter isn't still asleep long after the board frees.
+const maxBackoff = 2 * time.Second
+
 const (
-	// txnBudget is how long a call keeps retrying transactions that lost
-	// to another writer before it gives up with ErrBusy.
-	txnBudget = 30 * time.Second
 	// txnLimit is each transaction's own deadline: under the server's
 	// transactionLifetimeLimitSeconds, which doctor wants at 10 or less,
 	// so a call that stalls gives up before the server kills it.
@@ -59,7 +72,14 @@ const (
 	commitLimit = 10 * time.Second
 	// selectTimeout is how long a call waits to find the server.
 	selectTimeout = 5 * time.Second
+	// maxPool caps a client's connections to each server: a process makes
+	// few calls at once, and writers take turns on the server anyway.
+	maxPool = 2
 )
+
+// idleClose is how long a client no call uses stays connected. Tests
+// shorten it.
+var idleClose = time.Minute
 
 // Collection names.
 const (
@@ -99,6 +119,8 @@ type writerDoc struct {
 	// id's last.
 	Code  int            `bson:"code"`
 	Hosts map[string]int `bson:"hosts"`
+	// Setup is the setupVersion the board was last set up at.
+	Setup int `bson:"setup"`
 }
 
 // Code is this build's code: it goes up when what this package writes
@@ -130,7 +152,6 @@ type Options struct {
 // Store is a ticket.Store on one MongoDB database.
 type Store struct {
 	client *sharedClient
-	db     *mongo.Database
 	name   string
 	now    func() time.Time
 	stop   string
@@ -141,13 +162,20 @@ type Store struct {
 
 var _ ticket.Store = (*Store)(nil)
 
-// sharedClient is one process's connection pool to one URI: stores opened
-// on the same URI share it, and the last Close disconnects it.
+// sharedClient is one process's client for one URI: stores opened on the
+// same URI share it, and the last Close disconnects it. A client no call
+// has used for idleClose disconnects too, and the next call connects it
+// again, so a process that lives as long as a run holds no connection
+// between its calls.
 type sharedClient struct {
-	c     *mongo.Client
-	uri   string
-	refs  int
-	ready map[string]bool // databases set up by this process
+	uri  string
+	refs int // guarded by clients
+
+	mu     sync.Mutex
+	c      *mongo.Client // nil until a call connects it
+	busy   int           // calls using c
+	idle   *time.Timer   // disconnects c once no call uses it
+	closed bool          // the last store closed
 }
 
 var clients = struct {
@@ -156,8 +184,8 @@ var clients = struct {
 }{m: map[string]*sharedClient{}}
 
 // Open connects to the replica set at uri (reusing this process's client
-// for it), sets up the database if it is new, and checks its schema. No
-// error it returns holds the URI.
+// for it), sets up the database if it is new or an older build set it up,
+// and checks its schema. No error it returns holds the URI.
 func Open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	s, err := open(ctx, uri, opts)
 	if err != nil {
@@ -181,11 +209,7 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	if strings.ContainsAny(opts.Host, ".$ ") {
 		return nil, fmt.Errorf("%w: bad host id %q", ticket.ErrInvalid, opts.Host)
 	}
-	sc, err := acquire(uri)
-	if err != nil {
-		return nil, err
-	}
-	s := &Store{client: sc, db: sc.c.Database(name), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
+	s := &Store{client: acquire(uri), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
 	if err := s.setup(ctx); err != nil {
 		s.Close()
 		return nil, err
@@ -193,21 +217,76 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	return s, nil
 }
 
-func acquire(uri string) (*sharedClient, error) {
+func acquire(uri string) *sharedClient {
 	clients.Lock()
 	defer clients.Unlock()
-	if sc := clients.m[uri]; sc != nil {
-		sc.refs++
-		return sc, nil
+	sc := clients.m[uri]
+	if sc == nil {
+		sc = &sharedClient{uri: uri}
+		clients.m[uri] = sc
 	}
-	// The default first, so a serverSelectionTimeoutMS in the URI wins.
-	c, err := mongo.Connect(options.Client().SetServerSelectionTimeout(selectTimeout).ApplyURI(uri))
+	sc.refs++
+	return sc
+}
+
+// use returns the client, connected, for a call, which ends with release.
+func (sc *sharedClient) use() (*mongo.Client, error) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.closed {
+		return nil, mongo.ErrClientDisconnected
+	}
+	if sc.c == nil {
+		// Defaults first, so the URI's own settings win. Polling watches
+		// each server on one connection, not two.
+		c, err := mongo.Connect(options.Client().SetServerSelectionTimeout(selectTimeout).SetMaxPoolSize(maxPool).
+			SetServerMonitoringMode(options.ServerMonitoringModePoll).ApplyURI(sc.uri))
+		if err != nil {
+			return nil, fmt.Errorf("connect to MongoDB: %w", err)
+		}
+		sc.c = c
+	}
+	if sc.idle != nil {
+		sc.idle.Stop()
+		sc.idle = nil
+	}
+	sc.busy++
+	return sc.c, nil
+}
+
+// release ends a call use began, and disconnects the client once no call
+// has used it for idleClose.
+func (sc *sharedClient) release() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.busy--; sc.busy == 0 && sc.c != nil && !sc.closed {
+		sc.idle = time.AfterFunc(idleClose, sc.closeIdle)
+	}
+}
+
+// closeIdle disconnects the client if no call took it up since release.
+func (sc *sharedClient) closeIdle() {
+	sc.mu.Lock()
+	c := sc.c
+	if sc.busy > 0 || c == nil {
+		sc.mu.Unlock()
+		return
+	}
+	sc.c, sc.idle = nil, nil
+	sc.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), selectTimeout)
+	defer cancel()
+	c.Disconnect(ctx)
+}
+
+// conn returns the store's database on the connected client for a call,
+// and done, which ends the call.
+func (s *Store) conn() (*mongo.Database, func(), error) {
+	c, err := s.client.use()
 	if err != nil {
-		return nil, fmt.Errorf("connect to MongoDB: %w", err)
+		return nil, nil, Redact(err, s.client.uri)
 	}
-	sc := &sharedClient{c: c, uri: uri, refs: 1, ready: map[string]bool{}}
-	clients.m[uri] = sc
-	return sc, nil
+	return c.Database(s.name), s.client.release, nil
 }
 
 // Close releases the store's share of the client. It is safe to call
@@ -222,9 +301,19 @@ func (s *Store) Close() error {
 			return
 		}
 		delete(clients.m, sc.uri)
+		sc.mu.Lock()
+		c := sc.c
+		sc.c, sc.closed = nil, true
+		if sc.idle != nil {
+			sc.idle.Stop()
+		}
+		sc.mu.Unlock()
+		if c == nil {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), selectTimeout)
 		defer cancel()
-		err = sc.c.Disconnect(ctx)
+		err = c.Disconnect(ctx)
 	})
 	return err
 }
@@ -232,31 +321,36 @@ func (s *Store) Close() error {
 // Database names the store's database.
 func (s *Store) Database() string { return s.name }
 
-// setup makes the collections, indexes and writer document of a new
-// board, once per process and database, then checks the schema. Each step
-// is safe to run from many processes at once. It is the one place that
-// touches collections outside a transaction: MongoDB builds indexes there.
+// setup checks the schema, first making the collections, indexes and
+// writer document of a board not set up at setupVersion: a new one, or
+// one an older build set up. A board set up already costs one read, and
+// needs no grant to build indexes. Each step is safe to run from many
+// processes at once. It is the one place that touches collections outside
+// a transaction: MongoDB builds indexes there.
 func (s *Store) setup(ctx context.Context) error {
-	clients.Lock()
-	ready := s.client.ready[s.name]
-	clients.Unlock()
-	if !ready {
-		if err := s.build(ctx); err != nil {
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
+	var w writerDoc
+	err = db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return fmt.Errorf("read the board's meta: %w", err)
+	}
+	if err != nil || w.Setup < setupVersion {
+		if err := s.build(ctx, db); err != nil {
 			return err
 		}
-		clients.Lock()
-		s.client.ready[s.name] = true
-		clients.Unlock()
-	}
-	var w writerDoc
-	if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
-		return fmt.Errorf("read the board's meta: %w", err)
+		if err := db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
+			return fmt.Errorf("read the board's meta: %w", err)
+		}
 	}
 	return s.checkWriter(w)
 }
 
-func (s *Store) build(ctx context.Context) error {
-	have, err := s.db.ListCollectionNames(ctx, bson.D{})
+func (s *Store) build(ctx context.Context, db *mongo.Database) error {
+	have, err := db.ListCollectionNames(ctx, bson.D{})
 	if err != nil {
 		return fmt.Errorf("list collections: %w", err)
 	}
@@ -265,7 +359,7 @@ func (s *Store) build(ctx context.Context) error {
 			continue
 		}
 		var ce mongo.CommandError
-		if err := s.db.CreateCollection(ctx, c); err != nil && !(errors.As(err, &ce) && ce.Code == 48) { // NamespaceExists
+		if err := db.CreateCollection(ctx, c); err != nil && !(errors.As(err, &ce) && ce.Code == 48) { // NamespaceExists
 			return fmt.Errorf("create %s: %w", c, err)
 		}
 	}
@@ -294,18 +388,19 @@ func (s *Store) build(ctx context.Context) error {
 		cMarks: {{Keys: bson.D{{Key: "space", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("marks_space")}},
 	}
 	for c, models := range idx {
-		if _, err := s.db.Collection(c).Indexes().CreateMany(ctx, models); err != nil {
+		if _, err := db.Collection(c).Indexes().CreateMany(ctx, models); err != nil {
 			return fmt.Errorf("index %s: %w", c, err)
 		}
 	}
-	// The writer document: made once, never replaced.
-	_, err = s.db.Collection(cMeta).UpdateOne(ctx, bson.D{{Key: "_id", Value: writerID}},
+	// The writer document: made once, never replaced. It notes the setup
+	// last, so a build cut short runs again.
+	_, err = db.Collection(cMeta).UpdateOne(ctx, bson.D{{Key: "_id", Value: writerID}},
 		bson.D{{Key: "$setOnInsert", Value: bson.D{
 			{Key: "schema", Value: schemaVersion}, {Key: "moved", Value: false}, {Key: "writes", Value: int64(0)},
 			{Key: "now", Value: bson.NewDateTimeFromTime(time.Now())},
 			{Key: "tickets", Value: int64(0)}, {Key: "comments", Value: int64(0)},
 			{Key: "events", Value: int64(0)}, {Key: "launches", Value: int64(0)},
-		}}}, options.UpdateOne().SetUpsert(true))
+		}}, {Key: "$max", Value: bson.D{{Key: "setup", Value: setupVersion}}}}, options.UpdateOne().SetUpsert(true))
 	if err != nil && !mongo.IsDuplicateKeyError(err) {
 		return fmt.Errorf("make the writer document: %w", err)
 	}
@@ -459,13 +554,14 @@ func (s *Store) retryRun(ctx context.Context, run func(ctx context.Context) erro
 		if time.Since(start) > txnBudget {
 			return fmt.Errorf("%w after %d tries in %s; try again later: %v", ticket.ErrBusy, attempt, time.Since(start).Round(time.Millisecond), err)
 		}
-		d := backoff/2 + rand.N(backoff/2+1)
+		// The last wait ends as the budget does, so one more try lands.
+		d := min(backoff/2+rand.N(backoff/2+1), txnBudget-time.Since(start))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(d):
 		}
-		backoff = min(backoff*2, 200*time.Millisecond)
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 
@@ -476,7 +572,12 @@ func hasLabel(err error, label string) bool {
 
 // once runs one attempt of a transaction.
 func (s *Store) once(ctx context.Context, write bool, fn func(tx *txn) error) error {
-	sess, err := s.client.c.StartSession()
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
+	sess, err := db.Client().StartSession()
 	if err != nil {
 		return err
 	}
@@ -486,7 +587,7 @@ func (s *Store) once(ctx context.Context, write bool, fn func(tx *txn) error) er
 	if err := sess.StartTransaction(txnOptions()); err != nil {
 		return err
 	}
-	tx := &txn{ctx: mongo.NewSessionContext(tctx, sess), db: s.db}
+	tx := &txn{ctx: mongo.NewSessionContext(tctx, sess), db: db}
 	err = s.begin(tx, write)
 	if err == nil {
 		err = fn(tx)

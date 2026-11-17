@@ -114,7 +114,7 @@ func TestMoveLoadRoundTrip(t *testing.T) {
 	var host struct {
 		Host string `bson:"host"`
 	}
-	if err := plain.db.Collection(cLaunches).FindOne(ctx, bson.D{{Key: "_id", Value: b.Launches[0].ID}}).Decode(&host); err != nil || host.Host != b.Launches[0].Host {
+	if err := testDB(t, plain).Collection(cLaunches).FindOne(ctx, bson.D{{Key: "_id", Value: b.Launches[0].ID}}).Decode(&host); err != nil || host.Host != b.Launches[0].Host {
 		t.Fatalf("host: %+v %v", host, err)
 	}
 	rows, err := plain.Runs(ctx, ticket.RunFilter{})
