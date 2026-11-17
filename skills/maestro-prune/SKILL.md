@@ -33,7 +33,7 @@ Open a todo list with one item per phase below. From the main checkout, run `git
 |---|---|
 | Safe | no keep label, and nothing lost: `merged` worktrees and branches, those of `cancelled` tickets (a remote branch holds the tip), `qa-<id>-*` and `review-<id>-*` worktrees whose ticket isn't `in_review`, `prunable` entries |
 | Ask first | the rest with none of the keep labels: other pushed but unmerged worktrees and branches, evidence folders, rebuildable folders, temp files, empty folders, temp folders: the machine's temp folder holds other projects' and tools' folders too |
-| Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; `.maestro/project/`, `.maestro/worktrees/` itself, harness folders (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, `<common>/tickets.db*`, `<common>/backups/`, `<common>/STOP`, and every `*.lock` file: a live git or tool call holds it |
+| Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; `.maestro/project/`, `.maestro/worktrees/` itself, harness folders (`.claude/`, `.agents/`, `.grok/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, `<common>/tickets.db*`, `<common>/backups/`, `<common>/STOP`, `<common>/store.uri`, `<common>/host-id`, and every `*.lock` file: a live git or tool call holds it |
 
 If no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates, and remove them after Phase D, as [references/code.md](references/code.md) says.
 
