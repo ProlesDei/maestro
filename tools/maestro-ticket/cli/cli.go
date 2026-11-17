@@ -994,6 +994,7 @@ func runClaim(ctx context.Context, c *call) error {
 		if err := c.headroom(path, min); err != nil {
 			return err
 		}
+		c.syncHalt(ctx, s)
 		t, err := s.ClaimNext(ctx, req)
 		if err != nil {
 			return err
@@ -1047,6 +1048,7 @@ func (c *call) heartbeat(ctx context.Context, s ticket.Store, req ticket.Heartbe
 	if !ok {
 		return s.Heartbeat(ctx, req)
 	}
+	c.syncHalt(ctx, s)
 	t, halted, err := hb.HeartbeatHalt(ctx, req)
 	if err != nil {
 		return t, err

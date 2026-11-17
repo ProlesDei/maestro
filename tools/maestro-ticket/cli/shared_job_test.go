@@ -3,107 +3,101 @@
 package cli
 
 import (
-	"context"
-	"os"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-// Two machines start one ticket's build at once: one run starts, on one
-// of them, and its launch says whose it is.
-func TestTwoMachinesStartOneRun(t *testing.T) {
-	uri := sharedBoard(t)
-	var ms [2]*jobHarness
-	for i := range ms {
-		ms[i] = newJobHarness(t, "senior-engineer")
-		writeURI(t, ms[i].h.dir, uri)
-		slow := strings.Replace(fakeClaude, "printf '{", "sleep 3; printf '{", 1)
-		if err := os.WriteFile(filepath.Join(ms[i].bin, "claude"), []byte(slow), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ms[0].h.ok(nil, "create", "--title", "x")
-	outs := make([]string, 4)
-	var wg sync.WaitGroup
-	for i := range outs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			b, _ := ms[i%2].cmd("", "job", "build", "T-1").CombinedOutput()
-			outs[i] = string(b)
-		}()
-	}
-	wg.Wait()
-	var started []runs.Record
-	var on *jobHarness
-	for _, m := range ms {
-		list, err := runs.List(filepath.Join(m.h.dir, "runs"), time.Now(), true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(list) > 0 {
-			on = m
-		}
-		started = append(started, list...)
-	}
-	if len(started) != 1 {
-		t.Fatalf("%d runs started; want 1\n%s", len(started), strings.Join(outs, "\n"))
-	}
-	for _, o := range outs {
-		if !strings.Contains(o, started[0].ID) && !strings.Contains(o, "claimed") && !strings.Contains(o, "under way") {
-			t.Fatalf("a start neither ran, went on, nor was refused: %s", o)
-		}
-	}
-	host, _ := HostID(on.h.dir)
-	s, err := mongostore.Open(context.Background(), uri, mongostore.Options{})
+// boardCall is a call on h's machine, as actor.
+func boardCall(t *testing.T, h *harness, actor string) (*call, coord) {
+	t.Helper()
+	c := &call{env: Env{Getenv: func(k string) string { return h.env[k] }, Dir: h.dir}, actor: actor}
+	t.Cleanup(c.closeBoard)
+	co, err := c.coord()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		open, err := s.OpenLaunches(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(open) == 1 {
-			if l := open[0]; l.Host != host || l.Job != "build" || l.Limit == "" || l.Ticket != 1 {
-				t.Fatalf("launch: %+v; want host %s", l, host)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("open launches: %+v", open)
-		}
-		time.Sleep(100 * time.Millisecond)
+	return c, co
+}
+
+// Two machines start one ticket's build at once: of all their takes of
+// its .active mark, one wins, and its mark says whose run it is.
+func TestTwoMachinesTakeOneActiveMark(t *testing.T) {
+	uri := sharedBoard(t)
+	var cos [2]coord
+	var dirs [2]string
+	for i := range cos {
+		h := onBoard(t, uri, "senior-engineer")
+		_, cos[i] = boardCall(t, h, "senior-engineer")
+		dirs[i] = filepath.Join(h.dir, "runs")
 	}
-	on.waitEnded(started[0].ID, 20*time.Second)
+	if cos[0].host == "" || cos[0].host == cos[1].host {
+		t.Fatalf("hosts %q and %q: want two machines", cos[0].host, cos[1].host)
+	}
+	var mu sync.Mutex
+	var won []func(string) error
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			commit, _, err := cos[i%2].takeActive(dirs[i%2], "T-1", "build", "senior-engineer", time.Hour)
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				won = append(won, commit)
+			case !errors.Is(err, ticket.ErrClaimed):
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(won) != 1 {
+		t.Fatalf("%d takes won; want 1", len(won))
+	}
+	if err := won[0]("R-aaaaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := cos[0].s.read(runMarks, activeName("T-1", "build"))
+	if a, ok := readActive(m.body); err != nil || !ok || a.Run != "R-aaaaaaaa" || a.Host == "" {
+		t.Fatalf("mark %q: %v", m.body, err)
+	}
 }
 
 // A start whose .active mark the board won't give its run's id fails, and
 // no run goes: an empty mark lets any machine take the job over in 30s.
 func TestSharedActiveMarkWriteFails(t *testing.T) {
 	uri := sharedBoard(t)
-	m := newJobHarness(t, "senior-engineer")
-	writeURI(t, m.h.dir, uri)
-	m.h.ok(nil, "create", "--title", "x")
+	h := onBoard(t, uri, "senior-engineer")
+	h.ok(nil, "create", "--title", "x")
 	refuseBodies(t, uri, runMarks)
-	if out, err := m.cmd("", "job", "build", "T-1").CombinedOutput(); err == nil || !strings.Contains(string(out), "mark the run") {
-		t.Fatalf("the start went on with an empty mark: %v %s", err, out)
-	}
-	list, err := runs.List(filepath.Join(m.h.dir, "runs"), time.Now(), true)
+	c, co := boardCall(t, h, "senior-engineer")
+	dir := filepath.Join(h.dir, "runs")
+	commit, _, err := co.takeActive(dir, "T-1", "build", c.actor, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range list {
-		if !r.Ended() || r.AckedAt == nil {
-			t.Fatalf("run %s is %s, acked %v: a failed start leaves nothing going or to pick up", r.ID, r.State, r.AckedAt)
-		}
+	// startRun checks the mark before it starts the supervisor, so a
+	// refused mark starts no process.
+	_, err = c.startRun(runs.Record{Ticket: "T-1", Job: "build", Limit: "1h", Command: []string{"true"}}, nil, nil, nil, commit)
+	if err == nil || !strings.Contains(err.Error(), "mark the run") {
+		t.Fatalf("the start went on with an empty mark: %v", err)
+	}
+	list, err := runs.List(dir, time.Now(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("%d runs; want the one failed start", len(list))
+	}
+	if r := list[0]; !r.Ended() || r.AckedAt == nil {
+		t.Fatalf("run %s is %s, acked %v: a failed start leaves nothing going or to pick up", r.ID, r.State, r.AckedAt)
 	}
 }

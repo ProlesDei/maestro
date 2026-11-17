@@ -204,7 +204,7 @@ func TestMoveOutTombstone(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "board moved") {
 		t.Fatalf("list after the move: %v", err)
 	}
-	if st, err := mv.State(ctx); st.To != "" || !st.Moved || err != nil {
+	if st, err := mv.State(ctx); st.To != "" || !st.Moved || st.Host != testHost || err != nil {
 		t.Fatalf("state: %+v %v", st, err)
 	}
 	if b, err := mv.Board(ctx); err != nil || len(b.Tickets) != 5 {

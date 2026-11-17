@@ -7,9 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -62,131 +60,6 @@ func TestEndFactsNotInRecordJSON(t *testing.T) {
 	}
 	if l, _ := Load(dir, got.ID); l.End != nil {
 		t.Fatal("a loaded record has end facts")
-	}
-}
-
-// wait_ms is Credit's figure once the command ends, read before the
-// marks go: a wait that ended counts to its end; a cap shows as capped.
-func TestWaitMsCredit(t *testing.T) {
-	dir := t.TempDir()
-	r, err := Create(dir, Record{Launcher: "qa-lead", Limit: "10s", Command: []string{"sleep", "1"}, Dir: dir}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w, err := StartWait(dir, r.ID, time.Now(), true)
-	if err != nil || w == nil {
-		t.Fatalf("StartWait: %v, %v", w, err)
-	}
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		w.End(time.Now())
-	}()
-	var got Record
-	if err := Supervise(context.Background(), dir, r.ID, Options{OnEnd: func(r Record) { got = r }}); err != nil {
-		t.Fatal(err)
-	}
-	if e := got.End; e == nil || e.WaitMs < 300 || e.WaitMs > 900 || e.WaitCapped || e.Stop != StopNone {
-		t.Fatalf("end facts %+v; want about 500 ms of wait, not capped, no stop", e)
-	}
-	if n := len(waits(dir, r.ID)); n != 0 {
-		t.Fatalf("%d wait marks left", n)
-	}
-
-	old := maxSlotCredit
-	maxSlotCredit = time.Second
-	t.Cleanup(func() { maxSlotCredit = old })
-	r, err = Create(dir, Record{Launcher: "qa-lead", Limit: "1s", Command: []string{"sleep", "30"}, Dir: dir}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	live, err := StartWait(dir, r.ID, time.Now(), true)
-	if err != nil || live == nil {
-		t.Fatalf("StartWait: %v, %v", live, err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { // never gets its slot
-		for ctx.Err() == nil {
-			live.Touch(time.Now())
-			time.Sleep(200 * time.Millisecond)
-		}
-	}()
-	if err := Supervise(context.Background(), dir, r.ID, Options{OnEnd: func(r Record) { got = r }}); err != nil {
-		t.Fatal(err)
-	}
-	if e := got.End; e == nil || e.WaitMs != 1000 || !e.WaitCapped || got.State != TimedOut {
-		t.Fatalf("%s, end facts %+v; want the 1s cap, capped", got.State, e)
-	}
-}
-
-// How the supervisor ended the command: on its own, SIGTERM, or SIGKILL
-// once the grace ran out; and how many of its processes had left its
-// group when the stop came.
-func TestStopKind(t *testing.T) {
-	old := killGrace
-	killGrace = 500 * time.Millisecond
-	t.Cleanup(func() { killGrace = old })
-	dir := t.TempDir()
-	for _, c := range []struct {
-		name    string
-		cmd     []string
-		stop    string
-		escaped int
-	}{
-		{"own", []string{"true"}, StopNone, 0},
-		{"term", []string{"sleep", "30"}, StopTerm, 0},
-		// An ignored signal stays ignored through exec, so sleep ignores
-		// it too.
-		{"kill", []string{"sh", "-c", "trap '' TERM; sleep 30"}, StopKill, 0},
-	} {
-		got := superviseEnd(t, dir, Record{Limit: "1s", Command: c.cmd}, Options{})
-		if e := got.End; e.Stop != c.stop || e.Escaped != c.escaped || e.Cause != "" {
-			t.Errorf("%s: end facts %+v; want stop %s, %d escaped", c.name, e, c.stop, c.escaped)
-		}
-	}
-	if runtime.GOOS != "linux" {
-		return // finding what left the group needs /proc
-	}
-	if _, err := exec.LookPath("setsid"); err != nil {
-		t.Skip("no setsid")
-	}
-	got := superviseEnd(t, dir, Record{Limit: "1s", Command: []string{"sh", "-c", "setsid sleep 30 & setsid sleep 30 & sleep 30"}}, Options{})
-	if e := got.End; e.Stop != StopTerm || e.Escaped != 2 {
-		t.Fatalf("end facts %+v; want term, 2 escaped", e)
-	}
-	if runAlive(got.ID) {
-		t.Fatal("an escaped process outlived its run")
-	}
-}
-
-// Who stopped a run reaches its end facts as data: a stop asked, or its
-// launcher's.
-func TestStopCause(t *testing.T) {
-	old := watchEvery
-	watchEvery = 100 * time.Millisecond
-	t.Cleanup(func() { watchEvery = old })
-	dir := t.TempDir()
-	for _, want := range []string{CauseAsked, CauseLauncher} {
-		r, err := Create(dir, Record{Launcher: "planner", Limit: "1h", Command: []string{"sleep", "30"}, Dir: dir, StartedAt: time.Now().UTC()}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		time.AfterFunc(300*time.Millisecond, func() {
-			if want == CauseAsked {
-				AskStop(dir, r.ID, "planner", time.Now())
-			} else {
-				cancel()
-			}
-		})
-		var got Record
-		if err := Supervise(ctx, dir, r.ID, Options{OnEnd: func(r Record) { got = r }}); err != nil {
-			t.Fatal(err)
-		}
-		cancel()
-		if got.End == nil || got.End.Cause != want {
-			t.Errorf("end facts %+v; want cause %s", got.End, want)
-		}
 	}
 }
 

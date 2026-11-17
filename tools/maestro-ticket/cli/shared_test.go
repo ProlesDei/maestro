@@ -456,6 +456,35 @@ func TestHeartbeatSeesTheHalt(t *testing.T) {
 	}
 }
 
+// A machine that copied the halt and then ran nothing that reads it
+// still claims once the halt lifts: the claim checks the board before it
+// obeys its copy. A STOP made by hand still refuses.
+func TestClaimClearsALiftedHaltCopy(t *testing.T) {
+	uri := sharedBoard(t)
+	a, b := onBoard(t, uri, "planner"), onBoard(t, uri, "planner")
+	a.ok(nil, "create", "--title", "x")
+	a.ok(nil, "create", "--title", "y")
+	var got tk
+	a.ok(&got, "claim", "T-1", "--holder", "jse/s1")
+	tok := fmt.Sprint(got.Claim.Token)
+	stop := filepath.Join(a.dir, "STOP")
+	b.ok(nil, "stop", "--all")
+	a.ok(nil, "heartbeat", "T-1", "--holder", "jse/s1", "--token", tok)
+	a.ok(nil, "release", "T-1", "--holder", "jse/s1", "--token", tok)
+	if bs, err := os.ReadFile(stop); err != nil || string(bs) != haltBody {
+		t.Fatalf("A's STOP under the halt: %q %v", bs, err)
+	}
+	b.ok(nil, "stop", "--all", "--off")
+	a.ok(nil, "claim", "T-2", "--holder", "jse/s2")
+	if _, err := os.Stat(stop); !os.IsNotExist(err) {
+		t.Fatalf("A's copy stayed after its claim: %v", err)
+	}
+	os.WriteFile(stop, []byte("by hand\n"), 0o644)
+	if code := a.fails(4, "claim", "T-1", "--holder", "jse/s3"); code != "stopped" {
+		t.Fatalf("a claim under a STOP made by hand: %s", code)
+	}
+}
+
 // Another machine's run that a usage limit stopped holds its ticket
 // until the limit is a stall past lifting, as this machine's own do.
 func TestLookHoldsALimitedRunElsewhere(t *testing.T) {

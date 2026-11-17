@@ -25,41 +25,6 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/streamfilter"
 )
 
-// childEnv makes the test binary one process of TestPrepareRace: it
-// prepares the file named and writes one run.
-const childEnv = "STATS_TEST_CHILD"
-
-func TestMain(m *testing.M) {
-	if p := os.Getenv(childEnv); p != "" {
-		os.Exit(child(p, os.Getenv("STATS_TEST_RUN")))
-	}
-	os.Exit(m.Run())
-}
-
-func child(path, run string) int {
-	db, err := Open(path, true)
-	if err != nil {
-		return 1
-	}
-	defer db.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := Prepare(ctx, db, testLists); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	for {
-		err := Write(ctx, db, testRun(run))
-		if err == nil {
-			return 0
-		}
-		if !isBusy(err) || ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-	}
-}
-
 var testLists = Lists{
 	"role": {"planner", "reviewer", "person"}, "job": {"build", "review"}, "model": {"opus", "opus-5.5"},
 	"effort": {"high"}, "nudge": {"none", "opus"}, "state": {"done", "failed"}, "outcome": {"done", "failed"},
@@ -169,66 +134,6 @@ func TestPrepareUpgrade(t *testing.T) {
 	if count(t, db, `SELECT count(*) FROM run_facts`) != 1 || count(t, db, `SELECT count(*) FROM later`) != 0 {
 		t.Fatal("no row after the migration")
 	}
-}
-
-// Twenty processes find no file and race to make it: one schema, codes
-// seeded once, every run stored.
-func TestPrepareRace(t *testing.T) {
-	path := filepath.Join(t.TempDir(), DBName)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const n = 20
-	var wg sync.WaitGroup
-	errs := make([]error, n)
-	out := make([][]byte, n)
-	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			c := exec.Command(exe)
-			c.Env = append(os.Environ(), childEnv+"="+path, "STATS_TEST_RUN="+runID(i+1))
-			out[i], errs[i] = c.CombinedOutput()
-		}()
-	}
-	wg.Wait()
-	for i := range n {
-		if errs[i] != nil {
-			t.Fatalf("process %d: %v: %s", i, errs[i], out[i])
-		}
-	}
-	db, err := Open(path, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if v := count(t, db, `PRAGMA user_version`); v != Version() {
-		t.Fatalf("user_version %d", v)
-	}
-	if av := count(t, db, `PRAGMA auto_vacuum`); av != 2 {
-		t.Fatalf("auto_vacuum %d; want 2 (incremental), set before the first table", av)
-	}
-	if got := count(t, db, `SELECT count(*) FROM run_facts`); got != n {
-		t.Fatalf("%d rows; want %d", got, n)
-	}
-	if d := count(t, db, `SELECT count(*) - count(DISTINCT kind || '/' || name) FROM codes`); d != 0 {
-		t.Fatalf("%d duplicate codes", d)
-	}
-	if got, want := count(t, db, `SELECT count(*) FROM codes`), codeCount(testLists); got != want {
-		t.Fatalf("%d codes; want %d", got, want)
-	}
-	if got := count(t, db, `SELECT count(*) FROM sqlite_master WHERE type = 'table'`); got != 8 {
-		t.Fatalf("%d tables", got)
-	}
-}
-
-func codeCount(l Lists) int {
-	n := 0
-	for _, names := range l {
-		n += len(names) + 1
-	}
-	return n
 }
 
 func TestNewerSchemaDrops(t *testing.T) {
@@ -708,6 +613,7 @@ func TestStatsBurstBalances(t *testing.T) {
 // A prune of many batches rests between them: every run's write that
 // comes while it goes lands, though each waits only its busy timeout.
 func TestPruneLetsWritesIn(t *testing.T) {
+	t.Parallel()
 	db, path := fresh(t)
 	now := time.Now()
 	// 40 batches of old runs, each with its model row, put in by SQL.

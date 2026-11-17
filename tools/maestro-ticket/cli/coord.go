@@ -544,3 +544,23 @@ func mirrorHalt(dir string, halted bool) {
 		os.Remove(p)
 	}
 }
+
+// syncHalt mirrors the board's halt to a STOP file the CLI made, before a
+// claim or heartbeat obeys it, so a machine that ran nothing that reads
+// the halt since the lift isn't stopped by its old copy. Only such a copy
+// costs a read of the board; a STOP made by hand is left to refuse.
+func (c *call) syncHalt(ctx context.Context, s ticket.Store) {
+	h, ok := s.(interface {
+		Halted(context.Context) (bool, error)
+	})
+	loc, err := c.location()
+	if !ok || err != nil {
+		return
+	}
+	if b, err := os.ReadFile(filepath.Join(loc.localDir, sqlitestore.StopFile)); err != nil || string(b) != haltBody {
+		return
+	}
+	if halted, err := h.Halted(ctx); err == nil {
+		mirrorHalt(loc.localDir, halted)
+	}
+}

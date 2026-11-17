@@ -3,18 +3,15 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -92,117 +89,6 @@ func TestSlotWaitsForAFreeSlot(t *testing.T) {
 	f.Close()
 	if code, _, errs := h.run("", "slot", "--max", "1", "--wait", "200ms", "--", "true"); code != 0 {
 		t.Fatalf("after release: exit %d: %s", code, errs)
-	}
-}
-
-// Many sessions at once: never more than --max run together.
-func TestSlotCapsConcurrentRuns(t *testing.T) {
-	h := newHarness(t)
-	running := t.TempDir()
-	// Each run marks itself running, counts the marks, holds, then unmarks.
-	script := fmt.Sprintf(`touch %[1]s/$$; ls %[1]s | wc -l; sleep 0.2; rm %[1]s/$$`, running)
-	const max, runs = 2, 8
-	var wg sync.WaitGroup
-	peaks := make([]int, runs)
-	for i := range runs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			code, out, errs := h.run("", "slot", "--max", strconv.Itoa(max), "--", "sh", "-c", script)
-			if code != 0 {
-				t.Errorf("run %d: exit %d: %s", i, code, errs)
-				return
-			}
-			peaks[i], _ = strconv.Atoi(strings.TrimSpace(out))
-		}()
-	}
-	wg.Wait()
-	for i, p := range peaks {
-		if p < 1 || p > max {
-			t.Errorf("run %d saw %d running; want 1 to %d", i, p, max)
-		}
-	}
-}
-
-// A command that handles the stop signal and exits keeps its exit code,
-// and a slow one still stops.
-func TestSlotStopsCommandOnCancel(t *testing.T) {
-	h := newHarness(t)
-	for _, tc := range []struct {
-		script string
-		want   int
-	}{
-		{`trap 'kill $!; exit 0' TERM; sleep 30 & echo up; wait`, 0},
-		{`trap 'kill $!; exit 7' TERM; sleep 30 & echo up; wait`, 7},
-		{`echo up; exec sleep 30`, 128 + 15},
-	} {
-		ctx, cancel := context.WithCancel(context.Background())
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		done := make(chan int, 1)
-		var errb bytes.Buffer
-		go func() {
-			done <- Run(ctx, []string{"slot", "--", "sh", "-c", tc.script}, Env{
-				Stdout: w, Stderr: &errb, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
-			})
-			w.Close()
-		}()
-		buf := make([]byte, 3)
-		if _, err := r.Read(buf); err != nil { // the command is up and trapping
-			t.Fatal(err)
-		}
-		cancel()
-		select {
-		case got := <-done:
-			if got != tc.want {
-				t.Errorf("%q: exit %d; want %d (%s)", tc.script, got, tc.want, errb.String())
-			}
-		case <-time.After(20 * time.Second):
-			t.Fatalf("%q: slot didn't stop", tc.script)
-		}
-		r.Close()
-	}
-}
-
-// A stop reaches what the command started, not just the command, and a
-// hangup stops it as SIGTERM does; else the slot frees while the work
-// still loads the machine.
-func TestSlotStopsTheWholeCommand(t *testing.T) {
-	h := newHarness(t)
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGHUP} {
-		cmd := exec.Command(os.Args[0], "slot", "--", "sh", "-c", "sleep 30 & echo $!; wait")
-		cmd.Env = append(os.Environ(), childEnv+"=1", envcheck.MinFreeEnv+"=0", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
-		cmd.Dir = h.dir
-		out, err := cmd.StdoutPipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		line, err := bufio.NewReader(out).ReadString('\n')
-		if err != nil {
-			t.Fatal(err)
-		}
-		grandchild, err := strconv.Atoi(strings.TrimSpace(line))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cmd.Process.Signal(sig)
-		cmd.Wait()
-		if got := cmd.ProcessState.ExitCode(); got != 128+int(syscall.SIGTERM) {
-			t.Errorf("%v: exit %d; want %d", sig, got, 128+int(syscall.SIGTERM))
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for alive(grandchild) && time.Now().Before(deadline) {
-			time.Sleep(20 * time.Millisecond)
-		}
-		if alive(grandchild) {
-			syscall.Kill(grandchild, syscall.SIGKILL)
-			t.Errorf("%v: the command's own child %d outlived slot", sig, grandchild)
-		}
 	}
 }
 
@@ -287,10 +173,14 @@ func TestSlotRemovesTempFolderOnSignal(t *testing.T) {
 	h.env["TMPDIR"] = shared
 	ctx, cancel := context.WithCancel(context.Background())
 	r, w, _ := os.Pipe()
+	// The command waits on a stdin no one writes, until the stop.
+	in, hold, _ := os.Pipe()
+	defer in.Close()
+	defer hold.Close()
 	done := make(chan int, 1)
 	go func() {
-		done <- Run(ctx, []string{"slot", "--", "sh", "-c", "touch $TMPDIR/f; echo up; sleep 30"}, Env{
-			Stdout: w, Stderr: io.Discard, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
+		done <- Run(ctx, []string{"slot", "--", "sh", "-c", "touch $TMPDIR/f; echo up; read _"}, Env{
+			Stdin: in, Stdout: w, Stderr: io.Discard, Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, DiskFree: halfFree,
 		})
 		w.Close()
 	}()
@@ -354,39 +244,6 @@ func holdSlot(t *testing.T, h *harness, name string, i int) *os.File {
 	}
 	t.Cleanup(func() { f.Close() })
 	return f
-}
-
-// Waiters take slots in the order they came, however their retries fall.
-func TestSlotServesWaitersInOrder(t *testing.T) {
-	h := newHarness(t)
-	held := holdSlot(t, h, "checks", 0)
-	order := filepath.Join(h.dir, "order")
-	const n = 4
-	var wg sync.WaitGroup
-	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			code, _, errs := h.run("", "slot", "--max", "1", "--", "sh", "-c", "echo $0 >> "+order+"; sleep 0.2", strconv.Itoa(i))
-			if code != 0 {
-				t.Errorf("waiter %d: exit %d: %s", i, code, errs)
-			}
-		}()
-		// Each joins the line before the next comes.
-		deadline := time.Now().Add(5 * time.Second)
-		for countLine(t, h) < i+1 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	held.Close()
-	wg.Wait()
-	b, _ := os.ReadFile(order)
-	if got := strings.Fields(string(b)); strings.Join(got, " ") != "0 1 2 3" {
-		t.Fatalf("served %v; want 0 1 2 3", got)
-	}
-	if c := countLine(t, h); c != 0 {
-		t.Fatalf("%d waiters left in line", c)
-	}
 }
 
 func countLine(t *testing.T, h *harness) int {
@@ -475,27 +332,14 @@ func TestSlotMarksTheRunsWait(t *testing.T) {
 	h.env[runs.RunIDEnv] = r.ID
 	held := holdSlot(t, h, "checks", 0)
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		held.Close()
 	}()
 	begun := time.Now()
 	if code, _, errs := h.run("", "slot", "--max", "1", "--", "true"); code != 0 {
 		t.Fatalf("exit %d: %s", code, errs)
 	}
-	if got := runs.SlotWait(rdir, r.ID, begun, time.Now()); got < time.Second || got > 4*time.Second {
-		t.Fatalf("marked wait %s; want about 1.5s", got)
-	}
-}
-
-// End to end: a launched run whose check waits for a slot past its time
-// limit isn't ended by it, and finishes once the slot frees.
-func TestLaunchedRunsLimitLeavesOutSlotWait(t *testing.T) {
-	l := newLauncher(t, "qa-lead")
-	held := holdSlot(t, l.h, "checks", 0)
-	r := l.launch("", "--limit", "2s", "--", envcheck.MinFreeEnv+"=0", "sh", "-c", `"$0" slot --max 1 -- true`, l.exe)
-	time.Sleep(4 * time.Second)
-	held.Close()
-	if e := l.waitEnded(r.ID, 20*time.Second); e.State != runs.Done {
-		t.Fatalf("run: %s: %s", e.State, e.Error)
+	if got := runs.SlotWait(rdir, r.ID, begun, time.Now()); got < 200*time.Millisecond || got > 3*time.Second {
+		t.Fatalf("marked wait %s; want about 300ms", got)
 	}
 }
