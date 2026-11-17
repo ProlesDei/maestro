@@ -59,6 +59,10 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if err != nil {
 		return
 	}
+	co, err := c.coord()
+	if err != nil {
+		return
+	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	now := time.Now().UTC().Round(time.Millisecond)
 	var chained []string
@@ -77,10 +81,17 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		}
 		rt.Do = keep
 		left := rt.Send
+		unsure := false
 		if rt.Outcome == outDone {
 			// As pickup would: a job a look handed out lately is on its way.
-			sends := pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
-			left = []send{}
+			// A store that can't say starts nothing and stays the
+			// launcher's: its pickup shows why.
+			sends, err := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
+			if err != nil {
+				sends, unsure = nil, true
+			} else {
+				left = []send{}
+			}
 			for _, sd := range sends {
 				if c.handOn(ctx, dir, notify, r, sd) {
 					chained = append(chained, sd.Bot+": "+sd.Line)
@@ -94,8 +105,8 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// leave it what it would have seen.
 		bot := hasHook(notify, r.Launcher)
 		rest := leftForBot(rt)
-		done = bot && len(left) == 0 && !rest && ackable(before)
-		toPlanner = bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
+		done = bot && !unsure && len(left) == 0 && !rest && ackable(before)
+		toPlanner = bot && !unsure && len(left) > 0 && !rest && r.Launcher != "planner" &&
 			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
 	}
 	// One save, after every start: no reader sees the route before the

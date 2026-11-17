@@ -286,9 +286,9 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 	// unless it died: then its resume works them.
 	// A usage limit doesn't free them either: the run goes on once it lifts.
 	if r.Job == "judge" && out.Outcome != outDone && out.Outcome != outUsageLimit && !(out.Outcome == outDied && !r.AfterDeath) {
-		if dir, err := c.besideStore("handouts"); err == nil {
+		if co, err := c.coord(); err == nil {
 			for _, tk := range append(slices.Clone(r.Tickets), "cause") {
-				os.Remove(handoutPath(dir, tk, "judge"))
+				co.dropHandout(tk, "judge")
 			}
 		}
 	}
@@ -298,13 +298,13 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		// The limit is the team's plan's: no bot starts a run until it
 		// lifts. A reset pickup can't read waits an hour.
 		until := limitLifts(r, out.Reset)
-		if store, _, err := c.storePath(); err == nil && until.After(time.Now()) {
+		if co, err := c.coord(); err == nil && until.After(time.Now()) {
 			// One line to the planner per pause, not one per stopped run.
 			why := "usage limit"
 			if apiDown(r) {
 				why = "API outage"
 			}
-			if setPause(filepath.Dir(store), pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
+			if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
@@ -380,8 +380,8 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			// One that gave no result and won't run again frees its ticket
 			// for the next look to start again.
 			if out.Outcome != outDone && out.Outcome != outQuestion && r.Ticket != "" && !retry {
-				if dir, err := c.besideStore("handouts"); err == nil {
-					os.Remove(handoutPath(dir, r.Ticket, "planner-job"))
+				if co, err := c.coord(); err == nil {
+					co.dropHandout(r.Ticket, "planner-job")
 				}
 			}
 		default: // cos, qa-ask: the asker reads the answer
@@ -1223,13 +1223,13 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 		return nil
 	}
 	key := fmt.Sprintf("design-up-%s-%d", d.ID, e.ID)
-	dir, err := c.besideStore("handouts")
+	co, err := c.coord()
 	if err != nil {
 		return err
 	}
 	mine, hid := key+" "+sender, fmt.Sprintf("%s-design%d", d.ID, e.ID)
-	if !claimHandout(dir, hid, "chief-of-staff", mine, 24*time.Hour, time.Now()) {
-		if b, _ := os.ReadFile(handoutPath(dir, hid, "chief-of-staff")); strings.TrimSpace(string(b)) != mine {
+	if !co.claimHandout(hid, "chief-of-staff", mine, 24*time.Hour, time.Now()) {
+		if co.handoutBody(hid, "chief-of-staff") != mine {
 			return nil // another look or pickup sends this card
 		}
 	}
@@ -1241,7 +1241,7 @@ func (c *call) designUp(ctx context.Context, s ticket.Store, d ticket.Detail, se
 	}
 	card := strings.Join(strings.Fields(strings.Join(lines, " | ")), " ")
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: d.ID, Body: "Sent up: chief of staff: approve the design on " + d.ID.String() + "?", Actor: c.actor, IdempotencyKey: key}); err != nil {
-		os.Remove(handoutPath(dir, hid, "chief-of-staff")) // the next one tries again
+		co.dropHandout(hid, "chief-of-staff") // the next one tries again
 		return err
 	}
 	out.Wrote = append(out.Wrote, d.ID.String()+" sent up: design ready")

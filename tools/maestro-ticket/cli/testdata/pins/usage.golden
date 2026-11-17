@@ -57,6 +57,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -75,6 +76,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
@@ -204,6 +209,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -222,6 +228,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
@@ -351,6 +361,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -369,6 +380,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
@@ -498,6 +513,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -516,6 +532,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its

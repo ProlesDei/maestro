@@ -208,7 +208,7 @@ flowchart TD
 
 ## Tools
 
-- [tools/maestro-ticket](tools/maestro-ticket/README.md): the ticket store and CLI. SQLite, leases and fencing tokens.
+- [tools/maestro-ticket](tools/maestro-ticket/README.md): the ticket store and CLI. SQLite by default, or MongoDB to share one board across machines; leases and fencing tokens.
 
 ## Credits
 

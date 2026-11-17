@@ -1,4 +1,4 @@
-package sqlitestore
+package storetest
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 
 // T-181's review lease ran out twice and came back with no word: a hung
 // session looked healthy. The claim now counts its revivals.
-func TestClaimCountsRevivals(t *testing.T) {
-	s, clk := newStore(t)
+func testClaimCountsRevivals(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "review me", "", 2)
 	c, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: a.ID, Holder: "reviewer/x", TTL: time.Minute})
@@ -45,8 +45,8 @@ func TestClaimCountsRevivals(t *testing.T) {
 	}
 }
 
-func TestLaunchesEndOnce(t *testing.T) {
-	s, clk := newStore(t)
+func testLaunchesEndOnce(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "build me", "", 2)
 	if _, err := s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: "x", Ticket: 99, PID: 5}); !errors.Is(err, ticket.ErrNotFound) {
@@ -82,8 +82,8 @@ func TestLaunchesEndOnce(t *testing.T) {
 	}
 }
 
-func TestETAs(t *testing.T) {
-	s, clk := newStore(t)
+func testETAs(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "demo", "", 2)
 	g := "demo"
@@ -144,17 +144,10 @@ func TestETAs(t *testing.T) {
 	}
 }
 
-func mustSetETA(t *testing.T, s *Store, goal string, due time.Time) {
-	t.Helper()
-	if _, err := s.SetETA(context.Background(), ticket.SetETARequest{Goal: goal, Due: due}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // T-123 and T-167 sat in review for 3 hours with no one on them. Doctor
 // names a handoff that waits past 20 minutes, and still passes.
-func TestDoctorFlagsStalls(t *testing.T) {
-	s, clk := newStore(t)
+func testDoctorFlagsStalls(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
 	ctx := context.Background()
 	a := mustCreate(t, s, "handed off", "", 2)
 	b := mustCreate(t, s, "under review", "", 2)

@@ -26,7 +26,6 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -121,6 +120,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -139,6 +139,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
@@ -252,6 +256,8 @@ var commands = []command{
 	{"render", runRender},
 	{"doctor", runDoctor},
 	{"rules", runRules},
+	{"store", runStoreURI},
+	{"migrate", runMigrate},
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},
@@ -276,6 +282,14 @@ type call struct {
 		path, source string
 		err          error
 	}
+	loc struct { // location's answer
+		done bool
+		v    storeLoc
+		err  error
+	}
+	// hostID's and board's answers: a pointer, so a copy of the call, as
+	// a chained start makes, shares them.
+	shared      *callShared
 	storeChecks []ticket.Check // besideStore's checks of the store's dir
 	// Set in the supervisor: it alone creates or migrates stats.db.
 	inSupervisor bool
@@ -322,7 +336,7 @@ func Run(ctx context.Context, args []string, env Env) int {
 		}
 		return c.fail(usagef("unknown command %q%s; run maestro-ticket help", args[0], hint))
 	}
-	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError)}
+	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError), shared: &callShared{}}
 	c.fs.SetOutput(env.Stderr)
 	c.fs.BoolVar(&c.jsonOut, "json", false, "machine-readable output")
 	c.fs.StringVar(&c.storeFlag, "store", "", "ticket store path")
@@ -330,6 +344,7 @@ func Run(ctx context.Context, args []string, env Env) int {
 	c.fs.StringVar(&c.idemKey, "idempotency-key", "", "idempotency key for writes")
 	c.args = args[1:]
 	err := cmd.run(ctx, c)
+	c.closeBoard()
 	if errors.Is(err, flag.ErrHelp) {
 		return ticket.ExitOK
 	}
@@ -574,24 +589,23 @@ func (c *call) git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// open opens the store. From the git default it opens only a store that
-// exists: a separate clone of the repo has its own git common dir, so a
+// open opens the store. From the git default it opens only a SQLite store
+// that exists: a separate clone of the repo has its own git common dir, so a
 // store made there would be a second, empty one. doctor, which
 // install.sh apply runs, makes it.
-func (c *call) open(ctx context.Context) (*sqlitestore.Store, error) {
-	path, source, err := c.storePath()
+func (c *call) open(ctx context.Context) (ticket.Store, error) {
+	loc, err := c.location()
 	if err != nil {
 		return nil, err
 	}
-	if source == "git common dir" {
-		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and don't make one there with doctor: it would be an empty second board", ticket.ErrInvalid, path)
-		}
+	if loc.missing() {
+		return nil, fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it; a separate clone has none, and don't make one there with doctor: it would be an empty second board", ticket.ErrInvalid, loc.sqlitePath)
 	}
-	if err := envcheck.Err(c.envChecks(path)); err != nil {
+	// Runs and slots stay on this machine, with file locks, for either kind.
+	if err := envcheck.Err(c.envChecks(loc.sqlitePath)); err != nil {
 		return nil, err
 	}
-	return sqlitestore.Open(ctx, path, sqlitestore.Options{Now: c.env.Now})
+	return c.openStore(ctx, loc)
 }
 
 // withStore parses flags, opens the store and runs fn.
@@ -987,6 +1001,7 @@ func runClaim(ctx context.Context, c *call) error {
 		if err := c.headroom(path, min); err != nil {
 			return err
 		}
+		c.syncHalt(ctx, s)
 		t, err := s.ClaimNext(ctx, req)
 		if err != nil {
 			return err
@@ -1019,12 +1034,36 @@ func runHeartbeat(ctx context.Context, c *call) error {
 		if c.idemKey != "" {
 			return usagef("heartbeat: --idempotency-key not supported; a heartbeat must always act on the lease as it is now")
 		}
-		t, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
+		t, err := c.heartbeat(ctx, s, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
 		if err != nil {
 			return err
 		}
 		return c.out(withoutBody(t), func(w io.Writer) { fmt.Fprintf(w, "renewed %s\n", oneLine(t)) })
 	})
+}
+
+// haltBeater is a shared store's heartbeat, which reads the halt too.
+type haltBeater interface {
+	HeartbeatHalt(ctx context.Context, req ticket.HeartbeatRequest) (ticket.Ticket, bool, error)
+}
+
+// heartbeat renews a lease. On a shared store it copies the halt the
+// heartbeat read to this machine's STOP file, as mirrorHalt says, so a
+// session already going sees stop --all at its next STOP check.
+func (c *call) heartbeat(ctx context.Context, s ticket.Store, req ticket.HeartbeatRequest) (ticket.Ticket, error) {
+	hb, ok := s.(haltBeater)
+	if !ok {
+		return s.Heartbeat(ctx, req)
+	}
+	c.syncHalt(ctx, s)
+	t, halted, err := hb.HeartbeatHalt(ctx, req)
+	if err != nil {
+		return t, err
+	}
+	if loc, err := c.location(); err == nil {
+		mirrorHalt(loc.localDir, halted)
+	}
+	return t, nil
 }
 
 // unwatchable says why a keepalive can't watch pid, or "" if it can.
@@ -1099,7 +1138,7 @@ func runKeepalive(ctx context.Context, c *call) error {
 				return nil
 			}
 			if !time.Now().Before(next) {
-				_, err := s.Heartbeat(ctx, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
+				_, err := c.heartbeat(ctx, s, ticket.HeartbeatRequest{ID: id, Holder: *holder, Token: *token, TTL: *ttl})
 				switch {
 				case ctx.Err() != nil:
 					return nil
@@ -1255,10 +1294,11 @@ func runEvents(ctx context.Context, c *call) error {
 }
 
 // backupPrefix and backupSuffix frame snapshot names, and backupName
-// matches them whole, so pruning only ever touches files backup wrote.
-const backupPrefix, backupSuffix = "tickets-", ".db"
+// matches them whole, so pruning only ever touches files backup wrote. A
+// MongoDB store's snapshot is a JSON dump, named with backupSuffixJSON.
+const backupPrefix, backupSuffix, backupSuffixJSON = "tickets-", ".db", ".json"
 
-var backupName = regexp.MustCompile(`^tickets-\d{8}T\d{6}\.\d{3}Z\.db$`)
+var backupName = regexp.MustCompile(`^tickets-\d{8}T\d{6}\.\d{3}Z\.(db|json)$`)
 
 func runBackup(ctx context.Context, c *call) error {
 	dir := c.fs.String("dir", "", "snapshot directory (default backups/ next to the store)")
@@ -1284,7 +1324,11 @@ func runBackup(ctx context.Context, c *call) error {
 		if now == nil {
 			now = time.Now
 		}
-		name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + backupSuffix
+		suffix := backupSuffix
+		if loc, err := c.location(); err == nil && loc.kind == kindMongoDB {
+			suffix = backupSuffixJSON
+		}
+		name := backupPrefix + now().UTC().Format("20060102T150405.000Z") + suffix
 		path := filepath.Join(d, name)
 		if err := s.Backup(ctx, path); err != nil {
 			return err
@@ -1435,20 +1479,25 @@ func runDoctor(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
-	path, source, err := c.storePath()
+	loc, err := c.location()
 	if err != nil {
 		return err
 	}
-	rep := ticket.DoctorReport{Checks: []ticket.Check{{Name: "store", OK: true, Detail: fmt.Sprintf("%s (from %s)", path, source)}}}
-	checks, err := c.doctorChecks(ctx, path)
+	store, detail := loc.sqlitePath, fmt.Sprintf("%s (from %s)", loc.sqlitePath, loc.source)
+	if loc.kind == kindMongoDB {
+		store = "mongodb at " + uriHost(loc.uri)
+		detail = fmt.Sprintf("%s (from %s)", store, filepath.Join(loc.localDir, uriFile))
+	}
+	rep := ticket.DoctorReport{Checks: []ticket.Check{{Name: "store", OK: true, Detail: detail}}}
+	checks, err := c.doctorChecks(ctx, loc)
 	if err != nil {
 		return err
 	}
 	rep.Checks = append(rep.Checks, checks...)
 	if envcheck.Err(checks) == nil {
-		rep.Checks = append(rep.Checks, c.rulesCheck(), c.runsCheck(ctx, path))
+		rep.Checks = append(rep.Checks, c.rulesCheck(), c.runsCheck(ctx, loc.sqlitePath))
 	}
-	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
+	res := map[string]any{"ok": rep.OK(), "store": store, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {
 		return err
 	}
@@ -1462,13 +1511,14 @@ func runDoctor(ctx context.Context, c *call) error {
 }
 
 // doctorChecks runs the environment checks and, if they pass, the store's
-// own. It never opens a store on a filesystem that can lose its writes.
-func (c *call) doctorChecks(ctx context.Context, path string) ([]ticket.Check, error) {
-	checks := c.envChecks(path)
+// own. It never opens a store on a filesystem that can lose its writes;
+// for MongoDB, the checks are of the local folder its runs and slots use.
+func (c *call) doctorChecks(ctx context.Context, loc storeLoc) ([]ticket.Check, error) {
+	checks := c.envChecks(loc.sqlitePath)
 	if envcheck.Err(checks) != nil {
 		return checks, nil
 	}
-	s, err := sqlitestore.Open(ctx, path, sqlitestore.Options{Now: c.env.Now})
+	s, err := c.openStore(ctx, loc)
 	if err != nil {
 		return append(checks, ticket.Check{Name: "open", OK: false, Detail: err.Error()}), nil
 	}

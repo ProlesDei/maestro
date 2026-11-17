@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 )
 
 // A ring's body is the routine's own input, a stronger place for a planted
@@ -142,16 +141,15 @@ func bodyLines(rt routed) ([]string, bool) {
 // be refused. It returns the runs the body covers:
 // those whose lines ride, those it holds for pickup and those waiting;
 // one only counted in More is not covered.
-func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
+func ringDigest(co coord, dir, bot string, now time.Time) (runs.Notification, []string) {
 	list, _ := runs.Unacked(dir, bot, now)
 	n := runs.NoticeFor(bot, list)
 	n.Runs, n.More = nil, 0
 	if len(list) == 0 {
 		return n, nil
 	}
-	handouts := filepath.Join(filepath.Dir(dir), "handouts")
-	pause, paused := readPause(filepath.Dir(dir), now)
-	_, held := startsHeld(dir, now)
+	pause, paused := co.readPause(now)
+	_, held := co.startsHeld(now)
 	var listed, ack, waiting []string
 	cards, size := false, 0
 	for _, r := range list {
@@ -172,8 +170,14 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 		}
 		var lines []string
 		if ok {
-			rt.Send = pickupSends(handouts, r.ID, r.StartedAt, rt.Send, now)
-			lines, ok = bodyLines(rt)
+			// A store that can't say which sends went holds the run for
+			// pickup, which shows why.
+			var err error
+			if rt.Send, err = co.pickupSends(r.ID, r.StartedAt, rt.Send, now); err == nil {
+				lines, ok = bodyLines(rt)
+			} else {
+				ok = false
+			}
 		}
 		cost := 0
 		for _, l := range lines {
@@ -213,13 +217,13 @@ func ringDigest(dir, bot string, now time.Time) (runs.Notification, []string) {
 	return n, listed
 }
 
-// startsHeld says why no run may start now, as mayStart refuses: STOP is
-// set, or a pause holds. dir is the runs folder beside the store.
-func startsHeld(dir string, now time.Time) (string, bool) {
-	if fileExists(filepath.Join(filepath.Dir(dir), sqlitestore.StopFile)) {
+// startsHeld says why no run may start now, as mayStart refuses: the halt
+// stands, or a pause holds.
+func (co coord) startsHeld(now time.Time) (string, bool) {
+	if stopped, _ := co.s.stopped(); stopped {
 		return "maestro/STOP is set", true
 	}
-	if p, ok := readPause(filepath.Dir(dir), now); ok {
+	if p, ok := co.readPause(now); ok {
 		return "jobs are paused until " + p.Until.Format(time.RFC3339), true
 	}
 	return "", false
@@ -241,4 +245,20 @@ func heldLine(n int, why string) string {
 // waitingLine is pickup's one line for the runs a usage limit holds.
 func waitingLine(n int, until time.Time) string {
 	return fmt.Sprintf("%d runs wait for the usage limit to lift at %s: nothing to do till then; they ring you as it lifts", n, until.Format(time.RFC3339))
+}
+
+// runsCoord is the coord a supervisor or a sweep over the runs folder dir
+// uses: the call's, or, if its store can't be read, the files beside dir,
+// which still hold this machine's STOP.
+func (c *call) runsCoord(dir string) coord {
+	if co, err := c.coord(); err == nil {
+		return co
+	}
+	return filesCoord(dir)
+}
+
+// filesCoord is the file coord beside the runs folder dir.
+func filesCoord(dir string) coord {
+	local := filepath.Dir(dir)
+	return coord{s: fileCoord{dir: local, handouts: filepath.Join(local, "handouts"), runs: dir}}
 }

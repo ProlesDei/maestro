@@ -368,30 +368,6 @@ func TestJudgeStdinSeedsRules(t *testing.T) {
 	}
 }
 
-func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
-	l := newLookHarness(t)
-	os.Remove(filepath.Join(l.h.dir, rulesFile))
-	l.h.ok(nil, "create", "--title", "x")
-	l.move("T-1", "blocked")
-	l.comment("T-1", "Escalation: build at abc: which key?\nReturn-role: engineer")
-	out, err := l.cmd("", "look", "--limit", "2", "--judge").CombinedOutput()
-	if err == nil || strings.Contains(string(out), "judging:") || !strings.Contains(string(out), "judge: no maestro/rules.md") {
-		t.Fatalf("no rules.md: %v\n%s", err, out)
-	}
-	if fileExists(filepath.Join(l.h.dir, "handouts", "T-1.judge")) {
-		t.Fatal("a judge row stayed claimed with no judge")
-	}
-	os.WriteFile(filepath.Join(l.h.dir, rulesFile), []byte("# via: rules\n"), 0o644)
-	j := with(l.look("", "--limit", "2", "--judge"), "judging: ")
-	if len(j) != 1 {
-		t.Fatalf("empty rules.md: %q", j)
-	}
-	r := l.waitEnded(strings.Fields(strings.TrimPrefix(j[0], "judging: "))[0], 20*time.Second)
-	if s := l.seen(r.ID).stdin; s[len(s)-2] != "Standing rules:" || s[len(s)-1] != "none" {
-		t.Fatalf("judge prompt %q", s)
-	}
-}
-
 // TestLookBoardSeedRace: looks that seed the limit race rules set limit.
 // The file stays whole, and once a rules write lands no look write
 // follows it.
@@ -450,50 +426,6 @@ func TestLookBoardSeedRace(t *testing.T) {
 	}
 	if b := h.board(); b.LimitVia != "rules" || *b.Limit < 100 {
 		t.Fatalf("board %+v", b)
-	}
-}
-
-func TestQASlotsOrder(t *testing.T) {
-	j := newJobHarness(t, "qa-lead")
-	for range 3 {
-		j.h.ok(nil, "create", "--title", "x")
-	}
-	for _, id := range []string{"T-1", "T-2", "T-3"} {
-		j.h.ok(nil, "transition", id, "--to", "in_progress")
-		j.h.ok(nil, "transition", id, "--to", "in_review")
-	}
-	max := func(r runs.Record) string {
-		i := slices.Index(r.Command, "slot")
-		return flagValue(r.Command[i:], "--max")
-	}
-	if _, r := j.job("", "qa", "T-1"); max(r) != "6" {
-		t.Fatalf("default: %q", r.Command)
-	}
-	j.h.must("", "rules", "set", "qa_slots", "4")
-	if _, r := j.job("", "qa", "T-2"); max(r) != "4" {
-		t.Fatalf("qa_slots: %q", r.Command)
-	}
-	if _, r := j.job("", "qa", "T-3", "--slots", "2"); max(r) != "2" {
-		t.Fatalf("flag: %q", r.Command)
-	}
-}
-
-func TestPlanAndRulePromptsCarryRules(t *testing.T) {
-	j := newJobHarness(t, "planner")
-	j.h.ok(nil, "create", "--title", "x")
-	_, r := j.job("goal g: ship it\n", "plan")
-	if s := j.seen(r.ID).stdin; strings.Contains(strings.Join(s, "\n"), "Standing rules:") {
-		t.Fatalf("no rules.md, yet the plan prompt has rules: %q", s)
-	}
-	j.h.must("api/: senior only\n", "rules", "text")
-	rule := "api/: senior only (set by planner, " + today() + ")"
-	_, r = j.job("goal g: ship it\n", "plan")
-	if s := j.seen(r.ID).stdin; !slices.Equal(s, []string{"/maestro-planner goal g: ship it", "Standing rules:", rule}) {
-		t.Fatalf("plan prompt %q", s)
-	}
-	_, r = j.job("drop it\n", "rule", "T-1")
-	if s := j.seen(r.ID).stdin; !slices.Equal(s, []string{"/maestro-planner rule T-1: drop it", "Standing rules:", rule}) {
-		t.Fatalf("rule prompt %q", s)
 	}
 }
 

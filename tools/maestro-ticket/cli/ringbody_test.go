@@ -137,7 +137,7 @@ func TestBodyNoFreeText(t *testing.T) {
 	plain := storedRun(t, dir, "planner", nil) // no stored route
 	held = append(held, plain.ID)
 	fine := storedRun(t, dir, "planner", &routed{First: "PLANTED head", Mismatch: "PLANTED", Send: []send{{"planner", "merged T-1"}}})
-	n, listed := ringDigest(dir, "planner", time.Now())
+	n, listed := ringDigest(filesCoord(dir), dir, "planner", time.Now())
 	b, _ := json.Marshal(n)
 	if strings.Contains(string(b), "PLANTED") {
 		t.Fatalf("free text in the body: %s", b)
@@ -155,7 +155,7 @@ func TestBodyNoFreeText(t *testing.T) {
 func TestBodyHeldRunWhole(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "runs")
 	storedRun(t, dir, "reviewer", &routed{Send: []send{{"qa-lead", "qa T-1"}, {"planner", "block T-1: a note"}}})
-	n, _ := ringDigest(dir, "reviewer", time.Now())
+	n, _ := ringDigest(filesCoord(dir), dir, "reviewer", time.Now())
 	if !slices.Equal(n.Lines, []string{cardWaiting}) || n.Ack != "" || n.More != 1 {
 		t.Fatalf("body: %+v", n)
 	}
@@ -173,7 +173,7 @@ func TestBodyAppliesPickupSends(t *testing.T) {
 	if !claimHandout(handouts, "T-3", "junior-engineer", "build T-3", time.Hour, time.Now()) {
 		t.Fatal("no handout")
 	}
-	n, listed := ringDigest(dir, "planner", time.Now())
+	n, listed := ringDigest(filesCoord(dir), dir, "planner", time.Now())
 	want := []string{"send planner: merged T-1", "do: maestro-ticket resume R-abcdefgh --died"}
 	if !slices.Equal(n.Lines, want) || n.Ack != "MAESTRO_TICKET_ACTOR=planner maestro-ticket ack "+a.ID || !slices.Equal(listed, []string{a.ID, d.ID}) {
 		t.Fatalf("body: %+v", n)
@@ -199,7 +199,7 @@ func TestRingLinesMatchPickup(t *testing.T) {
 	} {
 		storedRun(t, dir, "planner", rt)
 	}
-	n, _ := ringDigest(dir, "planner", time.Now())
+	n, _ := ringDigest(filesCoord(dir), dir, "planner", time.Now())
 	h.env["MAESTRO_TICKET_ACTOR"] = "planner"
 	_, out, _ := h.run("", "pickup")
 	lines := strings.Split(out, "\n")
@@ -237,7 +237,7 @@ func TestPickupShowsSettlingAsRunning(t *testing.T) {
 	if out != "no run of yours ended; running: "+r.ID+" (T-1, ending)\n" {
 		t.Fatalf("pickup: %q", out)
 	}
-	if n, _ := ringDigest(dir, "planner", time.Now()); len(n.Runs) != 0 || n.More != 0 {
+	if n, _ := ringDigest(filesCoord(dir), dir, "planner", time.Now()); len(n.Runs) != 0 || n.More != 0 {
 		t.Fatalf("ring of a settling run: %+v", n)
 	}
 	if _, out, _ := h.run("", "ack", storedRun(t, dir, "planner", nil).ID); strings.Contains(out, "more") {
@@ -299,7 +299,7 @@ func TestDoWaitsWhileHeld(t *testing.T) {
 			!strings.HasSuffix(out, "maestro-ticket ack "+plain.ID+"\n") {
 			t.Fatalf("pickup while held: %s", out)
 		}
-		n, covered := ringDigest(dir, "senior-engineer", time.Now())
+		n, covered := ringDigest(filesCoord(dir), dir, "senior-engineer", time.Now())
 		if n.More != 0 || !slices.Equal(n.Lines, []string{"send planner: slot free T-1"}) ||
 			n.Ack != "MAESTRO_TICKET_ACTOR=senior-engineer maestro-ticket ack "+plain.ID || !slices.Equal(covered, []string{plain.ID}) {
 			t.Fatalf("ring while held: %+v", n)
@@ -316,7 +316,7 @@ func TestDoWaitsWhileHeld(t *testing.T) {
 	stop := filepath.Join(h.dir, sqlitestore.StopFile)
 	os.WriteFile(stop, nil, 0o644)
 	runs.Ack(dir, plain.ID, "senior-engineer", time.Now())
-	if n, covered := ringDigest(dir, "senior-engineer", time.Now()); len(n.Runs)+len(n.Lines)+n.More+len(covered) != 0 {
+	if n, covered := ringDigest(filesCoord(dir), dir, "senior-engineer", time.Now()); len(n.Runs)+len(n.Lines)+n.More+len(covered) != 0 {
 		t.Fatalf("ring of held runs only: %+v", n)
 	}
 	os.Remove(stop)
@@ -469,7 +469,7 @@ func TestOrphanSkippedByGateRetried(t *testing.T) {
 	listed := storedRun(t, dir, "planner", nil)
 	hk, _ := runs.Webhook(notify, "planner")
 	runs.RingBot(context.Background(), dir, notify, "planner", []string{listed.ID}, hk, time.Now(), func(now time.Time) (runs.Notification, []string) {
-		return ringDigest(dir, "planner", now)
+		return ringDigest(filesCoord(dir), dir, "planner", now)
 	})
 	y := storedRun(t, dir, "planner", nil)
 	y.Rang = false
@@ -495,7 +495,7 @@ func TestAckMoreDrains300(t *testing.T) {
 		storedRun(t, dir, "planner", &routed{Send: []send{{"planner", fmt.Sprintf("merged T-%d", i+1)}}})
 	}
 	h.env["MAESTRO_TICKET_ACTOR"] = "planner"
-	n, _ := ringDigest(dir, "planner", time.Now())
+	n, _ := ringDigest(filesCoord(dir), dir, "planner", time.Now())
 	_, out, _ := h.run("", strings.Fields(strings.TrimPrefix(n.Ack, "MAESTRO_TICKET_ACTOR=planner maestro-ticket "))...)
 	pickups := 0
 	for strings.Contains(out, "run pickup") && pickups < 15 {

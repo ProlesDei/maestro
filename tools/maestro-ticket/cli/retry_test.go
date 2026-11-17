@@ -341,7 +341,7 @@ func TestRoutePlanFailRetriesOnce(t *testing.T) {
 					n++
 					h.ok(nil, "create", "--title", "x")
 					id = "T-" + strconv.Itoa(n)
-					recordHandouts(hdir, []send{{"planner-job", id}})
+					filesCoord(filepath.Join(filepath.Dir(hdir), "runs")).recordHandouts([]send{{"planner-job", id}})
 				}
 				r := h.saveRun(runs.Record{Launcher: "planner", Job: job, Ticket: id, State: state, IsError: state == runs.Failed, Reply: "Error: the session crashed"})
 				rt := h.route(r)
