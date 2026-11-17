@@ -259,12 +259,17 @@ if run T-7 "$run_dir" --holder "$H" --token 3; then fail "passed when gh couldn'
 rm -f "$FX/pr-down"
 
 # A repo with no draft PRs: a plain PR, titled so no person merges it.
+# The spec now says Motion: none, so the clips in the folder stay out.
 touch "$FX/no-draft"
 ticket in_progress "$H"
+sed -i 's/^Motion: .*/Motion: none/' "$run_dir/spec.md"
 : >"$FX/log"
 run T-7 "$run_dir" --holder "$H" --token 3 || fail "the hand-up failed with no draft PRs"
 grep -qE "^gh pr create --base trunk --head maestro/T-7 --title Design: pricing page \(do not merge\) --body-file " "$FX/log" ||
 	fail "no plain PR: $(grep 'pr create' "$FX/log")"
 has "status=blocked"
+sha3=$(sed -n 's/^sha=//p' "$tmp/out")
+! git ls-tree -r --name-only "$sha3" -- .maestro/design/T-7 | grep -q motion || fail "Motion: none put clips on the branch"
+! grep -q "motion" "$FX/body" || fail "Motion: none put clips in the PR body"
 
 echo "design_pr_test: ok"

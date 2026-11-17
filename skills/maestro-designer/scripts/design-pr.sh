@@ -9,6 +9,7 @@
 #     name a width in px, and, unless its Motion: is just none, a
 #     clip of the pick (<pick>-*-motion.png, from screens.sh --motion);
 #     on a gap it prints problem= lines, exit 2, and writes nothing.
+#     With Motion: none, no clip goes up.
 #     Checks the ticket is a "Design:" scout ticket in in_progress under
 #     this holder's claim; else stop=<why>, exit 3.
 #     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
@@ -96,8 +97,13 @@ if [ -n "$pick" ]; then
 	shopt -u nullglob
 	[ ${#stills[@]} -gt 0 ] || probs+=("no $lp-*.png shots of the pick in the run folder")
 	motion=$(value Motion)
-	[[ ${motion,,} =~ ^none[[:space:][:punct:]]*$ ]] || [ "$n_pick" -gt 0 ] ||
+	if [[ ${motion,,} =~ ^none[[:space:][:punct:]]*$ ]]; then
+		# A spec with no motion shows none: clips from exploring would
+		# show the owner motion the design dropped.
+		clips=()
+	elif [ "$n_pick" = 0 ]; then
 		probs+=("Motion: no $lp-*-motion.png clip of the pick in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
+	fi
 fi
 if [ ${#probs[@]} -gt 0 ]; then
 	printf 'problem=%s\n' "${probs[@]}"

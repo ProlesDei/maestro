@@ -18,16 +18,18 @@
 #     a stepped clock: a frame every 40ms from load, for --ms (200 to
 #     4000, default 1000). CSS transitions and animations, the Web
 #     Animations API, timers and requestAnimationFrame all keep that
-#     clock. With #<cue>, the page first runs 5s of its own time, so its
-#     load timers fire, and what moves on load runs to its end; then it
-#     calls the page's window.motion("<cue>") at 0ms. Writes
-#     <name>[-<cue>]-<width>-motion.png, an animated PNG that loops, and
-#     <name>[-<cue>]-<width>-strip.png, up to eight of its frames in a
-#     grid, each labelled with its ms. Prints run=, then clip= and
-#     strip= per pair; still=<name>[-<cue>]-<width> for each clip where
-#     nothing moved, which writes no file and deletes an old one; and
-#     cut=<same> for each clip still moving on its last frame; then ok=1.
-#     If nothing moved in any clip, it fails.
+#     clock. With #<cue>, the page first settles, so what load starts
+#     (timers, animations, what their endings start) runs its course;
+#     then it calls the page's window.motion("<cue>") at 0ms. A run
+#     first deletes every *-motion.png and *-strip.png in <dir>, so the
+#     folder holds this run's clips only: clip every motion in one run.
+#     Writes <name>[-<cue>]-<width>-motion.png, an animated PNG that
+#     loops, and <name>[-<cue>]-<width>-strip.png, up to eight of its
+#     frames in a grid, each labelled with its ms. Prints run=, then
+#     clip= and strip= per pair; still=<name>[-<cue>]-<width> for each
+#     clip where nothing moved, which writes no file; and cut=<same> for
+#     each clip still moving on its last frame; then ok=1. If nothing
+#     moved in any clip, it fails.
 #
 # Needs jq, and playwright-cli and node on PATH. With no browser it prints
 # stop=no browser and exits 4. Exit 2: bad arguments; 1: any other
@@ -188,8 +190,10 @@ EOF
 # counts from the step it shows up in. Past its end (or its start, when
 # reversed) it is finished, so its events, finished promise and fill run
 # as the page meant. One the page paused itself is left alone; one the
-# page plays again is picked up where it stands. Under a cue, load gets
-# 5s of page time, and its animations end first.
+# page plays again is picked up where it stands. Under a cue, load
+# settles first: up to three rounds of 5s page time, each ending what
+# still runs, so load's timers and the handlers its endings start run
+# before the cue, not inside its clip.
 cat >"$tmp/motion.tail" <<'EOF'
 ;
   for (const j of jobs) {
@@ -200,7 +204,21 @@ cat >"$tmp/motion.tail" <<'EOF'
       await p.clock.pauseAt(1000);
       await p.setViewportSize({ width: j.width, height: 900 });
       await p.goto(j.url, { waitUntil: "load", timeout: 30000 });
-      if (j.cue) await p.clock.runFor(5000);
+      for (let r = 0; j.cue && r < 3; r++) {
+        await p.clock.runFor(5000);
+        const ended = await p.evaluate(() => {
+          let n = 0;
+          for (const a of document.getAnimations()) {
+            if (a.playState !== "running") continue;
+            try { a.finish(); n++; } catch {}
+          }
+          return n;
+        });
+        if (!ended) break;
+        // Finish events go out with the next frame the page draws, and a
+        // paused clock draws none: a tiny shot draws one.
+        await p.screenshot({ clip: { x: 0, y: 0, width: 1, height: 1 } });
+      }
       await p.evaluate(([cue, name]) => {
         const seen = new WeakSet(), last = new Map(), near = (x, y) => Math.abs(x - y) < 40;
         // Drive an animation from c: a fresh one, a step behind real time,
@@ -284,6 +302,9 @@ url_of() { # <index>
 
 if [ -n "$motion" ]; then
 	step=40
+	# Clips of an earlier run (a cue since renamed, a width since dropped)
+	# would reach the owner as current: this run's clips replace them all.
+	rm -f "$out"/*-motion.png "$out"/*-strip.png
 	# Frames: one folder per clip, under /f/; then one call shoots them all.
 	for i in "${!names[@]}"; do
 		for w in "${ws[@]}"; do
@@ -336,11 +357,7 @@ for (const c of fs.readdirSync(fdir).filter(c => fs.statSync(fdir + "/" + c).isD
     if (g && g.data.equals(f.data)) g.ms += step;
     else groups.push({ data: f.data, ms: step, at: i });
   });
-  if (groups.length < 2) {
-    for (const f of [out + "/" + c + "-motion.png", out + "/" + c + "-strip.png"]) fs.rmSync(f, { force: true });
-    console.log("still=" + c);
-    continue;
-  }
+  if (groups.length < 2) { console.log("still=" + c); continue; }
   if (groups[groups.length - 1].ms === step) console.log("cut=" + c);
   groups[0].ms += 600;
   groups[groups.length - 1].ms += 1200;
