@@ -424,6 +424,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	case k.text != "" && req.text != "":
 		prompt += " " + req.text
 	}
+	if k.name == "plan" || k.name == "rule" {
+		if rules, _ := c.standingRules(); rules != "" {
+			prompt += "\nStanding rules:\n" + rules
+		}
+	}
 	if req.model != "" {
 		if req.model != m {
 			side.Why = "override"
@@ -442,7 +447,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	}
 	cmd := claudeCommand(newSessionID(), m, e, k.lean)
 	if k.slot != "" {
-		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, defaultQASlots))
+		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
 	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,

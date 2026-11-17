@@ -21,7 +21,13 @@ import (
 type lookHarness struct{ *jobHarness }
 
 func newLookHarness(t *testing.T) *lookHarness {
-	return &lookHarness{newJobHarness(t, "planner")}
+	l := &lookHarness{newJobHarness(t, "planner")}
+	// Standing rules seeded and empty, as a first look on the old block
+	// leaves them: a look's stdin still seeds them.
+	if err := os.WriteFile(filepath.Join(l.h.dir, rulesFile), []byte("# via: look\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return l
 }
 
 func (l *lookHarness) look(stdin string, args ...string) []string {
@@ -222,7 +228,7 @@ func TestLookJudge(t *testing.T) {
 	run := strings.Fields(strings.TrimPrefix(j[0], "judging: "))[0]
 	r := l.waitEnded(strings.TrimSuffix(run, ","), 20*time.Second)
 	seen := l.seen(r.ID)
-	want := []string{"/maestro-planner judge T-1", "Rows:", "judge: T-1 blocked: Escalation: build at abc: which key?", "Standing rules:", "api/ tickets: senior only. Set by the owner, Oct 31."}
+	want := []string{"/maestro-planner judge T-1", "Rows:", "judge: T-1 blocked: Escalation: build at abc: which key?", "Standing rules:", "api/ tickets: senior only. Set by the owner, Oct 31. (set by planner, " + time.Now().UTC().Format("2006-01-02") + ")"}
 	if !slices.Equal(seen.stdin, want) || seen.flag("--model") != "opus" {
 		t.Fatalf("judge prompt: %q %q", seen.stdin, seen.args)
 	}

@@ -95,9 +95,13 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
               the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -247,6 +251,7 @@ var commands = []command{
 	{"export", runExport},
 	{"render", runRender},
 	{"doctor", runDoctor},
+	{"rules", runRules},
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},
@@ -1439,7 +1444,7 @@ func runDoctor(ctx context.Context, c *call) error {
 	}
 	rep.Checks = append(rep.Checks, checks...)
 	if envcheck.Err(checks) == nil {
-		rep.Checks = append(rep.Checks, c.runsCheck(ctx, path))
+		rep.Checks = append(rep.Checks, c.rulesCheck(), c.runsCheck(ctx, path))
 	}
 	res := map[string]any{"ok": rep.OK(), "store": path, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {

@@ -139,7 +139,9 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 	cc := *c
 	cc.actor, cc.runCache = sd.Bot, nil
 	req := jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1}
-	if k.slot != "" {
+	// QA runs at once: rules set qa_slots's, which startJob reads, else
+	// what the bot passed last.
+	if k.slot != "" && c.boardQASlots() == 0 {
 		req.slots = lastSlots(dir, sd.Bot, k.slot)
 	}
 	_, _, _, err := cc.startJob(ctx, req)
