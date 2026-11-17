@@ -154,6 +154,7 @@ To move back to SQLite:
 2. On the machine that holds the SQLite file, run `maestro-ticket migrate --to sqlite`. It copies the board back, lifts the write block, marks the MongoDB board moved so no machine can write to it, and removes `store.uri`. If it stops partway, run it again; to keep the board on MongoDB instead, run `maestro-ticket migrate --to sqlite --abort` on that machine, then `maestro-ticket stop --all --off`.
 3. Set `store: sqlite` there, run `apply` and `check`, then delete `maestro/STOP` under the git common dir if it's still there.
 4. On each other machine, run `maestro-ticket store --clear` and stop its bots: the board lives on the first machine again.
+5. For each bot that ran on another machine, do [step 8](#8-set-up-the-bots) on the machine that holds the board: run `bot-bundle.sh` there, the person pastes each block into its bot again so `Repo:` names that clone, then set its webhook there with `maestro-ticket notify <bot> --url-file -`, ring it with `--test`, and run `maestro-ticket notify <bot> --clear` on the machine it left. Until then, runs that end there ring no bot. Don't run `apply` on a cleared clone while its bots still run: with `store: sqlite`, it gives that clone a second, empty board.
 
 ## A teammate's checkout
 
