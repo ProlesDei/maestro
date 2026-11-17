@@ -47,6 +47,7 @@ func runAll(n int, fn func(i int)) {
 }
 
 func TestRaceClaimNext(t *testing.T) {
+	t.Parallel()
 	const tickets, workers = 50, 200
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")
@@ -107,6 +108,7 @@ func TestRaceClaimNext(t *testing.T) {
 }
 
 func TestRaceNoLostComments(t *testing.T) {
+	t.Parallel()
 	const workers = 200
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")
@@ -150,6 +152,7 @@ func TestRaceNoLostComments(t *testing.T) {
 }
 
 func TestRaceOptimisticTransition(t *testing.T) {
+	t.Parallel()
 	const workers = 50
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")
@@ -186,6 +189,7 @@ func TestRaceOptimisticTransition(t *testing.T) {
 }
 
 func TestRaceIdempotentCreate(t *testing.T) {
+	t.Parallel()
 	const workers = 50
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")
@@ -217,6 +221,7 @@ func TestRaceIdempotentCreate(t *testing.T) {
 // The old session and the new holder write at the same time. Every stale
 // write is rejected, every current one lands.
 func TestRaceWritesAfterReclaim(t *testing.T) {
+	t.Parallel()
 	const workers = 100
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")
@@ -292,6 +297,7 @@ func TestRaceWritesAfterReclaim(t *testing.T) {
 // moving. A heartbeat either lands before the expiry is logged, or fails;
 // the logged expiry is always the last extension a heartbeat reported.
 func TestRaceExpiryVsHeartbeat(t *testing.T) {
+	// Not parallel: its TTL runs on the wall clock.
 	// A writer that hits SQLITE_BUSY can sleep a full second in SQLite's
 	// busy handler, so the TTL spans a few seconds of real time: 120 steps
 	// of 20ms. Odd sessions crash early, so their leases must expire.

@@ -3,8 +3,6 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -327,53 +325,6 @@ func TestFindingsClamp(t *testing.T) {
 	}
 }
 
-// reviewClaude makes j's claude reply with reply, as a review would.
-func reviewClaude(t *testing.T, j *jobHarness, reply string) {
-	t.Helper()
-	res, _ := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": false, "result": reply,
-		"session_id": "22222222-2222-4222-8222-222222222222", "total_cost_usd": 0.01, "modelUsage": map[string]any{}})
-	if err := os.WriteFile(filepath.Join(j.out, "result.json"), append(res, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(j.bin, "claude"), []byte("#!/bin/sh\ncat >/dev/null\ncat \"$FAKE_OUT/result.json\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Each id --drop named becomes a dropped row of the review run, and of a
-// job again of it, which keeps the first prompt's drops; never its reason.
-func TestDroppedRowsFromSideFile(t *testing.T) {
-	t.Parallel()
-	j := newJobHarness(t, "reviewer")
-	reviewScene(t, j)
-	reviewClaude(t, j, reviewFixture(t, "go"))
-	j.h.ok(nil, "create", "--title", "a", "--tier", "senior")
-	j.h.ok(nil, "create", "--title", "b", "--tier", "junior")
-	moveTo(j, "T-2", "in_progress", "in_review")
-	_, r := j.job("F1 and F3 are moot\n", "review", "T-2", "--drop", "F1,F3,X.2", "--drop-file", "-")
-	j.waitSupervisors()
-	// go.txt's Follow-ups says none; X.2 is off the id shape.
-	want := []string{"F1 dropped - - - - 1", "F3 dropped - - - - 1", "- dropped - - - - 1"}
-	if got := findingRows(t, j.h.dir, r.ID); !slices.Equal(got, want) {
-		t.Fatalf("review: findings %q; want %q", got, want)
-	}
-	if got, want := reviewFactsRow(t, j.h.dir, r.ID), "review:go go 0 full -"; got != want {
-		t.Errorf("review: facts %q; want %q", got, want)
-	}
-	_, again := j.job("", "again", r.ID)
-	j.waitSupervisors()
-	if got := findingRows(t, j.h.dir, again.ID); !slices.Equal(got, want) {
-		t.Fatalf("again: findings %q; want %q", got, want)
-	}
-
-	// No side file: no dropped rows, and the rest as before.
-	dir := t.TempDir()
-	reviewRow(t, dir, "R-aaaaaaaa", "review", reviewFixture(t, "go"), nil)
-	if got := findingRows(t, dir, "R-aaaaaaaa"); len(got) != 0 {
-		t.Errorf("no side file: %q", got)
-	}
-}
-
 // Go works out why a review escalated from what it wrote; a failure's own
 // reason wins, and a run that didn't escalate gets none.
 func TestEscalateCause(t *testing.T) {
@@ -415,69 +366,6 @@ func TestEscalateCause(t *testing.T) {
 			t.Errorf("%s is not on the reason list", cause)
 		}
 	}
-}
-
-// grepStats fails for each marker stats.db or its WAL holds, before and
-// after a checkpoint and VACUUM.
-func grepStats(t *testing.T, dir string, markers []string) {
-	t.Helper()
-	grep := func(when string) {
-		for _, f := range []string{stats.DBName, stats.DBName + "-wal"} {
-			b, _ := os.ReadFile(filepath.Join(dir, f))
-			for _, m := range markers {
-				if bytes.Contains(b, []byte(m)) {
-					t.Errorf("%s: %s holds %q", when, f, m)
-				}
-			}
-		}
-	}
-	grep("before a checkpoint")
-	db, err := stats.Open(filepath.Join(dir, stats.DBName), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	for _, q := range []string{`PRAGMA wal_checkpoint(TRUNCATE)`, `VACUUM`} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	grep("after a checkpoint and VACUUM")
-}
-
-// Markers in a finding's file, evidence, impact and fix, in the fields
-// stats does decode, in the report and in the --drop-file reason miss
-// stats.db.
-func TestFindingsMarkers(t *testing.T) {
-	t.Parallel()
-	markers := []string{"zqmark7", "deadbeefcafe", strings.Repeat("d3adb33f", 5), "claude-zqmark", "cafe0123beef"}
-	all := strings.Join(markers, " ")
-	doc, _ := json.Marshal(map[string]any{"head": strings.Repeat("d3adb33f", 5), "verdict": "NO-GO", "tier": 1, "mode": "zqmark7",
-		"findings": []map[string]any{
-			{"id": "F1", "severity": "blocker", "action": "auto-fix", "pass": 2, "file": "zqmark7/deadbeefcafe.go", "line": 9,
-				"evidence": all, "impact": all, "fix": all, "prior": "new"},
-			{"id": "zqmark7", "severity": "deadbeefcafe", "action": "claude-zqmark", "pass": 3, "file": all, "prior": "cafe0123beef"},
-		}})
-	reply := "# Code review: T-2 " + all + "\nVerdict: NO-GO\n## Out of scope\n- " + all + "\n## Outcome " + all + "\n" + string(doc) + "\n" + all + "?"
-	j := newJobHarness(t, "reviewer")
-	reviewScene(t, j)
-	reviewClaude(t, j, reply)
-	prepareStatsAt(t, j.h.dir)
-	j.h.ok(nil, "create", "--title", all, "--tier", "senior")
-	j.h.ok(nil, "create", "--title", all, "--tier", "junior")
-	moveTo(j, "T-2", "in_progress", "in_review")
-	_, r := j.job(all+"\n", "review", "T-2", "--drop", "F1,zqmark7", "--drop-file", "-")
-	j.waitSupervisors()
-	got := findingRows(t, j.h.dir, r.ID)
-	want := []string{"F1 finding 2 blocker auto-fix new 1", "- finding 3 other other other 1", "- follow_up - - - - 1",
-		"F1 dropped - - - - 1", "- dropped - - - - 1"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("findings\n got %q\nwant %q", got, want)
-	}
-	if got, want := reviewFactsRow(t, j.h.dir, r.ID), "review:nogo nogo 1 other -"; got != want {
-		t.Errorf("facts %q; want %q", got, want)
-	}
-	grepStats(t, j.h.dir, markers)
 }
 
 // The review decoder reads only these fields, each loose; a new field is

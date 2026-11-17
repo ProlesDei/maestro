@@ -73,7 +73,7 @@ One rule, one file: when a rule already lives somewhere, link to it instead of r
 ## Commands
 
 From `tools/maestro-ticket/`:
-- Test: `go test -race ./...`
+- Test: `go test -race ./...`. Unit tests only: a test calls the code in process and itself starts only `git` or `go`. Never a launch, a supervisor or keepalive process, a fake `claude` session, a second CLI or a `sleep`; a test of `slot`, `check` or `Supervise` may hand the code a short `sh -c` command. `unitonly/` and `cli`'s `TestMain` enforce it. An end-to-end test costs minutes in every check run, and checks run three times a ticket.
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 

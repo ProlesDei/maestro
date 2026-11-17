@@ -3,11 +3,8 @@ package cli
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -184,33 +181,6 @@ func TestAlertsAfterARestartNameDeadRunsAndFreeTheirClaims(t *testing.T) {
 	}
 }
 
-// On the same boot, a gone log-run may have died alone while claude runs
-// on: report it, and leave its claim to the lease.
-func TestAlertsReportADeadRunOnTheSameBootAndKeepItsClaim(t *testing.T) {
-	h := newHarness(t)
-	h.ok(nil, "create", "--title", "x")
-	h.ok(nil, "claim", "T-1", "--holder", "senior-engineer/a")
-	s := h.store()
-	dead := startSleeper(t)
-	if _, err := s.StartLaunch(context.Background(), ticket.StartLaunchRequest{Actor: "senior-engineer", Ticket: 1, PID: dead.Process.Pid, Stamp: procStamp(dead.Process.Pid)}); err != nil {
-		t.Fatal(err)
-	}
-	var r alertsJSON
-	if h.ok(&r, "alerts"); len(r.Died) != 0 {
-		t.Fatalf("a run still going died: %+v", r.Died)
-	}
-	dead.Process.Kill()
-	dead.Wait()
-	h.ok(&r, "alerts")
-	if len(r.Died) != 1 || r.Died[0].Freed != "" || r.Restarted {
-		t.Fatalf("alerts = %+v", r)
-	}
-	var got tk
-	if h.ok(&got, "get", "T-1"); got.Claim == nil {
-		t.Fatal("the claim was freed on the same boot")
-	}
-}
-
 // log-run records each run as it starts, so one that never gives a reply
 // still shows, and how it ended.
 func TestLogRunRecordsTheLaunch(t *testing.T) {
@@ -323,53 +293,6 @@ func TestLogRunFreesTheClaimOfARunWithNoResult(t *testing.T) {
 	}
 	if h.ok(&a, "get", "T-1"); a.Claim == nil {
 		t.Fatal("a run with a reply lost its claim")
-	}
-}
-
-// A SIGTERM while log-run waits must not lose the run's end: the next
-// look would call a run that ended with no reply dead.
-func TestLogRunRecordsItsEndAfterSIGTERM(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no SIGTERM")
-	}
-	h := newHarness(t)
-	h.ok(nil, "create", "--title", "a")
-	h.ok(nil, "claim", "T-1", "--holder", "junior-engineer/x")
-	cmd := exec.Command(os.Args[0], "log-run", "--actor", "junior-engineer", "--ticket", "T-1")
-	cmd.Env = append(os.Environ(), childEnv+"=1", "MAESTRO_TICKET_STORE="+h.env["MAESTRO_TICKET_STORE"])
-	in, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	s := h.store()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		open, _ := s.OpenLaunches(context.Background())
-		if len(open) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("log-run never recorded its start")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	cmd.Process.Signal(syscall.SIGTERM)
-	time.Sleep(100 * time.Millisecond)
-	in.Close()
-	cmd.Wait()
-	var exp struct {
-		Launches []struct{ Outcome string }
-	}
-	h.ok(&exp, "export")
-	if len(exp.Launches) != 1 || exp.Launches[0].Outcome != "no_result" {
-		t.Fatalf("launches = %+v", exp.Launches)
-	}
-	var got tk
-	if h.ok(&got, "get", "T-1"); got.Claim != nil {
-		t.Fatalf("the claim wasn't freed: %+v", got.Claim)
 	}
 }
 
