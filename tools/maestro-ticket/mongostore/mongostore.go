@@ -79,12 +79,15 @@ var collections = []string{cMeta, cTickets, cComments, cEvents, cIdempotency, cR
 const writerID = "writer"
 
 // writerDoc is the meta "writer" document: the schema, the moved
-// tombstone, the halt, the server clock as of the last write, the last id
-// each counter gave out, and the code each host's binary last wrote with.
+// tombstone, a move under way, the halt, the server clock as of the last
+// write, the last id each counter gave out, and the code each host's
+// binary last wrote with.
 type writerDoc struct {
 	ID       string        `bson:"_id"`
 	Schema   int           `bson:"schema"`
 	Moved    bool          `bson:"moved"`
+	Moving   string        `bson:"moving,omitempty"`      // the store a migrate is moving the board to
+	MoveHost string        `bson:"moving_host,omitempty"` // the machine that migrate runs on
 	Halt     bool          `bson:"halt"`
 	Writes   int64         `bson:"writes"`
 	Now      bson.DateTime `bson:"now"`
@@ -118,6 +121,10 @@ type Options struct {
 	// Host is this machine's id: the writer document keeps the code each
 	// host last wrote with, for doctor. Empty records none.
 	Host string
+	// Mover, set to this machine's host id, marks migrate's own store: it
+	// alone may open and use a board that is moving, or has moved, to the
+	// other store, and only its machine's move goes on.
+	Mover string
 }
 
 // Store is a ticket.Store on one MongoDB database.
@@ -128,6 +135,7 @@ type Store struct {
 	now    func() time.Time
 	stop   string
 	host   string
+	mover  string
 	closed sync.Once
 }
 
@@ -177,7 +185,7 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{client: sc, db: sc.c.Database(name), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host}
+	s := &Store{client: sc, db: sc.c.Database(name), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
 	if err := s.setup(ctx); err != nil {
 		s.Close()
 		return nil, err
@@ -244,7 +252,7 @@ func (s *Store) setup(ctx context.Context) error {
 	if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
 		return fmt.Errorf("read the board's meta: %w", err)
 	}
-	return checkWriter(w)
+	return s.checkWriter(w)
 }
 
 func (s *Store) build(ctx context.Context) error {
@@ -308,10 +316,15 @@ func (s *Store) build(ctx context.Context) error {
 // to SQLite: the meta document's moved tombstone is set.
 const movedMsg = "board moved: this MongoDB board was handed back to SQLite; use the store there"
 
-func checkWriter(w writerDoc) error {
+func (s *Store) checkWriter(w writerDoc) error {
 	switch {
+	case s.mover != "" && w.Schema == schemaVersion:
+		return nil
 	case w.Moved:
 		return fmt.Errorf("%w: %s", ticket.ErrInvalid, movedMsg)
+	case w.Moving != "":
+		return fmt.Errorf("%w: board moving: maestro-ticket migrate --to %s is copying it, or was cut short; wait for it, or run it again on the machine that started it",
+			ticket.ErrInvalid, w.Moving)
 	case w.Schema > schemaVersion:
 		return fmt.Errorf("%w: schema %d, this binary knows %d; rebuild maestro-ticket from the newest Maestro this machine uses",
 			ticket.ErrStoreTooNew, w.Schema, schemaVersion)
@@ -535,7 +548,7 @@ func (s *Store) begin(tx *txn, write bool) error {
 		}, &w)
 	} else {
 		err = meta.findOne(id, &w, options.FindOne().SetProjection(bson.D{
-			{Key: "schema", Value: 1}, {Key: "moved", Value: 1}, {Key: "now", Value: "$$NOW"},
+			{Key: "schema", Value: 1}, {Key: "moved", Value: 1}, {Key: "moving", Value: 1}, {Key: "now", Value: "$$NOW"},
 		}))
 	}
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -544,7 +557,7 @@ func (s *Store) begin(tx *txn, write bool) error {
 	if err != nil {
 		return err
 	}
-	if err := checkWriter(w); err != nil {
+	if err := s.checkWriter(w); err != nil {
 		return err
 	}
 	tx.now = int64(w.Now)

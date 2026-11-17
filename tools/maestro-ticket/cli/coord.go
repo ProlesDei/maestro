@@ -89,8 +89,7 @@ func (c *call) coord() (coord, error) {
 	if err != nil {
 		return coord{}, err
 	}
-	dir := loc.localDir
-	files := fileCoord{dir: dir, handouts: filepath.Join(dir, "handouts"), runs: filepath.Join(dir, "runs")}
+	files := localCoord(loc)
 	if loc.kind != kindMongoDB {
 		return coord{s: files}, nil
 	}

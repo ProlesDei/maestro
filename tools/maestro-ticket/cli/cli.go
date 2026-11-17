@@ -135,6 +135,10 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
+              the URI connects, or removes it; prints the store, with only the URI's host)
+  migrate     --to mongodb [--uri-file F|-] | --to sqlite   (moves the board between stores and
+              checks the copy row by row; README's Move between stores says what each needs)
   slot        [--name checks] [--max 4] [--wait D] -- <command> [args]
               (runs the command once one of --max slots is free, so the sessions on
               one ticket store run at most that many at once, with a TMPDIR of its
@@ -247,6 +251,8 @@ var commands = []command{
 	{"export", runExport},
 	{"render", runRender},
 	{"doctor", runDoctor},
+	{"store", runStoreURI},
+	{"migrate", runMigrate},
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},

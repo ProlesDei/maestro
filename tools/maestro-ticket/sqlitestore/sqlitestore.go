@@ -416,9 +416,10 @@ func (s *Store) snapshotBeforeMigrate(ctx context.Context, v int) error {
 
 // write runs fn in a BEGIN IMMEDIATE transaction, retrying briefly if the
 // write lock stays busy past busy_timeout. now is read under the write lock,
-// so writes see time move forward in commit order.
+// so writes see time move forward in commit order. On a board moved to
+// MongoDB every write fails with ErrInvalid.
 func (s *Store) write(ctx context.Context, fn func(tx *sql.Tx, now int64) error) error {
-	return retryBusy(ctx, func() error {
+	return s.movedErr(retryBusy(ctx, func() error {
 		tx, err := s.w.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -432,7 +433,7 @@ func (s *Store) write(ctx context.Context, fn func(tx *sql.Tx, now int64) error)
 			return err
 		}
 		return tx.Commit()
-	})
+	}))
 }
 
 func (s *Store) read(ctx context.Context, fn func(tx *sql.Tx, now int64) error) error {
@@ -1824,6 +1825,13 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		return rep, err
 	}
 	add("events", triggers == 2, "last seq %d; append-only triggers %d/2", lastSeq, triggers)
+	gone, err := moved(ctx, conn)
+	if err != nil {
+		return rep, err
+	}
+	if gone {
+		add("moved", false, "%s: this file is the copy from before the move and takes no writes; store.uri missing? Put it back beside it with maestro-ticket store --uri-file -", movedMsg)
+	}
 	return rep, nil
 }
 
@@ -1913,7 +1921,17 @@ func checkBackup(ctx context.Context, path string, version int) error {
 func (s *Store) Export(ctx context.Context) (ticket.Export, error) {
 	var out ticket.Export
 	err := s.read(ctx, func(tx *sql.Tx, now int64) error {
-		out = ticket.Export{SchemaVersion: schemaVersion, Tickets: []ticket.Detail{}, Events: []ticket.Event{}}
+		var err error
+		out, err = s.export(ctx, tx, now)
+		return err
+	})
+	return out, err
+}
+
+// export reads the whole store through q, one transaction, at now.
+func (s *Store) export(ctx context.Context, tx querier, now int64) (ticket.Export, error) {
+	out := ticket.Export{SchemaVersion: schemaVersion, Tickets: []ticket.Detail{}, Events: []ticket.Event{}}
+	err := func() error {
 		byID := map[ticket.ID]int{}
 		rows, err := tx.QueryContext(ctx, "SELECT "+ticketCols+" FROM tickets ORDER BY id")
 		if err != nil {
@@ -1997,6 +2015,6 @@ func (s *Store) Export(ctx context.Context) (ticket.Export, error) {
 		}
 		out.ETAs, err = queryETAs(ctx, tx, []ticket.ETA{})
 		return err
-	})
+	}()
 	return out, err
 }
