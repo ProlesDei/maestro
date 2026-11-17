@@ -386,7 +386,9 @@ func runSupervise(ctx context.Context, c *call) error {
 // on its ticket, unless another run of that bot on that ticket still
 // goes. Neither may hold up the ring, so failures only warn on stderr.
 func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
-	dropActive(dir, r)
+	if co, err := c.coord(); err == nil {
+		co.dropActive(r)
+	}
 	warn := func(err error) {
 		if err != nil {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: %v\n", r.ID, err)
@@ -573,7 +575,11 @@ func runPickup(ctx context.Context, c *call) error {
 	// While a usage limit holds, the runs it stopped wait: no do: line
 	// to retry, no ack, one line for all; they ring again as it lifts.
 	// The rest come first, 20 at most a call.
-	pause, paused := readPause(filepath.Dir(dir), now)
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	pause, paused := co.readPause(now)
 	waiting, shown := []string{}, []runs.Record{}
 	more := 0
 	for _, r := range ended {
@@ -595,7 +601,7 @@ func runPickup(ctx context.Context, c *call) error {
 		if rt, ok := routes[r.ID]; ok {
 			// A job a look handed out lately goes out once: pickup drops
 			// its own line for it, and holds the rest from the next look.
-			rt.Send = pickupSends(filepath.Join(filepath.Dir(dir), "handouts"), r.ID, r.StartedAt, rt.Send, now)
+			rt.Send = co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
 			routes[r.ID] = rt
 			routeList = append(routeList, rt)
 		}
@@ -796,7 +802,7 @@ const maxPickup = 20
 // the next look sends none of them. A handout made before the run began
 // was for the step before it, such as the review a kickback answered, so
 // this run's send takes its place.
-func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time) []send {
+func (co coord) pickupSends(runID string, since time.Time, sends []send, now time.Time) []send {
 	out := []send{}
 	for _, s := range sends {
 		id := ticketInLine.FindString(s.Line)
@@ -805,17 +811,17 @@ func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time
 			continue
 		}
 		mine := "pickup " + runID
-		if claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
+		if co.claimHandout(id, s.Bot, mine, ticket.DefaultStall, now) {
 			out = append(out, s)
 			continue
 		}
-		p := handoutPath(dir, id, s.Bot)
-		if fi, err := os.Stat(p); err == nil && fi.ModTime().Before(since) && moveStale(p, fi) &&
-			claimHandout(dir, id, s.Bot, mine, ticket.DefaultStall, now) {
+		name := handoutName(id, s.Bot)
+		if m, err := co.s.read(handoutMarks, name); err == nil && m.at.Before(since) && co.moveStale(handoutMarks, name, m) &&
+			co.claimHandout(id, s.Bot, mine, ticket.DefaultStall, now) {
 			out = append(out, s)
 			continue
 		}
-		if b, _ := os.ReadFile(p); strings.TrimSpace(string(b)) == mine {
+		if co.handoutBody(id, s.Bot) == mine {
 			out = append(out, s)
 		}
 	}

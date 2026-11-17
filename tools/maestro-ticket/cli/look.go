@@ -28,26 +28,28 @@ var (
 	urgentText   = regexp.MustCompile(`(?i)\burgent\b`)
 )
 
-func handoutPath(dir, id, bot string) string { return filepath.Join(dir, id+"."+bot) }
+func handoutName(id, bot string) string { return id + "." + bot }
 
 // recordHandouts keeps each send that names a ticket.
-func recordHandouts(dir string, sends []send) {
-	if len(sends) == 0 {
-		return
-	}
-	os.MkdirAll(dir, 0o755)
+func (co coord) recordHandouts(sends []send) {
 	for _, s := range sends {
 		// A line to the planner is a report, not a job it was handed.
 		id := ticketInLine.FindString(s.Line)
 		if id == "" || !runs.BotPattern.MatchString(s.Bot) || s.Bot == "planner" {
 			continue
 		}
-		p := handoutPath(dir, id, s.Bot)
-		tmp := p + ".tmp" + newSessionID()[:8]
-		if os.WriteFile(tmp, []byte(s.Line+"\n"), 0o644) == nil {
-			os.Rename(tmp, p)
-		}
+		co.s.write(handoutMarks, handoutName(id, s.Bot), s.Line+"\n")
 	}
+}
+
+// dropHandout frees a ticket's handout to bot, so the next look or pickup
+// may send it again.
+func (co coord) dropHandout(id, bot string) { co.s.remove(handoutMarks, handoutName(id, bot)) }
+
+// handoutBody is what a ticket's handout to bot holds, trimmed, or "".
+func (co coord) handoutBody(id, bot string) string {
+	m, _ := co.s.read(handoutMarks, handoutName(id, bot))
+	return strings.TrimSpace(m.body)
 }
 
 // urgentSince is the newest note marked urgent after the latest Taken:,
@@ -66,48 +68,32 @@ func urgentSince(d ticket.Detail) (ticket.Comment, bool) {
 }
 
 // claimHandout takes a ticket's handout to bot for this look, unless one
-// stands from within d: the file is made with O_EXCL, so of two looks at
+// stands from within d: the mark is made exclusive, so of two looks at
 // once only one takes it. A stale one is moved aside first, and of two
 // looks that both find it stale, one still wins the create. body is what
-// the file holds.
-func claimHandout(dir, id, bot, body string, d time.Duration, now time.Time) bool {
-	os.MkdirAll(dir, 0o755)
-	p := handoutPath(dir, id, bot)
+// the mark holds.
+func (co coord) claimHandout(id, bot, body string, d time.Duration, now time.Time) bool {
+	name := handoutName(id, bot)
 	for range 2 {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.WriteString(body + "\n")
-			f.Close()
+		if co.s.create(handoutMarks, name, body+"\n") == nil {
 			return true
 		}
-		fi, serr := os.Stat(p)
-		if serr == nil && now.Sub(fi.ModTime()) < d {
+		m, err := co.s.read(handoutMarks, name)
+		if err == nil && now.Sub(m.at) < d {
 			return false
 		}
-		if !moveStale(p, fi) {
+		if !co.moveStale(handoutMarks, name, m) {
 			return false
 		}
 	}
 	return false
 }
 
-// moveStale moves a stale file aside under a takeover lock, and only if it
-// is still the file seen, so of takers that all found it stale one wins.
-func moveStale(p string, seen os.FileInfo) bool {
-	lock := p + ".takeover"
-	lf, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		if fi, err := os.Stat(lock); err == nil && time.Since(fi.ModTime()) > activeGrace {
-			os.Remove(lock) // its taker died; the next try takes it
-		}
-		return false
-	}
-	lf.Close()
-	defer os.Remove(lock)
-	if fi, err := os.Stat(p); err == nil && seen != nil && os.SameFile(fi, seen) && fi.ModTime().Equal(seen.ModTime()) {
-		os.Rename(p, p+".stale"+newSessionID()[:8])
-	}
-	return true
+// moveStale moves a stale mark aside under a takeover lock, and only if it
+// is still the mark seen, so of takers that all found it stale one wins.
+func (co coord) moveStale(space, name string, seen mark) bool {
+	took, _ := co.s.takeOver(space, name, func(now mark) bool { return sameMark(seen, now) })
+	return took
 }
 
 // judgeWindow is how long a judged row stays judged while the ticket
@@ -116,32 +102,27 @@ func moveStale(p string, seen os.FileInfo) bool {
 const judgeWindow = 6 * time.Hour
 
 // judged reports whether the judge took this row, in this state, lately.
-func judged(dir, id, fp string, now time.Time) bool {
-	p := handoutPath(dir, id, "judge")
-	b, err := os.ReadFile(p)
-	if err != nil || strings.TrimSpace(string(b)) != fp {
-		return false
-	}
-	fi, err := os.Stat(p)
-	return err == nil && now.Sub(fi.ModTime()) < judgeWindow
+func (co coord) judged(id, fp string, now time.Time) bool {
+	m, err := co.s.read(handoutMarks, handoutName(id, "judge"))
+	return err == nil && strings.TrimSpace(m.body) == fp && now.Sub(m.at) < judgeWindow
 }
 
 // pruneHandouts drops records over a day old.
-func pruneHandouts(dir string, now time.Time) {
-	es, err := os.ReadDir(dir)
+func (co coord) pruneHandouts(now time.Time) {
+	ms, err := co.s.list(handoutMarks)
 	if err != nil {
 		return
 	}
-	for _, e := range es {
+	for _, m := range ms {
 		keep := 24 * time.Hour
-		if strings.Contains(e.Name(), ".stale") || strings.HasSuffix(e.Name(), ".takeover") {
+		if strings.Contains(m.name, ".stale") || strings.HasSuffix(m.name, ".takeover") {
 			keep = time.Hour
 		}
-		if strings.HasPrefix(e.Name(), "eta-") {
+		if strings.HasPrefix(m.name, "eta-") {
 			keep = 30 * 24 * time.Hour // a missed date goes up once
 		}
-		if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > keep {
-			os.Remove(filepath.Join(dir, e.Name()))
+		if now.Sub(m.at) > keep {
+			co.s.remove(handoutMarks, m.name)
 		}
 	}
 }
@@ -220,24 +201,28 @@ func runLook(ctx context.Context, c *call) error {
 		return err
 	}
 	rdir := filepath.Join(filepath.Dir(hdir), "runs")
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
 	var out lookOut
 	paused := ""
-	if p, ok := readPause(filepath.Dir(store), time.Now()); ok {
+	if p, ok := co.readPause(time.Now()); ok {
 		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
 	}
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
 		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
-			stopped: fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)), handouts: hdir, runs: rdir})
+			stopped: fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)), handouts: co, runs: rdir})
 		return err
 	})
 	if err != nil {
 		return err
 	}
 	if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
-		c.startJudge(ctx, &out, rules, hdir)
+		c.startJudge(ctx, &out, rules, co)
 	}
-	pruneHandouts(hdir, time.Now())
+	co.pruneHandouts(time.Now())
 	if err := c.out(out, func(w io.Writer) { printLook(w, out) }); err != nil {
 		return err
 	}
@@ -262,14 +247,14 @@ const maxJudgeRows = 20
 // startJudge starts one judge session on the judge rows it can claim,
 // each kept as judged in its state, so neither the next look nor one
 // running beside this one judges it again.
-func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string) {
+func (c *call) startJudge(ctx context.Context, out *lookOut, rules string, co coord) {
 	k, _ := findJob("judge")
 	ids, rows := []string{}, []string{"Rows:"}
 	seen := map[string]bool{}
 	now := time.Now()
 	var claimed []string
 	for _, j := range out.Judge {
-		if len(rows) > maxJudgeRows || !claimJudge(hdir, cmp.Or(j.key, j.ID), j.fp, now) {
+		if len(rows) > maxJudgeRows || !co.claimJudge(cmp.Or(j.key, j.ID), j.fp, now) {
 			continue
 		}
 		claimed = append(claimed, cmp.Or(j.key, j.ID))
@@ -290,7 +275,7 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
 	if err != nil {
 		for _, k := range claimed { // only this look's: another's stand
-			os.Remove(handoutPath(hdir, k, "judge"))
+			co.dropHandout(k, "judge")
 		}
 		out.Errors = append(out.Errors, "judge: "+err.Error())
 		return
@@ -302,21 +287,17 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules, hdir string)
 // claimJudge takes a row for this look's judge, unless the judge took the
 // ticket in this state within judgeWindow; as claimHandout does, of two
 // looks at once only one takes it.
-func claimJudge(dir, id, fp string, now time.Time) bool {
-	os.MkdirAll(dir, 0o755)
-	p := handoutPath(dir, id, "judge")
+func (co coord) claimJudge(id, fp string, now time.Time) bool {
+	name := handoutName(id, "judge")
 	for range 2 {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.WriteString(fp + "\n")
-			f.Close()
+		if co.s.create(handoutMarks, name, fp+"\n") == nil {
 			return true
 		}
-		if judged(dir, id, fp, now) {
+		if co.judged(id, fp, now) {
 			return false
 		}
-		fi, _ := os.Stat(p)
-		if !moveStale(p, fi) {
+		m, _ := co.s.read(handoutMarks, name)
+		if !co.moveStale(handoutMarks, name, m) {
 			return false
 		}
 	}
@@ -329,7 +310,7 @@ type lookOpts struct {
 	report   bool
 	stopped  bool
 	paused   string // a usage limit pickup saw: why, and until when
-	handouts string
+	handouts coord
 	runs     string
 }
 
@@ -356,7 +337,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
 		// Once per promise: a missed date stays missed every look.
-		if !idle && claimHandout(o.handouts, fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix()), "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
+		if !idle && o.handouts.claimHandout(fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix()), "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
 			out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
 		}
 	}
@@ -436,7 +417,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	n := struct{ busy, build, review, blocked, sentUp, todo, ready, backlog, waiting int }{}
 	var stuck, held, sentUp []string
 	hand := func(bot, line string, id ticket.ID) {
-		if idle || !claimHandout(o.handouts, id.String(), bot, line, o.stall, now) {
+		if idle || !o.handouts.claimHandout(id.String(), bot, line, o.stall, now) {
 			return
 		}
 		out.Send = append(out.Send, send{bot, line})
@@ -462,7 +443,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		if row == "cause" {
 			key = "cause" // apart from that ticket's own row
 		}
-		if judged(o.handouts, key, fp, now) {
+		if o.handouts.judged(key, fp, now) {
 			return
 		}
 		out.Judge = append(out.Judge, judgeRow{t.ID.String(), row, facts, fp, key})
@@ -471,7 +452,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		// A planner job holds its ticket for hours: one that waits on the
 		// chief of staff mustn't start again each look; one that failed
 		// frees it in pickup.
-		if idle || !claimHandout(o.handouts, id.String(), "planner-job", kind, 6*time.Hour, now) {
+		if idle || !o.handouts.claimHandout(id.String(), "planner-job", kind, 6*time.Hour, now) {
 			return
 		}
 		k, _ := findJob(kind)
@@ -487,7 +468,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			return // the planner's own job runs already
 		}
 		if err != nil {
-			os.Remove(handoutPath(o.handouts, id.String(), "planner-job"))
+			o.handouts.dropHandout(id.String(), "planner-job")
 			keep(fmt.Errorf("start %s %s: %w", kind, id, err))
 			return
 		}
@@ -784,13 +765,13 @@ func (c *call) sendUpTries(ctx context.Context, s ticket.Store, t ticket.Ticket,
 	}
 	id, key := t.ID.String(), fmt.Sprintf("look-tries-%s-%d", t.ID, t.Tries)
 	q := "split, rewrite or drop " + id + "?"
-	dir, err := c.besideStore("handouts")
+	co, err := c.coord()
 	hid := fmt.Sprintf("%s-tries%d", id, t.Tries)
-	if err != nil || !claimHandout(dir, hid, "chief-of-staff", key, 24*time.Hour, time.Now()) {
+	if err != nil || !co.claimHandout(hid, "chief-of-staff", key, 24*time.Hour, time.Now()) {
 		return // a look beside this one sends it
 	}
 	failed := func(what string, err error) {
-		os.Remove(handoutPath(dir, hid, "chief-of-staff")) // the next look tries again
+		co.dropHandout(hid, "chief-of-staff") // the next look tries again
 		keep(fmt.Errorf("%s %s: %w", what, id, err))
 	}
 	// The note first, then the move: a stop between leaves an in_progress

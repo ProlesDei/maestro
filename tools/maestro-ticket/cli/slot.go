@@ -117,11 +117,15 @@ func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Durat
 	// A Claude session waiting in line holds while the line is stopped or
 	// a usage limit holds: started then, it only stops or fails again.
 	sdir := filepath.Dir(path)
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
 	held := func() bool {
 		if filepath.Base(command[0]) != "claude" {
 			return false
 		}
-		_, paused := readPause(sdir, time.Now())
+		_, paused := co.readPause(time.Now())
 		return paused || fileExists(filepath.Join(sdir, "STOP"))
 	}
 	use := c.slotUser(sdir, command)
