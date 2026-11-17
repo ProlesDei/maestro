@@ -5,12 +5,18 @@
 #
 #   design-pr.sh <T-n> <run folder> --holder <holder> --token <n>
 #     Checks the spec (spec.md in the run folder) has every field, two or
-#     more directions, a pick among them, and numbered criteria that each
-#     name a width in px; on a gap it prints problem= lines, exit 2, and
-#     writes nothing. Checks the ticket is a "Design:" scout ticket in
-#     in_progress under this holder's claim; else stop=<why>, exit 3.
-#     Then commits spec.md, the sheets (sheet-*.png) and the pick's shots
-#     (<pick>-*.png, the pick's letter in lowercase) to
+#     more directions, a pick among them, numbered criteria that each
+#     name a width in px, and, unless its Motion: is just none, a
+#     clip of the pick (<pick>[+<cue>]-<width>-motion.png, from
+#     screens.sh --motion);
+#     on a gap it prints problem= lines, exit 2, and writes nothing.
+#     With Motion: none, no clip goes up.
+#     Checks the ticket is a "Design:" scout ticket in in_progress under
+#     this holder's claim; else stop=<why>, exit 3.
+#     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
+#     (<pick>-*.png, the pick's letter in lowercase) and every clip
+#     of a direction (<letter>[-+]*-motion.png, the pick's first), but
+#     no strip (*-strip.png), to
 #     .maestro/design/<T-n>/ on branch maestro/<T-n>, pushed with
 #     [skip ci]; opens a draft PR for it, or updates the open one; posts
 #     "Design spec:" and then "Escalation: design ready: PR <url>: owner's
@@ -45,11 +51,18 @@ spec=$dir/spec.md
 # The spec. Each field opens a line; a block runs to the next field.
 probs=()
 field() { grep -qE "^$1:" "$spec" || probs+=("no '$1:' line"); }
-for f in Problem Breadboard Directions Pick States Reuses Criteria "Taste calls"; do field "$f"; done
+for f in Problem Breadboard Directions Pick States Motion Reuses Criteria "Taste calls"; do field "$f"; done
 block() { # the lines after "<field>:" up to the next field
 	awk -v f="$1" '{sub(/\r$/, "")}
-		/^(Problem|Breadboard|Directions|Pick|States|Reuses|Criteria|Taste calls):/ {on=(index($0, f ":") == 1); next}
+		/^(Problem|Breadboard|Directions|Pick|States|Motion|Reuses|Criteria|Taste calls):/ {on=(index($0, f ":") == 1); next}
 		on' "$spec"
+}
+one() { block "$1" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//'; }
+value() { # the text after "<field>:" on its line, else the block under it, as one line
+	local v
+	v=$(awk -v f="$1" '{sub(/\r$/, "")} index($0, f ":") == 1 {print substr($0, length(f) + 2); exit}' "$spec" | sed 's/^ *//; s/ *$//')
+	[ -n "$v" ] || v=$(one "$1")
+	printf '%s' "$v"
 }
 dirs=$(block Directions | grep -E '^[A-Z]: ' | cut -c1 | sort -u || true)
 [ "$(printf '%s' "$dirs" | grep -c . || true)" -ge 2 ] || probs+=("Directions: want two or more lines 'A: <one line>', each its own letter")
@@ -66,8 +79,35 @@ while IFS= read -r c; do
 	[ -z "$c" ] || grep -qiE '(^|[^a-z])at [0-9]+px' <<<"$c" || probs+=("Criteria: '${c%% *}' names no width as 'at <n>px'")
 done <<<"$crit"
 ls "$dir"/sheet-*.png >/dev/null 2>&1 || probs+=("no sheet-*.png in the run folder")
+# The pick's shots and every direction's clips, the pick's first: a clip
+# of a page that is no direction (a probe, a dropped C) stays out. A
+# strip is for the session that made it, not the owner.
 lp=${pick,,}
-[ -z "$pick" ] || ls "$dir/$lp"-*.png >/dev/null 2>&1 || probs+=("no $lp-*.png shots of the pick in the run folder")
+stills=() clips=()
+if [ -n "$pick" ]; then
+	shopt -s nullglob
+	for f in "$dir/$lp"-*.png; do
+		case $f in *-motion.png | *-strip.png) ;; *) stills+=("$f") ;; esac
+	done
+	# A clip is <page>[+<cue>]-<width>-motion.png, and a direction's
+	# pages are <letter>.html or <letter>-<place>.html.
+	clips=("$dir/$lp"[-+]*-motion.png)
+	n_pick=${#clips[@]}
+	for f in "$dir"/*-motion.png; do
+		b=${f##*/}
+		[[ ${b:1:1} == [-+] ]] && [ "${b:0:1}" != "$lp" ] && grep -qx "${b:0:1}" <<<"${dirs,,}" && clips+=("$f")
+	done
+	shopt -u nullglob
+	[ ${#stills[@]} -gt 0 ] || probs+=("no $lp-*.png shots of the pick in the run folder")
+	motion=$(value Motion)
+	if [[ ${motion,,} =~ ^none[[:space:][:punct:]]*$ ]]; then
+		# A spec with no motion shows none: clips from exploring would
+		# show the owner motion the design dropped.
+		clips=()
+	elif [ "$n_pick" = 0 ]; then
+		probs+=("Motion: no clip of the pick (${lp}[+<cue>]-<width>-motion.png) in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
+	fi
+fi
 if [ ${#probs[@]} -gt 0 ]; then
 	printf 'problem=%s\n' "${probs[@]}"
 	exit 2
@@ -131,7 +171,7 @@ nohook worktree add -q --detach "$wt" "$start" || die 1 "can't add a worktree at
 d=.maestro/design/$id
 rm -rf "${wt:?}/$d"
 mkdir -p "$wt/$d"
-cp "$spec" "$dir"/sheet-*.png "$dir/$lp"-*.png "$wt/$d/"
+cp "$spec" "$dir"/sheet-*.png "${stills[@]}" "${clips[@]}" "$wt/$d/"
 git -C "$wt" add -A -- "$d"
 if ! git -C "$wt" diff --cached --quiet; then
 	printf 'Design %s for the owner'"'"'s look [skip ci]\n\nShots and spec only; this branch never merges.\n' "$id" >"$tmp/msg"
@@ -148,13 +188,22 @@ raw() { echo "$web/blob/$sha/$d/$1?raw=true"; }
 {
 	echo "Design for $id, for the owner's look. This PR never merges: the owner answers in chat, and the planner closes it."
 	echo
-	for f in "$dir"/sheet-*.png "$dir/$lp"-*.png; do
-		b=$(basename "$f")
-		echo "**${b%.png}**"
+	show() {
+		local f b
+		for f in "$@"; do
+			b=$(basename "$f")
+			echo "**${b%.png}**"
+			echo
+			echo "![${b%.png}]($(raw "$b"))"
+			echo
+		done
+	}
+	show "$dir"/sheet-*.png "${stills[@]}"
+	if [ ${#clips[@]} -gt 0 ]; then
+		echo "Motion: each clip loops."
 		echo
-		echo "![${b%.png}]($(raw "$b"))"
-		echo
-	done
+		show "${clips[@]}"
+	fi
 	echo '```text'
 	# shellcheck disable=SC2016 # literal backticks
 	sed 's/`\{3,\}/` ` `/g' "$spec"
@@ -178,13 +227,11 @@ fi
 [[ $pr =~ ^https:// ]] || die 1 "gh gave no PR URL: $pr"
 
 # The card, from the spec.
-one() { block "$1" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//'; }
 why=${pickline:7}
 why=${why#:}
 why=${why# }
 why=${why%.}
-taste=$(sed -n 's/\r$//; s/^Taste calls: *//p' "$spec" | head -1)
-[ -n "$taste" ] || taste=$(one "Taste calls")
+taste=$(value "Taste calls")
 n=$(printf '%s\n' "$dirs" | grep -c .)
 {
 	echo "Escalation: design ready: PR $pr: owner's call"
