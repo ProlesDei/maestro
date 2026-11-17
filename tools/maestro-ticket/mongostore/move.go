@@ -62,8 +62,13 @@ type Move struct {
 
 // State reads the move under way, if any, and the moved tombstone.
 func (s *Store) State(ctx context.Context) (Move, error) {
+	db, done, err := s.conn()
+	if err != nil {
+		return Move{}, err
+	}
+	defer done()
 	var w writerDoc
-	err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
+	err = db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
 	return Move{To: w.Moving, Host: w.MoveHost, Moved: w.Moved}, Redact(err, s.client.uri)
 }
 
@@ -154,8 +159,13 @@ func (s *Store) load(ctx context.Context, b ticket.Board) error {
 	if s.mover == "" {
 		return errNotMover
 	}
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
 	var w writerDoc
-	if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
+	if err := db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
 		return err
 	}
 	if err := s.mine(w); err != nil {
@@ -222,7 +232,7 @@ func (s *Store) load(ctx context.Context, b ticket.Board) error {
 		coll string
 		docs []any
 	}{{cTickets, tickets}, {cComments, comments}, {cIdempotency, idem}, {cRuns, runs}, {cLaunches, launches}, {cETAs, etas}} {
-		c := s.db.Collection(x.coll)
+		c := db.Collection(x.coll)
 		if _, err := c.DeleteMany(ctx, bson.D{}); err != nil {
 			return fmt.Errorf("empty %s: %w", x.coll, err)
 		}
@@ -233,10 +243,10 @@ func (s *Store) load(ctx context.Context, b ticket.Board) error {
 			return fmt.Errorf("write %s: %w", x.coll, err)
 		}
 	}
-	if err := s.loadEvents(ctx, b.Events); err != nil {
+	if err := s.loadEvents(ctx, db, b.Events); err != nil {
 		return err
 	}
-	_, err := s.db.Collection(cMeta).UpdateOne(ctx, bson.D{{Key: "_id", Value: writerID}}, bson.D{{Key: "$set", Value: bson.D{
+	_, err = db.Collection(cMeta).UpdateOne(ctx, bson.D{{Key: "_id", Value: writerID}}, bson.D{{Key: "$set", Value: bson.D{
 		{Key: "tickets", Value: b.Counters.Tickets}, {Key: "comments", Value: b.Counters.Comments},
 		{Key: "events", Value: b.Counters.Events}, {Key: "launches", Value: b.Counters.Launches},
 	}}})
@@ -245,8 +255,8 @@ func (s *Store) load(ctx context.Context, b ticket.Board) error {
 
 // loadEvents adds the events not there yet, after checking that those
 // there match.
-func (s *Store) loadEvents(ctx context.Context, evs []ticket.BoardEvent) error {
-	c := s.db.Collection(cEvents)
+func (s *Store) loadEvents(ctx context.Context, db *mongo.Database, evs []ticket.BoardEvent) error {
+	c := db.Collection(cEvents)
 	cur, err := c.Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		return err
@@ -328,8 +338,13 @@ func (s *Store) Board(ctx context.Context) (ticket.Board, error) {
 func (s *Store) board(ctx context.Context) (ticket.Board, error) {
 	b := ticket.Board{Tickets: []ticket.BoardTicket{}, Comments: []ticket.BoardComment{}, Events: []ticket.BoardEvent{},
 		Idempotency: []ticket.BoardIdem{}, Runs: []ticket.BoardRun{}, Launches: []ticket.BoardLaunch{}, ETAs: []ticket.BoardETA{}}
+	db, done, err := s.conn()
+	if err != nil {
+		return b, err
+	}
+	defer done()
 	all := func(coll string, out any) error {
-		cur, err := s.db.Collection(coll).Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+		cur, err := db.Collection(coll).Find(ctx, bson.D{}, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
 		if err != nil {
 			return err
 		}
@@ -430,7 +445,7 @@ func (s *Store) board(ctx context.Context) (ticket.Board, error) {
 	slices.SortFunc(b.Runs, func(x, y ticket.BoardRun) int { return strings.Compare(x.Session, y.Session) })
 	slices.SortFunc(b.ETAs, func(x, y ticket.BoardETA) int { return strings.Compare(x.Goal, y.Goal) })
 	var w writerDoc
-	err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
+	err = db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return b, fmt.Errorf("%w: database %s holds no maestro board", ticket.ErrInvalid, s.name)
 	}

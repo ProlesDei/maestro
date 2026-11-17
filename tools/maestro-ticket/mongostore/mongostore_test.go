@@ -96,7 +96,7 @@ func wantErr(t *testing.T, err, want error) {
 // setMeta changes the writer document behind the store's back.
 func setMeta(t *testing.T, s *Store, set bson.D) {
 	t.Helper()
-	if _, err := s.db.Collection(cMeta).UpdateOne(context.Background(), bson.D{{Key: "_id", Value: writerID}},
+	if _, err := testDB(t, s).Collection(cMeta).UpdateOne(context.Background(), bson.D{{Key: "_id", Value: writerID}},
 		bson.D{{Key: "$set", Value: set}}); err != nil {
 		t.Fatal(err)
 	}

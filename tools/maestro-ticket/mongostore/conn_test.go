@@ -3,6 +3,7 @@ package mongostore
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,93 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
+
+// testDB is s's database, for a test to reach behind the store's back
+// at once: the client may disconnect idleClose after.
+func testDB(t *testing.T, s *Store) *mongo.Database {
+	t.Helper()
+	db, done, err := s.conn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done()
+	return db
+}
+
+// connected reports whether s's client is connected.
+func connected(s *Store) bool {
+	s.client.mu.Lock()
+	defer s.client.mu.Unlock()
+	return s.client.c != nil
+}
+
+// A client no call has used for idleClose disconnects, and the next call
+// connects it again: a process that lives as long as a run holds no
+// connection between its calls.
+func TestIdleClientDisconnects(t *testing.T) {
+	defer func(d time.Duration) { idleClose = d }(idleClose)
+	idleClose = 50 * time.Millisecond
+	s, _ := newStore(t, Options{})
+	ctx := context.Background()
+	tk, err := s.Create(ctx, ticket.CreateRequest{Title: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for connected(s) {
+		if time.Now().After(deadline) {
+			t.Fatal("the client stayed connected with no call using it")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := s.Get(ctx, tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Halted(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Calls at once on stores that share a client, while it keeps
+// disconnecting between them, all go through.
+func TestIdleCloseUnderCalls(t *testing.T) {
+	defer func(d time.Duration) { idleClose = d }(idleClose)
+	idleClose = time.Millisecond
+	s, uri := newStore(t, Options{})
+	ctx := context.Background()
+	tk, err := s.Create(ctx, ticket.CreateRequest{Title: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for g := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			o, err := Open(ctx, uri, Options{Database: s.Database()})
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer o.Close()
+			for i := range 6 {
+				if _, err := o.Get(ctx, tk.ID); err != nil {
+					errs <- err
+				}
+				if err := o.WriteMark(ctx, "test", "m", "x"); err != nil {
+					errs <- err
+				}
+				time.Sleep(time.Duration(g+i) * time.Millisecond)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
 
 // ownDB is database name on a client of the test's own, apart from the
 // stores'.

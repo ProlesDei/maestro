@@ -37,8 +37,14 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		rep.Checks = append(rep.Checks, ticket.Check{Name: name, OK: ok, Detail: fmt.Sprintf(format, args...)})
 		return &rep.Checks[len(rep.Checks)-1]
 	}
+	db, done, err := s.conn()
+	if err != nil {
+		add("connection", false, "%v", err)
+		return rep, nil
+	}
+	defer done()
 	pctx, cancel := context.WithTimeout(ctx, selectTimeout+time.Second)
-	err := s.client.c.Ping(pctx, readpref.Primary())
+	err = db.Client().Ping(pctx, readpref.Primary())
 	cancel()
 	if err != nil {
 		add("connection", false, "can't reach the replica set's primary: %v", Redact(err, s.client.uri))
@@ -47,11 +53,11 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	var build struct {
 		Version string `bson:"version"`
 	}
-	s.client.c.Database("admin").RunCommand(ctx, bson.D{{Key: "buildInfo", Value: 1}}).Decode(&build)
+	db.Client().Database("admin").RunCommand(ctx, bson.D{{Key: "buildInfo", Value: 1}}).Decode(&build)
 	add("connection", true, "MongoDB %s, database %s", build.Version, s.name)
 
 	var w writerDoc
-	if err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
+	if err := db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w); err != nil {
 		add("schema", false, "can't read the board's meta: %v", err)
 		return rep, nil
 	}
@@ -64,7 +70,7 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 	var limit struct {
 		Seconds int64 `bson:"transactionLifetimeLimitSeconds"`
 	}
-	err = s.client.c.Database("admin").RunCommand(ctx, bson.D{
+	err = db.Client().Database("admin").RunCommand(ctx, bson.D{
 		{Key: "getParameter", Value: 1}, {Key: "transactionLifetimeLimitSeconds", Value: 1},
 	}).Decode(&limit)
 	if err != nil {

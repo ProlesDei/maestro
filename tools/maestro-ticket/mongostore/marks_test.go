@@ -43,7 +43,7 @@ func freshNamed(t *testing.T, uri, name string) {
 			return
 		}
 		defer s.Close()
-		if err := s.db.Drop(context.Background()); err != nil {
+		if err := testDB(t, s).Drop(context.Background()); err != nil {
 			t.Errorf("drop %s: %v", name, err)
 		}
 	})
@@ -233,7 +233,7 @@ func TestCodeSkew(t *testing.T) {
 		t.Fatal(err)
 	}
 	var w writerDoc
-	s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
+	testDB(t, s).Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
 	if w.Code != Code || w.Hosts["aaaa1111"] != Code {
 		t.Fatalf("writer: code %d hosts %v", w.Code, w.Hosts)
 	}

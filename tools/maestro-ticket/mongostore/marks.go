@@ -71,7 +71,12 @@ func (s *Store) CreateMark(ctx context.Context, space, name, body string) error 
 	// An upsert whose filter no mark matches: one that stands makes the
 	// insert clash on _id, and the clock is the server's.
 	filter := append(markID(space, name), bson.E{Key: "ver", Value: bson.D{{Key: "$exists", Value: false}}})
-	_, err := s.db.Collection(cMarks).UpdateOne(ctx, filter, bson.D{
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
+	_, err = db.Collection(cMarks).UpdateOne(ctx, filter, bson.D{
 		{Key: "$setOnInsert", Value: bson.D{{Key: "space", Value: space}, {Key: "name", Value: name}, {Key: "body", Value: body}, {Key: "ver", Value: bson.NewObjectID()}}},
 		{Key: "$currentDate", Value: bson.D{{Key: "at", Value: true}}},
 	}, options.UpdateOne().SetUpsert(true))
@@ -83,8 +88,13 @@ func (s *Store) CreateMark(ctx context.Context, space, name, body string) error 
 
 // ReadMark reads a mark, failing with fs.ErrNotExist if none stands.
 func (s *Store) ReadMark(ctx context.Context, space, name string) (Mark, error) {
+	db, done, err := s.conn()
+	if err != nil {
+		return Mark{}, err
+	}
+	defer done()
 	var d markDoc
-	err := s.db.Collection(cMarks).FindOne(ctx, markID(space, name),
+	err = db.Collection(cMarks).FindOne(ctx, markID(space, name),
 		options.FindOne().SetProjection(append(markRead(), bson.E{Key: "body", Value: 1}))).Decode(&d)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return Mark{}, fmt.Errorf("mark %s/%s: %w", space, name, fs.ErrNotExist)
@@ -97,7 +107,12 @@ func (s *Store) ReadMark(ctx context.Context, space, name string) (Mark, error) 
 
 // WriteMark sets a mark's body whole, made or not.
 func (s *Store) WriteMark(ctx context.Context, space, name, body string) error {
-	_, err := s.db.Collection(cMarks).UpdateOne(ctx, markID(space, name), bson.D{
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
+	_, err = db.Collection(cMarks).UpdateOne(ctx, markID(space, name), bson.D{
 		{Key: "$set", Value: bson.D{{Key: "space", Value: space}, {Key: "name", Value: name}, {Key: "body", Value: body}, {Key: "ver", Value: bson.NewObjectID()}}},
 		{Key: "$currentDate", Value: bson.D{{Key: "at", Value: true}}},
 	}, options.UpdateOne().SetUpsert(true))
@@ -106,7 +121,12 @@ func (s *Store) WriteMark(ctx context.Context, space, name, body string) error {
 
 // RemoveMark removes a mark, failing with fs.ErrNotExist if none stands.
 func (s *Store) RemoveMark(ctx context.Context, space, name string) error {
-	res, err := s.db.Collection(cMarks).DeleteOne(ctx, markID(space, name))
+	db, done, err := s.conn()
+	if err != nil {
+		return err
+	}
+	defer done()
+	res, err := db.Collection(cMarks).DeleteOne(ctx, markID(space, name))
 	if err != nil {
 		return s.markErr(err)
 	}
@@ -124,7 +144,12 @@ func (s *Store) RemoveMarkIf(ctx context.Context, space, name, ver string) (bool
 	if err != nil {
 		return false, nil // no copy has it
 	}
-	res, err := s.db.Collection(cMarks).DeleteOne(ctx, append(markID(space, name), bson.E{Key: "ver", Value: oid}))
+	db, done, err := s.conn()
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	res, err := db.Collection(cMarks).DeleteOne(ctx, append(markID(space, name), bson.E{Key: "ver", Value: oid}))
 	if err != nil {
 		return false, s.markErr(err)
 	}
@@ -134,7 +159,12 @@ func (s *Store) RemoveMarkIf(ctx context.Context, space, name, ver string) (bool
 // ListMarks names each mark in a space, with its age; it reads no
 // bodies.
 func (s *Store) ListMarks(ctx context.Context, space string) ([]Mark, error) {
-	cur, err := s.db.Collection(cMarks).Find(ctx, bson.D{{Key: "space", Value: space}},
+	db, done, err := s.conn()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	cur, err := db.Collection(cMarks).Find(ctx, bson.D{{Key: "space", Value: space}},
 		options.Find().SetProjection(markRead()).SetSort(bson.D{{Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, s.markErr(err)
@@ -155,10 +185,15 @@ func (s *Store) markErr(err error) error { return Redact(err, s.client.uri) }
 // Halted reports the halt stop --all set: while it stands no claim lands
 // and no lease that ran out comes back, on any machine.
 func (s *Store) Halted(ctx context.Context) (bool, error) {
+	db, done, err := s.conn()
+	if err != nil {
+		return false, err
+	}
+	defer done()
 	var w struct {
 		Halt bool `bson:"halt"`
 	}
-	err := s.db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}},
+	err = db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}},
 		options.FindOne().SetProjection(bson.D{{Key: "halt", Value: 1}})).Decode(&w)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return false, fmt.Errorf("database %s holds no maestro board", s.name)
