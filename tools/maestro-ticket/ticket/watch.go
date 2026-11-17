@@ -28,6 +28,25 @@ type Launch struct {
 	EndedAt time.Time `json:"ended_at,omitzero"`
 	Outcome string    `json:"outcome,omitempty"`
 	Session string    `json:"session,omitempty"`
+	// Host, Job, Tickets and Limit say whose run it is on a store that
+	// machines share, so another machine leaves it to its own. A store on
+	// one machine keeps none of them: an empty Host is this machine.
+	Host    string `json:"host,omitempty"`
+	Job     string `json:"job,omitempty"`
+	Tickets []ID   `json:"tickets,omitempty"` // a judge run's
+	Limit   string `json:"limit,omitempty"`   // as a run record writes it, such as 45m
+	// Lifts is when the usage limit that stopped the run lifts, so another
+	// machine holds its ticket for it; zero if none stopped it. A store on
+	// one machine keeps none.
+	Lifts time.Time `json:"lifts,omitzero"`
+}
+
+// LimitOr is the launch's time limit, or d when it names none.
+func (l Launch) LimitOr(d time.Duration) time.Duration {
+	if v, err := time.ParseDuration(l.Limit); err == nil && v > 0 {
+		return v
+	}
+	return d
 }
 
 // Launch outcomes.
@@ -48,6 +67,11 @@ type StartLaunchRequest struct {
 	Ticket ID
 	PID    int
 	Stamp  string
+	// As Launch's; a store on one machine ignores them.
+	Host    string
+	Job     string
+	Tickets []ID
+	Limit   string
 }
 
 // Validate checks the request.
@@ -61,6 +85,22 @@ func (r StartLaunchRequest) Validate() error {
 		return fmt.Errorf("%w: a launch needs its process id", ErrInvalid)
 	case len(r.Stamp) > 200 || HasControl(r.Stamp):
 		return fmt.Errorf("%w: bad process stamp", ErrInvalid)
+	case len(r.Host) > 64 || HasControl(r.Host) || strings.ContainsAny(r.Host, " \t"):
+		return fmt.Errorf("%w: bad host id", ErrInvalid)
+	case len(r.Job) > 40 || HasControl(r.Job):
+		return fmt.Errorf("%w: bad job name", ErrInvalid)
+	case len(r.Tickets) > 100:
+		return fmt.Errorf("%w: a launch names at most 100 tickets", ErrInvalid)
+	}
+	for _, id := range r.Tickets {
+		if id <= 0 {
+			return fmt.Errorf("%w: bad ticket id %d", ErrInvalid, id)
+		}
+	}
+	if r.Limit != "" {
+		if d, err := time.ParseDuration(r.Limit); err != nil || d <= 0 {
+			return fmt.Errorf("%w: bad run limit %q", ErrInvalid, r.Limit)
+		}
 	}
 	return nil
 }
@@ -72,6 +112,7 @@ type EndLaunchRequest struct {
 	ID      int64
 	Outcome string
 	Session string
+	Lifts   time.Time // as Launch's; a store on one machine ignores it
 }
 
 // Validate checks the request.

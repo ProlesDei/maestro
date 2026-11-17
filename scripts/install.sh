@@ -23,9 +23,14 @@
 #   stats: on|off                   local run stats in stats.db beside the
 #                                   store; off stops their writes, and no
 #                                   line leaves them as they are (on, at first)
+#   store: sqlite|mongodb           the board: SQLite beside the repo's git
+#                                   folder, or MongoDB, which machines share
+#                                   (sqlite with no line)
 #
 # apply copies each skill in skills/ beside this script into every harness
-# folder, writes project-setup.md once, creates the ticket store, turns
+# folder, writes project-setup.md once, creates the ticket store (for
+# mongodb, checks the one store.uri names; with none, makes no store and
+# says to join the board), turns
 # local run stats on or off and lists
 # each file it placed, with its git blob hash, in the record:
 # .maestro/project/installed.list when committed, else
@@ -46,7 +51,9 @@
 #
 # check reports what's wrong with an install and with the machine its
 # bots run on, and changes nothing: copies that are missing or changed, a
-# store that is empty, unreadable or no SQLite file, a missing claude, gh or jq, an
+# store that is empty, unreadable or no SQLite file (for mongodb, a
+# store.uri that is missing or not 0600, or a failing doctor), a missing
+# claude, gh or jq, an
 # unset git identity, a code graph install.yaml asks for that .mcp.json
 # lacks, a browser install.yaml asks for that can't open a headless page,
 # Maestro's own AGENTS.md, CLAUDE.md or harness folders in .maestro/src/
@@ -119,7 +126,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha='' harnesses=() home='' bots=() graph='' browser='' stats=''
+sha='' harnesses=() home='' bots=() graph='' browser='' stats='' board=''
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -140,6 +147,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 	code-graph) graph=$val ;;
 	browser) browser=$val ;;
 	stats) stats=$val ;;
+	store) board=$val ;;
 	*) die "install.yaml:$n: unknown key $key" ;;
 	esac
 done <"$choices"
@@ -161,6 +169,9 @@ head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git chec
 # No line means on: an install from before the key asks nothing.
 [ "$cmd" = uninstall ] || [[ -z ${set[stats]-} || $stats == on || $stats == off ]] ||
 	die "install.yaml: stats wants on or off"
+# No line means sqlite, the store every install had before the key.
+[ "$cmd" = uninstall ] || [[ -z ${set[store]-} || $board == sqlite || $board == mongodb ]] ||
+	die "install.yaml: store wants sqlite or mongodb"
 [ ${#harnesses[@]} -gt 0 ] || die "install.yaml: harnesses wants claude, codex or grok"
 dirs=()
 for h in "${harnesses[@]}"; do
@@ -320,6 +331,7 @@ leaks() {
 	out=${out#./} out=${out//$'\n'.\//$'\n'}
 	leaked=$(LC_ALL=C sort <<<"$out")
 }
+urifix="at the repo's root, run maestro-ticket store --uri-file - and paste the MongoDB URI, from the owner, on stdin, as INSTALL.md's Move the board to MongoDB says"
 leakread="couldn't read all of .maestro/src/ to look for Maestro's own files: make it readable"
 if [ "$cmd" = apply ]; then
 	leaks || die "$leakread, then run again; nothing was changed"
@@ -351,6 +363,20 @@ if [ "$cmd" = check ]; then
 	store=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
 	if [[ $store != /* ]]; then
 		problem "MAESTRO_TICKET_STORE is relative, and maestro-ticket refuses it: make it absolute"
+	elif [ "$board" = mongodb ]; then
+		# The secret that points maestro-ticket at MongoDB; doctor then
+		# reaches the store. Doctor writes nothing to a MongoDB board.
+		uri=$(dirname "$store")/store.uri
+		if [ ! -f "$uri" ]; then
+			problem "store is mongodb, but there is no $uri: $urifix"
+		elif [ -z "$(find "$uri" -prune -perm 600)" ]; then
+			problem "$uri holds the board's password, and its mode isn't 600: chmod 600 it"
+		elif command -v maestro-ticket >/dev/null && ! out=$(cd "$target" && maestro-ticket doctor 2>&1); then
+			why=$({ grep '^FAIL' <<<"$out" || head -n1 <<<"$out"; } | tr -s ' ')
+			while IFS= read -r l; do problem "maestro-ticket doctor: $l"; done <<<"$why"
+		fi
+	elif [ -f "$(dirname "$store")/store.uri" ]; then
+		problem "$(dirname "$store")/store.uri puts the board on MongoDB, but install.yaml has no store: mongodb: add that line, or move the board back with maestro-ticket migrate --to sqlite"
 	elif [ ! -f "$store" ]; then
 		problem "no ticket store at $store: run apply in this clone"
 	elif [ "$(head -c 15 "$store" 2>/dev/null | tr -d '\0')" != "SQLite format 3" ]; then
@@ -777,7 +803,38 @@ fi
 # creates it and checks the repo can hold one, before anything is written.
 # No other maestro-ticket command makes one, so a stray clone gets none.
 command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
-out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
+db=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
+nouri=
+if [ "$board" = mongodb ]; then
+	[[ $db == /* ]] || die "MAESTRO_TICKET_STORE is relative, and maestro-ticket refuses it: make it absolute"
+	# A teammate's clone has no store.uri until the owner hands over the
+	# URI. It gets the skills and no store: a SQLite one would be a second
+	# board.
+	[ -f "$(dirname "$db")/store.uri" ] || nouri=1
+	# A move to MongoDB leaves the SQLite file as the way back, with
+	# triggers that refuse every write. A file that holds a ticket and
+	# takes a write never moved, and apply never moves one: a move needs
+	# STOP and no live runs. The probe reads and writes a copy, where no
+	# store.uri beside it turns maestro-ticket to MongoDB.
+	if [ -z "$nouri" ] && [ -f "$db" ]; then
+		probe=$scratch/probe
+		mkdir "$probe"
+		cp -- "$db" "$probe/tickets.db"
+		[ ! -f "$db-wal" ] || cp -- "$db-wal" "$probe/tickets.db-wal"
+		rc=0
+		out=$(cd "$probe" && maestro-ticket get T-1 --store "$probe/tickets.db" 2>&1) || rc=$?
+		[ "$rc" = 0 ] || [ "$rc" = 3 ] || {
+			printf '%s\n' "$out" >&2
+			die "couldn't read the SQLite board at $db to see whether it holds tickets; nothing was written"
+		}
+		# No T-1: the board is empty, and nothing is lost.
+		[ "$rc" = 3 ] || ! (cd "$probe" && maestro-ticket create --title probe --store "$probe/tickets.db") >/dev/null 2>&1 ||
+			die "$db holds a SQLite board that never moved to MongoDB: stop new work and run maestro-ticket migrate --to mongodb, as INSTALL.md's Move the board to MongoDB says; nothing was written"
+	fi
+elif [[ $db == /* ]] && [ -f "$(dirname "$db")/store.uri" ]; then
+	die "$(dirname "$db")/store.uri puts the board on MongoDB, but install.yaml has no store: mongodb: add that line, or move the board back with maestro-ticket migrate --to sqlite; nothing was written"
+fi
+[ -n "$nouri" ] || out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
 	printf '%s\n' "$out" >&2
 	die "maestro-ticket doctor failed in $target; nothing was written"
 }
@@ -789,7 +846,7 @@ out=$(cd "$target" && maestro-ticket doctor 2>&1) || {
 marker=$(dirname "${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}")/STATS_OFF
 reon=''
 [ "$stats" != on ] || [ ! -e "$marker" ] || reon=1
-out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
+[ -n "$nouri" ] || out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
 	printf '%s\n' "$out" >&2
 	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
 }
@@ -845,21 +902,23 @@ if [ "$home" = hidden ]; then
 fi
 rm -f -- "$other"
 
-echo "ticket store ready"
-# Whether stats are on is maestro-ticket's to say: the marker, the shell's
-# MAESTRO_TICKET_STATS=off and an unsafe store each turn them off.
-health=$(cd "$target" && maestro-ticket stats health 2>/dev/null) || health=''
-case ${health%%$'\n'*} in
-"stats: on")
-	echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
-	[ -z "$reon" ] || echo "stats: on in install.yaml turned run stats back on, over STATS_OFF; without that line, maestro-ticket stats off lasts through apply"
-	;;
-"stats: off ("*)
-	why=${health#stats: off (} why=${why%%): no run is written*}
-	echo "run stats off ($why): no run is written to stats.db"
-	;;
-*) echo "run stats: maestro-ticket stats health says whether they are on" ;;
-esac
+if [ -z "$nouri" ]; then
+	echo "ticket store ready"
+	# Whether stats are on is maestro-ticket's to say: the marker, the
+	# shell's MAESTRO_TICKET_STATS=off and an unsafe store each turn them off.
+	health=$(cd "$target" && maestro-ticket stats health 2>/dev/null) || health=''
+	case ${health%%$'\n'*} in
+	"stats: on")
+		echo "run stats on: numbers about each run in stats.db beside the store; nothing leaves the machine"
+		[ -z "$reon" ] || echo "stats: on in install.yaml turned run stats back on, over STATS_OFF; without that line, maestro-ticket stats off lasts through apply"
+		;;
+	"stats: off ("*)
+		why=${health#stats: off (} why=${why%%): no run is written*}
+		echo "run stats off ($why): no run is written to stats.db"
+		;;
+	*) echo "run stats: maestro-ticket stats health says whether they are on" ;;
+	esac
+fi
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.
@@ -867,3 +926,4 @@ visible=
 [ "$home" != hidden ] || visible=" and no longer hidden from git"
 for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record$visible: $f"; done
 [ "$untracked" -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them; every other clone loses the skills on its next pull until it runs the install"
+[ -z "$nouri" ] || echo "next: join the team's board: $urifix, then run apply again"
