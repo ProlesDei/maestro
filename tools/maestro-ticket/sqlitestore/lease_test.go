@@ -108,6 +108,7 @@ func TestLeaseExpiriesCount(t *testing.T) {
 // One reap call frees every expired lease, in batches of reapBatch, and
 // leaves live leases alone.
 func TestReapBatches(t *testing.T) {
+	t.Parallel()
 	s, clk := newStore(t)
 	ctx := context.Background()
 	n := reapBatch*2 + 7
