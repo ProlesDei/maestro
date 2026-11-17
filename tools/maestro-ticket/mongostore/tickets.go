@@ -873,8 +873,11 @@ func (s *Store) ClaimNext(ctx context.Context, req ticket.ClaimRequest) (ticket.
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *txn) error {
 		// Holding the writer: a claim that waited on it while STOP
-		// appeared must not land.
+		// appeared, or the halt was set, must not land.
 		if err := s.checkStop(); err != nil {
+			return err
+		}
+		if err := tx.halted(); err != nil {
 			return err
 		}
 		var err error
@@ -1125,6 +1128,9 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		}
 		if c.Expired {
 			if err := s.checkStop(); err != nil {
+				return fmt.Errorf("%w: %s lease ran out, and %w", ticket.ErrLeaseLost, t.ID, err)
+			}
+			if err := tx.halted(); err != nil {
 				return fmt.Errorf("%w: %s lease ran out, and %w", ticket.ErrLeaseLost, t.ID, err)
 			}
 		}

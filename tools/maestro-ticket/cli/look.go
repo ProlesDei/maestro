@@ -208,7 +208,7 @@ func runLook(ctx context.Context, c *call) error {
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
 		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
-			stopped: co.s.stopped(), handouts: co, runs: rdir})
+			stopped: co.s.stopped(), handouts: co, runs: rdir, host: co.host})
 		return err
 	})
 	if err != nil {
@@ -307,6 +307,13 @@ type lookOpts struct {
 	paused   string // a usage limit pickup saw: why, and until when
 	handouts coord
 	runs     string
+	host     string // this machine's id on a shared store, else ""
+}
+
+// launchesSince is a store that lists recent launches with their hosts:
+// one machines share.
+type launchesSince interface {
+	LaunchesSince(ctx context.Context, since time.Time) ([]ticket.Launch, error)
 }
 
 // look reads the board once and sorts every open ticket into the
@@ -387,6 +394,31 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if !r.Ended() {
 				for _, tk := range r.Tickets { // a judge run's
 					liveRun[tk] = true
+				}
+			}
+		}
+	}
+	// Another machine's runs have no record here: on a shared store their
+	// launches stand for them, live until overdue, and fresh for a stall
+	// once ended, as its own records are there.
+	if ls, ok := s.(launchesSince); ok && o.host != "" {
+		recent, err := ls.LaunchesSince(ctx, now.Add(-o.stall))
+		keep(err)
+		for _, l := range recent {
+			if !elsewhere(l, o.host) {
+				continue
+			}
+			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
+			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall
+			if l.Ticket != 0 && live && l.Job == "build" {
+				building[l.Ticket.String()] = true
+			}
+			if l.Ticket != 0 && (live || fresh) {
+				liveRun[l.Ticket.String()] = true
+			}
+			if live {
+				for _, tk := range l.Tickets {
+					liveRun[tk.String()] = true
 				}
 			}
 		}

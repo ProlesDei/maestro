@@ -116,6 +116,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -273,6 +274,9 @@ type call struct {
 		v    storeLoc
 		err  error
 	}
+	// hostID's and board's answers: a pointer, so a copy of the call, as
+	// a chained start makes, shares them.
+	shared      *callShared
 	storeChecks []ticket.Check // besideStore's checks of the store's dir
 	// Set in the supervisor: it alone creates or migrates stats.db.
 	inSupervisor bool
@@ -319,7 +323,7 @@ func Run(ctx context.Context, args []string, env Env) int {
 		}
 		return c.fail(usagef("unknown command %q%s; run maestro-ticket help", args[0], hint))
 	}
-	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError)}
+	c := &call{env: env, fs: flag.NewFlagSet("maestro-ticket "+cmd.name, flag.ContinueOnError), shared: &callShared{}}
 	c.fs.SetOutput(env.Stderr)
 	c.fs.BoolVar(&c.jsonOut, "json", false, "machine-readable output")
 	c.fs.StringVar(&c.storeFlag, "store", "", "ticket store path")
@@ -327,6 +331,7 @@ func Run(ctx context.Context, args []string, env Env) int {
 	c.fs.StringVar(&c.idemKey, "idempotency-key", "", "idempotency key for writes")
 	c.args = args[1:]
 	err := cmd.run(ctx, c)
+	c.closeBoard()
 	if errors.Is(err, flag.ErrHelp) {
 		return ticket.ExitOK
 	}

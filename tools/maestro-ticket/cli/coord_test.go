@@ -11,7 +11,7 @@ import (
 )
 
 // The folder forms the older tests call, each on the files under dir.
-func handoutsAt(dir string) coord { return coord{fileCoord{handouts: dir}} }
+func handoutsAt(dir string) coord { return coord{s: fileCoord{handouts: dir}} }
 
 func handoutPath(dir, id, bot string) string { return filepath.Join(dir, handoutName(id, bot)) }
 
@@ -32,25 +32,25 @@ func pickupSends(dir, runID string, since time.Time, sends []send, now time.Time
 func pausePath(dir string) string { return filepath.Join(dir, pauseFlag) }
 
 func readPause(dir string, now time.Time) (pause, bool) {
-	return coord{fileCoord{dir: dir}}.readPause(now)
+	return coord{s: fileCoord{dir: dir}}.readPause(now)
 }
 
 func setPause(dir string, p pause, now time.Time) bool {
-	return coord{fileCoord{dir: dir}}.setPause(p, now)
+	return coord{s: fileCoord{dir: dir}}.setPause(p, now)
 }
 
 // The file coord keeps today's paths: handouts/, runs/ and the store's
 // folder.
 func TestCoordFilePaths(t *testing.T) {
 	dir := t.TempDir()
-	co := coord{fileCoord{dir: dir, handouts: filepath.Join(dir, "handouts"), runs: filepath.Join(dir, "runs")}}
+	co := coord{s: fileCoord{dir: dir, handouts: filepath.Join(dir, "handouts"), runs: filepath.Join(dir, "runs")}}
 	if !co.claimHandout("T-1", "reviewer", "review T-1", time.Minute, time.Now()) {
 		t.Fatal("no handout")
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "handouts", "T-1.reviewer")); err != nil || string(b) != "review T-1\n" {
 		t.Fatalf("handout file: %q %v", b, err)
 	}
-	commit, _, err := co.takeActive(filepath.Join(dir, "runs"), "T-1", "build", "x")
+	commit, _, err := co.takeActive(filepath.Join(dir, "runs"), "T-1", "build", "x", time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
