@@ -450,7 +450,8 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if k.ids {
 		rec.Tickets = ids
 	}
-	commit, abort := func(string) {}, func() {}
+	var commit func(string) error
+	abort := func() {}
 	if ticketID != "" {
 		dir, err := c.besideStore("runs")
 		if err != nil {
@@ -465,12 +466,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 	}
 	side.PromptBytes = ptr(len(prompt) + 1)
-	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side)
+	r, err := c.startRun(rec, []byte(prompt+"\n"), runs.DefaultRings, side, commit)
 	if err != nil {
 		abort()
 		return fail(err)
 	}
-	commit(r.ID)
 	return r, m, why, nil
 }
 
@@ -574,7 +574,7 @@ func activeName(ticketID, job string) string { return ticketID + "." + job + ".a
 // On a shared store the mark says whose run it is, as an activeMark: a
 // run on another machine has no record here to read, so it holds until
 // it is overdue, past any limit its own supervisor would let it run.
-func (co coord) takeActive(dir, ticketID, job, actor string, limit time.Duration) (commit func(runID string), abort func(), err error) {
+func (co coord) takeActive(dir, ticketID, job, actor string, limit time.Duration) (commit func(runID string) error, abort func(), err error) {
 	body := func(id string) string { return id }
 	if co.host != "" {
 		body = func(id string) string {
@@ -659,11 +659,11 @@ func (c *call) goingOn(err error) bool {
 // died before its commit, holds for activeGrace. A taker that finds one
 // stale moves it aside under a takeover lock, and only if it still holds
 // what it read, so two takers that both find it stale can't both win.
-func (co coord) takeMark(name string, body func(runID string) string, held func(id string, m mark) error) (commit func(runID string), abort func(), err error) {
+func (co coord) takeMark(name string, body func(runID string) string, held func(id string, m mark) error) (commit func(runID string) error, abort func(), err error) {
 	busy := fmt.Errorf("%w: another start of this run is under way", ticket.ErrClaimed)
 	for range 3 {
 		if co.s.create(runMarks, name, "") == nil {
-			commit = func(id string) { co.s.write(runMarks, name, body(id)) }
+			commit = func(id string) error { return co.s.write(runMarks, name, body(id)) }
 			return commit, func() { co.s.remove(runMarks, name) }, nil
 		}
 		m, _ := co.s.read(runMarks, name)
@@ -888,7 +888,8 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	if err != nil {
 		return err
 	}
-	commit, abort := func(string) {}, func() {}
+	var commit func(string) error
+	abort := func() {}
 	if r.Ticket != "" {
 		if commit, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, lim); err != nil {
 			return fmt.Errorf("job again %s: %w", r.ID, err)
@@ -900,12 +901,11 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	if p, ok := readSide(dir, first.ID); ok {
 		side.Drops = p.Drops
 	}
-	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side)
+	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side, commit)
 	if err != nil {
 		abort()
 		return err
 	}
-	commit(nr.ID)
 	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
 		// The rerun holds the ticket, as look's start would, so no look
@@ -1071,7 +1071,7 @@ func resumeRun(ctx context.Context, c *call) error {
 		return err
 	}
 	// And one run of a job on a ticket at a time, resumed or not.
-	commitActive, abortActive := func(string) {}, func() {}
+	commitActive, abortActive := func(string) error { return nil }, func() {}
 	if r.Ticket != "" && r.Job != "" {
 		if commitActive, abortActive, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, rec.LimitDuration()); err != nil {
 			abortMark()
@@ -1080,14 +1080,13 @@ func resumeRun(ctx context.Context, c *call) error {
 	}
 	side := &sideFacts{Why: "resume", PromptBytes: ptr(len(text) + 1)}
 	side.fromParent(dir, r.ID)
-	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side)
+	commit := func(id string) error { return errors.Join(commitMark(id), commitActive(id)) }
+	nr, err := c.startRun(rec, []byte(text+"\n"), runs.DefaultRings, side, commit)
 	if err != nil {
 		abortMark()
 		abortActive()
 		return err
 	}
-	commitMark(nr.ID)
-	commitActive(nr.ID)
 	// Its result is acted on: pickup stops showing it, and its rings stop.
 	runs.Ack(dir, r.ID, c.actor, time.Now())
 	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)

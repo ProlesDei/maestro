@@ -64,8 +64,12 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	now := time.Now().UTC().Round(time.Millisecond)
-	// As pickup would: a job a look handed out lately is on its way.
-	sends := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
+	// As pickup would: a job a look handed out lately is on its way. A
+	// store that can't say stays the launcher's: its pickup shows why.
+	sends, err := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
+	if err != nil {
+		return
+	}
 	var chained []string
 	left := []send{}
 	for _, sd := range sends {

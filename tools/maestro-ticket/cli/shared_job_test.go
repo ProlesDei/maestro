@@ -85,3 +85,25 @@ func TestTwoMachinesStartOneRun(t *testing.T) {
 	}
 	on.waitEnded(started[0].ID, 20*time.Second)
 }
+
+// A start whose .active mark the board won't give its run's id fails, and
+// no run goes: an empty mark lets any machine take the job over in 30s.
+func TestSharedActiveMarkWriteFails(t *testing.T) {
+	uri := sharedBoard(t)
+	m := newJobHarness(t, "senior-engineer")
+	writeURI(t, m.h.dir, uri)
+	m.h.ok(nil, "create", "--title", "x")
+	refuseBodies(t, uri, runMarks)
+	if out, err := m.cmd("", "job", "build", "T-1").CombinedOutput(); err == nil || !strings.Contains(string(out), "mark the run") {
+		t.Fatalf("the start went on with an empty mark: %v %s", err, out)
+	}
+	list, err := runs.List(filepath.Join(m.h.dir, "runs"), time.Now(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range list {
+		if !r.Ended() || r.AckedAt == nil {
+			t.Fatalf("run %s is %s, acked %v: a failed start leaves nothing going or to pick up", r.ID, r.State, r.AckedAt)
+		}
+	}
+}
