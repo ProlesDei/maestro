@@ -3,6 +3,7 @@ package mongostore
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestOpenBuildsOnlyABoardNotSetUp(t *testing.T) {
 	uri := testURI(t)
 	ctx := context.Background()
 	name := freshDB(t, uri)
-	s, err := Open(ctx, uri, Options{Database: name})
+	s, err := Open(ctx, uri, Options{Database: name, Create: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,5 +198,98 @@ func TestRetryBacksOffTowardTheBudget(t *testing.T) {
 	}
 	if took > txnBudget+500*time.Millisecond {
 		t.Errorf("gave up after %s; budget %s", took.Round(time.Millisecond), txnBudget)
+	}
+}
+
+// Calls at once in one process, as many as ringOrphans runs, each get a
+// connection: one waiting for a connection would spend its transaction's
+// deadline in the wait. Seven calls stall on the server, holding theirs,
+// and an eighth still writes well inside txnLimit.
+func TestEightCallsAtOnceEachGetAConnection(t *testing.T) {
+	defer func(d time.Duration) { txnLimit = d }(txnLimit)
+	s, uri := newStore(t, Options{})
+	ctx := context.Background()
+	own := ownDB(t, uri, s.Database())
+	hold := own.Collection("hold")
+	if _, err := hold.InsertOne(ctx, bson.D{{Key: "_id", Value: "lock"}}); err != nil {
+		t.Fatal(err)
+	}
+	// A transaction of the test's own takes the document and keeps it, so
+	// every write to it from outside waits on the server.
+	sess, err := own.Client().StartSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.EndSession(ctx)
+	if err := sess.StartTransaction(); err != nil {
+		t.Fatal(err)
+	}
+	sctx := mongo.NewSessionContext(ctx, sess)
+	if _, err := hold.UpdateOne(sctx, bson.D{{Key: "_id", Value: "lock"}}, bson.D{{Key: "$set", Value: bson.D{{Key: "by", Value: "test"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	ended := false
+	end := func() {
+		if !ended {
+			ended = true
+			sess.AbortTransaction(ctx)
+		}
+	}
+	defer end()
+
+	const stalled = 7
+	db := testDB(t, s)
+	var wg sync.WaitGroup
+	for range stalled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			db.Collection("hold").UpdateOne(ctx, bson.D{{Key: "_id", Value: "lock"}}, bson.D{{Key: "$inc", Value: bson.D{{Key: "n", Value: 1}}}})
+		}()
+	}
+	defer wg.Wait()
+	// Wait until the server holds all seven, each on a connection of
+	// the store's, or as many as the pool lets through.
+	var reached int
+	for deadline := time.Now().Add(3 * time.Second); reached < stalled && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		var out struct {
+			Inprog []bson.Raw `bson:"inprog"`
+		}
+		cmd := bson.D{{Key: "currentOp", Value: 1}, {Key: "ns", Value: s.Database() + ".hold"}, {Key: "op", Value: "update"}}
+		if err := own.Client().Database("admin").RunCommand(ctx, cmd).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		reached = len(out.Inprog)
+	}
+
+	txnLimit = 2 * time.Second
+	if _, err := s.Create(ctx, ticket.CreateRequest{Title: "x"}); err != nil {
+		t.Fatalf("a write beside %d stalled calls (%d on the server): %v", stalled, reached, err)
+	}
+	end()
+}
+
+// Open refuses a database that holds no board, and makes nothing there:
+// a URI naming the wrong database would start a second, empty board, and
+// the team would split across two.
+func TestOpenRefusesADatabaseWithNoBoard(t *testing.T) {
+	uri := testURI(t)
+	ctx := context.Background()
+	name := freshDB(t, uri)
+	s, err := Open(ctx, uri, Options{Database: name})
+	if err == nil {
+		s.Close()
+		t.Fatal("open made a board in an empty database")
+	}
+	wantErr(t, err, ticket.ErrInvalid)
+	if !strings.Contains(err.Error(), "holds no board") || !strings.Contains(err.Error(), "migrate --to mongodb") {
+		t.Fatalf("the refusal says no way out: %v", err)
+	}
+	have, err := ownDB(t, uri, name).ListCollectionNames(ctx, bson.D{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) > 0 {
+		t.Fatalf("a refused open made %v", have)
 	}
 }

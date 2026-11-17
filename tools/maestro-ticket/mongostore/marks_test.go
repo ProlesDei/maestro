@@ -24,7 +24,7 @@ func coordStore(t *testing.T, opts Options) *Store {
 	uri := testURI(t)
 	b := make([]byte, 6)
 	rand.Read(b)
-	opts.Database = "p3coord_" + hex.EncodeToString(b)
+	opts.Database, opts.Create = "p3coord_"+hex.EncodeToString(b), true
 	freshNamed(t, uri, opts.Database)
 	s, err := Open(context.Background(), uri, opts)
 	if err != nil {

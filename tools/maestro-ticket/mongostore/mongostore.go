@@ -68,9 +68,12 @@ const (
 	commitLimit = 10 * time.Second
 	// selectTimeout is how long a call waits to find the server.
 	selectTimeout = 5 * time.Second
-	// maxPool caps a client's connections to each server: a process makes
-	// few calls at once, and writers take turns on the server anyway.
-	maxPool = 2
+	// maxPool caps a client's connections to each server. A call waiting
+	// for one spends its transaction's deadline, so it fits the most
+	// calls one process makes at once: ringOrphans' 8. The pool opens a
+	// connection only when calls overlap, so a process making one call at
+	// a time holds one.
+	maxPool = 8
 )
 
 // idleClose is how long a client no call uses stays connected. Tests
@@ -148,6 +151,10 @@ type Options struct {
 	// alone may open and use a board that is moving, or has moved, to the
 	// other store, and only its machine's move goes on.
 	Mover string
+	// Create makes a board in a database that holds none: migrate's move
+	// in does, and tests. Without it, Open refuses such a database, so a
+	// URI naming the wrong one can't start a second, empty board.
+	Create bool
 }
 
 // Store is a ticket.Store on one MongoDB database.
@@ -185,8 +192,9 @@ var clients = struct {
 }{m: map[string]*sharedClient{}}
 
 // Open connects to the replica set at uri (reusing this process's client
-// for it), sets up the database if it is new or an older build set it up,
-// and checks its schema. No error it returns holds the URI.
+// for it), sets up the board if an older build set it up, or if it is new
+// and opts.Create is set, and checks its schema. No error it returns holds
+// the URI.
 func Open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	s, err := open(ctx, uri, opts)
 	if err != nil {
@@ -211,7 +219,7 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 		return nil, fmt.Errorf("%w: bad host id %q", ticket.ErrInvalid, opts.Host)
 	}
 	s := &Store{client: acquire(uri), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
-	if err := s.setup(ctx); err != nil {
+	if err := s.setup(ctx, opts.Create); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -319,16 +327,20 @@ func (s *Store) Close() error {
 	return err
 }
 
+// ErrNoBoard is Open's refusal of a database that holds no board.
+var ErrNoBoard = errors.New("holds no board")
+
 // Database names the store's database.
 func (s *Store) Database() string { return s.name }
 
 // setup checks the schema, first making the collections, indexes and
-// writer document of a board not set up at setupVersion: a new one, or
-// one an older build set up. A board set up already costs one read, and
-// needs no grant to build indexes. Each step is safe to run from many
-// processes at once. It is the one place that touches collections outside
+// writer document of a board not set up at setupVersion: one an older
+// build set up, or, with create, a new one. A database with no writer
+// document holds no board, and without create it is refused, untouched.
+// A board set up already costs one read, and needs no grant to build
+// indexes. Each step is safe to run from many processes at once. It is the one place that touches collections outside
 // a transaction: MongoDB builds indexes there.
-func (s *Store) setup(ctx context.Context) error {
+func (s *Store) setup(ctx context.Context, create bool) error {
 	db, done, err := s.conn()
 	if err != nil {
 		return err
@@ -338,6 +350,10 @@ func (s *Store) setup(ctx context.Context) error {
 	err = db.Collection(cMeta).FindOne(ctx, bson.D{{Key: "_id", Value: writerID}}).Decode(&w)
 	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		return fmt.Errorf("read the board's meta: %w", err)
+	}
+	if err != nil && !create {
+		return fmt.Errorf("%w: database %s %w: point store.uri at the database the board is in (maestro-ticket store --uri-file -), or start the board there by moving this machine's SQLite board with maestro-ticket migrate --to mongodb",
+			ticket.ErrInvalid, s.name, ErrNoBoard)
 	}
 	if err != nil || w.Setup < setupVersion {
 		if err := s.build(ctx, db); err != nil {
@@ -421,6 +437,9 @@ func (s *Store) checkWriter(w writerDoc) error {
 		return nil
 	case w.Moved:
 		return fmt.Errorf("%w: %s", ticket.ErrInvalid, movedMsg)
+	case w.Moving == MoveOut:
+		return fmt.Errorf("%w: board moving: maestro-ticket migrate --to %s is copying it, or was cut short; wait for it, or run it again on the machine that started it; if that machine is gone, call it off with migrate --to sqlite --abort --force",
+			ticket.ErrInvalid, w.Moving)
 	case w.Moving != "":
 		return fmt.Errorf("%w: board moving: maestro-ticket migrate --to %s is copying it, or was cut short; wait for it, or run it again on the machine that started it",
 			ticket.ErrInvalid, w.Moving)

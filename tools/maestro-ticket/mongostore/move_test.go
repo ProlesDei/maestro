@@ -25,7 +25,7 @@ func moverStore(t *testing.T, uri, db string, now func() time.Time) *Store {
 
 func moverOn(t *testing.T, uri, db string, now func() time.Time, host string) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), uri, Options{Database: db, Now: now, Mover: host})
+	s, err := Open(context.Background(), uri, Options{Database: db, Now: now, Mover: host, Create: true})
 	if err != nil {
 		t.Fatal(err)
 	}

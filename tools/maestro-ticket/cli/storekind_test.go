@@ -237,6 +237,14 @@ func TestStoreKindMongoLive(t *testing.T) {
 	})
 	h := newHarness(t)
 	writeURI(t, h.dir, u.String())
+	// A database with no board is refused, and stays empty: only a move
+	// in starts one.
+	for _, args := range [][]string{{"list"}, {"create", "--title", "a"}, {"doctor"}} {
+		if code, out, errs := h.run("", args...); code == 0 || !strings.Contains(out+errs, "holds no board") {
+			t.Fatalf("%v on a database with no board: exit %d %s%s", args, code, out, errs)
+		}
+	}
+	makeBoard(t, u.String())
 	var tk ticket.Ticket
 	h.ok(&tk, "create", "--title", "a")
 	h.ok(nil, "comment", tk.ID.String(), "--body", "hi")
