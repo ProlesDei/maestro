@@ -150,9 +150,6 @@ func statsLists() stats.Lists {
 func reasonOf(r runs.Record, outcome string, res claudeReply, resErr error) string {
 	switch outcome {
 	case outDied:
-		if r.LauncherStopped() {
-			return "stopped"
-		}
 		return "supervisor"
 	case outTimedOut:
 		if r.Frozen {
