@@ -18,12 +18,15 @@
 #     a stepped clock: a frame every 40ms from load, for --ms (200 to
 #     4000, default 1000). CSS transitions and animations, the Web
 #     Animations API, timers and requestAnimationFrame all keep that
-#     clock. With #<cue>, what moves on load runs to its end first, then
-#     it calls the page's window.motion("<cue>") at 0ms. Writes <name>[-<cue>]-<width>-motion.png, an animated PNG that
-#     loops, and <name>[-<cue>]-<width>-strip.png, up to eight of its
-#     frames in a grid, each labelled with its ms. Prints run=, then
-#     clip= and strip= per pair, then ok=1. A clip where nothing moves
-#     is a failure.
+#     clock. With #<cue>, the page first runs 5s of its own time, so its
+#     load timers fire, and what moves on load runs to its end; then it
+#     calls the page's window.motion("<cue>") at 0ms. Writes
+#     <name>[-<cue>]-<width>-motion.png, an animated PNG that loops, and
+#     <name>[-<cue>]-<width>-strip.png, up to eight of its frames in a
+#     grid, each labelled with its ms. Prints run=, then clip= and
+#     strip= per pair, and still=<name>[-<cue>]-<width> for each clip
+#     where nothing moved, which writes no file; then ok=1. If nothing
+#     moved in any clip, it fails.
 #
 # Needs jq, and playwright-cli and node on PATH. With no browser it prints
 # stop=no browser and exits 4. Exit 2: bad arguments; 1: any other
@@ -180,8 +183,8 @@ EOF
 # the session's own page, so each clip gets a context of its own. Each
 # step moves the clock and every animation by the same ms, then shoots;
 # an animation that starts mid-clip (a class a timer adds) counts from
-# the step it shows up in. Under a cue, load's animations keep the place
-# finish() gave.
+# the step it shows up in. Under a cue, load gets 5s of page time, and
+# its animations keep the place finish() gave.
 cat >"$tmp/motion.tail" <<'EOF'
 ;
   for (const j of jobs) {
@@ -192,6 +195,7 @@ cat >"$tmp/motion.tail" <<'EOF'
       await p.clock.pauseAt(1000);
       await p.setViewportSize({ width: j.width, height: 900 });
       await p.goto(j.url, { waitUntil: "load", timeout: 30000 });
+      if (j.cue) await p.clock.runFor(5000);
       await p.evaluate(([cue, name]) => {
         let t = 0;
         const start = new WeakMap();
@@ -337,9 +341,10 @@ EOF
 		cat "$tmp/err" >&2
 		die 1 "can't make the clips"
 	}
-	if grep -q '^still=' "$tmp/clips"; then
+	# Motion that shows at one width only leaves the other widths still:
+	# say so and go on. Nothing moving anywhere is a wrong cue or page.
+	grep -q '^clip=' "$tmp/clips" ||
 		die 1 "nothing moved in $(sed -n 's/^still=//p' "$tmp/clips" | paste -sd, -): check its cue, or give more --ms"
-	fi
 	sed -n 's/^clip=//p' "$tmp/clips" | while IFS= read -r c; do
 		echo "$base/f/$c.html|$out/$c-strip.png|1600|light"
 	done | mkjobs "$tmp/strips.json"
@@ -350,6 +355,7 @@ EOF
 		echo "clip=$out/$c-motion.png"
 		echo "strip=$out/$c-strip.png"
 	done < <(sed -n 's/^clip=//p' "$tmp/clips")
+	grep '^still=' "$tmp/clips" || true
 	echo "ok=1"
 	exit 0
 fi

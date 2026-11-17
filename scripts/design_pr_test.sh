@@ -140,10 +140,15 @@ gap "no b-\*.png shots" '' 'b-*.png'
 gap "no 'Motion:' line" '/^Motion:/d'
 gap "Motion: no b-\*-motion.png clip" '' 'b-*-motion.png'
 
-# Motion: none needs no clip (it stops at the ticket instead).
-cp -R "$run_dir" "$tmp/still" && sed -i 's/^Motion: .*/Motion: none/' "$tmp/still/spec.md" && rm "$tmp/still"/*-motion.png
+gap "Motion: no b-\*-motion.png clip" 's/^Motion: .*/Motion: nonetheless a fade/' 'b-*-motion.png'
+
+# Motion: none, however it's written, needs no clip (it stops at the
+# ticket instead).
 ticket blocked ""
-if run T-7 "$tmp/still" --holder "$H" --token 3; then fail "passed a blocked ticket"; else rc=$?; [ $rc = 3 ] || fail "exit $rc for Motion: none and no clips"; fi
+for m in 's/^Motion: .*/Motion: none/' 's/^Motion: .*/Motion: none /' 's/^Motion: .*/Motion: None, a static page./' 's/^Motion: .*/Motion:\nnone/'; do
+	rm -rf "$tmp/still" && cp -R "$run_dir" "$tmp/still" && sed -i "$m" "$tmp/still/spec.md" && rm "$tmp/still"/*-motion.png
+	if run T-7 "$tmp/still" --holder "$H" --token 3; then fail "passed a blocked ticket"; else rc=$?; [ $rc = 3 ] || fail "exit $rc for '$m' and no clips"; fi
+done
 
 # A spec with CRLF line ends passes the spec checks (it stops at the
 # ticket instead).

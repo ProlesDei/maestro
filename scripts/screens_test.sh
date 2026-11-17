@@ -186,9 +186,15 @@ const want = "frames=3 plays=0 640/1000 40/1000 1360/1000";
 if (got.join(" ") !== want) { console.error("clip chunks: " + got.join(" ")); process.exit(1); }' "$tmp/m/a-open-1280-motion.png" || fail "the clip isn't the looping APNG wanted"
 grep -q "^t-mo close " "$LOG" || fail "the browser wasn't closed after clips"
 
-# A page where nothing moves fails, naming it.
+# A page where nothing moves gets a still= line and no files, and the
+# run goes on; if nothing moves anywhere, it fails, naming each.
 echo '<h1>still</h1>' >"$tmp/pages/still.html"
-if run --motion --out "$tmp/m2" --widths 375 --ms 200 "$tmp/pages/still.html"; then fail "passed a clip where nothing moved"; else rc=$?; [ $rc = 1 ] || fail "exit $rc for a still clip"; fi
-grep -q "nothing moved in still-375" "$tmp/out" || fail "no word on the still clip"
+run --motion --out "$tmp/m2" --widths 375 --ms 200 "$tmp/pages/a.html" "$tmp/pages/still.html" || fail "one still clip failed the run"
+has "clip=$tmp/m2/a-375-motion.png"
+has "still=still-375"
+has "ok=1"
+! ls "$tmp/m2"/still-* >/dev/null 2>&1 || fail "a still clip wrote files"
+if run --motion --out "$tmp/m3" --widths 375,1280 --ms 200 "$tmp/pages/still.html"; then fail "passed when nothing moved"; else rc=$?; [ $rc = 1 ] || fail "exit $rc when nothing moved"; fi
+grep -q "nothing moved in still-1280,still-375" "$tmp/out" || fail "no word on the still clips"
 
 echo "screens_test: ok"

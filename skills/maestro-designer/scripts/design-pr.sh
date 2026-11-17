@@ -6,11 +6,11 @@
 #   design-pr.sh <T-n> <run folder> --holder <holder> --token <n>
 #     Checks the spec (spec.md in the run folder) has every field, two or
 #     more directions, a pick among them, numbered criteria that each
-#     name a width in px, and, unless its Motion: is none, a clip of the
-#     pick (<pick>-*-motion.png, from screens.sh --motion); on a gap it
-#     prints problem= lines, exit 2, and writes nothing. Checks the
-#     ticket is a "Design:" scout ticket in in_progress under this
-#     holder's claim; else stop=<why>, exit 3.
+#     name a width in px, and, unless its Motion: starts with none, a
+#     clip of the pick (<pick>-*-motion.png, from screens.sh --motion);
+#     on a gap it prints problem= lines, exit 2, and writes nothing.
+#     Checks the ticket is a "Design:" scout ticket in in_progress under
+#     this holder's claim; else stop=<why>, exit 3.
 #     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
 #     (<pick>-*.png, the pick's letter in lowercase) and every clip
 #     (*-motion.png, the pick's first), but no strip (*-strip.png), to
@@ -54,6 +54,13 @@ block() { # the lines after "<field>:" up to the next field
 		/^(Problem|Breadboard|Directions|Pick|States|Motion|Reuses|Criteria|Taste calls):/ {on=(index($0, f ":") == 1); next}
 		on' "$spec"
 }
+one() { block "$1" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//'; }
+value() { # the text after "<field>:" on its line, else the block under it, as one line
+	local v
+	v=$(awk -v f="$1" '{sub(/\r$/, "")} index($0, f ":") == 1 {print substr($0, length(f) + 2); exit}' "$spec" | sed 's/^ *//; s/ *$//')
+	[ -n "$v" ] || v=$(one "$1")
+	printf '%s' "$v"
+}
 dirs=$(block Directions | grep -E '^[A-Z]: ' | cut -c1 | sort -u || true)
 [ "$(printf '%s' "$dirs" | grep -c . || true)" -ge 2 ] || probs+=("Directions: want two or more lines 'A: <one line>', each its own letter")
 pickline=$(awk '{sub(/\r$/, "")} /^Pick: [A-Z]([^A-Za-z0-9]|$)/ {print; exit}' "$spec")
@@ -85,8 +92,8 @@ if [ -n "$pick" ]; then
 	done
 	shopt -u nullglob
 	[ ${#stills[@]} -gt 0 ] || probs+=("no $lp-*.png shots of the pick in the run folder")
-	motion=$(sed -n 's/\r$//; s/^Motion: *//p' "$spec" | head -1)
-	[[ ${motion,,} =~ ^none\.?$ ]] || [ "$n_pick" -gt 0 ] ||
+	motion=$(value Motion)
+	[[ ${motion,,} =~ ^none([^a-z]|$) ]] || [ "$n_pick" -gt 0 ] ||
 		probs+=("Motion: no $lp-*-motion.png clip of the pick in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
 fi
 if [ ${#probs[@]} -gt 0 ]; then
@@ -208,13 +215,11 @@ fi
 [[ $pr =~ ^https:// ]] || die 1 "gh gave no PR URL: $pr"
 
 # The card, from the spec.
-one() { block "$1" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//'; }
 why=${pickline:7}
 why=${why#:}
 why=${why# }
 why=${why%.}
-taste=$(sed -n 's/\r$//; s/^Taste calls: *//p' "$spec" | head -1)
-[ -n "$taste" ] || taste=$(one "Taste calls")
+taste=$(value "Taste calls")
 n=$(printf '%s\n' "$dirs" | grep -c .)
 {
 	echo "Escalation: design ready: PR $pr: owner's call"
