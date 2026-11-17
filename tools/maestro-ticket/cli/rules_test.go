@@ -458,10 +458,10 @@ func TestDoctorWarnsMissingBoardAndRules(t *testing.T) {
 	}
 }
 
-// fakeSupervisor stands in for a run's supervisor: it marks each run it
+// rulesSupervisor stands in for a run's supervisor: it marks each run it
 // gets as running, with no process, so startRun returns at once, and
 // returns the runs folder. A test that calls it must not run in parallel.
-func fakeSupervisor(h *harness) string {
+func rulesSupervisor(h *harness) string {
 	h.t.Helper()
 	dir := filepath.Join(h.dir, "runs")
 	old := startSupervisor
@@ -508,7 +508,7 @@ func promptOf(h *harness, dir, id string) []string {
 // claimed; an empty rules.md gives the judge "none" as its rules.
 func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
 	h := newRulesHarness(t, "planner")
-	dir := fakeSupervisor(h)
+	dir := rulesSupervisor(h)
 	h.ok(nil, "create", "--title", "x")
 	h.ok(nil, "transition", "T-1", "--to", "blocked")
 	if code, out := h.try("Escalation: build at abc: which key?\nReturn-role: engineer", "comment", "T-1", "--body-file", "-"); code != 0 {
@@ -544,7 +544,7 @@ func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
 // set it, and of --slots over both.
 func TestQASlotsOrder(t *testing.T) {
 	h := newRulesHarness(t, "qa-lead")
-	dir := fakeSupervisor(h)
+	dir := rulesSupervisor(h)
 	for _, id := range []string{"T-1", "T-2", "T-3"} {
 		h.ok(nil, "create", "--title", "x")
 		h.ok(nil, "transition", id, "--to", "in_progress")
@@ -572,7 +572,7 @@ func TestQASlotsOrder(t *testing.T) {
 // The plan and rule prompts end with the standing rules, once there are any.
 func TestPlanAndRulePromptsCarryRules(t *testing.T) {
 	h := newRulesHarness(t, "planner")
-	dir := fakeSupervisor(h)
+	dir := rulesSupervisor(h)
 	h.ok(nil, "create", "--title", "x")
 	if _, s := startedRun(h, dir, "goal g: ship it\n", "plan"); slices.Contains(s, "Standing rules:") {
 		t.Fatalf("no rules.md, yet the plan prompt has rules: %q", s)

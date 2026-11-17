@@ -397,10 +397,10 @@ func shWords(t *testing.T, s string) []string {
 	return words
 }
 
-// fakeSupervisor stands in for a start's supervisor until the test ends:
+// stopSupervisor stands in for a start's supervisor until the test ends:
 // it keeps each command and marks its run running, as a supervisor does
 // once claude starts, so startRun returns at once. No process starts.
-func fakeSupervisor(t *testing.T, dir string) *[]*exec.Cmd {
+func stopSupervisor(t *testing.T, dir string) *[]*exec.Cmd {
 	t.Helper()
 	var got []*exec.Cmd
 	was := startSupervisor
@@ -511,7 +511,7 @@ func TestResumeRewritesHook(t *testing.T) {
 	h.env["MAESTRO_TICKET_ACTOR"] = "senior-engineer"
 	h.ok(nil, "create", "--title", "a")
 	dir := filepath.Join(h.dir, "runs")
-	sups := fakeSupervisor(t, dir)
+	sups := stopSupervisor(t, dir)
 	store := h.env["MAESTRO_TICKET_STORE"]
 	exe, err := os.Executable()
 	if err != nil {
@@ -592,7 +592,7 @@ func TestSessionEnvAddsNoStore(t *testing.T) {
 	store := h.env["MAESTRO_TICKET_STORE"]
 	delete(h.env, "MAESTRO_TICKET_STORE")
 	dir := filepath.Join(h.dir, "runs")
-	sups := fakeSupervisor(t, dir)
+	sups := stopSupervisor(t, dir)
 	r := startJob(h, "", dir, "job", "build", "T-1", "--store", store)
 	if len(*sups) != 1 {
 		t.Fatalf("%d supervisors; want 1", len(*sups))
@@ -624,7 +624,7 @@ func TestStopCheckUsesPinnedStore(t *testing.T) {
 	h.env["MAESTRO_TICKET_ACTOR"] = "senior-engineer"
 	h.ok(nil, "create", "--title", "a")
 	dir := filepath.Join(h.dir, "runs")
-	fakeSupervisor(t, dir)
+	stopSupervisor(t, dir)
 	r := startJob(h, "", dir, "job", "build", "T-1")
 	words := shWords(t, hookCommand(t, r.Command))
 	if len(words) < 2 || words[1] != "stop-check" {
