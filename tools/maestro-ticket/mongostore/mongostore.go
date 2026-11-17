@@ -287,8 +287,11 @@ func (s *Store) build(ctx context.Context) error {
 			{Keys: bson.D{{Key: "ticket_id", Value: 1}}, Options: options.Index().SetName("runs_ticket")},
 			{Keys: bson.D{{Key: "created_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("runs_created")},
 		},
-		cLaunches: {{Keys: bson.D{{Key: "ended_at", Value: 1}, {Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("launches_open")}},
-		cETAs:     {{Keys: bson.D{{Key: "due_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("etas_due")}},
+		cLaunches: {
+			{Keys: bson.D{{Key: "ended_at", Value: 1}, {Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("launches_open")},
+			{Keys: bson.D{{Key: "lifts", Value: 1}}, Options: options.Index().SetName("launches_lifts").SetSparse(true)},
+		},
+		cETAs: {{Keys: bson.D{{Key: "due_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("etas_due")}},
 		// Made by its index: marks are no part of the board, so backups
 		// and exports leave them out.
 		cMarks: {{Keys: bson.D{{Key: "space", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("marks_space")}},

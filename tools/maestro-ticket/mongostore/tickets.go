@@ -1113,11 +1113,20 @@ func (tx *txn) applyClaim(t ticket.Ticket, req ticket.ClaimRequest) (ticket.Tick
 // nothing written since comes back to life (lease_revived), unless STOP is
 // on or another claim took one of its areas meanwhile.
 func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (ticket.Ticket, error) {
+	t, _, err := s.HeartbeatHalt(ctx, req)
+	return t, err
+}
+
+// HeartbeatHalt is Heartbeat, and reports the halt as its transaction
+// read it, so a keepalive learns of stop --all at no extra round trip.
+func (s *Store) HeartbeatHalt(ctx context.Context, req ticket.HeartbeatRequest) (ticket.Ticket, bool, error) {
 	if err := req.Validate(); err != nil {
-		return ticket.Ticket{}, err
+		return ticket.Ticket{}, false, err
 	}
 	var out ticket.Ticket
+	var halted bool
 	err := s.write(ctx, func(tx *txn) error {
+		halted = tx.w != nil && tx.w.Halt
 		t, err := tx.getTicket(req.ID)
 		if err != nil {
 			return err
@@ -1163,7 +1172,7 @@ func (s *Store) Heartbeat(ctx context.Context, req ticket.HeartbeatRequest) (tic
 		out, err = tx.getTicket(t.ID)
 		return err
 	})
-	return out, err
+	return out, halted, err
 }
 
 // Release implements ticket.Store.

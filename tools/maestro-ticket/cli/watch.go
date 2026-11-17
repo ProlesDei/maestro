@@ -58,8 +58,8 @@ func (c *call) startLaunch(ctx context.Context, id ticket.ID, r runs.Record) int
 
 // endLaunch records how the run ended, best effort, on s or on a store it
 // opens.
-func (c *call) endLaunch(ctx context.Context, s ticket.Store, id int64, outcome, session string) {
-	if id == 0 {
+func (c *call) endLaunch(ctx context.Context, s ticket.Store, req ticket.EndLaunchRequest) {
+	if req.ID == 0 {
 		return
 	}
 	// A cancelled context (SIGTERM) must not lose the end: the run is over.
@@ -73,7 +73,7 @@ func (c *call) endLaunch(ctx context.Context, s ticket.Store, id int64, outcome,
 		defer st.Close()
 		s = st
 	}
-	if _, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: id, Outcome: outcome, Session: session}); err != nil {
+	if _, err := s.EndLaunch(ctx, req); err != nil {
 		fmt.Fprintf(c.env.Stderr, "maestro-ticket log-run: can't record the run's end: %v\n", err)
 	}
 }

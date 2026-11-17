@@ -205,10 +205,14 @@ func runLook(ctx context.Context, c *call) error {
 	if p, ok := co.readPause(time.Now()); ok {
 		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
 	}
+	stopped, err := co.s.stopped()
+	if err != nil {
+		return err
+	}
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
 		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
-			stopped: co.s.stopped(), handouts: co, runs: rdir, host: co.host})
+			stopped: stopped, handouts: co, runs: rdir, host: co.host})
 		return err
 	})
 	if err != nil {
@@ -399,8 +403,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		}
 	}
 	// Another machine's runs have no record here: on a shared store their
-	// launches stand for them, live until overdue, and fresh for a stall
-	// once ended, as its own records are there.
+	// launches stand for them, live until overdue, fresh for a stall once
+	// ended, and held until a usage limit that stopped one is a stall past
+	// lifting, as its own records are there.
 	if ls, ok := s.(launchesSince); ok && o.host != "" {
 		recent, err := ls.LaunchesSince(ctx, now.Add(-o.stall))
 		keep(err)
@@ -410,10 +415,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
 			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall
+			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall))
 			if l.Ticket != 0 && live && l.Job == "build" {
 				building[l.Ticket.String()] = true
 			}
-			if l.Ticket != 0 && (live || fresh) {
+			if l.Ticket != 0 && (live || fresh || limited) {
 				liveRun[l.Ticket.String()] = true
 			}
 			if live {
