@@ -22,7 +22,9 @@
 # Grok's limit refuses, and memories go in a message apart; uninstall
 # runs off the pin; stats: on or off sets the marker and says which, on
 # says when it removed a marker, no line leaves a person's stats off, and
-# any other value or a second line refuses; the install.yaml that
+# any other value or a second line refuses; store: mongodb wants a
+# store.uri, 0600 for check, and a SQLite board with tickets moved first,
+# while store: sqlite or no line refuses a store.uri; the install.yaml that
 # project-setup.md's ## Run writes applies; check opens a headless page with playwright-cli and
 # closes only its own session, names why one won't open, and warns on
 # Playwright CLI's own skill;
@@ -65,16 +67,22 @@ nskills=$(echo "$skills" | wc -l)
 # A stand-in maestro-ticket: prints a help that lists launch, job,
 # resume and look (only launch with STUB_NOJOB), unless
 # STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
-# is set, and otherwise makes the store as doctor does, the STATS_OFF
+# is set, and otherwise makes the store as doctor does (with a store.uri
+# beside it, MongoDB's: no file), the STATS_OFF
 # marker beside it as stats off does, and says on or off as stats health
-# does, from the marker or MAESTRO_TICKET_STATS.
+# does, from the marker or MAESTRO_TICKET_STATS. On a --store file, get
+# finds T-1 where the file or its -wal holds that text, fails where it holds
+# garbage, and create fails where it holds moved, as migrate's triggers
+# make it.
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
 	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || { printf "Commands:\n  launch      [--ticket T-1]\n"; [ -n "${STUB_NOJOB:-}" ] || printf "  job         <job>\n  resume      <run-id>\n  look        --limit N\n"; }; exit 0; }' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
-	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro && mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; }' \
+	'[ "$1" != get ] || { ! grep -q garbage "${@: -1}" || exit 2; grep -qs T-1 "${@: -1}" "${@: -1}-wal" || exit 3; exit 0; }' \
+	'[ "$1" != create ] || { ! grep -q moved "${@: -1}"; exit; }' \
+	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; if [ -f "$d/store.uri" ]; then echo "ok  store  mongodb at h"; else mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; fi; }' \
 	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; health) if [ "${MAESTRO_TICKET_STATS:-}" = off ]; then echo "stats: off (MAESTRO_TICKET_STATS=off): no run is written"; elif [ -e "$d/STATS_OFF" ]; then echo "stats: off (STATS_OFF sits beside the store): no run is written"; else echo "stats: on"; fi; echo "stats.db: none yet" ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
 chmod +x "$tmp/bin/maestro-ticket"
 # check wants what the bots' runs need; stand-ins, so the test passes on a
@@ -731,6 +739,57 @@ ok apply "$r15"
 printf 'SQLite format 3\0' >"$r15/.git/maestro/stats.db"
 ok uninstall "$r15"
 [ -e "$r15/.git/maestro/stats.db" ] && [ -e "$r15/.git/maestro/STATS_OFF" ] || fail "uninstall removed stats.db or STATS_OFF"
+
+# --- store: mongodb needs store.uri, and a SQLite board with tickets moved
+# first; check wants store.uri 0600 and a passing doctor; sqlite, or no
+# line, refuses a store.uri ---
+r17=$tmp/mongo
+repo "$r17" "harnesses: claude" "skills-home: hidden" "store: mongodb"
+d17=$(cd "$r17" && pwd -P)/.git/maestro
+for c in apply check; do refuses "store is mongodb, but there is no $d17/store.uri: at the repo's root, run maestro-ticket store --uri-file -" "$r17" $c "$r17"; done
+mkdir -p "$d17" && echo 'mongodb+srv://u:p@h/x' >"$d17/store.uri" && chmod 644 "$d17/store.uri"
+: >"$STUB_LOG"
+ok apply "$r17"
+says "ticket store ready"
+[ ! -e "$d17/tickets.db" ] || fail "apply on MongoDB made a SQLite store"
+grep -qxF "$(cd "$r17" && pwd -P) doctor" "$STUB_LOG" || fail "apply on MongoDB didn't run doctor: $(cat "$STUB_LOG")"
+refuses "problem: $d17/store.uri holds the board's password, and its mode isn't 600" "$r17" check "$r17"
+chmod 600 "$d17/store.uri"
+: >"$STUB_LOG"
+ok check "$r17"
+grep -qxF "$(cd "$r17" && pwd -P) doctor" "$STUB_LOG" || fail "check on MongoDB didn't run doctor: $(cat "$STUB_LOG")"
+STUB_FAIL=1 refuses "problem: maestro-ticket doctor: FAIL stub: no store here" "$r17" check "$r17"
+# A SQLite board beside it: one with a ticket that takes writes never
+# moved; an empty one, or one whose triggers refuse writes, did.
+printf 'SQLite format 3\0T-1' >"$d17/tickets.db"
+refuses "$d17/tickets.db holds a SQLite board that never moved to MongoDB: stop new work and run maestro-ticket migrate --to mongodb" "$r17" apply "$r17"
+! grep -qF "get T-1 --store $d17/" "$STUB_LOG" || fail "apply read the real SQLite file, not a copy"
+printf 'SQLite format 3\0' >"$d17/tickets.db" && echo T-1 >"$d17/tickets.db-wal"
+refuses "never moved to MongoDB" "$r17" apply "$r17"
+rm "$d17/tickets.db-wal"
+ok apply "$r17"
+printf 'SQLite format 3\0T-1 moved' >"$d17/tickets.db"
+ok apply "$r17"
+echo garbage >"$d17/tickets.db"
+refuses "couldn't read the SQLite board at $d17/tickets.db to see whether it holds tickets" "$r17" apply "$r17"
+printf 'SQLite format 3\0T-1 moved' >"$d17/tickets.db"
+# store: sqlite, or no line, with a store.uri: maestro-ticket reads
+# MongoDB, and install.yaml says otherwise.
+for v in "store: sqlite" ""; do
+	sed -i '/^store: /d' "$r17/.maestro/project/install.yaml"
+	[ -z "$v" ] || echo "$v" >>"$r17/.maestro/project/install.yaml"
+	for c in apply check; do refuses "$d17/store.uri puts the board on MongoDB, but install.yaml has no store: mongodb" "$r17" $c "$r17"; done
+done
+rm "$d17/store.uri"
+echo "store: sqlite" >>"$r17/.maestro/project/install.yaml"
+ok apply "$r17"
+cp "$r17/.maestro/project/install.yaml" "$tmp/keep17"
+for bad in "store: postgres|install.yaml: store wants sqlite or mongodb" "store: sqlite|install.yaml:7: store twice"; do
+	cp "$tmp/keep17" "$r17/.maestro/project/install.yaml"
+	echo "${bad%%|*}" >>"$r17/.maestro/project/install.yaml"
+	[ "${bad%%|*}" = "store: sqlite" ] || sed -i '/^store: sqlite$/d' "$r17/.maestro/project/install.yaml"
+	refuses "${bad#*|}" "$r17" apply "$r17"
+done
 
 # --- the install.yaml that this repo's project-setup.md ## Run writes is
 # one apply takes ---
