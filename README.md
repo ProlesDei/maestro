@@ -23,7 +23,7 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
 7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
-Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot rereads its whole chat at every step.
+Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: its ring, `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot resends its whole chat at every model call.
 
 <!-- Source: docs/team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
@@ -163,7 +163,7 @@ What a bot loads and what the installer leaves in your repo:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only its ring, look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
 
     subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR
@@ -187,7 +187,7 @@ flowchart TD
     Runtime -->|"loads the profile for the role it plays"| Profile
     Runtime ==>|"maestro-ticket job in their repo"| H
     Installed --> H
-    H -.->|"pickup: what to send, read by Grok Bot"| Runtime
+    H -.->|"ring and pickup: what to send, read by Grok Bot"| Runtime
     Guard -.-> H
     H ~~~ Roles
 

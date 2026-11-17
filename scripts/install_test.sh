@@ -393,8 +393,12 @@ mkdir -p "$r/.maestro/project/bots"
 printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
 # INSTALL.md runs it as a command, not through bash.
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
-[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md reviewer.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
-b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md
+[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md planner.routine.md reviewer.md reviewer.routine.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
+b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md br=$r/.maestro/bots/planner.routine.md
+# Each bot's routine is the shipped one with its id filled in.
+[ "$(cat "$br")" = "$(sed 's/<bot id>/planner/g' "$m/bot-profiles/routine.md")" ] && ! grep -qF '<bot id>' "$br" || fail "planner routine: $(cat "$br")"
+grep -qF "MAESTRO_TICKET_ACTOR=reviewer maestro-ticket pickup" "$r/.maestro/bots/reviewer.routine.md" || fail "reviewer routine lacks its id"
+says "planner routine: new, paste .maestro/bots/planner.routine.md"
 grep -qxF -- "- Runs at once: up to 3." "$bm" && grep -qxF "  Wrapped." "$bm" || fail "planner memories lack the team's memory"
 ! grep -qF "Intro." "$bm" || fail "planner memories hold the memory file's intro"
 grep -qF 'save each bullet below as one memory that starts `Starting:`' "$bm" || fail "planner memories don't say to save them"
@@ -405,7 +409,7 @@ grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 # A rebuild says which blocks changed, and drops a bot no longer listed.
 says "planner: new" && says "planner memories: new"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && says "planner memories: same" && says "reviewer: same"
+says "planner: same" && says "planner memories: same" && says "reviewer: same" && says "planner routine: same"
 ! grep -qF "reviewer memories" "$tmp/out" || fail "bot-bundle wrote memories for a bot with none"
 # An update that changes no persona changes only the block's Maestro line:
 # the block is the same, so no one pastes it again.
@@ -428,7 +432,8 @@ sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
 says "planner memories: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
 grep -qxF -- "- Another." "$bm" || fail "planner memories lack the new memory"
-[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ ! -e "$r/.maestro/bots/reviewer.routine.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+says "reviewer: removed .maestro/bots/reviewer.routine.md"
 # A dropped bot loses its memories too. A bot whose memories went gets a
 # message to forget the old ones.
 sed -i 's|^bots: .*|bots: reviewer|' "$r/.maestro/project/install.yaml"
@@ -469,6 +474,9 @@ for p in $all; do
 	*) max=8500 ;;
 	esac
 	[ "$n" -le "$max" ] || fail "$p: persona and team rules are $n bytes; a router's block stays under $max, since Grok rereads it at every step"
+	# Every ring bills the routine's instruction.
+	n=$(wc -c <"$r/.maestro/bots/$p.routine.md")
+	[ "$n" -le 1000 ] || fail "$p: its routine is $n bytes; keep it under 1,000, since every ring bills it"
 done
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
@@ -503,6 +511,12 @@ if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle 
 says ".maestro/bots/planner.memories.md is a symlink"
 [ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked memories file"
 rm "$bm" && mv "$tmp/planner.memories.md" "$bm"
+echo outside >"$tmp/victim"
+mv "$br" "$tmp/planner.routine.md" && ln -s "$tmp/victim" "$br"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked routine"; fi
+says ".maestro/bots/planner.routine.md is a symlink"
+[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked routine"
+rm "$br" && mv "$tmp/planner.routine.md" "$br"
 # A block over Grok's limit refuses before any bot's files are written,
 # even a bot listed first that is due a new one.
 sed -i 's|^bots: .*|bots: reviewer planner|' "$r/.maestro/project/install.yaml"
