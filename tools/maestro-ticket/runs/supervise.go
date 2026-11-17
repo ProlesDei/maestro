@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -39,8 +40,14 @@ const FreezeGap = time.Minute
 const pickPoll = 2 * time.Second
 
 // DefaultRings are when, after a run ends, the supervisor rings the
-// launcher's webhook while no one has acked the result.
-var DefaultRings = []time.Duration{0, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute}
+// launcher's webhook while no one has acked the result. Each goes through
+// the bot's gate (RingBot), so a bot with many results hears of them in
+// one ring each GateWindow at most.
+var DefaultRings = []time.Duration{0, 5 * time.Minute, 10 * time.Minute, 40 * time.Minute}
+
+// maxHeld is how often one ring point waits out a gate a newer ring holds
+// shut before it gives that point up: each wait is a ring the bot got.
+const maxHeld = 5
 
 // Options configure a supervisor.
 type Options struct {
@@ -70,6 +77,12 @@ type Options struct {
 	// reads that file once the command is over: .out gets what it would
 	// have held with json, and the record's Stream the counts.
 	Stream *streamfilter.Names
+	// Gate is the folder for each bot's ring gate (RingBot); the runs
+	// folder if empty.
+	Gate string
+	// Digest builds the ring for bot at now, and lists the runs it
+	// covers; NoticeFor of the bot's unacked results if nil.
+	Digest func(bot string, now time.Time) (Notification, []string)
 	Now    func() time.Time
 }
 
@@ -100,6 +113,9 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 		return fmt.Errorf("run %s is %s, not starting", id, r.State)
 	}
 	r = run(ctx, dir, r, o)
+	// Until its end is handled, no reader shows it as a result. One that
+	// never started stays as before: launch acks it.
+	r.Settling = o.OnEnd != nil && !(r.Error != "" && r.PID == 0)
 	if err := Save(dir, r); err != nil {
 		DropStream(dir, id)
 		return err
@@ -113,6 +129,10 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 		// It may have handed the result on: ring as it left the record.
 		if got, err := Load(dir, r.ID); err == nil {
 			r = got
+		}
+		if r.Settling {
+			r.Settling = false
+			Save(dir, r)
 		}
 	}
 	DropStream(dir, id)
@@ -422,8 +442,10 @@ func join(a, b string) string {
 	return a + "\n" + b
 }
 
-// ring rings the launcher's webhook at each of o.Rings after the end
-// while no one has acked the result.
+// ring rings the owner's webhook at each of o.Rings after the end while
+// no one has acked the result, each time through the bot's gate: a ring
+// the gate holds back waits for it to open, and a newer ring that listed
+// this run counts as this run's.
 func ring(ctx context.Context, dir string, r Record, o Options) {
 	first := o.AfterRing
 	after := func(err error) {
@@ -436,7 +458,8 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	if o.Hook == nil {
 		return
 	}
-	h, err := o.Hook(r.Owner())
+	bot := r.Owner()
+	h, err := o.Hook(bot)
 	if err != nil {
 		r.RingError = err.Error()
 		Save(dir, r)
@@ -445,6 +468,70 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	}
 	if h.URL == "" {
 		return
+	}
+	gateDir := cmp.Or(o.Gate, dir)
+	digest := func(now time.Time) (Notification, []string) {
+		if o.Digest != nil {
+			return o.Digest(bot, now)
+		}
+		recs, _ := Unacked(dir, bot, now)
+		n := NoticeFor(bot, recs)
+		return n, n.Runs
+	}
+	// waitFor waits until at, or until the run is acked or ctx stops: true
+	// if a ring is still due.
+	waitFor := func(at time.Time) bool {
+		for !Acked(dir, r.ID) {
+			wait := time.Until(at)
+			if wait <= 0 {
+				return true
+			}
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(min(wait, pickPoll)):
+			}
+		}
+		return false
+	}
+	// point rings once through the gate, where a ring since the given
+	// time that listed this run counts as its own; false once no ring can
+	// follow.
+	point := func(since time.Time) bool {
+		for range maxHeld {
+			g, err := RingBot(ctx, dir, gateDir, bot, []string{r.ID}, h, o.Now(), digest)
+			if ctx.Err() != nil {
+				return false // a ring cut short isn't one: a reader rings after
+			}
+			switch {
+			case g.Tried || err != nil:
+				if g.Tried {
+					r.Rings++
+				}
+				r.Rang, r.RingError = r.Rang || g.Rang, ""
+				if err != nil {
+					r.RingError = err.Error()
+				}
+				Save(dir, r)
+				after(err)
+				return true
+			case g.Covers(r.ID) && !g.At.Before(since):
+				if !r.Rang {
+					r.Rang = true
+					Save(dir, r)
+				}
+				after(nil)
+				return true
+			case !g.Held():
+				return true // nothing to say, as when it was acked meanwhile
+			}
+			// Held back: ring once the gate opens, unless a newer ring
+			// listed it by then.
+			if !waitFor(g.Next) {
+				return false
+			}
+		}
+		return true
 	}
 	end := *r.EndedAt
 	rings := o.Rings
@@ -456,31 +543,9 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	for _, at := range rings {
 		// Look for an ack every few seconds while it waits, so a
 		// supervisor whose result was acked exits soon after.
-		for !Acked(dir, r.ID) {
-			wait := time.Until(end.Add(at))
-			if wait <= 0 {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(min(wait, pickPoll)):
-			}
-		}
-		if Acked(dir, r.ID) {
+		if !waitFor(end.Add(at)) || !point(time.Time{}) {
 			return
 		}
-		err := Ring(ctx, h, Notice(r))
-		if ctx.Err() != nil {
-			return // a ring cut short isn't one: a reader rings after
-		}
-		r.Rings++
-		r.Rang, r.RingError = r.Rang || err == nil, ""
-		if err != nil {
-			r.RingError = err.Error()
-		}
-		Save(dir, r)
-		after(err)
 	}
 	if o.RingAgain == nil {
 		return
@@ -489,18 +554,9 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	if at.IsZero() || time.Until(at) > 24*time.Hour {
 		return
 	}
-	for !Acked(dir, r.ID) && time.Now().Before(at) {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(min(time.Until(at), pickPoll)):
-		}
-	}
-	if Acked(dir, r.ID) {
-		return
-	}
-	if err := Ring(ctx, h, Notice(r)); err == nil && ctx.Err() == nil {
-		r.Rings++
-		Save(dir, r)
+	// What its bot can do changed at the lift: only a ring since then
+	// tells it.
+	if waitFor(at) {
+		point(at)
 	}
 }

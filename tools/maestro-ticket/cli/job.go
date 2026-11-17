@@ -48,17 +48,20 @@ type jobKind struct {
 	// slot names the slot the run waits in, at most --slots at once: each
 	// QA run holds its own copy of the app and a browser.
 	slot string
-	help string
+	// stopHook runs stop-check as the session's Stop hook (stopcheck.go):
+	// a job whose end is a note on its ticket.
+	stopHook bool
+	help     string
 }
 
 var jobKinds = []jobKind{
-	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier",
+	{name: "build", skill: "/maestro-software-engineer", ticket: true, model: "tier", stopHook: true,
 		help: "build <id>: the ticket's engineer session, Opus (senior tier or none) or Sonnet (junior, until it is sent back twice)"},
-	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route",
+	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route", stopHook: true,
 		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
-	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa",
+	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
 		help: "qa <id>: test the reviewed PR and merge it on a pass"},
-	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa",
+	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
 		help: "live <id>: a goal's live run"},
 	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus, slot: "qa",
 		help: "qa-ask [--ticket T-1] < ask: a second look, a repro, a test plan"},
@@ -72,7 +75,7 @@ var jobKinds = []jobKind{
 		help: "finish <id>: finish a split, drop or merge that stopped short"},
 	{name: "judge", skill: "/maestro-planner", prefix: "judge", ids: true, text: "need", model: modelOpus, lean: true,
 		help: "judge <id>... < rows and standing rules: the planner's calls that need reading"},
-	{name: "design", skill: "/maestro-designer", prefix: "design", ticket: true, model: modelOpus, lean: true,
+	{name: "design", skill: "/maestro-designer", prefix: "design", ticket: true, model: modelOpus, lean: true, stopHook: true,
 		help: "design <id>: a goal's Design: ticket, new or sent back with changes"},
 	{name: "cos", skill: "/maestro-chief-of-staff", text: "need", model: modelOpus, lean: true,
 		help: "cos [--ticket T-1] < ask: a check, second opinion, audit or card draft"},
@@ -423,6 +426,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	case k.text != "" && req.text != "":
 		prompt += " " + req.text
 	}
+	if k.name == "plan" || k.name == "rule" {
+		if rules, _ := c.standingRules(); rules != "" {
+			prompt += "\nStanding rules:\n" + rules
+		}
+	}
 	if req.model != "" {
 		if req.model != m {
 			side.Why = "override"
@@ -439,9 +447,12 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if runLimit < time.Second || runLimit > 24*time.Hour {
 		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
-	cmd := claudeCommand(newSessionID(), m, e, k.lean)
+	cmd, err := c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
+	if err != nil {
+		return fail(err)
+	}
 	if k.slot != "" {
-		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, defaultQASlots))
+		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
 	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
@@ -514,7 +525,7 @@ func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 		for _, r := range list {
 			if !r.Ended() && r.Ticket == id && (r.Job == k.name || r.Job == "") {
 				if r.Launcher == c.actor && r.Job == k.name {
-					return alreadyGoing{r.ID}
+					return alreadyGoing{run: r.ID}
 				}
 				return fmt.Errorf("%w: job %s: run %s, %s's, already works on %s", ticket.ErrClaimed, k.name, r.ID, r.Launcher, id)
 			}
@@ -543,7 +554,7 @@ func (c *call) resumeFits(ctx context.Context, r runs.Record) error {
 		moved = moved || (t.Status != ticket.StatusInReview && t.Status != ticket.StatusBlocked)
 	}
 	if moved {
-		return fmt.Errorf("%w: resume: %s is %s now: run %s's session has nothing left to do there: maestro-ticket ack %s", ticket.ErrStatusConflict, r.Ticket, t.Status, r.ID, r.ID)
+		return fmt.Errorf("%w: resume: %s is %s now: run %s's session has nothing left to do there", ticket.ErrStatusConflict, r.Ticket, t.Status, r.ID)
 	}
 	return nil
 }
@@ -592,13 +603,13 @@ func (co coord) takeActive(dir, ticketID, job, actor string, limit time.Duration
 				return nil
 			}
 			if a.By == actor {
-				return alreadyGoing{a.Run}
+				return alreadyGoing{run: a.Run}
 			}
 			return fmt.Errorf("%w: run %s, %s's on another machine, already does it", ticket.ErrClaimed, a.Run, dash(a.By))
 		}
 		if r, err := runs.Get(dir, id, time.Now()); err == nil && !r.Ended() {
 			if r.Launcher == actor {
-				return alreadyGoing{r.ID}
+				return alreadyGoing{run: r.ID}
 			}
 			return fmt.Errorf("%w: run %s, %s's, already does it", ticket.ErrClaimed, r.ID, r.Launcher)
 		}
@@ -635,17 +646,60 @@ func markRun(body string) string {
 }
 
 // alreadyGoing is a start a session of the same bot already made: the
-// work goes on, so it is no failure, and the bot does nothing more.
-type alreadyGoing struct{ run string }
+// work goes on, so it is no failure, and the bot does nothing more. ran
+// says that start has ended since: a stale do: line, run late.
+type alreadyGoing struct {
+	run string
+	ran bool
+}
 
-func (a alreadyGoing) Error() string { return "already going as " + a.run }
+func (a alreadyGoing) Error() string {
+	if a.ran {
+		return "already went again as " + a.run
+	}
+	return "already going as " + a.run
+}
 
-// goingOn prints a start another session of this bot made, and reports
-// whether err was one.
+// movedOn is a retry or resume refused for good: the run's ticket moved
+// on without it, so no later try starts it. The command a bot runs acks
+// the run, so it never waits unacked for a start that can't come; a
+// run's own end drops the line.
+type movedOn struct {
+	run string
+	err error
+}
+
+func (m movedOn) Error() string { return m.err.Error() }
+func (m movedOn) Unwrap() error { return m.err }
+
+// goingOn prints a start another session of this bot made, or a run
+// whose ticket moved on, which it acks, and reports whether err was one.
+// An ack that fails leaves the refusal to stand.
 func (c *call) goingOn(err error) bool {
 	var a alreadyGoing
+	var m movedOn
+	if errors.As(err, &m) {
+		dir, derr := c.besideStore("runs")
+		if derr == nil {
+			_, derr = runs.Ack(dir, m.run, c.actor, time.Now().UTC().Round(time.Millisecond))
+		}
+		if derr != nil {
+			return false
+		}
+		why := strings.TrimPrefix(m.err.Error(), ticket.ErrStatusConflict.Error()+": ")
+		c.out(map[string]any{"acked": m.run, "moved_on": why}, func(w io.Writer) {
+			fmt.Fprintf(w, "%s: acked %s\n", why, m.run)
+		})
+		return true
+	}
 	if !errors.As(err, &a) {
 		return false
+	}
+	if a.ran {
+		c.out(map[string]any{"went_again_as": a.run}, func(w io.Writer) {
+			fmt.Fprintf(w, "went again as %s already: nothing to do\n", a.run)
+		})
+		return true
 	}
 	c.out(map[string]any{"already_going": a.run}, func(w io.Writer) {
 		fmt.Fprintf(w, "%s already going: nothing to do\n", a.run)
@@ -777,9 +831,9 @@ func (c *call) ticketForJob(ctx context.Context, id string) (ticket.Ticket, erro
 // prompt's flag.
 func oneLineText(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// printStarted prints a started run in one line, then one line for each
-// of the actor's runs that ended and aren't acked, so a turn that starts
-// a run needs no pickup to learn of them.
+// printStarted prints a started run in one line, then, if any of the
+// actor's runs ended and aren't acked, one line that counts them, so a
+// turn that starts a run learns of them.
 func (c *call) printStarted(r runs.Record, model, why string) error {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -788,7 +842,7 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 	list, _ := runs.List(dir, time.Now(), false)
 	ended := []string{}
 	for _, o := range list {
-		if o.Owner() == c.actor && o.Ended() && o.ID != r.ID {
+		if o.Owner() == c.actor && o.Ended() && !o.Settling && o.ID != r.ID {
 			ended = append(ended, o.ID)
 		}
 	}
@@ -803,41 +857,61 @@ func (c *call) printStarted(r runs.Record, model, why string) error {
 			extra = ", " + why
 		}
 		fmt.Fprintf(w, "%s started: %s%s on %s, limit %s%s\n", r.ID, dash(r.Job), on, model, r.Limit, extra)
-		for _, id := range ended {
-			fmt.Fprintf(w, "%s ended: run maestro-ticket pickup\n", id)
+		if len(ended) > 0 {
+			fmt.Fprintf(w, "%d ended, unacked: run pickup\n", len(ended))
 		}
 	})
 }
 
-// runAgain starts a run's job afresh: its prompt and command as they
-// were, a new session, and a new limit when given. With full, a light
-// review goes on the full model. A retry keeps every flag the bot gave
-// the first run (--approved, --drop, --slots).
+// runAgain starts a run's job afresh, as again does, and prints the run.
 func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) error {
 	if len(c.args) != 2 || !runs.ValidID(c.args[1]) {
 		return usagef("job again: want one run id, such as R-abcdefgh")
 	}
-	if err := c.needActor("job"); err != nil {
+	nr, err := c.again(ctx, againOpts{run: c.args[1], limit: limit, full: full})
+	if err != nil {
 		return err
+	}
+	return c.printStarted(nr, dash(flagValue(nr.Command, "--model")), "again: "+c.args[1])
+}
+
+// againOpts are what job again takes: the run, and a new limit or the
+// full model when given.
+type againOpts struct {
+	run   string
+	limit time.Duration
+	full  bool
+}
+
+// again starts a run's job afresh: its prompt and command as they were,
+// a new session, and a new limit when given. With full, a light review
+// goes on the full model. A retry keeps every flag the bot gave the
+// first run (--approved, --drop, --slots), and the chain it was part of.
+// A run goes again once, whoever asks and however often: a run's end
+// and its bot may both run the same do: line.
+func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
+	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.needActor("job"); err != nil {
+		return fail(err)
 	}
 	dir, err := c.besideStore("runs")
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	r, err := runs.Get(dir, c.args[1], time.Now())
+	r, err := runs.Get(dir, o.run, time.Now())
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%w: run %s", ticket.ErrNotFound, c.args[1])
+		return fail(fmt.Errorf("%w: run %s", ticket.ErrNotFound, o.run))
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	switch {
 	case r.Launcher != c.actor:
-		return fmt.Errorf("%w: job again: run %s is %s's", ticket.ErrForbidden, r.ID, dash(r.Launcher))
+		return fail(fmt.Errorf("%w: job again: run %s is %s's", ticket.ErrForbidden, r.ID, dash(r.Launcher)))
 	case r.Job == "":
-		return usagef("job again: run %s isn't a job's", r.ID)
+		return fail(usagef("job again: run %s isn't a job's", r.ID))
 	case !r.Ended():
-		return fmt.Errorf("%w: job again: %s", ticket.ErrStatusConflict, stillRunning(r))
+		return fail(fmt.Errorf("%w: job again: %s", ticket.ErrStatusConflict, stillRunning(r)))
 	}
 	// A resumed run's prompt is only its resume text: start from the run
 	// the session began with.
@@ -848,53 +922,70 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		}
 		p, err := runs.Get(dir, first.ResumeOf, time.Now())
 		if err != nil {
-			return fmt.Errorf("%w: job again: run %s resumes %s, which is gone: start the job with job", ticket.ErrNotFound, first.ID, first.ResumeOf)
+			return fail(fmt.Errorf("%w: job again: run %s resumes %s, which is gone: start the job with job", ticket.ErrNotFound, first.ID, first.ResumeOf))
 		}
 		first = p
 	}
 	prompt, err := os.ReadFile(filepath.Join(dir, first.ID+".in"))
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if err := c.mayStart(); err != nil {
-		return err
+		return fail(err)
 	}
 	k, _ := findJob(r.Job)
 	if r.Ticket != "" {
 		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
-			return err
+			if errors.Is(err, ticket.ErrStatusConflict) {
+				err = movedOn{run: r.ID, err: err}
+			}
+			return fail(err)
 		}
 	}
-	cmd := slices.Clone(first.Command)
-	cmd = thisSlotBinary(cmd)
+	cmd, err := c.stopHook(thisSlotBinary(first.Command), r.Job)
+	if err != nil {
+		return fail(err)
+	}
 	for i := 0; i+1 < len(cmd); i++ {
 		switch {
 		case cmd[i] == "--session-id":
 			cmd[i+1] = newSessionID()
-		case cmd[i] == "--model" && (full || flagValue(r.Command, "--model") == modelOpus):
+		case cmd[i] == "--model" && (o.full || flagValue(r.Command, "--model") == modelOpus):
 			cmd[i+1] = modelOpus // a session moved to Opus stays there
 		}
 	}
-	if full {
+	if o.full {
 		prompt = []byte(strings.Replace(string(prompt), " --light", "", 1))
 	}
 	lim := r.LimitDuration()
-	if limit != 0 {
-		lim = limit
+	if o.limit != 0 {
+		lim = o.limit
 	}
 	if lim < time.Second || lim > 24*time.Hour {
-		return usagef("job again: --limit %s: want 1s to 24h", lim)
+		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
-	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd}
+	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
+		AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops}
+	// Once: of agains at once one makes the mark; a later one finds it
+	// naming the run it made. A start that fails takes it back.
 	co, err := c.coord()
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	var commit func(string) error
-	abort := func() {}
+	commitMark, abortMark, err := co.takeMark(r.ID+".again", func(id string) string { return id }, func(id string, _ mark) error {
+		if nr, err := runs.Get(dir, id, time.Now()); err == nil && nr.Ended() {
+			return alreadyGoing{run: id, ran: true}
+		}
+		return alreadyGoing{run: id}
+	})
+	if err != nil {
+		return fail(err)
+	}
+	commitActive, abort := func(string) error { return nil }, func() {}
 	if r.Ticket != "" {
-		if commit, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, lim); err != nil {
-			return fmt.Errorf("job again %s: %w", r.ID, err)
+		if commitActive, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, lim); err != nil {
+			abortMark()
+			return fail(fmt.Errorf("job again %s: %w", r.ID, err))
 		}
 	}
 	// Its facts carry on the run it retries; its drops, the prompt's.
@@ -903,10 +994,12 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	if p, ok := readSide(dir, first.ID); ok {
 		side.Drops = p.Drops
 	}
+	commit := func(id string) error { return errors.Join(commitMark(id), commitActive(id)) }
 	nr, err := c.startRun(rec, prompt, runs.DefaultRings, side, commit)
 	if err != nil {
 		abort()
-		return err
+		abortMark()
+		return fail(err)
 	}
 	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
@@ -914,7 +1007,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 		// starts a second planner run beside it.
 		co.recordHandouts([]send{{"planner-job", r.Ticket}})
 	}
-	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "again: "+r.ID)
+	return nr, nil
 }
 
 // stillRunning says why a live run can't go again yet, and the way out.
@@ -927,6 +1020,9 @@ const diedText = "Your run died. Go on from your last step."
 
 // goOnText is what a session a usage limit stopped is resumed with.
 const goOnText = "A usage limit stopped your run; it has lifted. Go on from your last step."
+
+// apiGoOnText is what a session an API outage stopped is resumed with.
+const apiGoOnText = "An API outage stopped your run; its pause has lifted. Go on from your last step."
 
 // escalateText is what a build session that ended on a question, with
 // no Escalation: posted, is resumed with, so the planner can answer it.
@@ -949,9 +1045,7 @@ func runResume(ctx context.Context, c *call) error {
 	return nil
 }
 
-// resumeRun resumes a run's session as a new run with the same command,
-// ticket and limit: with the answer on stdin; with --died, once, after
-// the run died; with --opus, on Opus at high effort.
+// resumeRun resumes a run's session, as resume does, and prints the run.
 func resumeRun(ctx context.Context, c *call) error {
 	died := c.fs.Bool("died", false, "the run died: resume it once with \""+diedText+"\"")
 	opus := c.fs.Bool("opus", false, "resume on Opus at high effort, as for a junior build's stuck session")
@@ -967,28 +1061,48 @@ func resumeRun(ctx context.Context, c *call) error {
 	if !runs.Supported {
 		return usagef("resume needs a unix system")
 	}
-	if err := c.needActor("resume"); err != nil {
+	nr, err := c.resume(ctx, resumeOpts{run: c.args[0], died: *died, opus: *opus, escalate: *escalate, decide: *decide, goOn: *goOn, answer: c.readStdin})
+	if err != nil {
 		return err
+	}
+	return c.printStarted(nr, dash(flagValue(nr.Command, "--model")), "resumes "+c.args[0])
+}
+
+// resumeOpts are what resume takes: the run, which fixed text it goes on
+// with, and where an answer comes from when none does (nil: none).
+type resumeOpts struct {
+	run                                string
+	died, opus, escalate, decide, goOn bool
+	answer                             func() ([]byte, error)
+}
+
+// resume resumes a run's session as a new run with the same command,
+// ticket, limit and chain: with the answer; with died, once, after the
+// run died; with opus, on Opus at high effort.
+func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
+	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.needActor("resume"); err != nil {
+		return fail(err)
 	}
 	dir, err := c.besideStore("runs")
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	now := time.Now()
-	r, err := runs.Get(dir, c.args[0], now)
+	r, err := runs.Get(dir, o.run, now)
 	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("%w: run %s", ticket.ErrNotFound, c.args[0])
+		return fail(fmt.Errorf("%w: run %s", ticket.ErrNotFound, o.run))
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	switch {
 	case r.Launcher != c.actor:
-		return fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher))
+		return fail(fmt.Errorf("%w: resume: run %s is %s's: only the bot that launched it resumes it", ticket.ErrForbidden, r.ID, dash(r.Launcher)))
 	case !r.Ended():
-		return fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r))
-	case *died && r.State != runs.Died && !r.LauncherStopped():
-		return fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State)
+		return fail(fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r)))
+	case o.died && r.State != runs.Died && !r.LauncherStopped():
+		return fail(fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State))
 	}
 	session := r.SessionID
 	if session == "" {
@@ -998,86 +1112,96 @@ func resumeRun(ctx context.Context, c *call) error {
 		session = flagValue(r.Command, "--resume")
 	}
 	if session == "" {
-		return fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID)
+		return fail(fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID))
 	}
 	all, err := runs.List(dir, now, true)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	nudge := ""
 	switch {
-	case *opus:
+	case o.opus:
 		nudge = "opus"
-	case *escalate:
+	case o.escalate:
 		nudge = "escalate"
-	case *decide:
+	case o.decide:
 		nudge = "decide"
 	}
-	for _, o := range all {
-		if neverRan(o) {
+	for _, x := range all {
+		if neverRan(x) {
 			continue // its start failed: it holds nothing
 		}
-		if nudge != "" && o.Nudge == nudge && flagValue(o.Command, "--resume") == session {
-			return fmt.Errorf("%w: resume --%s: session %s had it once already (%s): it goes up instead", ticket.ErrStatusConflict, nudge, session, o.ID)
+		if nudge != "" && x.Nudge == nudge && flagValue(x.Command, "--resume") == session {
+			return fail(fmt.Errorf("%w: resume --%s: session %s had it once already (%s): it goes up instead", ticket.ErrStatusConflict, nudge, session, x.ID))
 		}
-		if o.ResumeOf == r.ID {
-			return alreadyGoing{o.ID} // only its launcher resumes a run: this bot did
+		if x.ResumeOf == r.ID {
+			return fail(alreadyGoing{run: x.ID}) // only its launcher resumes a run: this bot did
 		}
-		if *died && o.AfterDeath && flagValue(o.Command, "--resume") == session {
-			return fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, o.ID)
+		if o.died && x.AfterDeath && flagValue(x.Command, "--resume") == session {
+			return fail(fmt.Errorf("%w: resume --died: session %s was resumed once after a death already (%s): report it to whoever handed you the job", ticket.ErrStatusConflict, session, x.ID))
 		}
 	}
 	text := ""
 	switch {
-	case *died:
+	case o.died:
 		text = diedText
-	case *escalate:
+	case o.escalate:
 		text = escalateText
-	case *decide:
+	case o.decide:
 		text = decideText
-	case *goOn:
+	case o.goOn && apiDown(r):
+		text = apiGoOnText
+	case o.goOn:
 		text = goOnText
 	default:
-		b, err := c.readStdin()
-		if err != nil {
-			return err
+		var b []byte
+		if o.answer != nil {
+			if b, err = o.answer(); err != nil {
+				return fail(err)
+			}
 		}
 		text = strings.TrimSpace(string(b))
-		if text == "" && *opus {
+		if text == "" && o.opus {
 			text = opusText
 		}
 		if text == "" {
-			return usagef("resume: send the answer on stdin, in a quoted heredoc")
+			return fail(usagef("resume: send the answer on stdin, in a quoted heredoc"))
 		}
 	}
-	cmd := resumeCommand(r.Command, session, *opus)
+	cmd, err := c.stopHook(resumeCommand(r.Command, session, o.opus), r.Job)
+	if err != nil {
+		return fail(err)
+	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		ResumeOf: r.ID, AfterDeath: *died, Nudge: nudge,
+		ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops,
 	}
 	if err := c.mayStart(); err != nil {
-		return err
+		return fail(err)
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
-		return err
+		if errors.Is(err, ticket.ErrStatusConflict) {
+			err = movedOn{run: r.ID, err: err}
+		}
+		return fail(err)
 	}
 	// A run resumes once: of resumes at once, one makes its marker.
 	co, err := c.coord()
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	commitMark, abortMark, err := co.takeMark(r.ID+".resumed", func(id string) string { return id }, func(id string, _ mark) error {
-		return alreadyGoing{id}
+		return alreadyGoing{run: id}
 	})
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	// And one run of a job on a ticket at a time, resumed or not.
 	commitActive, abortActive := func(string) error { return nil }, func() {}
 	if r.Ticket != "" && r.Job != "" {
 		if commitActive, abortActive, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, rec.LimitDuration()); err != nil {
 			abortMark()
-			return fmt.Errorf("resume %s: %w", r.ID, err)
+			return fail(fmt.Errorf("resume %s: %w", r.ID, err))
 		}
 	}
 	side := &sideFacts{Why: "resume", PromptBytes: ptr(len(text) + 1)}
@@ -1087,11 +1211,11 @@ func resumeRun(ctx context.Context, c *call) error {
 	if err != nil {
 		abortMark()
 		abortActive()
-		return err
+		return fail(err)
 	}
 	// Its result is acted on: pickup stops showing it, and its rings stop.
 	runs.Ack(dir, r.ID, c.actor, time.Now())
-	return c.printStarted(nr, dash(flagValue(cmd, "--model")), "resumes "+r.ID)
+	return nr, nil
 }
 
 // thisSlotBinary is cmd with its slot wrapper on this binary as it is now,

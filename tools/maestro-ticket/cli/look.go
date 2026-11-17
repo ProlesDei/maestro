@@ -178,9 +178,9 @@ var lookPrefixes = []string{"Split into", "Answer:", "QA:", "Review:", "Rereview
 // the fixed writes, and one line per message to send. What needs reading
 // comes out as judge rows, for --judge to hand to one Opus session.
 func runLook(ctx context.Context, c *call) error {
-	limit := c.fs.Int("limit", -1, "work runs at once, as your memories set (required; 0 hands out no build)")
+	limit := c.fs.Int("limit", -1, "work runs at once: a one-off, or the planner's old way to set it (default: rules set limit's; 0 hands out no build)")
 	stall := c.fs.Duration("stall", ticket.DefaultStall, "how long a handout stands before look sends the job again")
-	judge := c.fs.Bool("judge", false, "start one judge session on the judge rows, the standing rules on stdin")
+	judge := c.fs.Bool("judge", false, "start one judge session on the judge rows, with the standing rules of maestro-ticket rules")
 	report := c.fs.Bool("report", false, "add the fixed lines of the report to the chief of staff")
 	if err := c.parse(); err != nil {
 		return err
@@ -188,22 +188,26 @@ func runLook(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
-	if *limit < 0 {
-		return usagef("look: pass --limit <n>, the work runs at once your memories set")
-	}
 	if *stall <= 0 {
 		return usagef("look: --stall must be more than 0")
 	}
 	if err := c.needActor("look"); err != nil {
 		return err
 	}
-	rules := ""
+	lim, alerts, err := c.lookLimit(*limit)
+	if err != nil {
+		return err
+	}
 	if *judge {
 		b, err := c.readStdin()
 		if err != nil {
 			return err
 		}
-		rules = strings.TrimSpace(string(b))
+		more, err := c.seedRules(string(b))
+		if err != nil {
+			return err
+		}
+		alerts = append(alerts, more...)
 	}
 	hdir, err := c.besideStore("handouts")
 	if err != nil {
@@ -225,15 +229,22 @@ func runLook(ctx context.Context, c *call) error {
 	}
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
-		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
+		out, err = c.look(ctx, s, lookOpts{limit: lim, stall: *stall, report: *report, paused: paused,
 			stopped: stopped, handouts: co, runs: rdir, host: co.host})
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	if len(alerts) > 0 {
+		out.Alerts = append(alerts, out.Alerts...)
+	}
 	if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
-		c.startJudge(ctx, &out, rules, co)
+		if rules, ok := c.standingRules(); ok {
+			c.startJudge(ctx, &out, rules, co)
+		} else {
+			out.Errors = append(out.Errors, "judge: no maestro/rules.md: set the planner's standing rules with maestro-ticket rules text")
+		}
 	}
 	co.pruneHandouts(time.Now())
 	if err := c.out(out, func(w io.Writer) { printLook(w, out) }); err != nil {
@@ -403,7 +414,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			// Until the limit is a --stall past lifting: a ring lost to a
 			// reboot must not hold it for good.
 			limited := r.Ended() && r.Job != "" && func() bool {
-				out, reset := outcomeOf(r)
+				out, reset := routeOutcome(r)
 				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
 			}()
 			if (!r.Ended() || fresh || limited) && r.Ticket != "" {

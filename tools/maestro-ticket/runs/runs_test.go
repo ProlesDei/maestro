@@ -250,13 +250,14 @@ func TestRecordJSONKeys(t *testing.T) {
 	want := []string{
 		"ID id", "Launcher launcher", "Ticket ticket,omitempty", "Limit limit", "Command command",
 		"Job job,omitempty", "Tickets tickets,omitempty", "ResumeOf resume_of,omitempty",
-		"AfterDeath after_death,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",
+		"AfterDeath after_death,omitempty", "AgainOf again_of,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",
 		"State state", "PID pid,omitempty", "EndedAt ended_at,omitempty", "Exit exit,omitempty",
 		"SessionID session_id,omitempty", "IsError is_error,omitempty", "Reply reply,omitempty",
 		"Error error,omitempty", "Frozen frozen,omitempty", "Rings rings,omitempty", "RingError ring_error,omitempty",
 		"Rang rang,omitempty", "OrphanTries orphan_tries,omitempty", "LaunchID launch_id,omitempty",
 		"Host host,omitempty", "ChainOf chain_of,omitempty", "Hops hops,omitempty",
 		"Chained chained,omitempty", "Routed routed,omitempty", "Notify notify,omitempty",
+		"Settling settling,omitempty",
 		"AckedAt acked_at,omitempty", "AckedBy acked_by,omitempty",
 	}
 	var got []string

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -53,6 +55,9 @@ type routed struct {
 	// Reply is the whole reply, shown only when the bot must read it: a
 	// question, a failure, or a text job whose reply is the answer.
 	Reply string `json:"reply,omitempty"`
+	// quiet: the run ended short, but its ticket moved on without it, so
+	// nothing is left to route. Never stored: only its own end reads it.
+	quiet bool
 }
 
 var (
@@ -66,9 +71,12 @@ var (
 	diskFullText    = regexp.MustCompile(`(?i)(infra block: disk full|infra block: low_disk)`)
 	diskFailText    = regexp.MustCompile(`(?i)(\blow_disk\b|no space left on device)`)
 	refusedText     = regexp.MustCompile(`(?i)^[a-z][a-z -]*: refused\b`)
-	fullModelText   = regexp.MustCompile(`^review: stopped: tier \d+ needs the full model`)
-	hexSHA          = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
-	shortSHA        = regexp.MustCompile(`\bat ([0-9a-f]{7,40})\b`)
+	// Claude Code's error reply once the API stayed down or overloaded
+	// past its own retries: the whole team's outage, not the run's.
+	apiDownText   = regexp.MustCompile(`(?i)^API Error: (?:5[0-9]{2}\b|.*\boverloaded)`)
+	fullModelText = regexp.MustCompile(`^review: stopped: tier \d+ needs the full model`)
+	hexSHA        = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+	shortSHA      = regexp.MustCompile(`\bat ([0-9a-f]{7,40})\b`)
 )
 
 // headLine is a reply's first line, cut to 200 bytes, since a bot reads
@@ -116,6 +124,31 @@ func outcomeOf(r runs.Record) (outcome, reset string) {
 		return outQuestion, ""
 	}
 	return outDone, ""
+}
+
+// apiPause is how long every job waits once an API outage ended a run.
+const apiPause = 10 * time.Minute
+
+// apiDown reports whether an API outage failed r.
+func apiDown(r runs.Record) bool {
+	out, _ := outcomeOf(r)
+	return out == outFailed && apiDownText.MatchString(firstLine(r.Reply))
+}
+
+// routeOutcome sorts an ended run for routing: as outcomeOf, but a run an
+// API outage failed waits as one a usage limit stopped does, on a short
+// pause for the whole team, and its session goes on as it lifts. A retry
+// spent inside the outage would only fail again and block its ticket.
+// Stats keep outcomeOf's failed.
+func routeOutcome(r runs.Record) (outcome, reset string) {
+	if !apiDown(r) {
+		return outcomeOf(r)
+	}
+	ended := time.Now()
+	if r.EndedAt != nil {
+		ended = *r.EndedAt
+	}
+	return outUsageLimit, ended.Add(apiPause).UTC().Format(time.RFC3339)
 }
 
 // latest is a ticket's newest comment, or the zero comment.
@@ -216,12 +249,31 @@ func goalDone(ctx context.Context, s ticket.Store, goal string) (bool, error) {
 // textJobs reply with what the bot asked for: it reads the reply.
 var textJobs = map[string]bool{"plan": true, "rule": true, "finish": true, "judge": true, "cos": true, "qa-ask": true}
 
-// route sorts one ended job and says what comes next. It writes to the
-// ticket only for the fixed follow-up a timed-out review needs, keyed so
-// a second pickup of the same run writes nothing new.
+// route sorts one ended job and says what comes next. Its writes to the
+// ticket are keyed, so a second pickup of the same run writes nothing new.
+// A run that ended short always gets a line, a command or a reply.
 func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed, error) {
+	out, err := c.routeRun(ctx, s, r)
+	if err == nil {
+		ensureRouted(r, &out)
+	}
+	return out, err
+}
+
+// ensureRouted gives a run that ended short, and that its route gave no
+// line, command or reply, one fault line to the chief of staff, so no such
+// end is acked unseen. A ticket closed or moved on has nothing to route.
+func ensureRouted(r runs.Record, out *routed) {
+	if out.Outcome == outDone || len(out.Send)+len(out.Do) > 0 || out.Reply != "" || out.quiet || ticket.Status(out.Status).Terminal() {
+		return
+	}
+	line := strings.TrimSpace(r.Job + " " + out.Outcome + " " + r.ID + " " + r.Ticket)
+	out.Send = append(out.Send, send{"chief-of-staff", line + ": nothing routed"})
+}
+
+func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (routed, error) {
 	out := routed{Run: r.ID, Job: r.Job, Ticket: r.Ticket, First: headLine(r.Reply), Send: []send{}, Do: []string{}, Wrote: []string{}}
-	out.Outcome, out.Reset = outcomeOf(r)
+	out.Outcome, out.Reset = routeOutcome(r)
 	if out.First == "" {
 		out.First = headLine(r.Error)
 	}
@@ -248,7 +300,11 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		until := limitLifts(r, out.Reset)
 		if co, err := c.coord(); err == nil && until.After(time.Now()) {
 			// One line to the planner per pause, not one per stopped run.
-			if co.setPause(pause{Until: until, Why: strings.TrimSpace("usage limit " + resetSuffix(out.Reset))}, time.Now()) {
+			why := "usage limit"
+			if apiDown(r) {
+				why = "API outage"
+			}
+			if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
@@ -285,13 +341,6 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 		}
 		return out, nil
 	}
-	// A plan, rule or finish run that gave no result frees its ticket for
-	// the next look to start again.
-	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && out.Outcome != outDone && out.Outcome != outQuestion && r.Ticket != "" {
-		if co, err := c.coord(); err == nil {
-			co.dropHandout(r.Ticket, "planner-job")
-		}
-	}
 	if textJobs[r.Job] {
 		switch r.Job {
 		case "judge":
@@ -304,26 +353,39 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if len(sent) > 0 && r.Ticket != "" {
 				// Its ticket waits for the answer, sent up, so no look
 				// plans it again however long the owner takes.
-				if err := c.parkForAnswer(ctx, s, r, &out); err != nil {
+				if err := c.parkForAnswer(ctx, s, r, cardWait, &out); err != nil {
 					out.Wrote = append(out.Wrote, "not parked for the answer: "+err.Error())
 				}
 			}
 			// A question beside cards waits on their answers; alone, the
-			// session decides.
+			// session decides. One that gave no result runs again once.
+			retry := false
 			switch {
-			case out.Outcome != outQuestion || len(sent) > 0:
-			case !c.nudged(r, "decide"):
+			case len(sent) > 0:
+			case out.Outcome == outQuestion && !c.nudged(r, "decide"):
 				out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --decide")
-			default: // it asked again: the question goes up as a card
+			case out.Outcome == outQuestion: // it asked again: the question goes up as a card
 				out.Send = append(out.Send, send{"chief-of-staff", r.Job + " " + r.ID + ": What: a planning session asked twice | Question: " + headLine(lastLine(r.Reply))})
 				if r.Ticket != "" {
-					if err := c.parkForAnswer(ctx, s, r, &out); err != nil {
+					if err := c.parkForAnswer(ctx, s, r, cardWait, &out); err != nil {
 						out.Wrote = append(out.Wrote, "not parked for the answer: "+err.Error())
 					}
 				}
+			case out.Outcome != outDone:
+				var err error
+				if retry, err = c.planFailed(ctx, s, r, &out); err != nil {
+					return out, err
+				}
+			}
+			// One that gave no result and won't run again frees its ticket
+			// for the next look to start again.
+			if out.Outcome != outDone && out.Outcome != outQuestion && r.Ticket != "" && !retry {
+				if co, err := c.coord(); err == nil {
+					co.dropHandout(r.Ticket, "planner-job")
+				}
 			}
 		default: // cos, qa-ask: the asker reads the answer
-			out.Reply = r.Reply
+			out.Reply = cmp.Or(r.Reply, out.First)
 		}
 		return out, nil
 	}
@@ -390,11 +452,14 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("block " + id + ": " + firstLine(last.Body))
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Handoff:") >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
 		case c.stoppedMidWork(r, id, &out):
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
+			// The first end with no verdict at a head runs again, in code.
+			out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
 		default:
 			out.Mismatch = "a Review: GO, a Kickback: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -435,11 +500,13 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, "Review: GO") >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
 		case c.stoppedMidWork(r, id, &out):
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
+			out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // the first with no verdict, as for review
 		default:
 			out.Mismatch = "done, a Kickback: QA fail, a Rereview: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -496,8 +563,14 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		if ready {
 			planner("slot free " + id)
 		}
+	case (out.Outcome == outTimedOut || c.retryableFail(r, out.Outcome)) && (t.Status == ticket.StatusInProgress || t.Status == ticket.StatusTodo) && (t.LiveClaim() == nil || ownClaim() != nil):
+		// A build that ran out of time or failed runs again once, in
+		// code; one a freeze ended, twice at its limit.
+		if err := c.buildStopped(ctx, s, r, d, &out); err != nil {
+			return out, err
+		}
 	case out.Outcome == outTimedOut:
-		planner("timed_out " + id)
+		planner("timed_out " + id) // the ticket moved on, or another bot holds it
 	case (out.Outcome == outQuestion || escalated) && !outside && flagValue(r.Command, "--model") == modelSonnet && !c.nudged(r, "opus"):
 		// The junior's session holds the ticket; on Opus it settles the
 		// question itself or sends it up (owner's ruling, Nov 14 2026).
@@ -536,14 +609,14 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 			out.Wrote = append(out.Wrote, id+" blocked: Escalation: build: "+trim(q, 80))
 		}
 		planner("block " + id + ": " + headLine(body))
-	case out.Outcome == outRefused:
-		planner("refused " + id + ": " + out.First)
+	case out.Outcome == outRefused || refusedText.MatchString(firstLine(r.Reply)):
+		planner("refused " + id + ": " + out.First) // a refusal that exited non-zero too
 	// A build that crashed before its session claimed the ticket leaves it
 	// in todo: those count too.
 	case (t.Status == ticket.StatusInProgress || t.Status == ticket.StatusTodo) && c.stoppedBuilds(r, d) >= 2 && (t.LiveClaim() == nil || ownClaim() != nil):
 		// The third build since its last handoff or send-back that stopped
 		// with nothing to show: no fourth by rote. The judge looks.
-		if err := c.blockStopped(ctx, s, r, d, &out); err != nil {
+		if err := c.blockStopped(ctx, s, r, d, stoppedThrice, &out); err != nil {
 			return out, err
 		}
 	case c.stoppedMidWork(r, id, &out):
@@ -582,16 +655,20 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 		planner("timed_out " + id)
 		return out, nil
 	}
-	if r.Frozen {
+	// Once at a head: again, with twice the time; after a freeze, at the
+	// same limit, twice. The head's start is its Handoff:, or with none,
+	// the ticket's latest move into review: never a time a write moves.
+	h, ok := latestWith(d, "Handoff:")
+	since := h.CreatedAt
+	if !ok {
+		var err error
+		if since, err = movedIntoReview(ctx, s, d); err != nil {
+			return out, err
+		}
+	}
+	if r.Frozen && c.frozenRuns(r, since) < maxFrozenReruns {
 		out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // a freeze ended it: the same limit again
 		return out, nil
-	}
-	// Once at a head: again, with twice the time. The head's start is its
-	// Handoff:, or with none, the ticket's move into review.
-	h, ok := latestWith(d, "Handoff:")
-	since := t.UpdatedAt
-	if ok {
-		since = h.CreatedAt
 	}
 	if !c.timedOutBefore(r, since) {
 		out.Do = append(out.Do, fmt.Sprintf("maestro-ticket job again %s --limit %s", r.ID, short(min(2*r.LimitDuration(), 4*time.Hour))))
@@ -643,21 +720,35 @@ func limitLifts(r runs.Record, reset string) time.Time {
 
 // noVerdictRuns counts the other runs of r's job on its ticket since its
 // latest mark (a Handoff: for review, a Review: GO for QA) that ended
-// with no verdict, deaths and limits aside.
+// with no verdict, deaths and limits aside. A run that ended past the Stop
+// hook's blocks counts even if it then timed out: the hook kept it going.
 func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
+	return len(c.noVerdicts(r, d, mark))
+}
+
+func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Record {
 	since := d.CreatedAt
 	if cm, ok := latestWith(d, mark); ok {
 		since = cm.CreatedAt
 	}
-	n := 0
+	var list []runs.Record
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut && !o.LauncherStopped() {
-				n++
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) && !o.LauncherStopped() {
+				list = append(list, o)
 			}
 		}
 	}
-	return n
+	return list
+}
+
+// verdictMark is the note a review or QA run's count of runs with no
+// verdict starts from.
+func verdictMark(job string) string {
+	if job == "qa" || job == "live" {
+		return "Review: GO"
+	}
+	return "Handoff:"
 }
 
 // blockNoVerdict blocks a ticket whose review or QA keeps ending with no
@@ -668,7 +759,19 @@ func (c *call) blockNoVerdict(ctx context.Context, s ticket.Store, r runs.Record
 	if r.Job == "qa" {
 		role = ticket.RoleQALead
 	}
-	body := fmt.Sprintf("Escalation: %s ended 3 times with no verdict; the last said: %s\n%s\nReturn-role: %s", r.Job, trim(out.First, 200), postedBy(r), role)
+	// Say how many ended past the Stop hook: those sessions were told to
+	// post a verdict and still didn't.
+	capped := 0
+	for _, o := range append(c.noVerdicts(r, d, verdictMark(r.Job)), r) {
+		if c.stopCapped(o.ID) {
+			capped++
+		}
+	}
+	hook := ""
+	if capped > 0 {
+		hook = fmt.Sprintf(", %d of them past the Stop hook's blocks", capped)
+	}
+	body := fmt.Sprintf("Escalation: %s ended 3 times with no verdict%s; the last said: %s\n%s\nReturn-role: %s", r.Job, hook, trim(out.First, 200), postedBy(r), role)
 	if _, err := s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-noverdict"}); err != nil {
 		return err
 	}
@@ -682,9 +785,14 @@ func (c *call) blockNoVerdict(ctx context.Context, s ticket.Store, r runs.Record
 	return nil
 }
 
-// parkForAnswer blocks a ticket a planner session sent a card up for,
-// and marks it Sent up, so it waits for the answer; keyed by the run.
-func (c *call) parkForAnswer(ctx context.Context, s ticket.Store, r runs.Record, out *routed) error {
+// cardWait ends the note that parks a ticket whose planning run sent a
+// card up.
+const cardWait = "waits on its card"
+
+// parkForAnswer marks a ticket a planner session sent a card up for, or
+// whose planning runs keep failing, Sent up, so it waits for the answer;
+// keyed by the run. why ends the note.
+func (c *call) parkForAnswer(ctx context.Context, s ticket.Store, r runs.Record, why string, out *routed) error {
 	tid, err := ticket.ParseID(r.Ticket)
 	if err != nil {
 		return err
@@ -702,30 +810,41 @@ func (c *call) parkForAnswer(ctx context.Context, s ticket.Store, r runs.Record,
 	}
 	// The note alone parks it: look leaves a ticket under Sent up: be,
 	// and the session the answer resumes finds it as it left it.
-	req := ticket.CommentRequest{ID: tid, Body: "Sent up: chief of staff: the " + r.Job + " run " + r.ID + " waits on its card\n" + postedBy(r), Actor: c.actor, IdempotencyKey: r.ID + "-park"}
+	req := ticket.CommentRequest{ID: tid, Body: "Sent up: chief of staff: the " + r.Job + " run " + r.ID + " " + why + "\n" + postedBy(r), Actor: c.actor, IdempotencyKey: r.ID + "-park"}
 	if cl := t.LiveClaim(); cl != nil {
 		req.Holder, req.Token = cl.Holder, cl.Token
 	}
 	if _, err := s.Comment(ctx, req); err != nil {
 		return err
 	}
-	out.Wrote = append(out.Wrote, r.Ticket+" waits on the card, sent up")
+	if why == cardWait {
+		out.Wrote = append(out.Wrote, r.Ticket+" waits on the card, sent up")
+	} else {
+		out.Wrote = append(out.Wrote, r.Ticket+" sent up: "+why)
+	}
 	return nil
 }
 
-// stoppedBuilds counts the other build runs on r's ticket that ended
-// with no handoff since its latest Handoff:, Kickback: or Answer:.
-func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
+// buildHead is when a ticket's build last began afresh: its latest
+// Handoff:, Kickback: or Answer:, else its making.
+func buildHead(d ticket.Detail) time.Time {
 	since := d.CreatedAt
 	for _, p := range []string{"Handoff:", "Kickback:", "Answer:"} {
 		if cm, ok := latestWith(d, p); ok && cm.CreatedAt.After(since) {
 			since = cm.CreatedAt
 		}
 	}
+	return since
+}
+
+// stoppedBuilds counts the other build runs on r's ticket that ended
+// with no handoff since its build head.
+func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
+	since := buildHead(d)
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen && !o.LauncherStopped() {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && !o.Frozen && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -733,11 +852,17 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	return n
 }
 
+// Why blockStopped blocks: the builds' stops, as its note and write say.
+const (
+	stoppedThrice = "stopped 3 times"
+	stoppedTwice  = "timed out or failed twice"
+)
+
 // blockStopped blocks a ticket whose builds keep stopping short, with an
-// Escalation the judge reads.
-func (c *call) blockStopped(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out *routed) error {
+// Escalation the judge reads; why says how they stopped.
+func (c *call) blockStopped(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, why string, out *routed) error {
 	t, id := d.Ticket, d.ID.String()
-	body := fmt.Sprintf("Escalation: build stopped 3 times with no handoff; the last said: %s\n%s\nReturn-role: engineer", trim(out.First, 200), postedBy(r))
+	body := fmt.Sprintf("Escalation: build %s with no handoff; the last said: %s\n%s\nReturn-role: engineer", why, trim(out.First, 200), postedBy(r))
 	req := ticket.CommentRequest{ID: t.ID, Body: body, Actor: c.actor, IdempotencyKey: r.ID + "-stopped"}
 	move := ticket.TransitionRequest{ID: t.ID, From: t.Status, To: ticket.StatusBlocked, Actor: c.actor, Note: "its builds keep stopping", IdempotencyKey: r.ID + "-stopped-move"}
 	if cl := t.LiveClaim(); cl != nil && ticket.HolderBot(cl.Holder) == ticket.HolderBot(r.Launcher) {
@@ -751,9 +876,209 @@ func (c *call) blockStopped(ctx context.Context, s ticket.Store, r runs.Record, 
 		return err
 	}
 	out.Status = string(ticket.StatusBlocked)
-	out.Wrote = append(out.Wrote, id+" blocked: its builds stopped 3 times")
+	out.Wrote = append(out.Wrote, id+" blocked: its builds "+why)
 	out.Send = append(out.Send, send{"planner", "block " + id + ": " + headLine(body)})
 	return nil
+}
+
+// maxFrozenReruns is how often a run a freeze ended goes again at its own
+// limit, per head: a host that sleeps every night reruns no job forever.
+const maxFrozenReruns = 2
+
+// frozenRuns counts the other runs of r's job on its ticket since since
+// that a freeze ended.
+func (c *call) frozenRuns(r runs.Record, since time.Time) int {
+	n := 0
+	for _, o := range c.allRuns() {
+		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.State == runs.TimedOut && o.Frozen && o.StartedAt.After(since) {
+			n++
+		}
+	}
+	return n
+}
+
+// hardStops counts the other builds on r's ticket since since that ran
+// out of time or failed as a retry would answer: never a stop on purpose,
+// a refusal or a start that never ran. A freeze past its reruns counts.
+func (c *call) hardStops(r runs.Record, since time.Time) int {
+	n := 0
+	for _, o := range c.allRuns() {
+		if o.ID == r.ID || o.Job != "build" || o.Ticket != r.Ticket || !o.Ended() || !o.StartedAt.After(since) {
+			continue
+		}
+		if out, _ := routeOutcome(o); (o.State == runs.TimedOut && !o.Frozen) || c.retryableFail(o, out) {
+			n++
+		}
+	}
+	return n + max(c.frozenRuns(r, since)-maxFrozenReruns, 0)
+}
+
+// stoppedOnPurpose: someone stopped the run (maestro-ticket stop), or its
+// launcher was stopped. No retry answers either.
+func (c *call) stoppedOnPurpose(r runs.Record) bool {
+	if dir, err := c.besideStore("runs"); err == nil {
+		if _, ok := runs.StopAsked(dir, r.ID); ok {
+			return true
+		}
+	}
+	return r.LauncherStopped()
+}
+
+// retryableFail: r failed in a way a fresh run may not, such as an API
+// error or a crash, not a refusal, a stop on purpose or a start that never
+// ran.
+func (c *call) retryableFail(r runs.Record, outcome string) bool {
+	return outcome == outFailed && !neverRan(r) && !refusedText.MatchString(firstLine(r.Reply)) && !c.stoppedOnPurpose(r)
+}
+
+// buildStopped answers a build that ran out of time or failed: it runs
+// again once at its head, with twice the time after a timeout, or at its
+// limit after a freeze, twice. A second such stop at one head, a freeze
+// past its reruns, or a third stop of any kind blocks the ticket for the
+// judge. The dead session's claim goes first, plainly (no expiry), or the
+// new session would find the ticket held.
+func (c *call) buildStopped(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out *routed) error {
+	since := buildHead(d)
+	again := "maestro-ticket job again " + r.ID
+	switch {
+	case r.Frozen && c.frozenRuns(r, since) < maxFrozenReruns:
+	case c.stoppedBuilds(r, d) >= 2:
+		return c.blockStopped(ctx, s, r, d, stoppedThrice, out)
+	case c.hardStops(r, since) >= 1:
+		return c.blockStopped(ctx, s, r, d, stoppedTwice, out)
+	case out.Outcome == outTimedOut:
+		again += " --limit " + short(min(2*r.LimitDuration(), 4*time.Hour))
+	}
+	if err := c.releaseOwn(ctx, s, d.Ticket, r, r.ID+"-release", out); err != nil {
+		return err
+	}
+	out.Do = append(out.Do, again)
+	return nil
+}
+
+// releaseOwn frees the live claim on t that r's bot holds, plainly, keyed
+// by key, for the run that goes again. A claim that moved on meanwhile is
+// no longer the dead session's: it stays.
+func (c *call) releaseOwn(ctx context.Context, s ticket.Store, t ticket.Ticket, r runs.Record, key string, out *routed) error {
+	cl := t.LiveClaim()
+	if cl == nil || ticket.HolderBot(cl.Holder) != ticket.HolderBot(r.Launcher) {
+		return nil
+	}
+	_, err := s.Release(ctx, ticket.ReleaseRequest{ID: t.ID, Holder: cl.Holder, Token: cl.Token, Actor: c.actor, IdempotencyKey: key})
+	switch {
+	case err == nil:
+		out.Wrote = append(out.Wrote, "released "+t.ID.String()+" for the retry")
+	case errors.Is(err, ticket.ErrLeaseLost), errors.Is(err, ticket.ErrClaimed), errors.Is(err, ticket.ErrIdempotencyConflict), errors.Is(err, ticket.ErrVersionConflict):
+	default:
+		return err
+	}
+	return nil
+}
+
+// planFailed answers a plan, rule or finish run that failed, timed out or
+// refused with no card: it runs again once, in code. A second such end,
+// a refusal, or a ticket another bot holds goes to the chief of staff as
+// one fault line, and the ticket waits under Sent up: for the answer. A
+// ticket that moved on needs neither. It reports whether the run goes
+// again.
+func (c *call) planFailed(ctx context.Context, s ticket.Store, r runs.Record, out *routed) (bool, error) {
+	var t ticket.Ticket
+	if r.Ticket != "" {
+		tid, err := ticket.ParseID(r.Ticket)
+		if err != nil {
+			return false, err
+		}
+		d, err := s.Get(ctx, tid)
+		if err != nil {
+			return false, err
+		}
+		if t = d.Ticket; t.Status.Terminal() || t.Status == ticket.StatusInReview {
+			out.Wrote = append(out.Wrote, r.Ticket+" moved on")
+			out.quiet = true
+			return false, nil
+		}
+	}
+	cl := t.LiveClaim()
+	held := cl != nil && ticket.HolderBot(cl.Holder) != ticket.HolderBot(r.Launcher)
+	if out.Outcome != outRefused && !held && !c.retriedBefore(r) {
+		if err := c.releaseOwn(ctx, s, t, r, r.ID+"-again-release", out); err != nil {
+			return false, err
+		}
+		out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
+		return true, nil
+	}
+	what := "failed twice"
+	switch {
+	case out.Outcome == outRefused:
+		what = "refused"
+	case held:
+		what = "failed"
+	}
+	line := what + " " + r.Job + " " + r.ID
+	switch {
+	case r.Ticket != "":
+		line += " " + r.Ticket
+	case r.Job == "plan":
+		if g := c.goalSlug(r); g != "" {
+			line += " goal " + g
+		}
+	}
+	out.Send = append(out.Send, send{"chief-of-staff", line})
+	if r.Ticket != "" && !held {
+		if err := c.parkForAnswer(ctx, s, r, what, out); err != nil {
+			out.Wrote = append(out.Wrote, "not parked for the answer: "+err.Error())
+		} else if err := c.releaseOwn(ctx, s, t, r, r.ID+"-again-release", out); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// retriedBefore reports whether r, or a run its session resumed from, was
+// a job again: a run goes again once.
+func (c *call) retriedBefore(r runs.Record) bool {
+	byID := map[string]runs.Record{}
+	for _, o := range c.allRuns() {
+		byID[o.ID] = o
+	}
+	for range 50 {
+		if r.AgainOf != "" {
+			return true
+		}
+		p, ok := byID[r.ResumeOf]
+		if !ok {
+			return false
+		}
+		r = p
+	}
+	return false
+}
+
+// goalText is how a goal plan's prompt names its goal.
+var goalText = regexp.MustCompile(`\bgoal ([a-z0-9][a-z0-9-]{0,59}):`)
+
+// goalSlug is the goal a goal plan's first prompt names, or "".
+func (c *call) goalSlug(r runs.Record) string {
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return ""
+	}
+	byID := map[string]runs.Record{}
+	for _, o := range c.allRuns() {
+		byID[o.ID] = o
+	}
+	for range 50 {
+		p, ok := byID[r.ResumeOf]
+		if !ok {
+			break
+		}
+		r = p
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, r.ID+".in"))
+	if m := goalText.FindSubmatch(b); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // postedBy marks a note pickup wrote for a run, so a later pickup of the
@@ -826,14 +1151,30 @@ func neverRan(r runs.Record) bool { return r.State == runs.Failed && r.PID == 0 
 
 // timedOutBefore reports whether another run of r's job on its ticket ran
 // out of time since since: a second timeout at one head goes up. One a
-// freeze caused (Frozen) counts as none.
+// freeze caused (Frozen) counts as none, up to its reruns.
 func (c *call) timedOutBefore(r runs.Record, since time.Time) bool {
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Ticket == r.Ticket && o.Job == r.Job && o.State == runs.TimedOut && !o.Frozen && o.StartedAt.After(since) {
 			return true
 		}
 	}
-	return false
+	return c.frozenRuns(r, since) > maxFrozenReruns
+}
+
+// movedIntoReview is when d last moved into review, from its events, else
+// when it was made.
+func movedIntoReview(ctx context.Context, s ticket.Store, d ticket.Detail) (time.Time, error) {
+	evs, err := s.Events(ctx, ticket.EventFilter{TicketID: d.ID, Type: ticket.EventTransitioned})
+	if err != nil {
+		return time.Time{}, err
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		var data struct{ To ticket.Status }
+		if json.Unmarshal(evs[i].Data, &data) == nil && data.To == ticket.StatusInReview {
+			return evs[i].CreatedAt, nil
+		}
+	}
+	return d.CreatedAt, nil
 }
 
 // qaTimedOut blocks a ticket whose QA ran out of time twice at one GO,
@@ -850,7 +1191,7 @@ func (c *call) qaTimedOut(ctx context.Context, s ticket.Store, r runs.Record, d 
 		planner("timed_out " + id)
 		return out, nil
 	}
-	if r.Frozen {
+	if r.Frozen && c.frozenRuns(r, gate.CreatedAt) < maxFrozenReruns {
 		out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // a freeze ended it: the same limit again
 		return out, nil
 	}
