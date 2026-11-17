@@ -888,6 +888,10 @@ func TestStatsChainedRun(t *testing.T) {
 	if len(rs) != 2 || rs[1].Job != "review" || rs[1].ChainOf != rs[0].ID {
 		t.Fatalf("runs on T-1: %+v", rs)
 	}
+	// A supervisor rings before it writes its row.
+	for deadline := time.Now().Add(30 * time.Second); statsRowCount(t, j.h.dir) < 2 && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+	}
 	for i, want := range [][4]string{{"junior-engineer", "build", "tier_junior", "ok"}, {"reviewer", "review", "route_full", "ok"}} {
 		var got [4]string
 		statsQuery(t, j.h.dir, `SELECT r.name, j.name, w.name, s.name FROM run_facts f JOIN codes r ON r.id = f.role
