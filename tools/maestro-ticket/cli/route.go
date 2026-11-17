@@ -394,6 +394,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		default:
 			out.Mismatch = "a Review: GO, a Kickback: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -438,6 +439,7 @@ func (c *call) route(ctx context.Context, s ticket.Store, r runs.Record) (routed
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
+		case c.stoppedMidWork(r, id, &out):
 		default:
 			out.Mismatch = "done, a Kickback: QA fail, a Rereview: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 			planner("mismatch " + id)
@@ -544,6 +546,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		if err := c.blockStopped(ctx, s, r, d, &out); err != nil {
 			return out, err
 		}
+	case c.stoppedMidWork(r, id, &out):
 	default:
 		out.Mismatch = "in_review with a Handoff:, found " + string(t.Status) + " " + quoteFirst(last.Body)
 		planner("build " + id + " stopped " + string(t.Status) + ": " + out.First)
@@ -649,7 +652,7 @@ func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && out != outTimedOut && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -722,7 +725,7 @@ func (c *call) stoppedBuilds(r runs.Record, d ticket.Detail) int {
 	n := 0
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == "build" && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen {
+			if out, _ := outcomeOf(o); out != outUsageLimit && out != outDied && !o.Frozen && !o.LauncherStopped() {
 				n++
 			}
 		}
@@ -801,6 +804,21 @@ func (c *call) nudged(r runs.Record, nudge string) bool {
 // resume refuses.
 func (c *call) diedBefore(r runs.Record) bool {
 	return c.sessionHad(r, func(o runs.Record) bool { return o.AfterDeath })
+}
+
+// stoppedMidWork offers a resume to a run its supervisor stopped as the
+// machine shut down, before its work landed: like a died run's, its
+// session goes on where it stopped, once, and a second stop goes up.
+func (c *call) stoppedMidWork(r runs.Record, id string, out *routed) bool {
+	if !r.LauncherStopped() {
+		return false
+	}
+	if r.AfterDeath || c.diedBefore(r) {
+		out.Send = append(out.Send, send{"planner", strings.TrimSpace("died twice " + id)})
+	} else {
+		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --died")
+	}
+	return true
 }
 
 // neverRan: a run whose supervisor never started it counts for nothing.
