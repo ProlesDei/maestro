@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -162,7 +163,7 @@ func runLogRun(ctx context.Context, c *call) error {
 	}
 	var launch int64
 	if err == nil && !asked {
-		launch = c.startLaunch(ctx, id)
+		launch = c.startLaunch(ctx, id, runs.Record{})
 	}
 	var buf bytes.Buffer
 	_, copyErr := io.Copy(c.env.Stdout, io.TeeReader(c.env.Stdin, &buf))

@@ -79,19 +79,30 @@ var collections = []string{cMeta, cTickets, cComments, cEvents, cIdempotency, cR
 const writerID = "writer"
 
 // writerDoc is the meta "writer" document: the schema, the moved
-// tombstone, the server clock as of the last write, and the last id each
-// counter gave out.
+// tombstone, the halt, the server clock as of the last write, the last id
+// each counter gave out, and the code each host's binary last wrote with.
 type writerDoc struct {
 	ID       string        `bson:"_id"`
 	Schema   int           `bson:"schema"`
 	Moved    bool          `bson:"moved"`
+	Halt     bool          `bson:"halt"`
 	Writes   int64         `bson:"writes"`
 	Now      bson.DateTime `bson:"now"`
 	Tickets  int64         `bson:"tickets"`
 	Comments int64         `bson:"comments"`
 	Events   int64         `bson:"events"`
 	Launches int64         `bson:"launches"`
+	// Code is the newest code any binary wrote with; Hosts, each host
+	// id's last.
+	Code  int            `bson:"code"`
+	Hosts map[string]int `bson:"hosts"`
 }
+
+// Code is this build's code: it goes up when what this package writes
+// changes so that every machine's binary should be rebuilt to match.
+// doctor warns when a host writes with an older one. 1 was the first
+// MongoDB store; 2 added shared marks, the halt and launch hosts.
+const Code = 2
 
 // Options tune a Store. The zero value is fine for production.
 type Options struct {
@@ -104,6 +115,9 @@ type Options struct {
 	// StopFile is the kill switch's path: while a file is there, every
 	// claim and lease revival is refused. Empty checks none.
 	StopFile string
+	// Host is this machine's id: the writer document keeps the code each
+	// host last wrote with, for doctor. Empty records none.
+	Host string
 }
 
 // Store is a ticket.Store on one MongoDB database.
@@ -113,6 +127,7 @@ type Store struct {
 	name   string
 	now    func() time.Time
 	stop   string
+	host   string
 	closed sync.Once
 }
 
@@ -155,11 +170,14 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	if name == "" {
 		name = DefaultDatabase
 	}
+	if strings.ContainsAny(opts.Host, ".$ ") {
+		return nil, fmt.Errorf("%w: bad host id %q", ticket.ErrInvalid, opts.Host)
+	}
 	sc, err := acquire(uri)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{client: sc, db: sc.c.Database(name), name: name, now: opts.Now, stop: opts.StopFile}
+	s := &Store{client: sc, db: sc.c.Database(name), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host}
 	if err := s.setup(ctx); err != nil {
 		s.Close()
 		return nil, err
@@ -263,6 +281,9 @@ func (s *Store) build(ctx context.Context) error {
 		},
 		cLaunches: {{Keys: bson.D{{Key: "ended_at", Value: 1}, {Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("launches_open")}},
 		cETAs:     {{Keys: bson.D{{Key: "due_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("etas_due")}},
+		// Made by its index: marks are no part of the board, so backups
+		// and exports leave them out.
+		cMarks: {{Keys: bson.D{{Key: "space", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("marks_space")}},
 	}
 	for c, models := range idx {
 		if _, err := s.db.Collection(c).Indexes().CreateMany(ctx, models); err != nil {
@@ -320,6 +341,8 @@ type txn struct {
 	now int64 // ms
 	w   *writerDoc
 	ids bool // a counter moved: write the writer document back
+	// host is the host id whose code the write records, if any.
+	host string
 }
 
 // coll returns collection name, bound to the transaction.
@@ -530,17 +553,43 @@ func (s *Store) begin(tx *txn, write bool) error {
 	}
 	if write {
 		tx.w = &w
+		// A host whose code the board doesn't know yet records it with
+		// this write: one more field, no more round trips.
+		if s.host != "" && w.Hosts[s.host] != Code {
+			tx.host = s.host
+			tx.ids = true
+		}
 	}
 	return nil
 }
 
 func (s *Store) saveCounters(tx *txn) error {
-	_, err := tx.coll(cMeta).update(bson.D{{Key: "_id", Value: writerID}}, bson.D{{Key: "$set", Value: bson.D{
+	set := bson.D{
 		{Key: "tickets", Value: tx.w.Tickets}, {Key: "comments", Value: tx.w.Comments},
 		{Key: "events", Value: tx.w.Events}, {Key: "launches", Value: tx.w.Launches},
-	}}})
+	}
+	up := bson.D{{Key: "$set", Value: set}}
+	if tx.host != "" {
+		up[0].Value = append(set, bson.E{Key: "hosts." + tx.host, Value: Code})
+		up = append(up, bson.E{Key: "$max", Value: bson.D{{Key: "code", Value: Code}}})
+	}
+	_, err := tx.coll(cMeta).update(bson.D{{Key: "_id", Value: writerID}}, up)
 	return err
 }
+
+// halted refuses a claim or a lease revival while the halt stands. The
+// writer document is the transaction's first read, and stop --all sets
+// the halt in a write of its own, so a claim that began before the halt
+// either commits before it or loses to it and sees it.
+func (tx *txn) halted() error {
+	if tx.w != nil && tx.w.Halt {
+		return fmt.Errorf("%w: %s", ticket.ErrStopped, haltMsg)
+	}
+	return nil
+}
+
+// haltMsg is what a claim under the halt fails with.
+const haltMsg = "the board is halted (maestro-ticket stop --all); claim nothing until stop --all --off"
 
 func msTime(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 

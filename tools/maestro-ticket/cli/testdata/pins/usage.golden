@@ -53,6 +53,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -196,6 +197,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -339,6 +341,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
@@ -482,6 +485,7 @@ Commands:
   ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
+  stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
   notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]

@@ -1,18 +1,27 @@
 package cli
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 // The marks and flags that stop two sessions doing one job: the handouts
 // a look printed, a run's .active and .resumed marks, and the pause. They
-// sit in a coordStore, which today keeps them as files next to the ticket
-// store, shared by every worktree of the checkout. A store that shares
-// them across machines keeps the same names, one record each.
+// sit in a coordStore: beside a SQLite store, files next to it, shared by
+// every worktree of the checkout; on a MongoDB store, one record each in
+// the database, under the same names, shared by every machine on it.
 
 // The spaces marks live in.
 const (
@@ -65,18 +74,102 @@ type coordStore interface {
 }
 
 // coord does the takes and checks on a coordStore that every command
-// shares.
-type coord struct{ s coordStore }
+// shares. host is this machine's id when the store is shared across
+// machines, and "" when it is not.
+type coord struct {
+	s    coordStore
+	host string
+}
 
-// coord is the coordStore this call's store keeps its marks in: for now
-// always the files beside it.
+// coord is the coordStore this call's store keeps its marks in: the files
+// beside a SQLite store, or the records of a MongoDB one, which every
+// machine on it shares.
 func (c *call) coord() (coord, error) {
-	path, _, err := c.storePath()
+	loc, err := c.location()
 	if err != nil {
 		return coord{}, err
 	}
-	dir := filepath.Dir(path)
-	return coord{fileCoord{dir: dir, handouts: filepath.Join(dir, "handouts"), runs: filepath.Join(dir, "runs")}}, nil
+	dir := loc.localDir
+	files := fileCoord{dir: dir, handouts: filepath.Join(dir, "handouts"), runs: filepath.Join(dir, "runs")}
+	if loc.kind != kindMongoDB {
+		return coord{s: files}, nil
+	}
+	// With no id, this machine's marks would read as no machine's, and
+	// another machine would judge them by runs it can't see.
+	host, err := c.hostID()
+	if err != nil {
+		return coord{}, err
+	}
+	return coord{s: sharedCoord{local: files, board: c.board}, host: host}, nil
+}
+
+// hostID is this machine's id when the store is shared, else "": a store
+// on one machine needs none, and gets no host-id file.
+func (c *call) hostID() (string, error) {
+	sh := c.sharedOnce()
+	sh.hostOnce.Do(func() {
+		loc, err := c.location()
+		switch {
+		case err != nil:
+			sh.hostErr = err
+		case loc.kind == kindMongoDB:
+			sh.host, sh.hostErr = HostID(loc.localDir)
+		}
+	})
+	return sh.host, sh.hostErr
+}
+
+// callShared is what a call works out once about a shared store, safe for
+// the goroutines that end runs at once.
+type callShared struct {
+	hostOnce  sync.Once
+	host      string
+	hostErr   error
+	boardOnce sync.Once
+	board     *mongostore.Store
+	boardErr  error
+}
+
+func (c *call) sharedOnce() *callShared {
+	if c.shared == nil {
+		c.shared = &callShared{} // a call a test made by hand
+	}
+	return c.shared
+}
+
+// board is the call's MongoDB store for its marks and the halt: opened at
+// first use, shared by the call's marks, and closed as the call ends.
+func (c *call) board() (*mongostore.Store, error) {
+	sh := c.sharedOnce()
+	sh.boardOnce.Do(func() {
+		loc, err := c.location()
+		if err != nil {
+			sh.boardErr = err
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), markTimeout)
+		defer cancel()
+		s, err := c.openStore(ctx, loc)
+		if err != nil {
+			sh.boardErr = err
+			return
+		}
+		ms, ok := s.(*mongostore.Store)
+		if !ok {
+			s.Close()
+			sh.boardErr = fmt.Errorf("%w: this store keeps no shared marks", ticket.ErrInvalid)
+			return
+		}
+		sh.board = ms
+	})
+	return sh.board, sh.boardErr
+}
+
+// closeBoard closes the store board opened, if it did.
+func (c *call) closeBoard() {
+	if c.shared != nil && c.shared.board != nil {
+		c.shared.board.Close()
+	}
 }
 
 // sameMark reports whether b is the very copy a was read from, not one
@@ -202,3 +295,249 @@ func (f fileCoord) clearFlag(name string) error {
 
 // stopped reports the STOP file in dir, set by hand or by a bot.
 func (f fileCoord) stopped() bool { return fileExists(filepath.Join(f.dir, sqlitestore.StopFile)) }
+
+// markTimeout bounds each call to a shared store's marks.
+const markTimeout = 15 * time.Second
+
+// flagMarks is the space a shared store keeps its flags in.
+const flagMarks = "flags"
+
+// sharedCoord keeps the marks and flags in a MongoDB store, where every
+// machine on it sees them, and keeps on this machine what only this
+// machine reads: a run's .resumed mark, since only its launcher resumes
+// it, and the STOP file. The store's clock dates each mark: read back,
+// a mark's time is this machine's now less the age the server gave it,
+// so callers that compare it with time.Now agree across machines whose
+// clocks differ.
+type sharedCoord struct {
+	local fileCoord
+	board func() (*mongostore.Store, error)
+}
+
+// here reports whether a mark stays on this machine.
+func (s sharedCoord) here(space, name string) bool {
+	return space == runMarks && !strings.HasSuffix(name, ".active")
+}
+
+// with runs fn on the store, bounded by markTimeout.
+func (s sharedCoord) with(fn func(ctx context.Context, b *mongostore.Store) error) error {
+	b, err := s.board()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), markTimeout)
+	defer cancel()
+	return fn(ctx, b)
+}
+
+func fromShared(m mongostore.Mark) mark {
+	return mark{name: m.Name, body: m.Body, at: time.Now().Add(-m.Age), ver: m.Ver}
+}
+
+func (s sharedCoord) create(space, name, body string) error {
+	if s.here(space, name) {
+		return s.local.create(space, name, body)
+	}
+	return s.with(func(ctx context.Context, b *mongostore.Store) error { return b.CreateMark(ctx, space, name, body) })
+}
+
+func (s sharedCoord) read(space, name string) (mark, error) {
+	if s.here(space, name) {
+		return s.local.read(space, name)
+	}
+	var m mark
+	err := s.with(func(ctx context.Context, b *mongostore.Store) error {
+		got, err := b.ReadMark(ctx, space, name)
+		m = fromShared(got)
+		return err
+	})
+	if err != nil {
+		return mark{}, err
+	}
+	return m, nil
+}
+
+func (s sharedCoord) write(space, name, body string) error {
+	if s.here(space, name) {
+		return s.local.write(space, name, body)
+	}
+	return s.with(func(ctx context.Context, b *mongostore.Store) error { return b.WriteMark(ctx, space, name, body) })
+}
+
+func (s sharedCoord) remove(space, name string) error {
+	if s.here(space, name) {
+		return s.local.remove(space, name)
+	}
+	return s.with(func(ctx context.Context, b *mongostore.Store) error { return b.RemoveMark(ctx, space, name) })
+}
+
+// list lists the shared marks of a space. Only handouts are listed, and
+// they are all shared.
+func (s sharedCoord) list(space string) ([]mark, error) {
+	var out []mark
+	err := s.with(func(ctx context.Context, b *mongostore.Store) error {
+		ms, err := b.ListMarks(ctx, space)
+		for _, m := range ms {
+			out = append(out, fromShared(m))
+		}
+		return err
+	})
+	return out, err
+}
+
+// takeOver needs no lock: the store removes the mark only while it is
+// still the copy read, so of takers that all found it stale one removes
+// it, and the next create decides. A mark already gone is took, so its
+// taker tries the create again.
+func (s sharedCoord) takeOver(space, name string, still func(now mark) bool) (took, cleared bool) {
+	if s.here(space, name) {
+		return s.local.takeOver(space, name, still)
+	}
+	m, err := s.read(space, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, false
+	}
+	if err != nil {
+		return false, false
+	}
+	if still(m) {
+		err = s.with(func(ctx context.Context, b *mongostore.Store) error {
+			_, err := b.RemoveMarkIf(ctx, space, name, m.ver.(string))
+			return err
+		})
+		if err != nil {
+			return false, false
+		}
+	}
+	return true, false
+}
+
+func (s sharedCoord) flag(name string) ([]byte, error) {
+	m, err := s.read(flagMarks, name)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(m.body), nil
+}
+
+func (s sharedCoord) setFlag(name string, b []byte) error { return s.write(flagMarks, name, string(b)) }
+
+func (s sharedCoord) clearFlag(name string) error { return s.remove(flagMarks, name) }
+
+// stopped reports the halt stop --all set on the board, or this
+// machine's STOP file. A board it can't read counts as halted: no claim
+// could land on it either. It copies a halt it read into the STOP file
+// first, for the skills and bots that look for the file, as
+// mirrorHalt says.
+func (s sharedCoord) stopped() bool {
+	halted := true
+	err := s.with(func(ctx context.Context, b *mongostore.Store) error {
+		var err error
+		halted, err = b.Halted(ctx)
+		return err
+	})
+	if err != nil {
+		return true
+	}
+	mirrorHalt(s.local.dir, halted)
+	return halted || s.local.stopped()
+}
+
+// haltBody is what a STOP file stop --all made holds: the mark that tells
+// it from one a person or a bot made, which the CLI never removes.
+const haltBody = "made by maestro-ticket stop --all; maestro-ticket stop --all --off removes it\n"
+
+// haltOut is what stop --all prints.
+type haltOut struct {
+	Halted  bool   `json:"halted"`
+	Shared  bool   `json:"shared"` // on every machine on the store
+	Changed bool   `json:"changed"`
+	Stop    string `json:"stop_file"`
+	// Kept is a STOP file the lift left: made by hand or by a bot, it
+	// still stops this machine.
+	Kept bool `json:"kept,omitempty"`
+}
+
+// halt sets or lifts the halt for every machine on the store: on a shared
+// store, the board's halt, which every machine copies to its STOP file,
+// and this one at once; on SQLite, where one machine works, the STOP file
+// alone. Lifting removes only a STOP file stop --all made.
+func (c *call) halt(ctx context.Context, on bool) error {
+	loc, err := c.location()
+	if err != nil {
+		return err
+	}
+	out := haltOut{Halted: on, Shared: loc.kind == kindMongoDB, Stop: filepath.Join(loc.localDir, sqlitestore.StopFile)}
+	if out.Shared {
+		b, err := c.board()
+		if err != nil {
+			return err
+		}
+		if out.Changed, err = b.SetHalt(ctx, on); err != nil {
+			return err
+		}
+	}
+	if on {
+		if err := os.MkdirAll(loc.localDir, 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(out.Stop, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		switch {
+		case err == nil:
+			_, err = f.WriteString(haltBody)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+			if err != nil {
+				return err
+			}
+			out.Changed = true
+		case !errors.Is(err, fs.ErrExist):
+			return err
+		}
+	} else {
+		b, err := os.ReadFile(out.Stop)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
+			return err
+		case string(b) == haltBody:
+			if err := os.Remove(out.Stop); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			out.Changed = true
+		default:
+			out.Kept = true
+		}
+	}
+	return c.out(out, func(w io.Writer) {
+		where := "this machine"
+		if out.Shared {
+			where = "every machine on the board"
+		}
+		switch {
+		case on:
+			fmt.Fprintf(w, "halted %s: no claim lands and no run starts until maestro-ticket stop --all --off\n", where)
+		case out.Kept:
+			fmt.Fprintf(w, "halt lifted on %s; %s stays, made by hand or by a bot: this machine stays stopped until it is removed\n", where, out.Stop)
+		default:
+			fmt.Fprintf(w, "halt lifted on %s\n", where)
+		}
+	})
+}
+
+// mirrorHalt makes dir's STOP file while the board is halted, and removes
+// it once the halt lifts, if the CLI made it.
+func mirrorHalt(dir string, halted bool) {
+	p := filepath.Join(dir, sqlitestore.StopFile)
+	if halted {
+		if f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644); err == nil {
+			f.WriteString(haltBody)
+			f.Close()
+		}
+		return
+	}
+	if b, err := os.ReadFile(p); err == nil && string(b) == haltBody {
+		os.Remove(p)
+	}
+}

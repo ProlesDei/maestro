@@ -357,7 +357,7 @@ func runSupervise(ctx context.Context, c *call) error {
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
 			c.actor = r.Launcher
-			return c.startLaunch(ctx, runTicket(r))
+			return c.startLaunch(ctx, runTicket(r), r)
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
@@ -429,7 +429,8 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
-	_, err = freeRunClaim(ctx, s, logActor(r.Launcher), id, logActor(r.Launcher))
+	host, _ := c.hostID()
+	_, err = freeRunClaim(ctx, s, logActor(r.Launcher), id, logActor(r.Launcher), host)
 	warn(err)
 }
 
@@ -737,11 +738,22 @@ const stopWait = runs.KillGrace + 10*time.Second
 // the asker, rung to its launcher like any end, so job again and resume
 // work once pickup shows it. Its launcher or the planner may ask.
 func runStop(ctx context.Context, c *call) error {
+	all := c.fs.Bool("all", false, "halt every claim and start, on every machine on the store")
+	off := c.fs.Bool("off", false, "with --all: lift the halt")
 	if err := c.parse(); err != nil {
 		return err
 	}
+	if *all {
+		if len(c.args) > 0 {
+			return usagef("stop --all takes no run id")
+		}
+		return c.halt(ctx, !*off)
+	}
+	if *off {
+		return usagef("stop: --off goes with --all")
+	}
 	if len(c.args) != 1 || !runs.ValidID(c.args[0]) {
-		return usagef("stop: want one run id, such as R-abcdefgh")
+		return usagef("stop: want one run id, such as R-abcdefgh, or --all")
 	}
 	if !runs.Supported {
 		return usagef("stop needs a unix system")

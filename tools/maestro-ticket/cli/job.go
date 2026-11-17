@@ -460,7 +460,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		if err != nil {
 			return fail(err)
 		}
-		if commit, abort, err = co.takeActive(dir, ticketID, k.name, c.actor); err != nil {
+		if commit, abort, err = co.takeActive(dir, ticketID, k.name, c.actor, runLimit); err != nil {
 			return fail(fmt.Errorf("job %s %s: %w", k.name, ticketID, err))
 		}
 	}
@@ -569,9 +569,33 @@ func activeName(ticketID, job string) string { return ticketID + "." + job + ".a
 
 // takeActive makes a ticket's job mark for a run about to start, or names
 // the live run that holds it. A mark left by a run that ended is taken
-// over. dir holds the runs.
-func (co coord) takeActive(dir, ticketID, job, actor string) (commit func(runID string), abort func(), err error) {
-	return co.takeMark(activeName(ticketID, job), func(id string) error {
+// over. dir holds the runs; limit is the new run's.
+//
+// On a shared store the mark says whose run it is, as an activeMark: a
+// run on another machine has no record here to read, so it holds until
+// it is overdue, past any limit its own supervisor would let it run.
+func (co coord) takeActive(dir, ticketID, job, actor string, limit time.Duration) (commit func(runID string), abort func(), err error) {
+	body := func(id string) string { return id }
+	if co.host != "" {
+		body = func(id string) string {
+			b, _ := json.Marshal(activeMark{Run: id, Host: co.host, By: actor, Started: time.Now().UTC().Round(time.Second), Limit: short(limit)})
+			return string(b)
+		}
+	}
+	return co.takeMark(activeName(ticketID, job), body, func(id string, m mark) error {
+		if a, ok := readActive(m.body); ok && a.Host != "" && a.Host != co.host {
+			lim, err := time.ParseDuration(a.Limit)
+			if err != nil || lim <= 0 {
+				lim = 24 * time.Hour // the most any job's limit may be
+			}
+			if runs.Overdue(m.at, lim, time.Now()) {
+				return nil
+			}
+			if a.By == actor {
+				return alreadyGoing{a.Run}
+			}
+			return fmt.Errorf("%w: run %s, %s's on another machine, already does it", ticket.ErrClaimed, a.Run, dash(a.By))
+		}
 		if r, err := runs.Get(dir, id, time.Now()); err == nil && !r.Ended() {
 			if r.Launcher == actor {
 				return alreadyGoing{r.ID}
@@ -580,6 +604,34 @@ func (co coord) takeActive(dir, ticketID, job, actor string) (commit func(runID 
 		}
 		return nil
 	})
+}
+
+// activeMark is what a shared store's .active mark holds. A file's holds
+// the run id alone.
+type activeMark struct {
+	Run     string    `json:"run"`
+	Host    string    `json:"host"`
+	By      string    `json:"by,omitempty"`
+	Started time.Time `json:"started"`
+	Limit   string    `json:"limit"`
+}
+
+// readActive reads a mark's body as an activeMark, if it is one.
+func readActive(body string) (activeMark, bool) {
+	var a activeMark
+	b := strings.TrimSpace(body)
+	if !strings.HasPrefix(b, "{") || json.Unmarshal([]byte(b), &a) != nil {
+		return activeMark{}, false
+	}
+	return a, true
+}
+
+// markRun is the run a run mark names, or "" for none yet.
+func markRun(body string) string {
+	if a, ok := readActive(body); ok {
+		return a.Run
+	}
+	return strings.TrimSpace(body)
 }
 
 // alreadyGoing is a start a session of the same bot already made: the
@@ -602,28 +654,28 @@ func (c *call) goingOn(err error) bool {
 }
 
 // takeMark makes the run mark name exclusive, so of takers at once one
-// wins. A mark that names a run holds while held says so; a mark with no
-// run yet, left by a taker that died before its commit, holds for
-// activeGrace. A taker that finds one stale moves it aside under a
-// takeover lock, and only if it still names what it read, so two takers
-// that both find it stale can't both win.
-func (co coord) takeMark(name string, held func(id string) error) (commit func(runID string), abort func(), err error) {
+// wins; its commit writes body(run id) in it. A mark that names a run
+// holds while held says so; a mark with no run yet, left by a taker that
+// died before its commit, holds for activeGrace. A taker that finds one
+// stale moves it aside under a takeover lock, and only if it still holds
+// what it read, so two takers that both find it stale can't both win.
+func (co coord) takeMark(name string, body func(runID string) string, held func(id string, m mark) error) (commit func(runID string), abort func(), err error) {
 	busy := fmt.Errorf("%w: another start of this run is under way", ticket.ErrClaimed)
 	for range 3 {
 		if co.s.create(runMarks, name, "") == nil {
-			commit = func(id string) { co.s.write(runMarks, name, id) }
+			commit = func(id string) { co.s.write(runMarks, name, body(id)) }
 			return commit, func() { co.s.remove(runMarks, name) }, nil
 		}
 		m, _ := co.s.read(runMarks, name)
-		id := strings.TrimSpace(m.body)
+		id := markRun(m.body)
 		if id == "" {
 			if m.ver != nil && time.Since(m.at) < activeGrace {
 				return nil, nil, busy
 			}
-		} else if err := held(id); err != nil {
+		} else if err := held(id, m); err != nil {
 			return nil, nil, err
 		}
-		took, cleared := co.s.takeOver(runMarks, name, func(now mark) bool { return strings.TrimSpace(now.body) == id })
+		took, cleared := co.s.takeOver(runMarks, name, func(now mark) bool { return markRun(now.body) == id })
 		if !took && !cleared {
 			return nil, nil, busy
 		}
@@ -642,7 +694,7 @@ func (co coord) dropActive(r runs.Record) {
 		return
 	}
 	name := activeName(r.Ticket, r.Job)
-	if m, err := co.s.read(runMarks, name); err == nil && strings.TrimSpace(m.body) == r.ID {
+	if m, err := co.s.read(runMarks, name); err == nil && markRun(m.body) == r.ID {
 		co.s.remove(runMarks, name)
 	}
 }
@@ -838,7 +890,7 @@ func (c *call) runAgain(ctx context.Context, limit time.Duration, full bool) err
 	}
 	commit, abort := func(string) {}, func() {}
 	if r.Ticket != "" {
-		if commit, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor); err != nil {
+		if commit, abort, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, lim); err != nil {
 			return fmt.Errorf("job again %s: %w", r.ID, err)
 		}
 	}
@@ -1012,7 +1064,7 @@ func resumeRun(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	commitMark, abortMark, err := co.takeMark(r.ID+".resumed", func(id string) error {
+	commitMark, abortMark, err := co.takeMark(r.ID+".resumed", func(id string) string { return id }, func(id string, _ mark) error {
 		return alreadyGoing{id}
 	})
 	if err != nil {
@@ -1021,7 +1073,7 @@ func resumeRun(ctx context.Context, c *call) error {
 	// And one run of a job on a ticket at a time, resumed or not.
 	commitActive, abortActive := func(string) {}, func() {}
 	if r.Ticket != "" && r.Job != "" {
-		if commitActive, abortActive, err = co.takeActive(dir, r.Ticket, r.Job, c.actor); err != nil {
+		if commitActive, abortActive, err = co.takeActive(dir, r.Ticket, r.Job, c.actor, rec.LimitDuration()); err != nil {
 			abortMark()
 			return fmt.Errorf("resume %s: %w", r.ID, err)
 		}

@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -146,7 +148,37 @@ func (s *Store) Doctor(ctx context.Context) (ticket.DoctorReport, error) {
 		add("counters", false, "a new row would reuse an id:%s", behind)
 	}
 	add("events", m.nEvents == m.events, "last seq %d; %d events (want one per seq, no gaps)", m.events, m.nEvents)
+	rep.Checks = append(rep.Checks, codeCheck(w))
+	if w.Halt {
+		c := add("halt", true, "warning: halted by stop --all: no claim lands on any machine until stop --all --off")
+		c.Warn = true
+	}
 	return rep, nil
+}
+
+// codeCheck warns when this binary is older than one that wrote the
+// board, or when the hosts on it last wrote with different builds: a
+// machine left on an old build may read what a newer one wrote wrong.
+func codeCheck(w writerDoc) ticket.Check {
+	c := ticket.Check{Name: "binaries", OK: true}
+	var hosts []string
+	differ := false
+	for h, v := range w.Hosts {
+		hosts = append(hosts, fmt.Sprintf("%.8s code %d", h, v))
+		differ = differ || v != Code
+	}
+	slices.Sort(hosts)
+	switch {
+	case w.Code > Code:
+		c.Warn = true
+		c.Detail = fmt.Sprintf("warning: this maestro-ticket writes code %d, older than the %d another wrote the board with: rebuild it from the newest Maestro", Code, w.Code)
+	case differ:
+		c.Warn = true
+		c.Detail = fmt.Sprintf("warning: the hosts on this board run different maestro-ticket builds (%s; this one is code %d): rebuild each from one Maestro", strings.Join(hosts, ", "), Code)
+	default:
+		c.Detail = fmt.Sprintf("code %d on %d hosts", Code, len(hosts))
+	}
+	return c
 }
 
 // maxID returns the largest _id in a collection of numbered documents, 0

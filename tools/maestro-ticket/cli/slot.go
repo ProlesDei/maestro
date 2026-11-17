@@ -29,6 +29,10 @@ var slotName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // and SIGKILL: under a supervisor's grace, so the group dies first.
 const slotKillGrace = runs.KillGrace / 2
 
+// sharedHeldEvery is how often a session waiting for a slot reads a
+// shared store's pause and halt.
+const sharedHeldEvery = 15 * time.Second
+
 // runSlot runs a command once one of --max slots named --name is free, so
 // hundreds of sessions sharing one ticket store don't run a heavy check at
 // once and fail it under load. A slot is a file lock in slots/ next to the
@@ -121,12 +125,21 @@ func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Durat
 	if err != nil {
 		return err
 	}
+	// On a shared store each read is a round trip, and a line of sessions
+	// held for hours would ask every second: read at most every
+	// sharedHeldEvery.
+	var heldAt time.Time
+	var wasHeld bool
 	held := func() bool {
 		if filepath.Base(command[0]) != "claude" {
 			return false
 		}
+		if co.host != "" && !heldAt.IsZero() && time.Since(heldAt) < sharedHeldEvery {
+			return wasHeld
+		}
 		_, paused := co.readPause(time.Now())
-		return paused || co.s.stopped()
+		heldAt, wasHeld = time.Now(), paused || co.s.stopped()
+		return wasHeld
 	}
 	use := c.slotUser(sdir, command)
 	lock, err := takeSlot(ctx, dir, name, max, wait, c.env.Stderr, tick, held, use)

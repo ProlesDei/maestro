@@ -46,12 +46,13 @@ type storeLoc struct {
 type storeOptions struct {
 	Now      func() time.Time // clock for the store; nil means the database's
 	StopFile string           // the kill switch's path, in the local folder
+	Host     string           // this machine's id, for a shared store
 }
 
 // openMongo opens a MongoDB store. Its error must not hold the URI.
 // Tests swap it for a fake.
 var openMongo = func(ctx context.Context, uri string, opts storeOptions) (ticket.Store, error) {
-	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: opts.Now, StopFile: opts.StopFile})
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: opts.Now, StopFile: opts.StopFile, Host: opts.Host})
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +111,11 @@ func (loc storeLoc) missing() bool {
 func (c *call) openStore(ctx context.Context, loc storeLoc) (ticket.Store, error) {
 	opts := storeOptions{Now: c.env.Now, StopFile: filepath.Join(loc.localDir, sqlitestore.StopFile)}
 	if loc.kind == kindMongoDB {
+		// Only for doctor's note of which build each machine runs: with
+		// no id, the store just records none.
+		if loc.localDir != "" {
+			opts.Host, _ = HostID(loc.localDir)
+		}
 		s, err := openMongo(ctx, loc.uri, opts)
 		if err != nil {
 			return nil, redactURI(err, loc.uri)

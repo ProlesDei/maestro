@@ -48,13 +48,21 @@ type launchDoc struct {
 	EndedAt   *bson.DateTime `bson:"ended_at"`
 	Outcome   string         `bson:"outcome"`
 	Session   string         `bson:"session"`
+	// Whose run it is, for the other machines on the board.
+	Host    string  `bson:"host,omitempty"`
+	Job     string  `bson:"job,omitempty"`
+	Tickets []int64 `bson:"tickets,omitempty"`
+	Limit   string  `bson:"limit,omitempty"`
 }
 
 func toLaunch(d launchDoc) ticket.Launch {
 	l := ticket.Launch{ID: d.ID, Actor: d.Actor, PID: d.PID, Stamp: d.Stamp, StartedAt: msTime(int64(d.StartedAt)),
-		Outcome: d.Outcome, Session: d.Session}
+		Outcome: d.Outcome, Session: d.Session, Host: d.Host, Job: d.Job, Limit: d.Limit}
 	if d.TicketID != nil {
 		l.Ticket = ticket.ID(*d.TicketID)
+	}
+	for _, id := range d.Tickets {
+		l.Tickets = append(l.Tickets, ticket.ID(id))
 	}
 	if d.EndedAt != nil {
 		l.EndedAt = msTime(int64(*d.EndedAt))
@@ -229,7 +237,10 @@ func (s *Store) StartLaunch(ctx context.Context, req ticket.StartLaunchRequest) 
 			return err
 		}
 		d := launchDoc{ID: tx.next(&tx.w.Launches), Actor: strings.TrimSpace(req.Actor), TicketID: tid, PID: req.PID,
-			Stamp: req.Stamp, StartedAt: dt(tx.now)}
+			Stamp: req.Stamp, StartedAt: dt(tx.now), Host: req.Host, Job: req.Job, Limit: req.Limit}
+		for _, id := range req.Tickets {
+			d.Tickets = append(d.Tickets, int64(id))
+		}
 		if err := tx.coll(cLaunches).insert(d); err != nil {
 			return err
 		}
@@ -266,6 +277,26 @@ func (s *Store) OpenLaunches(ctx context.Context) ([]ticket.Launch, error) {
 		var docs []launchDoc
 		err := tx.coll(cLaunches).find(bson.D{{Key: "ended_at", Value: nil}}, &docs,
 			options.Find().SetSort(bson.D{{Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}))
+		for _, d := range docs {
+			out = append(out, toLaunch(d))
+		}
+		return err
+	})
+	return out, err
+}
+
+// LaunchesSince lists the runs with no end recorded and those that ended
+// at or after since, oldest first: what look counts of another machine's
+// runs, which it can't read from runs/.
+func (s *Store) LaunchesSince(ctx context.Context, since time.Time) ([]ticket.Launch, error) {
+	out := []ticket.Launch{}
+	err := s.read(ctx, func(tx *txn) error {
+		out = out[:0]
+		var docs []launchDoc
+		err := tx.coll(cLaunches).find(bson.D{{Key: "$or", Value: bson.A{
+			bson.D{{Key: "ended_at", Value: nil}},
+			bson.D{{Key: "ended_at", Value: bson.D{{Key: "$gte", Value: bson.NewDateTimeFromTime(since)}}}},
+		}}}, &docs, options.Find().SetSort(bson.D{{Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}))
 		for _, d := range docs {
 			out = append(out, toLaunch(d))
 		}

@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -24,8 +25,10 @@ func (c *call) now() time.Time {
 
 // startLaunch records a run's start for log-run and returns its id, or 0
 // when it can't: the run's reply matters more than its record, so a
-// failure here only warns.
-func (c *call) startLaunch(ctx context.Context, id ticket.ID) int64 {
+// failure here only warns. r is the supervisor's run, or empty for
+// log-run's. On a shared store the launch also says whose run it is, so
+// another machine leaves it to this one.
+func (c *call) startLaunch(ctx context.Context, id ticket.ID, r runs.Record) int64 {
 	s, err := c.open(ctx)
 	if err != nil {
 		fmt.Fprintf(c.env.Stderr, "maestro-ticket log-run: can't record the run's start: %v\n", err)
@@ -33,6 +36,14 @@ func (c *call) startLaunch(ctx context.Context, id ticket.ID) int64 {
 	}
 	defer s.Close()
 	req := ticket.StartLaunchRequest{Actor: logActor(c.actor), Ticket: id, PID: os.Getpid(), Stamp: procStamp(os.Getpid())}
+	if host, _ := c.hostID(); host != "" {
+		req.Host, req.Job, req.Limit = host, r.Job, r.Limit
+		for _, t := range r.Tickets {
+			if tid, err := ticket.ParseID(t); err == nil {
+				req.Tickets = append(req.Tickets, tid)
+			}
+		}
+	}
 	l, err := s.StartLaunch(ctx, req)
 	if errors.Is(err, ticket.ErrNotFound) && req.Ticket != 0 {
 		req.Ticket = 0 // the end says so on stderr, once
@@ -79,7 +90,8 @@ func (c *call) freeClaim(ctx context.Context, launch int64, id ticket.ID) {
 	if err == nil {
 		defer s.Close()
 		var freed string
-		if freed, err = freeRunClaim(ctx, s, logActor(c.actor), id, logActor(c.actor)); freed != "" {
+		host, _ := c.hostID()
+		if freed, err = freeRunClaim(ctx, s, logActor(c.actor), id, logActor(c.actor), host); freed != "" {
 			fmt.Fprintf(c.env.Stderr, "maestro-ticket log-run: freed %s's claim on %s, counted as a lease expiry\n", freed, id)
 		}
 	}
@@ -112,6 +124,23 @@ func launchGone(l ticket.Launch) bool {
 		return false
 	}
 	return procStamp(l.PID) != l.Stamp || zombie(l.PID)
+}
+
+// elsewhere reports whether l is a run another machine on a shared store
+// started: its process can't be seen from here, and its stamp's boot is
+// never this one's. host is this machine's id, "" on a store no machine
+// shares, where every launch is this machine's.
+func elsewhere(l ticket.Launch, host string) bool { return l.Host != "" && l.Host != host }
+
+// launchOver reports whether l's run is over as far as this machine can
+// tell: by its process for a run here, and for one elsewhere only once it
+// is overdue, past any limit its own machine would let it run. Until then
+// that machine ends it and frees what it held.
+func launchOver(l ticket.Launch, host string, now time.Time) bool {
+	if elsewhere(l, host) {
+		return runs.Overdue(l.StartedAt, l.LimitOr(24*time.Hour), now)
+	}
+	return launchGone(l)
 }
 
 // fromAnotherBoot reports whether stamp was taken before this machine
@@ -213,7 +242,8 @@ func (c *call) collectAlerts(ctx context.Context, s ticket.Store, now time.Time,
 		}
 	}
 	keep(reapReport(ctx, s, &rep))
-	keep(diedReport(ctx, s, c.actor, &rep))
+	host, _ := c.hostID()
+	keep(diedReport(ctx, s, c.actor, host, &rep))
 	keep(etaReport(ctx, s, now, &rep))
 	yes, no := true, false
 	held, err := s.List(ctx, ticket.ListFilter{Claimed: &yes})
@@ -289,15 +319,17 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 
 // diedReport ends each open run whose log-run is gone as died. After a
 // restart it also frees the claim the run left on its ticket, as
-// freeRunClaim says.
-func diedReport(ctx context.Context, s ticket.Store, actor string, rep *alertReport) error {
+// freeRunClaim says. Another machine's run it leaves to that machine
+// until the run is overdue, as launchOver says; host is this machine's.
+func diedReport(ctx context.Context, s ticket.Store, actor, host string, rep *alertReport) error {
 	open, err := s.OpenLaunches(ctx)
 	if err != nil {
 		return err
 	}
 	var errs []error
+	now := time.Now()
 	for _, l := range open {
-		if !launchGone(l) {
+		if !launchOver(l, host, now) {
 			continue
 		}
 		ended, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: l.ID, Outcome: ticket.LaunchDied})
@@ -312,10 +344,11 @@ func diedReport(ctx context.Context, s ticket.Store, actor string, rep *alertRep
 		d.Outcome = ticket.LaunchDied
 		// Only a restart proves the run itself is gone: on the same boot
 		// log-run may have died alone while claude runs on, so its lease
-		// and keepalive decide.
-		if fromAnotherBoot(l.Stamp) {
-			rep.Restarted = true
-			if d.Freed, err = freeRunClaim(ctx, s, l.Actor, l.Ticket, actor); err != nil {
+		// and keepalive decide. An overdue run elsewhere is gone too, but
+		// its machine didn't restart for it.
+		if over := elsewhere(l, host); over || fromAnotherBoot(l.Stamp) {
+			rep.Restarted = rep.Restarted || !over
+			if d.Freed, err = freeRunClaim(ctx, s, l.Actor, l.Ticket, actor, host); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -327,9 +360,10 @@ func diedReport(ctx context.Context, s ticket.Store, actor string, rep *alertRep
 // freeRunClaim frees the claim a run that ended with no result left on its
 // ticket, as the team rules once had each bot do by hand: a live claim
 // held by the run's bot, counted as a lease expiry. It leaves the claim
-// while another run of that bot on that ticket still goes, and returns the
-// holder it freed, or "".
-func freeRunClaim(ctx context.Context, s ticket.Store, bot string, id ticket.ID, by string) (string, error) {
+// while another run of that bot on that ticket still goes, on this
+// machine or on another (host is this one's), and returns the holder it
+// freed, or "".
+func freeRunClaim(ctx context.Context, s ticket.Store, bot string, id ticket.ID, by, host string) (string, error) {
 	if id == 0 {
 		return "", nil
 	}
@@ -337,8 +371,9 @@ func freeRunClaim(ctx context.Context, s ticket.Store, bot string, id ticket.ID,
 	if err != nil {
 		return "", err
 	}
+	now := time.Now()
 	for _, l := range open {
-		if l.Actor == bot && l.Ticket == id && !launchGone(l) {
+		if l.Actor == bot && l.Ticket == id && !launchOver(l, host, now) {
 			return "", nil
 		}
 	}
