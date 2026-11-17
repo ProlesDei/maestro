@@ -227,6 +227,7 @@ func TestClaimSkipsBusyAreas(t *testing.T) {
 
 // Many claimers at once never run two tickets with overlapping areas.
 func TestRaceAreaLocks(t *testing.T) {
+	t.Parallel()
 	const groups, perGroup, workers = 5, 10, 100
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tickets.db")

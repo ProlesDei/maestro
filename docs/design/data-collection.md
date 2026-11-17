@@ -2,6 +2,7 @@
 
 **Status:** approved for v1, Nov 15 2026; open calls 1-4 and 9 accepted (section 14). This doc describes what v1 built. Section 13 lists the build steps, and the work left for later is marked "later" where it comes up.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **(R0)** means a real Claude Code run checked it (section 11). **(guess)** means no run has confirmed it yet. Section 16 lists each one.
+**Tests:** on Nov 17 2026 the suite went to unit tests only, so many tests this doc names, every one that started a process (a launch, a fake `claude`, a second CLI, a `sleep`) and the probe, are gone. Each still lives in git history at `7ac3892`.
 
 ## 0. The point
 

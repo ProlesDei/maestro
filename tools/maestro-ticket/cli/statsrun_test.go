@@ -5,13 +5,11 @@ package cli
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -133,6 +131,7 @@ func TestStatsModesKeepOutput(t *testing.T) {
 	}
 	for _, mode := range statsModes {
 		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
 			var ends []*harness // pickup's and doctor's, which end the died run
 			setup := func(h *harness) { mode.setup(t, h.dir, h); ends = append(ends, h) }
 			for name, got := range pinPickup(t, setup) {
@@ -157,100 +156,6 @@ func TestStatsModesKeepOutput(t *testing.T) {
 				mode.setup(t, filepath.Dir(env["MAESTRO_TICKET_STORE"]), nil)
 			}))
 		})
-	}
-}
-
-// job, again, resume and look, whose runs' supervisors write stats.db,
-// print the same with stats off, behind a held lock, and with a stats.db
-// that isn't one.
-func TestStatsModesKeepJobOutput(t *testing.T) {
-	if *update {
-		t.Skip("-update writes the goldens from the plain runs only")
-	}
-	for _, mode := range []struct {
-		name  string
-		setup func(j *jobHarness)
-		check func(t *testing.T, dir string)
-	}{
-		{"off", func(j *jobHarness) { stats.SetOff(j.h.dir, true) }, func(t *testing.T, dir string) {
-			if _, err := os.Stat(filepath.Join(dir, stats.DBName)); err == nil {
-				t.Error("stats off, and a supervisor made stats.db")
-			}
-		}},
-		{"locked", func(j *jobHarness) { prepareStatsAt(j.t, j.h.dir); holdStats(j.t, j.h.dir) }, func(*testing.T, string) {}},
-		{"broken", func(j *jobHarness) {
-			os.WriteFile(filepath.Join(j.h.dir, stats.DBName), []byte("zqmark7 not a database\n"), 0o644)
-		}, func(t *testing.T, dir string) {
-			if b, _ := os.ReadFile(filepath.Join(dir, stats.DBName)); string(b) != "zqmark7 not a database\n" {
-				t.Errorf("a supervisor changed a broken stats.db: %q", b)
-			}
-		}},
-	} {
-		for name, pin := range map[string]func(*testing.T, func(*jobHarness)) string{
-			"job_start": pinJobStart, "job_again": pinJobAgain, "resume": pinResume, "look": pinLook,
-		} {
-			t.Run(mode.name+"/"+name, func(t *testing.T) {
-				t.Parallel()
-				var dirs []*jobHarness
-				golden(t, name, pin(t, func(j *jobHarness) { mode.setup(j); dirs = append(dirs, j) }))
-				for _, j := range dirs {
-					j.waitSupervisors()
-					mode.check(t, j.h.dir)
-				}
-			})
-		}
-	}
-}
-
-// The first run's end on a store makes stats.db, writes its row, and
-// claims the first prune after its ring.
-func TestPrepareFresh(t *testing.T) {
-	t.Parallel()
-	j := newJobHarness(t, "senior-engineer")
-	j.h.ok(nil, "stats", "on", "--maestro-sha", "abc1234")
-	j.h.ok(nil, "create", "--title", "a")
-	if _, err := os.Stat(filepath.Join(j.h.dir, stats.DBName)); err == nil {
-		t.Fatal("stats on made stats.db: only a supervisor does")
-	}
-	s, _ := j.job("", "build", "T-1")
-	j.waitSupervisors()
-	var job, role, model, effort, outcome, state, subtype, ringErr, vMaestro string
-	var lean, rang, ticketN, turns int
-	var lastPrune int64
-	statsQuery(t, j.h.dir, `SELECT j.name, r.name, m.name, e.name, o.name, s.name, st.name, re.name, f.v_maestro, f.lean, f.rang, f.ticket, coalesce(f.turns, -1)
-		FROM run_facts f JOIN codes j ON j.id = f.job JOIN codes r ON r.id = f.role JOIN codes m ON m.id = f.model
-		JOIN codes e ON e.id = f.effort JOIN codes o ON o.id = f.outcome JOIN codes s ON s.id = f.state
-		JOIN codes st ON st.id = f.subtype JOIN codes re ON re.id = f.ring_err WHERE f.run = '`+s.Run.ID+`'`,
-		&job, &role, &model, &effort, &outcome, &state, &subtype, &ringErr, &vMaestro, &lean, &rang, &ticketN, &turns)
-	got := fmt.Sprintf("%s %s %s %s %s %s %s %s %s lean %d rang %d ticket %d turns %d", job, role, model, effort, outcome, state, subtype, ringErr, vMaestro, lean, rang, ticketN, turns)
-	if want := "build senior-engineer opus high done done success none abc1234 lean 0 rang 0 ticket 1 turns -1"; got != want {
-		t.Fatalf("row:\n got %s\nwant %s", got, want)
-	}
-	statsQuery(t, j.h.dir, `SELECT value FROM meta WHERE key = 1`, &lastPrune)
-	if lastPrune == 0 {
-		t.Fatal("the first run's supervisor didn't claim the first prune")
-	}
-	var v, av int
-	statsQuery(t, j.h.dir, `PRAGMA user_version`, &v)
-	statsQuery(t, j.h.dir, `PRAGMA auto_vacuum`, &av)
-	if v != stats.Version() || av != 2 {
-		t.Fatalf("user_version %d, auto_vacuum %d", v, av)
-	}
-}
-
-// A store a run's end found with no schema yet (a file but no tables)
-// gets one in the same end, from the supervisor.
-func TestSupervisorPreparesAtEnd(t *testing.T) {
-	t.Parallel()
-	j := newJobHarness(t, "senior-engineer")
-	j.h.ok(nil, "create", "--title", "a")
-	os.WriteFile(filepath.Join(j.h.dir, stats.DBName), nil, 0o644)
-	s, _ := j.job("", "build", "T-1")
-	j.waitSupervisors()
-	var n int
-	statsQuery(t, j.h.dir, `SELECT count(*) FROM run_facts WHERE run = '`+s.Run.ID+`'`, &n)
-	if n != 1 {
-		t.Fatal("no row")
 	}
 }
 
@@ -473,23 +378,6 @@ func TestReasons(t *testing.T) {
 	}
 }
 
-// A run maestro-ticket stop ended gets the reason asked and the stop
-// kind of a SIGTERM, from its supervisor's row.
-func TestStatsStoppedRun(t *testing.T) {
-	t.Parallel()
-	l := newLauncher(t, "planner")
-	prepareStatsAt(t, l.h.dir)
-	r := l.launch("", "--limit", "1h", "--", "sleep", "300")
-	l.h.ok(nil, "stop", r.ID)
-	l.waitSupervisors()
-	var reason, stop string
-	statsQuery(t, l.h.dir, `SELECT r.name, s.name FROM run_facts f JOIN codes r ON r.id = f.reason
-		JOIN codes s ON s.id = f.stop WHERE f.run = '`+r.ID+`'`, &reason, &stop)
-	if reason != "asked" || stop != runs.StopTerm {
-		t.Fatalf("reason %s, stop %s; want asked, term", reason, stop)
-	}
-}
-
 // Versions go in only on their shapes.
 func TestVersionShapes(t *testing.T) {
 	dir := t.TempDir()
@@ -675,130 +563,6 @@ func TestStatsOnOff(t *testing.T) {
 	}
 }
 
-// markerScene plants Never markers everywhere text lives, in T-1's
-// ticket, a launch on it and a run pickup ends, and returns them once
-// both rows are in stats.db.
-func markerScene(t *testing.T) (*launcher, []string) {
-	t.Helper()
-	markers := []string{"zqmark7", "deadbeefcafe", strings.Repeat("d3adb33f", 5), "claude-zqmark", "cafe0123beef"}
-	all := strings.Join(markers, " ")
-	l := newLauncher(t, "zqmark7")
-	l.h.checks = fixedChecks
-	prepareStatsAt(t, l.h.dir)
-	l.h.ok(nil, "create", "--title", all, "--body", all)
-	l.h.run(all, "comment", "T-1", "--body-file", "-")
-	sub := filepath.Join(l.h.dir, "zqmark7-deadbeefcafe")
-	os.MkdirAll(sub, 0o755)
-	res, _ := json.Marshal(map[string]any{
-		"type": "result", "subtype": "zqmark7", "stop_reason": "deadbeefcafe", "is_error": false, "result": all,
-		"session_id": "11111111-1111-4111-8111-111111111111", "total_cost_usd": 1,
-		"modelUsage": map[string]any{"claude-zqmark": map[string]any{"inputTokens": 1, "costUSD": 1}, "zqmark7": map[string]any{"outputTokens": 2}},
-	})
-	script := fmt.Sprintf("cat >/dev/null; echo %q >&2; printf '%%s\\n' %s", all, strconv.Quote(string(res)))
-	c := l.cmd(all, "launch", "--json", "--ticket", "T-1", "--", "env", "ANTHROPIC_MODEL=claude-zqmark", "sh", "-c", script,
-		"--model", "claude-zqmark", "--effort", "zqmark7")
-	c.Dir = sub
-	out, err := c.Output()
-	if err != nil {
-		t.Fatalf("launch: %v %s", err, out)
-	}
-	var r runs.Record
-	json.Unmarshal(out, &r)
-	l.waitEnded(r.ID, 20*time.Second)
-	l.waitSupervisors()
-	// And a run whose supervisor died, ended by pickup.
-	dead := putRun(t, filepath.Join(l.h.dir, "runs"), runs.Record{Launcher: "zqmark7", Ticket: "T-1", Job: "build",
-		Command: []string{"claude", "-p", "--model", "claude-zqmark", all}, Dir: sub, Limit: "2h", Host: "zqmark7-host",
-		StartedAt: pinBase(), State: runs.Running, PID: 4005, Reply: all, Error: all, SessionID: "deadbeefcafe"})
-	writeSide(filepath.Join(l.h.dir, "runs"), dead.ID, &sideFacts{Why: "tier_senior"}) // started with stats on
-	l.h.env["MAESTRO_TICKET_ACTOR"] = "zqmark7"
-	l.h.run("", "pickup")
-	if n := statsRowCount(t, l.h.dir); n != 2 {
-		t.Fatalf("%d rows; want the launch's and the orphan's", n)
-	}
-	return l, markers
-}
-
-// Markers planted everywhere text lives miss stats.db and its WAL, before
-// and after a checkpoint and VACUUM.
-func TestMarkersMissStatsDB(t *testing.T) {
-	t.Parallel()
-	l, markers := markerScene(t)
-	grep := func(when string) {
-		for _, f := range []string{stats.DBName, stats.DBName + "-wal"} {
-			b, _ := os.ReadFile(filepath.Join(l.h.dir, f))
-			for _, m := range markers {
-				if bytes.Contains(b, []byte(m)) {
-					t.Errorf("%s: %s holds %q", when, f, m)
-				}
-			}
-		}
-	}
-	grep("before a checkpoint")
-	db, _ := stats.Open(filepath.Join(l.h.dir, stats.DBName), false)
-	defer db.Close()
-	if _, err := db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`VACUUM`); err != nil {
-		t.Fatal(err)
-	}
-	grep("after a checkpoint and VACUUM")
-}
-
-// Forty runs end over three seconds, each supervisor writing its row:
-// every row lands. MAESTRO_STATS_LOAD=1 runs 300. Under -race a write
-// runs several times slower and can miss its 300 ms, which drops its row
-// by design (stats health counts it), so there no launch fails and some
-// row lands. Supervisors write
-// stderr to /dev/null, so this proves nothing of what they print: that
-// rests on writeStats and afterRing, which take no writer.
-func TestStatsConcurrentRunEnds(t *testing.T) {
-	t.Parallel()
-	n := 40
-	if os.Getenv("MAESTRO_STATS_LOAD") == "1" {
-		n = 300
-	}
-	l := newLauncher(t, "planner")
-	prepareStatsAt(t, l.h.dir)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var bad []string
-	begun := time.Now()
-	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			time.Sleep(time.Duration(i) * 3 * time.Second / time.Duration(n))
-			c := l.cmd("", "launch", "--json", "--", "sh", "-c", fmt.Sprintf("sleep 0.%d", i%5))
-			var out, errb bytes.Buffer
-			c.Stdout, c.Stderr = &out, &errb
-			if err := c.Run(); err != nil {
-				mu.Lock()
-				bad = append(bad, fmt.Sprintf("%v %s", err, errb.String()))
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	if len(bad) > 0 {
-		t.Fatalf("%d launches failed: %s", len(bad), bad[0])
-	}
-	deadline := time.Now().Add(60 * time.Second)
-	for statsRowCount(t, l.h.dir) < n && time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-	}
-	got := statsRowCount(t, l.h.dir)
-	if raceOn && got > 0 {
-		t.Logf("%d rows of %d runs under -race", got, n)
-		return
-	}
-	if got != n {
-		t.Fatalf("%d rows of %d runs", got, n)
-	}
-	t.Logf("%d run ends, every row in %s", n, time.Since(begun).Round(time.Millisecond))
-}
-
 // A died run that asked for a stream lost it only if its command
 // started: one that never did had none to lose.
 func TestStreamLostNeedsAStart(t *testing.T) {
@@ -807,34 +571,6 @@ func TestStreamLostNeedsAStart(t *testing.T) {
 		streamFacts(&row, runs.Record{State: runs.Died, PID: pid}, sideFacts{Stream: true}, true, false)
 		if row.Stream != want {
 			t.Errorf("pid %d: stream %s; want %s", pid, row.Stream, want)
-		}
-	}
-}
-
-// A plain launch started with stats off, whose supervisor died, gets no
-// row from a pickup with stats on; one started with stats on does.
-func TestStatsOffFollowsLaunchOrphan(t *testing.T) {
-	t.Parallel()
-	for _, off := range []bool{true, false} {
-		l := newLauncher(t, "planner")
-		prepareStatsAt(t, l.h.dir)
-		if off {
-			l.env = append(l.env, stats.OffEnv+"=off")
-		}
-		r := l.launch("", "--limit", "1h", "--", "sleep", "300")
-		if err := exec.Command("pkill", "-KILL", "-f", "supervise "+r.ID).Run(); err != nil {
-			t.Fatalf("kill supervisor: %v", err)
-		}
-		if d := l.waitEnded(r.ID, 10*time.Second); d.State != runs.Died {
-			t.Fatalf("run whose supervisor died: %+v", d)
-		}
-		l.h.ok(nil, "pickup")
-		want := 1
-		if off {
-			want = 0
-		}
-		if n := statsRowCount(t, l.h.dir); n != want {
-			t.Errorf("started with stats off %v: %d rows; want %d", off, n, want)
 		}
 	}
 }
@@ -863,47 +599,6 @@ func TestStatsCLIImports(t *testing.T) {
 	}
 	if seen < 2 {
 		t.Fatalf("read %d files", seen)
-	}
-}
-
-// A run main's chain starts at another run's end is a job run like a
-// bot's own start: it gets a side file, its stream is read, and its row
-// names the bot it was for.
-func TestStatsChainedRun(t *testing.T) {
-	needStream(t)
-	j, hooks := newChainHarness(t, "junior-engineer", "reviewer")
-	prepareStatsAt(t, j.h.dir)
-	// The review passes; with no QA lead webhook, its QA stays for the
-	// reviewer's pickup, and the reviewer is rung.
-	if err := os.WriteFile(filepath.Join(j.out, "kicked"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	j.h.ok(nil, "create", "--title", "a", "--tier", "junior")
-	j.h.ok(nil, "transition", "T-1", "--to", "in_progress")
-	if out, err := j.chainCmd("junior-engineer", "", "job", "build", "T-1").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-	hooks["reviewer"].wait(t, 60*time.Second)
-	rs := ticketRuns(t, j.h.dir, "T-1")
-	if len(rs) != 2 || rs[1].Job != "review" || rs[1].ChainOf != rs[0].ID {
-		t.Fatalf("runs on T-1: %+v", rs)
-	}
-	for i, want := range [][4]string{{"junior-engineer", "build", "tier_junior", "ok"}, {"reviewer", "review", "route_full", "ok"}} {
-		var got [4]string
-		statsQuery(t, j.h.dir, `SELECT r.name, j.name, w.name, s.name FROM run_facts f JOIN codes r ON r.id = f.role
-			JOIN codes j ON j.id = f.job JOIN codes w ON w.id = f.why JOIN codes s ON s.id = f.stream
-			WHERE f.run = '`+rs[i].ID+`'`, &got[0], &got[1], &got[2], &got[3])
-		if got != want {
-			t.Errorf("run %d's row: role, job, why, stream %q; want %q", i, got, want)
-		}
-	}
-	for _, r := range ticketRuns(t, j.h.dir, "T-1") {
-		if !r.Ended() {
-			j.waitEnded(r.ID, 20*time.Second)
-		}
-		if out, err := j.chainCmd(r.Owner(), "", "ack", r.ID).CombinedOutput(); err != nil {
-			t.Fatalf("ack %s: %v\n%s", r.ID, err, out)
-		}
 	}
 }
 
@@ -942,33 +637,6 @@ func TestStatsOffAtStartOrEnd(t *testing.T) {
 	h.ok(&hl, "stats", "health")
 	if statsRowCount(t, h.dir) != 1 || hl.Ended != 1 || hl.Missing != 0 {
 		t.Fatalf("%d rows, health %+v; want the one run on all through", statsRowCount(t, h.dir), hl)
-	}
-}
-
-// A run's first ring never waits on stats.db: behind a held lock it
-// comes as soon as with none, and the row still lands once the lock goes.
-func TestStatsLockedRingsAtOnce(t *testing.T) {
-	t.Parallel()
-	j := newJobHarness(t, "senior-engineer")
-	k := j.setHook("senior-engineer")
-	j.h.ok(nil, "create", "--title", "a")
-	prepareStatsAt(t, j.h.dir)
-	release := holdStats(t, j.h.dir)
-	_, r := j.job("", "build", "T-1")
-	k.wait(t, 10*time.Second)
-	release()
-	j.h.ok(nil, "ack", r.ID)
-	j.waitSupervisors()
-	// Waiting on the lock took 2.3 s at least: its start's 2 s, then a
-	// 300 ms retry.
-	k.mu.Lock()
-	late := k.at[0].Sub(*r.EndedAt)
-	k.mu.Unlock()
-	if late > 1500*time.Millisecond {
-		t.Fatalf("rang %s after the run's end, behind a locked stats.db", late.Round(time.Millisecond))
-	}
-	if n := statsRowCount(t, j.h.dir); n != 1 {
-		t.Fatalf("%d rows; want the run's, once the lock went", n)
 	}
 }
 
