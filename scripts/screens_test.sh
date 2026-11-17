@@ -55,7 +55,7 @@ const get = u => new Promise(ok => http.get(u, r => { r.resume(); ok(r.statusCod
     if (j.dir) {
       fs.appendFileSync(process.env.LOG, "clip " + u + " " + j.width + " #" + j.cue + " " + j.frames + "x" + j.step + "\n");
       for (let i = 0; i < j.frames; i++)
-        fs.writeFileSync(j.dir + "/" + String(i).padStart(3, "0") + ".png", png(j.url.includes("still") ? 0 : Math.min(i, 2)));
+        fs.writeFileSync(j.dir + "/" + String(i).padStart(3, "0") + ".png", png(j.url.includes("still") ? 0 : j.url.includes("moving") ? i : Math.min(i, 2)));
       continue;
     }
     fs.appendFileSync(process.env.LOG, "job " + u + " " + j.width + " " + j.scheme + "\n");
@@ -186,14 +186,21 @@ const want = "frames=3 plays=0 640/1000 40/1000 1360/1000";
 if (got.join(" ") !== want) { console.error("clip chunks: " + got.join(" ")); process.exit(1); }' "$tmp/m/a-open-1280-motion.png" || fail "the clip isn't the looping APNG wanted"
 grep -q "^t-mo close " "$LOG" || fail "the browser wasn't closed after clips"
 
-# A page where nothing moves gets a still= line and no files, and the
-# run goes on; if nothing moves anywhere, it fails, naming each.
+# A page where nothing moves gets a still= line, no files, and its old
+# clip and strip deleted, and the run goes on; a page still moving on
+# its last frame gets a cut= line. If nothing moves anywhere, it fails,
+# naming each.
 echo '<h1>still</h1>' >"$tmp/pages/still.html"
-run --motion --out "$tmp/m2" --widths 375 --ms 200 "$tmp/pages/a.html" "$tmp/pages/still.html" || fail "one still clip failed the run"
+echo '<h1>moving</h1>' >"$tmp/pages/moving.html"
+mkdir -p "$tmp/m2" && echo old >"$tmp/m2/still-375-motion.png" && echo old >"$tmp/m2/still-375-strip.png"
+run --motion --out "$tmp/m2" --widths 375 --ms 200 "$tmp/pages/a.html" "$tmp/pages/still.html" "$tmp/pages/moving.html" || fail "one still clip failed the run"
 has "clip=$tmp/m2/a-375-motion.png"
+has "clip=$tmp/m2/moving-375-motion.png"
 has "still=still-375"
+has "cut=moving-375"
+! grep -q "^cut=a-375" "$tmp/out" || fail "a clip that settled was called cut"
 has "ok=1"
-! ls "$tmp/m2"/still-* >/dev/null 2>&1 || fail "a still clip wrote files"
+! ls "$tmp/m2"/still-* >/dev/null 2>&1 || fail "a still clip left files"
 if run --motion --out "$tmp/m3" --widths 375,1280 --ms 200 "$tmp/pages/still.html"; then fail "passed when nothing moved"; else rc=$?; [ $rc = 1 ] || fail "exit $rc when nothing moved"; fi
 grep -q "nothing moved in still-1280,still-375" "$tmp/out" || fail "no word on the still clips"
 

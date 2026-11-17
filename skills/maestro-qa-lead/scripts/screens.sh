@@ -24,9 +24,10 @@
 #     <name>[-<cue>]-<width>-motion.png, an animated PNG that loops, and
 #     <name>[-<cue>]-<width>-strip.png, up to eight of its frames in a
 #     grid, each labelled with its ms. Prints run=, then clip= and
-#     strip= per pair, and still=<name>[-<cue>]-<width> for each clip
-#     where nothing moved, which writes no file; then ok=1. If nothing
-#     moved in any clip, it fails.
+#     strip= per pair; still=<name>[-<cue>]-<width> for each clip where
+#     nothing moved, which writes no file and deletes an old one; and
+#     cut=<same> for each clip still moving on its last frame; then ok=1.
+#     If nothing moved in any clip, it fails.
 #
 # Needs jq, and playwright-cli and node on PATH. With no browser it prints
 # stop=no browser and exits 4. Exit 2: bad arguments; 1: any other
@@ -181,10 +182,14 @@ EOF
 # A clip: a page on a fake clock, paused so only the steps move it. A
 # clock covers its whole browser context, and a paused one would stall
 # the session's own page, so each clip gets a context of its own. Each
-# step moves the clock and every animation by the same ms, then shoots;
-# an animation that starts mid-clip (a class a timer adds) counts from
-# the step it shows up in. Under a cue, load gets 5s of page time, and
-# its animations keep the place finish() gave.
+# step moves the clock, then each animation the page plays: paused, and
+# moved by the step times its playbackRate, so a reversed or faster one
+# keeps its own course. One that starts mid-clip (a class a timer adds)
+# counts from the step it shows up in. Past its end (or its start, when
+# reversed) it is finished, so its events, finished promise and fill run
+# as the page meant. One the page paused itself is left alone; one the
+# page plays again is picked up where it stands. Under a cue, load gets
+# 5s of page time, and its animations end first.
 cat >"$tmp/motion.tail" <<'EOF'
 ;
   for (const j of jobs) {
@@ -197,21 +202,43 @@ cat >"$tmp/motion.tail" <<'EOF'
       await p.goto(j.url, { waitUntil: "load", timeout: 30000 });
       if (j.cue) await p.clock.runFor(5000);
       await p.evaluate(([cue, name]) => {
-        let t = 0;
-        const start = new WeakMap();
+        const seen = new WeakSet(), last = new Map(), near = (x, y) => Math.abs(x - y) < 40;
+        // Drive an animation from c: a fresh one, a step behind real time,
+        // starts from its start; one played again resumes where it stood.
+        const take = a => {
+          // reverse() leaves its rate pending; setting the time settles it.
+          a.pause();
+          if (a.currentTime !== null) a.currentTime = a.currentTime;
+          const end = a.effect ? a.effect.getComputedTiming().endTime : 0;
+          let c = a.currentTime ?? 0;
+          if (!seen.has(a)) c = a.playbackRate < 0 ? end : 0;
+          else if (last.has(a) && near(c, last.get(a))) c = last.get(a);
+          else if (a.playbackRate >= 0 && near(c, 0)) c = 0;
+          else if (a.playbackRate < 0 && near(c, end)) c = end;
+          seen.add(a);
+          a.currentTime = c;
+          last.set(a, c);
+        };
         window.__maestroStep = d => {
-          t += d;
           for (const a of document.getAnimations()) {
-            if (!start.has(a)) { a.pause(); start.set(a, t); }
-            a.currentTime = t - start.get(a);
+            if (a.playState === "running") { take(a); continue; }
+            if (a.playState !== "paused" || !last.has(a)) { last.delete(a); continue; }
+            const end = a.effect ? a.effect.getComputedTiming().endTime : 0;
+            const c = a.currentTime + d * a.playbackRate;
+            if (a.playbackRate > 0 ? c >= end : a.playbackRate < 0 && c <= 0) {
+              last.delete(a);
+              a.finish();
+            } else {
+              a.currentTime = c;
+              last.set(a, c);
+            }
           }
         };
         if (cue) {
           if (typeof window.motion !== "function") throw new Error(name + ": the page has no window.motion for #" + cue);
           for (const a of document.getAnimations()) {
-            try { a.finish(); } catch {}
-            a.pause();
-            start.set(a, -(a.currentTime || 0));
+            if (a.playState !== "running") continue;
+            try { a.finish(); } catch { take(a); }
           }
           window.motion(cue);
         }
@@ -309,7 +336,12 @@ for (const c of fs.readdirSync(fdir).filter(c => fs.statSync(fdir + "/" + c).isD
     if (g && g.data.equals(f.data)) g.ms += step;
     else groups.push({ data: f.data, ms: step, at: i });
   });
-  if (groups.length < 2) { console.log("still=" + c); continue; }
+  if (groups.length < 2) {
+    for (const f of [out + "/" + c + "-motion.png", out + "/" + c + "-strip.png"]) fs.rmSync(f, { force: true });
+    console.log("still=" + c);
+    continue;
+  }
+  if (groups[groups.length - 1].ms === step) console.log("cut=" + c);
   groups[0].ms += 600;
   groups[groups.length - 1].ms += 1200;
   const w = frames[0].ihdr.readUInt32BE(0), h = frames[0].ihdr.readUInt32BE(4);
@@ -355,7 +387,7 @@ EOF
 		echo "clip=$out/$c-motion.png"
 		echo "strip=$out/$c-strip.png"
 	done < <(sed -n 's/^clip=//p' "$tmp/clips")
-	grep '^still=' "$tmp/clips" || true
+	grep -E '^(still|cut)=' "$tmp/clips" || true
 	echo "ok=1"
 	exit 0
 fi

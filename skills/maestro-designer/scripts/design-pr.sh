@@ -6,14 +6,15 @@
 #   design-pr.sh <T-n> <run folder> --holder <holder> --token <n>
 #     Checks the spec (spec.md in the run folder) has every field, two or
 #     more directions, a pick among them, numbered criteria that each
-#     name a width in px, and, unless its Motion: starts with none, a
+#     name a width in px, and, unless its Motion: is just none, a
 #     clip of the pick (<pick>-*-motion.png, from screens.sh --motion);
 #     on a gap it prints problem= lines, exit 2, and writes nothing.
 #     Checks the ticket is a "Design:" scout ticket in in_progress under
 #     this holder's claim; else stop=<why>, exit 3.
 #     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
 #     (<pick>-*.png, the pick's letter in lowercase) and every clip
-#     (*-motion.png, the pick's first), but no strip (*-strip.png), to
+#     of a direction (<letter>-*-motion.png, the pick's first), but no
+#     strip (*-strip.png), to
 #     .maestro/design/<T-n>/ on branch maestro/<T-n>, pushed with
 #     [skip ci]; opens a draft PR for it, or updates the open one; posts
 #     "Design spec:" and then "Escalation: design ready: PR <url>: owner's
@@ -76,8 +77,9 @@ while IFS= read -r c; do
 	[ -z "$c" ] || grep -qiE '(^|[^a-z])at [0-9]+px' <<<"$c" || probs+=("Criteria: '${c%% *}' names no width as 'at <n>px'")
 done <<<"$crit"
 ls "$dir"/sheet-*.png >/dev/null 2>&1 || probs+=("no sheet-*.png in the run folder")
-# The pick's shots and every clip, the pick's first. A strip is for the
-# session that made it, not the owner.
+# The pick's shots and every direction's clips, the pick's first: a clip
+# of a page that is no direction (a probe, a dropped C) stays out. A
+# strip is for the session that made it, not the owner.
 lp=${pick,,}
 stills=() clips=()
 if [ -n "$pick" ]; then
@@ -88,12 +90,13 @@ if [ -n "$pick" ]; then
 	clips=("$dir/$lp"-*-motion.png)
 	n_pick=${#clips[@]}
 	for f in "$dir"/*-motion.png; do
-		case ${f##*/} in "$lp"-*) ;; *) clips+=("$f") ;; esac
+		b=${f##*/}
+		[ "${b:1:1}" = - ] && [ "${b:0:1}" != "$lp" ] && grep -qx "${b:0:1}" <<<"${dirs,,}" && clips+=("$f")
 	done
 	shopt -u nullglob
 	[ ${#stills[@]} -gt 0 ] || probs+=("no $lp-*.png shots of the pick in the run folder")
 	motion=$(value Motion)
-	[[ ${motion,,} =~ ^none([^a-z]|$) ]] || [ "$n_pick" -gt 0 ] ||
+	[[ ${motion,,} =~ ^none[[:space:][:punct:]]*$ ]] || [ "$n_pick" -gt 0 ] ||
 		probs+=("Motion: no $lp-*-motion.png clip of the pick in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
 fi
 if [ ${#probs[@]} -gt 0 ]; then

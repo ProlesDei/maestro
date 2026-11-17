@@ -102,7 +102,9 @@ EOF
 run_dir=$tmp/run
 mkdir -p "$run_dir"
 spec "$run_dir" B
-for f in sheet-375 sheet-1280 a-375 a-1280 b-375 b-1280 a-hover-1280-motion b-hover-1280-motion b-hover-1280-strip; do echo "$f" >"$run_dir/$f.png"; done
+# c- (no direction C) and probe- clips must stay out of the PR.
+for f in sheet-375 sheet-1280 a-375 a-1280 b-375 b-1280 a-hover-1280-motion b-hover-1280-motion b-hover-1280-strip \
+	c-open-1280-motion probe-375-motion; do echo "$f" >"$run_dir/$f.png"; done
 run() { bash "$dpr" "$@" >"$tmp/out" 2>&1; }
 writes() { [ -s "$FX/log" ] && grep -qE '^(comment|transition|gh pr)' "$FX/log"; }
 
@@ -141,11 +143,13 @@ gap "no 'Motion:' line" '/^Motion:/d'
 gap "Motion: no b-\*-motion.png clip" '' 'b-*-motion.png'
 
 gap "Motion: no b-\*-motion.png clip" 's/^Motion: .*/Motion: nonetheless a fade/' 'b-*-motion.png'
+gap "Motion: no b-\*-motion.png clip" 's/^Motion: .*/Motion: none on load; open: drawer slides in 240ms/' 'b-*-motion.png'
+gap "Motion: no b-\*-motion.png clip" 's/^Motion: .*/Motion: None, a static page./' 'b-*-motion.png'
 
-# Motion: none, however it's written, needs no clip (it stops at the
-# ticket instead).
+# Motion: none alone, with space or punctuation, needs no clip (it stops
+# at the ticket instead).
 ticket blocked ""
-for m in 's/^Motion: .*/Motion: none/' 's/^Motion: .*/Motion: none /' 's/^Motion: .*/Motion: None, a static page./' 's/^Motion: .*/Motion:\nnone/'; do
+for m in 's/^Motion: .*/Motion: none/' 's/^Motion: .*/Motion: none /' 's/^Motion: .*/Motion: None./' 's/^Motion: .*/Motion:\nnone/'; do
 	rm -rf "$tmp/still" && cp -R "$run_dir" "$tmp/still" && sed -i "$m" "$tmp/still/spec.md" && rm "$tmp/still"/*-motion.png
 	if run T-7 "$tmp/still" --holder "$H" --token 3; then fail "passed a blocked ticket"; else rc=$?; [ $rc = 3 ] || fail "exit $rc for '$m' and no clips"; fi
 done
