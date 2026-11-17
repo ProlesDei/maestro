@@ -148,7 +148,7 @@ On MongoDB, `maestro-ticket stop --all` halts every machine and `maestro-ticket 
 To move back to SQLite:
 
 1. Run `maestro-ticket stop --all`, and wait until no machine has a run going.
-2. On the machine that holds the SQLite file, run `maestro-ticket migrate --to sqlite`. It copies the board back, lifts the write block, marks the MongoDB board moved so no machine can write to it, and removes `store.uri`.
+2. On the machine that holds the SQLite file, run `maestro-ticket migrate --to sqlite`. It copies the board back, lifts the write block, marks the MongoDB board moved so no machine can write to it, and removes `store.uri`. If it stops partway, run it again; to keep the board on MongoDB instead, run `maestro-ticket migrate --to sqlite --abort` on that machine, then `maestro-ticket stop --all --off`.
 3. Set `store: sqlite` there, run `apply` and `check`, then delete `maestro/STOP` under the git common dir if it's still there.
 4. On each other machine, run `maestro-ticket store --clear` and stop its bots: the board lives on the first machine again.
 

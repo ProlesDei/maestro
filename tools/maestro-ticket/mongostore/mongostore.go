@@ -51,15 +51,16 @@ const (
 	// txnBudget is how long a call keeps retrying transactions that lost
 	// to another writer before it gives up with ErrBusy.
 	txnBudget = 30 * time.Second
-	// txnLimit is each transaction's own deadline: under the server's
-	// transactionLifetimeLimitSeconds, which doctor wants at 10 or less,
-	// so a call that stalls gives up before the server kills it.
-	txnLimit = 8 * time.Second
 	// commitLimit bounds the commit retries of one transaction.
 	commitLimit = 10 * time.Second
 	// selectTimeout is how long a call waits to find the server.
 	selectTimeout = 5 * time.Second
 )
+
+// txnLimit is each transaction's own deadline: under the server's
+// transactionLifetimeLimitSeconds, which doctor wants at 10 or less, so a
+// call that stalls gives up before the server kills it. Tests shorten it.
+var txnLimit = 8 * time.Second
 
 // Collection names.
 const (
@@ -439,6 +440,24 @@ func (s *Store) write(ctx context.Context, fn func(tx *txn) error) error {
 // server clock, once, and checks the board.
 func (s *Store) read(ctx context.Context, fn func(tx *txn) error) error {
 	return s.retry(ctx, func(ctx context.Context) error { return s.once(ctx, false, fn) })
+}
+
+// snapshot runs fn in a snapshot session: like read, every read in it
+// sees the board as of one moment, but in no transaction, so a board too
+// big to read within txnLimit still reads whole. The server keeps that
+// moment for minSnapshotHistoryWindowInSeconds, 5 minutes by default.
+func (s *Store) snapshot(ctx context.Context, fn func(tx *txn) error) error {
+	sess, err := s.client.c.StartSession(options.Session().SetSnapshot(true))
+	if err != nil {
+		return Redact(err, s.client.uri)
+	}
+	defer sess.EndSession(context.WithoutCancel(ctx))
+	tx := &txn{ctx: mongo.NewSessionContext(ctx, sess), db: s.db}
+	err = s.begin(tx, false)
+	if err == nil {
+		err = fn(tx)
+	}
+	return Redact(err, s.client.uri)
 }
 
 // retry reruns a transaction that lost to another (TransientTransaction
