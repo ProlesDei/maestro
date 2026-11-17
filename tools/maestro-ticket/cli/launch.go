@@ -39,20 +39,18 @@ const keepAcked = 7 * 24 * time.Hour
 // besideStore returns the folder name next to the ticket store, which every
 // worktree shares, refusing where open would.
 func (c *call) besideStore(name string) (string, error) {
-	path, source, err := c.storePath()
+	loc, err := c.location()
 	if err != nil {
 		return "", err
 	}
-	if source == "git common dir" {
-		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, path)
-		}
+	if loc.missing() {
+		return "", fmt.Errorf("%w: no ticket store at %s: run maestro-ticket in the checkout Maestro is installed in, or a worktree of it", ticket.ErrInvalid, loc.sqlitePath)
 	}
-	c.storeChecks = c.envChecks(path)
+	c.storeChecks = c.envChecks(loc.sqlitePath)
 	if err := envcheck.Err(c.storeChecks); err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(path), name), nil
+	return filepath.Join(loc.localDir, name), nil
 }
 
 func (c *call) needActor(cmd string) error {
@@ -552,7 +550,7 @@ func runPickup(ctx context.Context, c *call) error {
 					routeErr[r.ID] = err
 					break
 				}
-				if s != nil {
+				if err == nil {
 					c.refileFollowUps(ctx, s, r, &rt)
 				}
 				routes[r.ID] = rt
