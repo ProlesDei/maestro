@@ -126,7 +126,7 @@ func (c *call) inSlot(ctx context.Context, name string, max int, wait time.Durat
 			return false
 		}
 		_, paused := co.readPause(time.Now())
-		return paused || fileExists(filepath.Join(sdir, "STOP"))
+		return paused || co.s.stopped()
 	}
 	use := c.slotUser(sdir, command)
 	lock, err := takeSlot(ctx, dir, name, max, wait, c.env.Stderr, tick, held, use)

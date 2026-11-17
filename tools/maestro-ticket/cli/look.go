@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -192,10 +191,6 @@ func runLook(ctx context.Context, c *call) error {
 		}
 		rules = strings.TrimSpace(string(b))
 	}
-	store, _, err := c.storePath()
-	if err != nil {
-		return err
-	}
 	hdir, err := c.besideStore("handouts")
 	if err != nil {
 		return err
@@ -213,7 +208,7 @@ func runLook(ctx context.Context, c *call) error {
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
 		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
-			stopped: fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)), handouts: co, runs: rdir})
+			stopped: co.s.stopped(), handouts: co, runs: rdir})
 		return err
 	})
 	if err != nil {

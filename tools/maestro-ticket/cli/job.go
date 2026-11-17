@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -660,16 +659,12 @@ func joinStatuses(st []ticket.Status) string {
 // or while a usage limit pickup saw holds: such a run only stops, or fails
 // again, and spends a start.
 func (c *call) mayStart() error {
-	store, _, err := c.storePath()
-	if err != nil {
-		return err
-	}
-	if fileExists(filepath.Join(filepath.Dir(store), sqlitestore.StopFile)) {
-		return fmt.Errorf("%w: stopped: maestro/STOP is set: start no run", ticket.ErrStopped)
-	}
 	co, err := c.coord()
 	if err != nil {
 		return err
+	}
+	if co.s.stopped() {
+		return fmt.Errorf("%w: stopped: maestro/STOP is set: start no run", ticket.ErrStopped)
 	}
 	if p, ok := co.readPause(time.Now()); ok {
 		return fmt.Errorf("%w: paused: %s, until %s: start no run until then", ticket.ErrPaused, p.Why, p.Until.Format(time.RFC3339))

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 )
 
 // The marks and flags that stop two sessions doing one job: the handouts
@@ -56,6 +58,10 @@ type coordStore interface {
 	// setFlag sets a flag whole, so a reader never sees half of one.
 	setFlag(name string, b []byte) error
 	clearFlag(name string) error
+	// stopped reports the halt: while it stands no run starts and no
+	// claim is made. A shared store must still honour this machine's own
+	// STOP file.
+	stopped() bool
 }
 
 // coord does the takes and checks on a coordStore that every command
@@ -193,3 +199,6 @@ func (f fileCoord) setFlag(name string, b []byte) error {
 func (f fileCoord) clearFlag(name string) error {
 	return os.Remove(filepath.Join(f.dir, name))
 }
+
+// stopped reports the STOP file in dir, set by hand or by a bot.
+func (f fileCoord) stopped() bool { return fileExists(filepath.Join(f.dir, sqlitestore.StopFile)) }

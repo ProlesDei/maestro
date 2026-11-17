@@ -204,6 +204,7 @@ Each send and start is a handout file in `handouts/` next to the store, one per 
 |---|---|
 | `ticket/` | Domain: types, roles, workflow, validation, errors, and the `Store` interface. No storage code. |
 | `sqlitestore/` | The SQLite driver. |
+| `storetest/` | The tests every `ticket.Store` driver must pass, run with `storetest.Run`. |
 | `render/` | `Backlog.md` generation and atomic writes. |
 | `envcheck/` | Filesystem and file-lock checks run before opening the store. |
 | `runs/` | Run records, the supervisor `launch` starts, webhook rings and the scan for untracked sessions. |
@@ -214,4 +215,4 @@ Each send and start is a handout file in `handouts/` next to the store, one per 
 
 ## Adding a driver
 
-Implement `ticket.Store` (for example on Postgres: `SELECT ... FOR UPDATE SKIP LOCKED` for `ClaimNext`; serialize event inserts, or assign `seq` at commit, so events become visible in seq order). Run the `sqlitestore` tests against it, then select it in `cli.(*call).open`. Nothing else in the CLI changes.
+Implement `ticket.Store` (for example on Postgres: `SELECT ... FOR UPDATE SKIP LOCKED` for `ClaimNext`; serialize event inserts, or assign `seq` at commit, so events become visible in seq order). Run `storetest.Run` on it from one test, as `TestConformance` in `sqlitestore` does, then open it in `cli.(*call).openStore`. Nothing else in the CLI changes.
