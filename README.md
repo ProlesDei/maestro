@@ -54,8 +54,8 @@ flowchart TD
     Planner -.->|"board status, blocks it can't settle"| CoS
 
     %% The Planner hands out builds, and what stalled
-    Planner -->|"senior-tier ticket"| Sr
-    Planner -->|"junior-tier ticket"| Jr
+    Planner -->|"senior-tier ticket:<br/>look starts its build"| Sr
+    Planner -->|"junior-tier ticket:<br/>look starts its build"| Jr
     Planner -->|"a stalled review"| Rev
     Planner -->|"a stalled test,<br/>a goal's live run"| QA
     Planner -->|"a goal's screens:<br/>Design: ticket"| Des
@@ -73,14 +73,13 @@ flowchart TD
     Build -.->|"a question it can't settle"| Sr
     Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle,<br/>a slot free"| Planner
-    Jr -.->|"a slot free"| Planner
+    Sr -.->|"what the ticket can't settle"| Planner
     QA -.->|"a block, a goal done"| Planner
     Rev -.->|"a block to settle"| Planner
     Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"in_review: its end starts the review"| Rev
+    Build -->|"in_review: its end starts the review,<br/>and the next build in its slot"| Rev
     Rev -->|"GO: its end starts QA"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done

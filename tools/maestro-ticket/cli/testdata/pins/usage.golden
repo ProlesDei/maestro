@@ -32,7 +32,8 @@ Commands:
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
   look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
   rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
@@ -184,7 +185,8 @@ Commands:
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
   look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
   rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
@@ -336,7 +338,8 @@ Commands:
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
   look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
   rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
@@ -488,7 +491,8 @@ Commands:
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
   look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
   rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA

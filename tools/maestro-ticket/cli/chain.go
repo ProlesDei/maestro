@@ -20,8 +20,9 @@ import (
 // review goes to review, a GO to QA, a send-back to its engineer, a
 // Rereview: to review. Each of those was a line a bot passed to another
 // bot, which woke, reread its chat and ran job: Grok spent a turn on each
-// and decided nothing (owner's ruling, Nov 15 2026). It picks no new work,
-// and whatever it can't start stays for the launcher's pickup, as before.
+// and decided nothing (owner's ruling, Nov 15 2026). New work it picks
+// only through refill, the planner's look without the judge; whatever it
+// can't start stays for the launcher's pickup, as before.
 var (
 	chainJobs = map[string]bool{"build": true, "review": true, "qa": true, "live": true}
 	chainBots = map[string]bool{"junior-engineer": true, "senior-engineer": true, "reviewer": true, "qa-lead": true}
@@ -102,6 +103,12 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 					left = append(left, sd)
 				}
 			}
+		}
+		// A freed slot or a merge woke the planner only to look: the end
+		// looks itself, and wakes it only for what that look leaves
+		// (owner's ruling, Nov 17 2026).
+		if !unsure && slices.ContainsFunc(left, refillLine) && hasHook(notify, "planner") && c.refill(ctx, dir) {
+			left = slices.DeleteFunc(left, refillLine)
 		}
 		rt.Send = left
 		// A launcher with no webhook, such as a person, reads its pickup:
@@ -240,17 +247,29 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 	if !ok || !hasHook(notify, sd.Bot) {
 		return false
 	}
-	cc := *c
-	cc.actor, cc.runCache = sd.Bot, nil
-	req := jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1}
-	// QA runs at once: rules set qa_slots's, which startJob reads, else
-	// what the bot passed last.
-	if k.slot != "" && c.boardQASlots() == 0 {
-		req.slots = lastSlots(dir, sd.Bot, k.slot)
-	}
-	_, _, _, err := cc.startJob(ctx, req)
+	_, err := c.startAs(ctx, dir, sd.Bot, jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1})
 	var a alreadyGoing
 	return err == nil || errors.As(err, &a)
+}
+
+// startAs starts req as bot, so the run rings bot and its end chains as
+// bot's would.
+func (c *call) startAs(ctx context.Context, dir, bot string, req jobReq) (runs.Record, error) {
+	cc := *c
+	cc.actor, cc.runCache = bot, nil
+	// QA runs at once: rules set qa_slots's, which startJob reads, else
+	// what the bot passed last.
+	if req.kind.slot != "" && c.boardQASlots() == 0 {
+		req.slots = lastSlots(dir, bot, req.kind.slot)
+	}
+	r, _, _, err := cc.startJob(ctx, req)
+	return r, err
+}
+
+// refillLine is a line that woke the planner only to look: a freed build
+// slot, or a merge that frees what waited on it.
+func refillLine(sd send) bool {
+	return sd.Bot == "planner" && (strings.HasPrefix(sd.Line, "slot free ") || strings.HasPrefix(sd.Line, "merged "))
 }
 
 // nextStep is the job and ticket of a send that is a fixed handoff to a

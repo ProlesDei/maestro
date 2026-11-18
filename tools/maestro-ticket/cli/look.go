@@ -164,6 +164,10 @@ type lookOut struct {
 	Report  []string   `json:"report,omitempty"`
 	Counts  string     `json:"counts"`
 	Errors  []string   `json:"errors"`
+	// rest counts what a refill left for the planner's own look: a
+	// missed date, a card or a send-back count it would send the chief of
+	// staff.
+	rest int
 }
 
 func (o lookOut) quiet() bool {
@@ -236,6 +240,7 @@ func runLook(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	c.startSends(ctx, rdir, &out)
 	if len(alerts) > 0 {
 		out.Alerts = append(alerts, out.Alerts...)
 	}
@@ -257,6 +262,69 @@ func runLook(ctx context.Context, c *call) error {
 		return errors.New(strings.Join(out.Errors, "; "))
 	}
 	return nil
+}
+
+// startSends starts each send that is a fixed job for a worker bot with a
+// webhook, as that bot: the bot would only have woken, reread its chat
+// and run job (owner's ruling, Nov 17 2026). A send it can't start stays,
+// for the bot to run and see why.
+func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
+	notify := filepath.Join(filepath.Dir(rdir), "notify")
+	left := []send{}
+	for _, sd := range out.Send {
+		k, id, ok := nextStep(runs.Record{}, sd)
+		if !ok || !hasHook(notify, sd.Bot) {
+			left = append(left, sd)
+			continue
+		}
+		r, err := c.startAs(ctx, rdir, sd.Bot, jobReq{kind: k, ids: []string{id}})
+		var going alreadyGoing
+		switch {
+		case err == nil:
+			out.Started = append(out.Started, fmt.Sprintf("%s %s as %s", r.ID, sd.Line, sd.Bot))
+		case !errors.As(err, &going):
+			left = append(left, sd)
+		}
+	}
+	out.Send = left
+}
+
+// refill is the look a run's end takes when its only line for the planner
+// was a freed slot or a merge, which woke the planner just to look. It
+// looks as the planner, without the judge or the report, starts what it
+// hands out, and frees each handout it couldn't start, for the planner's
+// own look. It reports whether it left the planner nothing: no judge row,
+// error, send or card.
+func (c *call) refill(ctx context.Context, rdir string) bool {
+	cc := *c
+	cc.actor, cc.runCache = "planner", nil
+	if cc.mayStart() != nil {
+		return false // stopped or paused: the planner's look says so
+	}
+	co, err := cc.coord()
+	if err != nil {
+		return false
+	}
+	lim, _, err := cc.lookLimit(-1)
+	if err != nil {
+		return false
+	}
+	s, err := cc.open(ctx)
+	if err != nil {
+		return false
+	}
+	out, err := cc.look(ctx, s, lookOpts{limit: lim, stall: ticket.DefaultStall, refill: true, handouts: co, runs: rdir, host: co.host})
+	s.Close()
+	if err != nil {
+		return false
+	}
+	cc.startSends(ctx, rdir, &out)
+	for _, sd := range out.Send {
+		if id := ticketInLine.FindString(sd.Line); id != "" {
+			co.dropHandout(id, sd.Bot)
+		}
+	}
+	return out.rest == 0 && len(out.Send)+len(out.Judge)+len(out.Errors) == 0
 }
 
 func fileExists(p string) bool {
@@ -337,6 +405,7 @@ type lookOpts struct {
 	handouts coord
 	runs     string
 	host     string // this machine's id on a shared store, else ""
+	refill   bool   // a run's end looks: it sends the chief of staff nothing
 }
 
 // launchesSince is a store that lists recent launches with their hosts:
@@ -368,7 +437,14 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
 		// Once per promise: a missed date stays missed every look.
-		if !idle && o.handouts.claimHandout(fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix()), "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
+		key := fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix())
+		if o.refill {
+			if !idle && o.handouts.handoutBody(key, "chief-of-staff") == "" {
+				out.rest++ // the planner's own look sends it
+			}
+			continue
+		}
+		if !idle && o.handouts.claimHandout(key, "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
 			out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
 		}
 	}
@@ -637,6 +713,8 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					build("senior-engineer", id)
 				case t.Tries == 2:
 					start("plan", id, id.String())
+				case o.refill:
+					out.rest++
 				default:
 					c.sendUpTries(ctx, s, t, &out, keep, idle)
 				}
@@ -669,7 +747,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			if designReady(d) {
 				// The owner's card on a design: up, not stuck.
-				if !idle {
+				if o.refill {
+					out.rest++
+				} else if !idle {
 					var rt routed
 					if err := c.designUp(ctx, s, d, "look "+newSessionID()[:8], &rt); err != nil {
 						keep(err)
