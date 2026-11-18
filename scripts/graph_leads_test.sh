@@ -2,8 +2,9 @@
 # Test for skills/maestro-code-review/scripts/graph-leads.sh, with the
 # real codebase-memory-mcp (skipped when it isn't on PATH), on a scratch
 # repo whose change copies a helper, adds a function nothing calls and
-# one over the complexity line. Covers the four lists, graph=none with
-# no tool, a bad base, and that no index is left behind.
+# one over the complexity line. Covers the four lists, a moved file, an
+# added line that reads as a file header, graph=none with no tool, a bad
+# base, and that no index is left behind.
 # Run from anywhere: bash scripts/graph_leads_test.sh
 set -euo pipefail
 
@@ -120,11 +121,27 @@ lacks "read_all (new)"
 bash "$leads" "$r" "$(git -C "$r" rev-parse "$base^{tree}")" "$tmp/md-tree" >"$tmp/out" || fail "tree base: exit $?"
 cmp -s "$tmp/md" "$tmp/md-tree" || fail "tree base: graph.md differs"
 
+# A moved file with one edit: its functions aren't new. And an added line
+# that starts "++ ", which reads "+++ " in the diff: the hunk after it
+# stays on its own file.
+printf 'def first():\n    return 1\n\n\ndef second():\n    return 2\n' >"$r/app/text.py"
+git -C "$r" add -A && git -C "$r" commit -qm text
+base2=$(git -C "$r" rev-parse HEAD)
+git -C "$r" mv app/main.py app/entry.py
+sed -i 's/return x \* 2/return x * 3/' "$r/app/entry.py"
+printf 'def first():\n    return """\n++ b/fake.py\n"""\n\n\ndef second():\n    return 3\n' >"$r/app/text.py"
+git -C "$r" add -A && git -C "$r" commit -qm move
+bash "$leads" "$r" "$base2" "$tmp/md" >"$tmp/out" || fail "move: exit $?"
+grep -qx 'graph=yes changed=3 new=0 uncalled=0 lookalikes=0 complex=0' "$tmp/out" || fail "move: $(cat "$tmp/out")"
+has "- app/entry.py:26-27 never_used: "
+has "- app/text.py:7-8 second: "
+lacks "fake.py"
+
 # Uncommitted changes: refused, since the index reads the disk.
-echo "# draft" >>"$r/app/main.py"
+echo "# draft" >>"$r/app/entry.py"
 code=0; bash "$leads" "$r" "$base" "$tmp/md4" >"$tmp/out" 2>&1 || code=$?
 { [ $code -eq 1 ] && grep -q "uncommitted changes" "$tmp/out"; } || fail "dirty tree: exit $code"
-git -C "$r" checkout -q -- app/main.py
+git -C "$r" checkout -q -- app/entry.py
 
 # No tool: graph=none, nothing written.
 mkdir "$tmp/bin"

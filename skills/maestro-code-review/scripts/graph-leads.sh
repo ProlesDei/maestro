@@ -77,13 +77,27 @@ command -v timeout >/dev/null && limit=(timeout "${GRAPH_LEADS_TIMEOUT:-300}")
 # full: the other modes skip folders such as scripts/ as if they held no code.
 got=$("${limit[@]}" codebase-memory-mcp cli index_repository --repo-path "$(cd "$wt" && pwd)" --mode full \
 	--name "$project" 2>/dev/null | tail -n 1) || die "indexing $wt failed or ran past its time limit"
-project=$(jq -re 'select(.status == "indexed") | .project' <<<"$got") || die "indexing $wt failed"
+# Into its own name first: a failed jq would blank $project, and cleanup
+# would then delete no index.
+indexed=$(jq -re 'select(.status == "indexed") | .project' <<<"$got") || die "indexing $wt failed"
+project=$indexed
 
 # The new side of each hunk: path, first line, last line. A hunk that
-# only deletes touches the line before it.
-gd -U0 --no-renames "$base" HEAD |
-	awk '/^\+\+\+ /{f = substr($0, 5); sub(/^b\//, "", f); if (f == "/dev/null") f = ""; next}
-		f != "" && /^@@ /{split($3, a, ","); s = substr(a[1], 2) + 0; n = (2 in a) ? a[2] + 0 : 1
+# only deletes touches the line before it. A file name comes only from a
+# header, between "diff --git" and the first @@, never from an added line
+# that starts "++ ". Renames are followed, so a moved file's functions
+# aren't new; old[] maps each new path back to its base path.
+declare -A old=()
+while IFS= read -r -d '' st; do
+	case $st in
+	R* | C*) IFS= read -r -d '' a && IFS= read -r -d '' b && old[$b]=$a ;;
+	*) IFS= read -r -d '' _ ;;
+	esac
+done < <(gd --name-status -z -M "$base" HEAD)
+gd -U0 -M "$base" HEAD |
+	awk '/^diff --git /{h = 1; f = ""; next}
+		h && /^\+\+\+ /{f = substr($0, 5); sub(/^b\//, "", f); if (f == "/dev/null") f = ""; next}
+		/^@@ /{h = 0; if (f == "") next; split($3, a, ","); s = substr(a[1], 2) + 0; n = (2 in a) ? a[2] + 0 : 1
 			if (n == 0) { if (s > 0) print f "\t" s "\t" s } else print f "\t" s "\t" s + n - 1}' >"$tmp/hunks.tsv"
 
 query 'MATCH (f) WHERE f:Function OR f:Method RETURN f.qualified_name, f.file_path, f.name, f.start_line, f.end_line, f.complexity, f.is_test, f.is_entry_point, f.bt' "$tmp/rows.json"
@@ -103,7 +117,7 @@ jq -c --rawfile h "$tmp/hunks.tsv" '
 	"$tmp/fns.json" >"$tmp/changed.json"
 : >"$tmp/new.txt"
 while IFS=$'\t' read -r q p n; do
-	git -C "$wt" show "$base:$p" >"$tmp/base-file" 2>/dev/null || : >"$tmp/base-file"
+	git -C "$wt" show "$base:${old[$p]:-$p}" >"$tmp/base-file" 2>/dev/null || : >"$tmp/base-file"
 	grep -qwF -- "$n" "$tmp/base-file" || printf '%s\n' "$q" >>"$tmp/new.txt"
 done < <(jq -r '.[] | [.q, .p, .n] | @tsv' "$tmp/changed.json")
 
