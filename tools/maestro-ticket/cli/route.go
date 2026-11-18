@@ -293,6 +293,22 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		}
 	}
 
+	// A limit or a death after the work landed loses none of it: the run
+	// routes on its ticket, as one that ended done would.
+	var d ticket.Detail
+	loaded := false
+	if (out.Outcome == outUsageLimit || out.Outcome == outDied) && chainJobs[r.Job] && id != "" {
+		tid, err := ticket.ParseID(id)
+		if err != nil {
+			return out, err
+		}
+		if d, err = s.Get(ctx, tid); err != nil {
+			return out, err
+		}
+		loaded = true
+	}
+	moved := loaded && landed(r, d)
+
 	switch out.Outcome {
 	case outUsageLimit:
 		// The limit is the team's plan's: no bot starts a run until it
@@ -308,6 +324,9 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
+		}
+		if moved {
+			break
 		}
 		if r.Job != "" {
 			// The work isn't lost: once the pause lifts, the session goes
@@ -334,6 +353,9 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		planner(strings.Join(strings.Fields("disk_full "+id), " ") + ": " + out.First)
 		return out, nil
 	case outDied:
+		if moved {
+			break
+		}
 		if r.AfterDeath || c.diedBefore(r) {
 			planner(strings.TrimSpace("died twice " + id))
 		} else {
@@ -395,15 +417,19 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		}
 		return out, nil
 	}
-	tid, err := ticket.ParseID(id)
-	if err != nil {
-		return out, err
-	}
-	d, err := s.Get(ctx, tid)
-	if err != nil {
-		return out, err
+	if !loaded {
+		tid, err := ticket.ParseID(id)
+		if err != nil {
+			return out, err
+		}
+		if d, err = s.Get(ctx, tid); err != nil {
+			return out, err
+		}
+		moved = landed(r, d)
 	}
 	t := d.Ticket
+	// cut: the run ended short after its work landed.
+	cut := moved && (out.Outcome == outTimedOut || out.Outcome == outDied || out.Outcome == outUsageLimit)
 	out.Status = string(t.Status)
 	last := latest(d)
 
@@ -436,7 +462,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		return c.routeBuild(ctx, s, r, d, out)
 	case "review":
 		switch {
-		case out.Outcome == outTimedOut:
+		case out.Outcome == outTimedOut && !moved:
 			return c.reviewTimedOut(ctx, s, r, d, out)
 		case fullModelText.MatchString(out.First):
 			out.Do = append(out.Do, "maestro-ticket job again "+r.ID+" --full")
@@ -450,6 +476,8 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			out.Send = append(out.Send, next)
 		case t.Status == ticket.StatusBlocked:
 			planner("block " + id + ": " + firstLine(last.Body))
+		case cut:
+			planner(out.Outcome + " " + id + " after its verdict")
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
 		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
@@ -466,7 +494,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		}
 	case "qa", "live":
 		switch {
-		case out.Outcome == outTimedOut:
+		case out.Outcome == outTimedOut && !moved:
 			return c.qaTimedOut(ctx, s, r, d, out)
 		case r.Job == "live" && t.Status == ticket.StatusBacklog && strings.HasPrefix(last.Body, "Hold: set by qa-lead: live run failed"):
 			planner("live fail " + id)
@@ -496,6 +524,8 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			out.Send = append(out.Send, send{"reviewer", "review " + id})
 		case t.Status == ticket.StatusBlocked:
 			planner("block " + id + ": " + firstLine(last.Body))
+		case cut:
+			planner(out.Outcome + " " + id + " after its verdict")
 		case r.Job == "live":
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
@@ -632,21 +662,12 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 }
 
 // reviewTimedOut does what the reviewer did by hand when a review ran past
-// its limit: unless a verdict landed since the run began, it blocks the
-// ticket with an Escalation the planner answers. Idempotency keys make a
+// its limit with no verdict since it began: it blocks the ticket with an
+// Escalation the planner answers. Idempotency keys make a
 // second pickup of the same run a replay.
 func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out routed) (routed, error) {
 	t, id := d.Ticket, d.ID.String()
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
-	for _, cm := range d.Comments {
-		if cm.CreatedAt.Before(r.StartedAt) {
-			continue
-		}
-		if strings.HasPrefix(cm.Body, "Review:") || (strings.HasPrefix(cm.Body, "Kickback:") && !strings.HasPrefix(cm.Body, "Kickback: QA fail")) {
-			planner("timed_out " + id + " after its verdict")
-			return out, nil
-		}
-	}
 	if t.Status == ticket.StatusBlocked && strings.HasPrefix(latest(d).Body, "Escalation: review at ") && strings.Contains(firstLine(latest(d).Body), ": ran past "+r.Limit) {
 		planner("block " + id + ": review ran past " + r.Limit) // as the first pickup of this run said
 		return out, nil
@@ -702,6 +723,39 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	out.Wrote = append(out.Wrote, id+" blocked: Escalation: review at "+sha+": ran past "+r.Limit)
 	planner("block " + id + ": review ran past " + r.Limit)
 	return out, nil
+}
+
+// landed reports whether r's work reached its ticket before r ended: a
+// build's Handoff: or Escalation:, a review's verdict, QA's merge, send-back
+// or Rereview:. Such a run routes on its ticket however it ended, so a
+// timeout, a limit or a death after the work never drops its next step.
+// What a pickup wrote itself is no work of the run's.
+func landed(r runs.Record, d ticket.Detail) bool {
+	t := d.Ticket
+	if (r.Job == "qa" || r.Job == "live") && t.Status == ticket.StatusDone {
+		return true
+	}
+	for _, cm := range d.Comments {
+		b := cm.Body
+		if cm.CreatedAt.Before(r.StartedAt) || strings.Contains(b, postedBy(r)) {
+			continue
+		}
+		switch r.Job {
+		case "build":
+			if t.Status == ticket.StatusInReview && strings.HasPrefix(b, "Handoff:") || t.Status == ticket.StatusBlocked && strings.HasPrefix(b, "Escalation:") {
+				return true
+			}
+		case "review":
+			if strings.HasPrefix(b, "Review:") || strings.HasPrefix(b, "Kickback:") && !strings.HasPrefix(b, "Kickback: QA fail") {
+				return true
+			}
+		case "qa", "live":
+			if strings.HasPrefix(b, "Kickback: QA fail") || strings.HasPrefix(b, "Rereview:") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // limitLifts is when the usage limit that stopped r lifts: the reset its

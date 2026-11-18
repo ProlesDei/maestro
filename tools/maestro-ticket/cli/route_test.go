@@ -662,3 +662,49 @@ func TestRouteRoundSix(t *testing.T) {
 		t.Fatalf("no verdict thrice: %+v", rt)
 	}
 }
+
+// A run that ended short after its work landed routes on its ticket, as
+// one that ended done would: its next step is never lost.
+func TestRouteWorkThatLanded(t *testing.T) {
+	h := newRouteHarness(t)
+	ago := time.Now().Add(-time.Minute)
+	// A review that posted GO, then ran out of time, goes to QA.
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at "+sha)
+	rt := h.route(runs.Record{ID: "R-l1l1l1l1", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "45m", StartedAt: ago, Command: opusCmd()})
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send qa-lead: qa T-1"}) {
+		t.Fatalf("GO, then timed out: %+v", rt)
+	}
+	// QA that sent it back, then ran out of time, goes to its engineer.
+	h.claimed("T-1", "junior-engineer")
+	h.move("T-1", "in_progress")
+	h.comment("T-1", "Kickback: QA fail at "+sha)
+	rt = h.route(runs.Record{ID: "R-l2l2l2l2", Job: "qa", Ticket: "T-1", State: runs.TimedOut, Limit: "2h", StartedAt: ago, Command: opusCmd()})
+	if len(rt.Do) != 0 || len(rt.Send) != 1 || rt.Send[0].Line != "build T-1" {
+		t.Fatalf("QA fail, then timed out: %+v", rt)
+	}
+	// A build that handed off, then hit a usage limit or died, goes to review.
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.comment("T-2", "Handoff: PR https://x/pull/2 at "+sha)
+	future := time.Now().Add(time.Hour)
+	for _, r := range []runs.Record{
+		{ID: "R-l3l3l3l3", State: runs.Failed, IsError: true, EndedAt: &future, Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)},
+		{ID: "R-l4l4l4l4", State: runs.Died},
+	} {
+		r.Job, r.Ticket, r.Launcher, r.StartedAt, r.Command = "build", "T-2", "junior-engineer", ago, sonnetCmd()
+		rt = h.route(r)
+		if len(rt.Do) != 0 || !slices.Contains(sends(rt), "send reviewer: review T-2") {
+			t.Fatalf("%s after the handoff: %+v", r.State, rt)
+		}
+	}
+	// One that died before it handed off still goes on where it stopped.
+	h.ok(nil, "create", "--title", "c")
+	h.move("T-3", "in_progress")
+	rt = h.route(runs.Record{ID: "R-l5l5l5l5", Job: "build", Ticket: "T-3", Launcher: "junior-engineer", State: runs.Died, StartedAt: ago, Command: sonnetCmd()})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-l5l5l5l5 --died"}) {
+		t.Fatalf("died mid-work: %+v", rt)
+	}
+}
+
