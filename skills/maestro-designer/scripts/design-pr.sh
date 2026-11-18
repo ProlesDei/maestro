@@ -29,6 +29,7 @@
 set -euo pipefail
 
 die() { echo "design-pr: $2" >&2; exit "$1"; }
+((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
 
 [ $# -ge 2 ] || die 2 "usage: design-pr.sh <T-n> <run folder> --holder <holder> --token <n>"
 id=$1 dir=$2
@@ -123,11 +124,12 @@ title=$(jq -r '.title' <<<"$t")
 [ "$(jq -r '.claim.holder // empty' <<<"$t")" = "$holder" ] || stop "$id is not claimed by $holder"
 
 # The main branch, as review-prep.sh reads it; main when none is set.
+# The install's .git is looked for, so no PR's tree can pass for it.
 wts=$(git worktree list --porcelain)
 mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
 if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
 	while IFS= read -r w; do
-		[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
 	done < <(sed -n 's/^worktree //p' <<<"$wts")
 fi
 setup=$mainwt/.maestro/project/project-setup.md

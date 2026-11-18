@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -82,7 +83,9 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		rt.Do = keep
 		left := rt.Send
 		unsure := false
-		if rt.Outcome == outDone {
+		// A run whose work landed before it ended short hands on the same:
+		// a line left for a bot to pass could meet a pause set meanwhile.
+		if rt.Outcome == outDone || rt.Landed {
 			// As pickup would: a job a look handed out lately is on its way.
 			// A store that can't say starts nothing and stays the
 			// launcher's: its pickup shows why.
@@ -115,15 +118,31 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if err != nil {
 		return
 	}
-	rec.Chained = chained
+	// Routed and chained: settled, so a stop that lands now leaves no
+	// reader to chain it again.
+	rec.Chained, rec.Settling = chained, false
 	if rec.Routed, err = json.Marshal(rt); err != nil {
 		return
 	}
 	if toPlanner {
 		rec.Notify = "planner"
 	}
-	if runs.Save(dir, rec) == nil && done {
+	if runs.Save(dir, rec) != nil {
+		return
+	}
+	if done {
 		runs.Ack(dir, r.ID, chainBy, now)
+	}
+	// On a board machines share, the launch says it too, before the ring
+	// sends the planner to look from wherever it runs.
+	if host, _ := c.hostID(); toPlanner && rec.LaunchID > 0 && host != "" {
+		b, err := c.board()
+		if err == nil {
+			err = b.NotifyLaunch(ctx, rec.LaunchID, "planner")
+		}
+		if err != nil {
+			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: the planner's look elsewhere holds its ticket a stall: %v\n", r.ID, err)
+		}
 	}
 }
 

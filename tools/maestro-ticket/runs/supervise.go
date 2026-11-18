@@ -130,7 +130,9 @@ func Supervise(ctx context.Context, dir, id string, o Options) error {
 		if got, err := Load(dir, r.ID); err == nil {
 			r = got
 		}
-		if r.Settling {
+		// Stopped, as at a shutdown: OnEnd left its end to the first
+		// reader after, which routes it while it is settling.
+		if r.Settling && ctx.Err() == nil {
 			r.Settling = false
 			Save(dir, r)
 		}

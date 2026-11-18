@@ -310,3 +310,31 @@ func TestSuperviseSettles(t *testing.T) {
 		t.Fatalf("during OnEnd settling %v, listed %d; after settling %v, %d rings", during.Settling, len(listed), got.Settling, k.count())
 	}
 }
+
+// A supervisor stopped, as at a shutdown, leaves its end settling and
+// rings no one: the first reader after routes and chains it, so nothing
+// it would start dies with the machine.
+func TestSuperviseStoppedStaysSettling(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"sh", "-c", "exec tail -f /dev/null"}, Dir: dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, h := newHookServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ended := false
+	err = Supervise(ctx, dir, r.ID, Options{
+		Rings:   []time.Duration{0},
+		Hook:    func(string) (Hook, error) { return h, nil },
+		OnStart: func(Record) int64 { cancel(); return 0 },
+		OnEnd:   func(Record) { ended = true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load(dir, r.ID)
+	if !ended || !got.LauncherStopped() || !got.Settling || k.count() != 0 {
+		t.Fatalf("OnEnd %v, stopped %v, settling %v, %d rings", ended, got.LauncherStopped(), got.Settling, k.count())
+	}
+}

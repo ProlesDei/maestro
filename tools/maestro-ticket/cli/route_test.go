@@ -662,3 +662,116 @@ func TestRouteRoundSix(t *testing.T) {
 		t.Fatalf("no verdict thrice: %+v", rt)
 	}
 }
+
+// A run that ended short after its work landed routes on its ticket, as
+// one that ended done would: its next step is never lost.
+func TestRouteWorkThatLanded(t *testing.T) {
+	h := newRouteHarness(t)
+	ago := time.Now().Add(-time.Minute)
+	// A review that posted GO, then ran out of time, goes to QA.
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at "+sha)
+	rt := h.route(runs.Record{ID: "R-l1l1l1l1", Job: "review", Ticket: "T-1", State: runs.TimedOut, Limit: "45m", StartedAt: ago, Command: opusCmd()})
+	if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send qa-lead: qa T-1"}) {
+		t.Fatalf("GO, then timed out: %+v", rt)
+	}
+	// QA that sent it back, then ran out of time, goes to its engineer.
+	h.claimed("T-1", "junior-engineer")
+	h.move("T-1", "in_progress")
+	h.comment("T-1", "Kickback: QA fail at "+sha)
+	rt = h.route(runs.Record{ID: "R-l2l2l2l2", Job: "qa", Ticket: "T-1", State: runs.TimedOut, Limit: "2h", StartedAt: ago, Command: opusCmd()})
+	if len(rt.Do) != 0 || len(rt.Send) != 1 || rt.Send[0].Line != "build T-1" {
+		t.Fatalf("QA fail, then timed out: %+v", rt)
+	}
+	// A build that handed off, then hit a usage limit or died, goes to review.
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.comment("T-2", "Handoff: PR https://x/pull/2 at "+sha)
+	future := time.Now().Add(time.Hour)
+	for _, r := range []runs.Record{
+		{ID: "R-l3l3l3l3", State: runs.Failed, IsError: true, EndedAt: &future, Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)},
+		{ID: "R-l4l4l4l4", State: runs.Died},
+	} {
+		r.Job, r.Ticket, r.Launcher, r.StartedAt, r.Command = "build", "T-2", "junior-engineer", ago, sonnetCmd()
+		rt = h.route(r)
+		if len(rt.Do) != 0 || !slices.Contains(sends(rt), "send reviewer: review T-2") {
+			t.Fatalf("%s after the handoff: %+v", r.State, rt)
+		}
+		// Its own pause would refuse that review: it sets none.
+		if _, ok := readPause(h.dir, time.Now()); ok {
+			t.Fatalf("%s after the handoff paused the team: %+v", r.State, rt)
+		}
+	}
+	// One that died before it handed off still goes on where it stopped.
+	h.ok(nil, "create", "--title", "c")
+	h.move("T-3", "in_progress")
+	rt = h.route(runs.Record{ID: "R-l5l5l5l5", Job: "build", Ticket: "T-3", Launcher: "junior-engineer", State: runs.Died, StartedAt: ago, Command: sonnetCmd()})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-l5l5l5l5 --died"}) {
+		t.Fatalf("died mid-work: %+v", rt)
+	}
+	// A review that posted GO under its claim, then hit a usage limit,
+	// frees the claim for QA, which refuses a ticket another holds.
+	h.ok(nil, "create", "--title", "d")
+	h.move("T-4", "in_progress", "in_review")
+	h.comment("T-4", "Review: GO at "+sha)
+	h.ok(nil, "claim", "T-4", "--holder", "reviewer/s9", "--status", "in_review")
+	rt = h.route(runs.Record{ID: "R-l6l6l6l6", Job: "review", Ticket: "T-4", Launcher: "reviewer", State: runs.Failed, IsError: true, EndedAt: &future,
+		StartedAt: ago, Command: opusCmd(), Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)})
+	if len(rt.Do) != 0 || !slices.Contains(sends(rt), "send qa-lead: qa T-4") || !slices.Contains(rt.Wrote, "released T-4 till the limit lifts") {
+		t.Fatalf("GO, then a usage limit: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 4); d.LiveClaim() != nil {
+		t.Fatalf("the reviewer's claim outlived its limit: %+v", d.Claim)
+	}
+	// A send-back whose move never came is half the work: the session
+	// goes on and makes it.
+	h.ok(nil, "create", "--title", "e")
+	h.move("T-5", "in_progress", "in_review")
+	h.comment("T-5", "Kickback: at "+sha)
+	rt = h.route(runs.Record{ID: "R-l7l7l7l7", Job: "review", Ticket: "T-5", Launcher: "reviewer", State: runs.Died, StartedAt: ago, Command: opusCmd()})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-l7l7l7l7 --died"}) {
+		t.Fatalf("Kickback: posted, not moved, then died: %+v", rt)
+	}
+}
+
+// A run whose end was left to the planner holds no ticket from the
+// planner's own look: the look is how it answers.
+func TestLookTakesARunLeftToThePlanner(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Escalation: review at "+sha+": which schema?\nReturn-role: engineer")
+	h.move("T-1", "blocked")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "")
+	runs.Save(dir, r)
+	var out lookOut
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 0 {
+		t.Fatalf("judged a ticket its reviewer's run still holds: %+v", out.Judge)
+	}
+	r.Notify = "planner"
+	runs.Save(dir, r)
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a run left to the planner held T-1: %+v", out)
+	}
+	// One a usage limit stopped after its work landed doesn't go on: the
+	// limit holds nothing from the planner it was left to.
+	lifts := time.Now().Add(5 * time.Hour)
+	r.State, r.IsError, r.Reply = runs.Failed, true, "Claude AI usage limit reached|"+strconv.FormatInt(lifts.Unix(), 10)
+	r.Notify = ""
+	runs.Save(dir, r)
+	os.RemoveAll(filepath.Join(h.dir, "handouts"))
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 0 {
+		t.Fatalf("judged a ticket a limited run holds: %+v", out.Judge)
+	}
+	r.Notify = "planner"
+	runs.Save(dir, r)
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a limited run left to the planner held T-1: %+v", out)
+	}
+}

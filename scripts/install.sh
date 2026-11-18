@@ -426,6 +426,11 @@ if [ "$cmd" = check ]; then
 			rm -rf -- "$probe"
 		fi
 	fi
+	# mobile.dev's Maestro keeps its flows in .maestro/ too: a flows glob
+	# that recurses would run the copies in Maestro's folders as tests.
+	if compgen -G "$target/.maestro/*.yaml" >/dev/null || compgen -G "$target/.maestro/*.yml" >/dev/null; then
+		warn ".maestro/ also holds mobile.dev Maestro flows: a flows glob in its config.yaml that recurses, such as **, also runs the copies in src/, worktrees/ and bots/: list only the folders that hold the team's flows"
+	fi
 	# Its own skill, in the repo or the user's home, loads in every session
 	# and tells it to close every browser session, other runs' too.
 	for d in "$target/.claude" "$target/.agents" "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}" "${HOME:-}/.agents"; do

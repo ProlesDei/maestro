@@ -167,7 +167,7 @@ func (c *call) unmovedBoard(ctx context.Context, path string) error {
 // sqliteDrops clears the fields of a launch only MongoDB keeps, which a
 // move to SQLite drops, so the two stores' Exports compare.
 func sqliteDrops(l *ticket.Launch) {
-	l.Host, l.Job, l.Tickets, l.Limit, l.Lifts = "", "", nil, "", time.Time{}
+	l.Host, l.Job, l.Tickets, l.Limit, l.Lifts, l.Notify = "", "", nil, "", time.Time{}, ""
 }
 
 // moveReport is what a move checked: each table's rows and hash, the

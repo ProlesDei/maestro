@@ -215,6 +215,21 @@ func testKeyedWriteReplaysUnderNewToken(t *testing.T, f Factory) {
 	if got, _ := s.Get(ctx, tk.ID); got.LiveClaim() == nil {
 		t.Fatal("the later lease is gone")
 	}
+	// So does a move that releases.
+	mv := ticket.TransitionRequest{ID: tk.ID, To: ticket.StatusInProgress, Holder: "reviewer/r1", Token: third.Claim.Token, Release: true, IdempotencyKey: "move-1"}
+	if _, err := s.Transition(ctx, mv); err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := s.ClaimNext(ctx, ticket.ClaimRequest{ID: tk.ID, Holder: "reviewer/r1", TTL: time.Minute, Statuses: []ticket.Status{ticket.StatusInProgress}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mv.Token = fourth.Claim.Token
+	_, err = s.Transition(ctx, mv)
+	wantErr(t, err, ticket.ErrIdempotencyConflict)
+	if got, _ := s.Get(ctx, tk.ID); got.LiveClaim() == nil {
+		t.Fatal("a replayed move freed the later lease")
+	}
 }
 
 // release --died frees the lease of a run that hung or died and counts it
