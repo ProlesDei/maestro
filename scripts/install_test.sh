@@ -10,6 +10,8 @@
 # install by the install.sh before the record is taken over, a copy a
 # merge made too; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
+# a harness skills folder linked to the other's installs once, and any
+# other link refuses;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
 # reads project-setup.md, changes nothing, and names a store that is no
@@ -890,7 +892,13 @@ refuses "no $r4/.maestro/project/install.yaml" "$r4" apply "$r4"
 r5=$tmp/link
 repo "$r5" "harnesses: claude" "skills-home: hidden"
 mkdir "$tmp/elsewhere" && ln -s "$tmp/elsewhere" "$r5/.claude"
-refuses "is a symlink" "$r5" apply "$r5"
+refuses "install writes through a symlink only to the other harness's skills folder in this repo" "$r5" apply "$r5"
+# A link to a folder of the team's in the repo, which the record and
+# exclude don't name, refuses too.
+r5f=$tmp/link-inside
+repo "$r5f" "harnesses: claude" "skills-home: hidden"
+mkdir -p "$r5f/shared" "$r5f/.claude" && ln -s ../shared "$r5f/.claude/skills"
+refuses "$r5f/.claude/skills is a symlink to $(cd "$r5f" && pwd -P)/shared" "$r5f" apply "$r5f"
 # A link in a harness folder install neither writes to nor names in its
 # record is the team's: a claude-only install goes ahead.
 r5b=$tmp/link-other
@@ -898,14 +906,35 @@ repo "$r5b" "harnesses: claude" "skills-home: hidden"
 mkdir -p "$r5b/.claude/skills" "$r5b/.agents" && ln -s ../.claude/skills "$r5b/.agents/skills"
 ok apply "$r5b"
 installed "$r5b" .claude
-# Dropping a harness whose folder is now a link to the other's: a delete
-# through it would take the kept harness's copies, so apply refuses.
+# Dropping a harness whose folder is now a link to the other's: its
+# record lines name the kept harness's copies, which stay.
 r5c=$tmp/link-dropped
 repo "$r5c" "harnesses: claude codex" "skills-home: hidden"
 ok apply "$r5c"
 rm -r "$r5c/.agents/skills" && ln -s ../.claude/skills "$r5c/.agents/skills"
 sed -i 's/^harnesses: .*/harnesses: claude/' "$r5c/.maestro/project/install.yaml"
-refuses "$r5c/.agents/skills is a symlink" "$r5c" apply "$r5c"
+ok apply "$r5c"
+says "0 files written, 0 removed"
+installed "$r5c" .claude
+! grep -q $'\t\\.agents/' "$r5c/.git/maestro/installed.list" || fail "the record still names .agents/ copies"
+! grep -q '^/\.agents/' "$r5c/.git/info/exclude" || fail "the exclude still names .agents/ copies"
+# A harness folder linked to the other's, to share skills: both install
+# once, in the real folder, and a rerun, check and uninstall agree.
+r5e=$tmp/link-shared
+repo "$r5e" "harnesses: claude codex" "skills-home: committed"
+mkdir -p "$r5e/.agents/skills" "$r5e/.claude" && ln -s ../.agents/skills "$r5e/.claude/skills"
+ok apply "$r5e"
+installed "$r5e" .agents
+[ -L "$r5e/.claude/skills" ] || fail "apply replaced the team's link"
+rec=$r5e/.maestro/project/installed.list
+[ "$(grep -c . "$rec")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) + 1)) ] && ! grep -q $'\t\\.claude/' "$rec" ||
+	fail "the record should list each file once, under .agents/"
+ok apply "$r5e"
+says "0 files written, 0 removed"
+ok check "$r5e"
+ok uninstall "$r5e"
+[ -z "$(find "$r5e/.agents" -type f)" ] || fail "uninstall left copies behind the link"
+[ -L "$r5e/.claude/skills" ] && [ -d "$r5e/.claude/skills/" ] || fail "uninstall broke the team's link"
 # An install without claude leaves every bot without its skills: check
 # fails, and uninstall still works.
 r5d=$tmp/no-claude
