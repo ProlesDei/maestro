@@ -292,7 +292,9 @@ wait:
 		// of its own, and slot puts its command in a group of its own, so
 		// a hung test or server would outlive the limit, holding its port
 		// or its slot's work. It gets the same SIGTERM and grace, so a git
-		// stopped mid-write removes its lock.
+		// stopped mid-write removes its lock. A daemon the run started
+		// that now serves another session, such as a Gradle daemon or an
+		// ssh master, stays: killing it would fail that session.
 		killGroup(r.PID, syscall.SIGTERM)
 		end.Stop, end.Escaped = StopTerm, termRun(r.ID, r.PID)
 		grace := time.After(killGrace)
