@@ -7,7 +7,7 @@ A team installs it into its own repo and gets:
 - `maestro-ticket`, a ticket store and CLI.
 - 19 `maestro-*` skills, and seven bot profiles.
 
-Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts every job; the one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md)).
+Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts each job, save two: a run that ends starts its ticket's fixed next step, and one that frees a build slot or merges takes the planner's look to fill it. The one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md), 1).
 
 ## Who drives it
 
@@ -148,7 +148,7 @@ Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-rev
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-qa-lead <id or pr>` is the last check before production, and it tests only a head sha that review passed. It builds that sha on today's main the way production does, walks each criterion and the critical flows in a browser, tries harder angles as the risk goes up (upgrade from old data, rollback, a second user, a dependency down), and reruns the project's checks. A pass adds a `QA: pass` comment with evidence, merges the PR and moves the ticket to `done`. A fail moves it back to `in_progress` with a `Kickback: QA fail` note. It blocks a ticket when it can't test it, GitHub refuses the merge, or the PR already merged. `/maestro-qa-lead <ask>` does the QA lead's other jobs: a second look at a verdict, a bug reproduced, a ticket checked before it's built, a test plan.
 - `/maestro-code-review <pr>` reviews the PR at its head sha, in a fresh session apart from the author. GO adds a `Review: GO` comment and leaves the ticket in `in_review` for QA; review never merges. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the engineer runs the ticket again with that feedback. ESCALATE blocks the ticket with an `Escalation:` note when the change needs the owner's yes (a dependency, CI or hook change, or one a revert can't undo) or a third kickback would repeat the last two. The review's depth follows the PR's risk: a docs fix gets one pass, an auth or migration change all nine. Add `--report-only` for the report alone.
-- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a bot's report or get a second opinion on a call; the planner runs it to group blocked tickets by cause. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
+- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a bot's report or get a second opinion on a call. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
 - `/maestro-software-engineer <id or change>` takes a ticket to an open PR, or makes a change by hand, always in its own worktree kept up to date with main: plan, build, self-review. The engineer bots run it on each ticket, and any session that writes code loads it.
 
 ## Your own skills
