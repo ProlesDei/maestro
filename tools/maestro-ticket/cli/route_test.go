@@ -708,3 +708,26 @@ func TestRouteWorkThatLanded(t *testing.T) {
 	}
 }
 
+// A run whose end was left to the planner holds no ticket from the
+// planner's own look: the look is how it answers.
+func TestLookTakesARunLeftToThePlanner(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Escalation: review at "+sha+": which schema?\nReturn-role: engineer")
+	h.move("T-1", "blocked")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "")
+	runs.Save(dir, r)
+	var out lookOut
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 0 {
+		t.Fatalf("judged a ticket its reviewer's run still holds: %+v", out.Judge)
+	}
+	r.Notify = "planner"
+	runs.Save(dir, r)
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a run left to the planner held T-1: %+v", out)
+	}
+}

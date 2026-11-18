@@ -407,8 +407,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				building[r.Ticket] = true
 			}
 			// A job run that ended lately and isn't acked is its bot's to
-			// route: its pickup sends what comes next.
-			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
+			// route: its pickup sends what comes next. One whose end left
+			// the rest to the planner is this look's to route.
+			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall && r.Notify != "planner"
 			// One a usage limit stopped goes on when it lifts: its ticket
 			// waits for it, however long that takes.
 			// Until the limit is a --stall past lifting: a ring lost to a
