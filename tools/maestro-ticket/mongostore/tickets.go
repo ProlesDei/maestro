@@ -296,9 +296,46 @@ func (s *Store) Reap(ctx context.Context) (ticket.ReapResult, error) {
 		}
 		res.Reaped = append(res.Reaped, batch...)
 		if len(batch) < reapBatch {
-			return res, nil
+			return res, s.forgetKeys(ctx)
 		}
 	}
+}
+
+// keyBatch caps how many idempotency keys one transaction deletes, and
+// keyBatches how many such transactions one reap runs: each key holds a
+// whole result, so a backlog goes over many reaps, never one long
+// transaction.
+const (
+	keyBatch   = 100
+	keyBatches = 10
+)
+
+// forgetKeys deletes idempotency keys older than ticket.IdempotencyKeep,
+// oldest first. The store's clock decides, not a TTL index on the
+// server's, so both stores forget the same keys at the same time.
+func (s *Store) forgetKeys(ctx context.Context) error {
+	for range keyBatches {
+		var n int64
+		err := s.write(ctx, func(tx *txn) error {
+			n = 0 // reset: a retry reruns this closure
+			var docs []idemDoc
+			err := tx.coll(cIdempotency).find(bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: dt(tx.now - ticket.IdempotencyKeep.Milliseconds())}}}}, &docs,
+				options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}).SetLimit(keyBatch).SetProjection(bson.D{{Key: "_id", Value: 1}}))
+			if err != nil || len(docs) == 0 {
+				return err
+			}
+			keys := make([]string, len(docs))
+			for i, d := range docs {
+				keys[i] = d.Key
+			}
+			n, err = tx.coll(cIdempotency).deleteMany(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: keys}}}})
+			return err
+		})
+		if err != nil || n < keyBatch {
+			return err
+		}
+	}
+	return nil
 }
 
 // idempotent runs do once per key. A retry with the same op and request

@@ -48,7 +48,7 @@ const schemaVersion = 1
 // setupVersion is the collections and indexes this build makes. Raise it
 // when build makes something new, so each board builds it on its next
 // open.
-const setupVersion = 1
+const setupVersion = 2
 
 // DefaultDatabase holds the board when the URI names no database.
 const DefaultDatabase = "maestro"
@@ -402,7 +402,8 @@ func (s *Store) build(ctx context.Context, db *mongo.Database) error {
 			{Keys: bson.D{{Key: "ended_at", Value: 1}, {Key: "started_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("launches_open")},
 			{Keys: bson.D{{Key: "lifts", Value: 1}}, Options: options.Index().SetName("launches_lifts").SetSparse(true)},
 		},
-		cETAs: {{Keys: bson.D{{Key: "due_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("etas_due")}},
+		cETAs:        {{Keys: bson.D{{Key: "due_at", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("etas_due")}},
+		cIdempotency: {{Keys: bson.D{{Key: "created_at", Value: 1}}, Options: options.Index().SetName("idempotency_created")}},
 		// Made by its index: marks are no part of the board, so backups
 		// and exports leave them out.
 		cMarks: {{Keys: bson.D{{Key: "space", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetName("marks_space")}},
@@ -534,6 +535,14 @@ func (c coll) bulk(models []mongo.WriteModel) (*mongo.BulkWriteResult, error) {
 
 func (c coll) deleteOne(filter any) (int64, error) {
 	res, err := c.c.DeleteOne(c.ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
+func (c coll) deleteMany(filter any) (int64, error) {
+	res, err := c.c.DeleteMany(c.ctx, filter)
 	if err != nil {
 		return 0, err
 	}

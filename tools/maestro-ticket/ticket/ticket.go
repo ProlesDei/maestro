@@ -1115,7 +1115,9 @@ type Store interface {
 	// Reap frees every expired lease, logging lease_expired for each and
 	// counting it on the ticket, so a session that died is reported without
 	// waiting for someone to claim its ticket. Any write to a ticket with an
-	// expired lease does the same for that ticket first.
+	// expired lease does the same for that ticket first. It also deletes
+	// idempotency keys older than IdempotencyKeep, oldest first, up to a
+	// bound per call, so a backlog goes over several reaps.
 	Reap(ctx context.Context) (ReapResult, error)
 	Release(ctx context.Context, req ReleaseRequest) (Ticket, error)
 	Transition(ctx context.Context, req TransitionRequest) (Ticket, error)

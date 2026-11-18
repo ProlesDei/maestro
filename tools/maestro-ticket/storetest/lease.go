@@ -119,6 +119,54 @@ func testReapBatches(t *testing.T, f Factory) {
 	}
 }
 
+// A reap forgets idempotency keys past ticket.IdempotencyKeep, across the
+// store's batches, and keeps younger ones: an old key's retry runs its
+// write again, a young key's still replays.
+func testReapForgetsOldKeys(t *testing.T, f Factory) {
+	s, clk := newStore(t, f)
+	ctx := context.Background()
+	tk := mustCreate(t, s, "x", "", 2)
+	req := func(key string) ticket.CommentRequest {
+		return ticket.CommentRequest{ID: tk.ID, Body: "note " + key, Actor: "rev", IdempotencyKey: key}
+	}
+	first := map[string]int64{}
+	post := func(key string) int64 {
+		t.Helper()
+		c, err := s.Comment(ctx, req(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	old := make([]string, ForgetKeys)
+	for i := range old {
+		old[i] = fmt.Sprint("old-", i)
+		first[old[i]] = post(old[i])
+	}
+	clk.Advance(ticket.IdempotencyKeep - time.Minute)
+	first["young"] = post("young")
+	if _, err := s.Reap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if id := post(old[0]); id != first[old[0]] {
+		t.Fatalf("a key a minute short of the window: comment %d, want the replay of %d", id, first[old[0]])
+	}
+	clk.Advance(2 * time.Minute)
+	if _, err := s.Reap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range old {
+		if id := post(k); id == first[k] {
+			t.Fatalf("key %s past the window still replays comment %d", k, id)
+		}
+	}
+	if id := post("young"); id != first["young"] {
+		t.Fatalf("a key 1 minute old: comment %d, want the replay of %d", id, first["young"])
+	}
+	_, err := s.Comment(ctx, ticket.CommentRequest{ID: tk.ID, Body: "other", Actor: "rev", IdempotencyKey: "young"})
+	wantErr(t, err, ticket.ErrIdempotencyConflict)
+}
+
 // A lease is expired at its exact expiry millisecond, not after.
 func testLeaseExpiresAtExactMillisecond(t *testing.T, f Factory) {
 	s, clk := newStore(t, f)
