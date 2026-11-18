@@ -314,7 +314,11 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 		// The limit is the team's plan's: no bot starts a run until it
 		// lifts. A reset pickup can't read waits an hour.
 		until := limitLifts(r, out.Reset)
-		if co, err := c.coord(); err == nil && until.After(time.Now()) {
+		// One whose work landed sets no pause: its next step, refused
+		// under its own pause, would be lost. Under another's pause it
+		// waits and rings as it lifts; else that step runs, or meets the
+		// limit and pauses the team itself.
+		if co, err := c.coord(); err == nil && until.After(time.Now()) && !moved {
 			// One line to the planner per pause, not one per stopped run.
 			why := "usage limit"
 			if apiDown(r) {

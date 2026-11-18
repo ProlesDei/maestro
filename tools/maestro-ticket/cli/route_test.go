@@ -698,6 +698,10 @@ func TestRouteWorkThatLanded(t *testing.T) {
 		if len(rt.Do) != 0 || !slices.Contains(sends(rt), "send reviewer: review T-2") {
 			t.Fatalf("%s after the handoff: %+v", r.State, rt)
 		}
+		// Its own pause would refuse that review: it sets none.
+		if _, ok := readPause(h.dir, time.Now()); ok {
+			t.Fatalf("%s after the handoff paused the team: %+v", r.State, rt)
+		}
 	}
 	// One that died before it handed off still goes on where it stopped.
 	h.ok(nil, "create", "--title", "c")
