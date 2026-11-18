@@ -111,7 +111,7 @@ Commands:
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
