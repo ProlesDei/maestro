@@ -86,6 +86,10 @@ type Record struct {
 	// AgainOf is the run this one started afresh (job again): a run goes
 	// again once, so a run that already did goes up when it stops.
 	AgainOf string `json:"again_of,omitempty"`
+	// Overrides are the --model, --effort and --limit flags its job
+	// started with, as its launcher's memories set them: the jobs code
+	// starts for that launcher later carry them (cli's lastOverrides).
+	Overrides []string `json:"overrides,omitempty"`
 	// Nudge is the fixed resume a run began with (opus, escalate,
 	// decide): each comes once per session, so a session that asks again
 	// goes up instead of round and round.
@@ -488,17 +492,19 @@ func Orphans(dir string, now time.Time) ([]string, error) {
 // it, and returns the record as stored, with a live one written as died:
 // a supervisor holds that lock from before it writes running until it
 // exits, so a free lock means it is gone, and while the caller holds it no
-// late supervisor, nor any other reader, can write the record. The caller
+// late supervisor, nor any other reader, can write the record. died says
+// this call wrote it died, so its end is the caller's to handle; a run
+// saved died before had its end handled by an earlier caller. The caller
 // rings, saves, then calls release. A caller killed halfway lets go of
 // the lock, and the next one takes the run over.
-func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
+func Adopt(dir, id string, now time.Time) (r Record, release func(), died, ok bool) {
 	f, err := os.OpenFile(path(dir, id, ".lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		return r, nil, false
+		return r, nil, false, false
 	}
 	if got, err := holdLock(f); err != nil || !got {
 		f.Close()
-		return r, nil, false
+		return r, nil, false, false
 	}
 	release = func() { f.Close() }
 	r, err = Load(dir, id)
@@ -509,13 +515,14 @@ func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
 		elsewhere(r) && (r.Ended() || !overdue(r, now)),
 		r.State == Starting && now.Sub(r.StartedAt) < startGrace:
 		release()
-		return r, nil, false
+		return r, nil, false, false
 	case !r.Ended():
 		r.State, r.EndedAt = Died, &now
 		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
 		r.Host = hostname() // ours from here on: a failed ring is tried again
+		died = true
 	}
-	return r, release, true
+	return r, release, died, true
 }
 
 var host = sync.OnceValue(func() string {

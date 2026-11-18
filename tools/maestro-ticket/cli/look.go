@@ -222,6 +222,10 @@ func runLook(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	// After a restart the planner's look may come before any pickup: it
+	// takes over runs whose supervisor went away first, as pickup does,
+	// so their ends route and their tickets show busy, not free.
+	c.ringOrphans(ctx, rdir, "")
 	var out lookOut
 	paused := ""
 	if p, ok := co.readPause(time.Now()); ok {
@@ -364,7 +368,7 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules string, co co
 		rules = "none"
 	}
 	text := strings.Join(rows, "\n") + "\nStanding rules:\n" + rules
-	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
+	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text, inherit: true})
 	if err != nil {
 		for _, k := range claimed { // only this look's: another's stand
 			co.dropHandout(k, "judge")
@@ -499,6 +503,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if (!r.Ended() || fresh || limited) && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
+			// A build a usage limit stopped holds its slot till it goes on.
+			if limited && r.Job == "build" && r.Ticket != "" {
+				building[r.Ticket] = true
+			}
 			if !r.Ended() {
 				for _, tk := range r.Tickets { // a judge run's
 					liveRun[tk] = true
@@ -520,7 +528,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
 			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall && l.Notify != "planner"
 			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall)) && l.Notify != "planner"
-			if l.Ticket != 0 && live && l.Job == "build" {
+			if l.Ticket != 0 && (live || limited) && l.Job == "build" {
 				building[l.Ticket.String()] = true
 			}
 			if l.Ticket != 0 && (live || fresh || limited) {
@@ -533,6 +541,22 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 		}
 	}
+	// A build handed out lately holds its slot on its way to a run, by
+	// its mark, not by where its ticket falls in this look's order: a
+	// ticket that became ready since would take the slot again. A mark
+	// older than its ticket's last change was for a build that has run.
+	sentAt := map[string]time.Time{}
+	if ms, err := o.handouts.s.list(handoutMarks); err == nil {
+		for _, m := range ms {
+			id, bot, _ := strings.Cut(m.name, ".")
+			if (bot == "junior-engineer" || bot == "senior-engineer") && now.Sub(m.at) < o.stall && m.at.After(sentAt[id]) {
+				sentAt[id] = m.at
+			}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		keep(err)
+	}
+	sentBuild := map[string]bool{}
 	// What goals still have work moving, for "the goal needs it next".
 	moving := map[string]bool{}
 	going, busyBoard := 0, false
@@ -542,7 +566,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		}
 		// A build run holds its slot before its session claims, too: the
 		// busy check below skips its ticket, so build never counts it.
-		if t.Status == ticket.StatusInProgress && t.LiveClaim() != nil || building[t.ID.String()] {
+		claimed := t.Status == ticket.StatusInProgress && t.LiveClaim() != nil
+		if claimed || building[t.ID.String()] {
+			going++
+		} else if at, ok := sentAt[t.ID.String()]; ok && at.After(t.UpdatedAt) && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress) {
+			sentBuild[t.ID.String()] = true
 			going++
 		}
 		if t.Goal != "" && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview) {
@@ -562,6 +590,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// build hands a build out while a work slot is free; one handed out
 	// lately still holds its slot on its way to a claim.
 	build := func(bot string, id ticket.ID) {
+		if sentBuild[id.String()] {
+			return // its handout is counted in going, and stands
+		}
 		if idle || free == 0 {
 			return
 		}
@@ -593,7 +624,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			return
 		}
 		k, _ := findJob(kind)
-		req := jobReq{kind: k, text: text}
+		req := jobReq{kind: k, text: text, inherit: true}
 		if k.ticket {
 			req.ids = []string{id.String()}
 		} else {

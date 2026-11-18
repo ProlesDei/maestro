@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
@@ -1165,14 +1166,23 @@ func sessionOf(r runs.Record) string {
 // for it for each run it routes.
 func (c *call) allRuns() []runs.Record {
 	if c.runCache == nil {
-		dir, err := c.besideStore("runs")
-		if err != nil {
-			return nil
-		}
-		list, _ := runs.List(dir, time.Now(), true)
-		c.runCache = &list
+		c.runCache = &pastRuns{}
 	}
-	return *c.runCache
+	l := c.runCache
+	l.once.Do(func() {
+		if dir, err := c.besideStore("runs"); err == nil {
+			l.list, _ = runs.List(dir, time.Now(), true)
+		}
+	})
+	return l.list
+}
+
+// pastRuns is allRuns' list, read once however many copies of a call share
+// it: every record of the last days, each up to a whole reply, so a sweep
+// that routes many runs at once reads them once, not once a run.
+type pastRuns struct {
+	once sync.Once
+	list []runs.Record
 }
 
 // sessionHad reports whether a run that resumed r's session, and started,
