@@ -397,17 +397,26 @@ func runSupervise(ctx context.Context, c *call) error {
 			defer cancel()
 			c.chain(cctx, dir, r)
 		},
-		// A run a usage limit stopped rings once more as the limit lifts:
-		// nothing else wakes its bot then.
-		RingAgain: func(r runs.Record) time.Time {
-			if out, reset := routeOutcome(r); out == outUsageLimit {
-				return limitLifts(r, reset).Add(30 * time.Second)
-			}
-			return time.Time{}
-		},
+		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.
 		AfterRing: func(r runs.Record, err error) { c.afterRing(dir, r, err) },
 	})
+}
+
+// ringAgain is when r rings once more, zero for never: a run a usage
+// limit stopped as the limit lifts, and one whose handoff a pause held as
+// the pause lifts. Nothing else wakes its bot then.
+func ringAgain(co coord, r runs.Record, now time.Time) time.Time {
+	if out, reset := routeOutcome(r); out == outUsageLimit {
+		return limitLifts(r, reset).Add(30 * time.Second)
+	}
+	var rt routed
+	if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && doWaits(rt) {
+		if p, ok := co.readPause(now); ok {
+			return p.Until.Add(30 * time.Second)
+		}
+	}
+	return time.Time{}
 }
 
 // endRun does what log-run did once a run ended: record its end and its
@@ -877,8 +886,8 @@ func runAck(ctx context.Context, c *call) error {
 // ones just acked: those a ring only counted, or held for pickup, or that
 // ended since. Runs a usage limit holds while its pause holds don't
 // count: they ring again as it lifts. Nor, while STOP or a pause holds,
-// does any run with a do: line: its command is refused till then, so a
-// pickup for it would only run it to be refused again.
+// does any run doWaits holds: its command or handoff is refused till
+// then, so a pickup for it would only run it to be refused again.
 func (c *call) moreUnacked(dir string, now time.Time) int {
 	list, _ := runs.Unacked(dir, c.actor, now)
 	co := c.runsCoord(dir)
@@ -894,7 +903,7 @@ func (c *call) moreUnacked(dir string, now time.Time) int {
 			if paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
 				continue
 			}
-			if held && len(rt.Do) > 0 {
+			if held && doWaits(rt) {
 				continue
 			}
 		}
