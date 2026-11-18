@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -124,8 +125,22 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if toPlanner {
 		rec.Notify = "planner"
 	}
-	if runs.Save(dir, rec) == nil && done {
+	if runs.Save(dir, rec) != nil {
+		return
+	}
+	if done {
 		runs.Ack(dir, r.ID, chainBy, now)
+	}
+	// On a board machines share, the launch says it too, before the ring
+	// sends the planner to look from wherever it runs.
+	if host, _ := c.hostID(); toPlanner && rec.LaunchID > 0 && host != "" {
+		b, err := c.board()
+		if err == nil {
+			err = b.NotifyLaunch(ctx, rec.LaunchID, "planner")
+		}
+		if err != nil {
+			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: the planner's look elsewhere holds its ticket a stall: %v\n", r.ID, err)
+		}
 	}
 }
 

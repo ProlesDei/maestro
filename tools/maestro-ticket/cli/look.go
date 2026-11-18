@@ -440,7 +440,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				continue
 			}
 			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
-			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall
+			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall && l.Notify != "planner"
 			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall))
 			if l.Ticket != 0 && live && l.Job == "build" {
 				building[l.Ticket.String()] = true

@@ -525,3 +525,98 @@ func TestLookHoldsALimitedRunElsewhere(t *testing.T) {
 		}
 	}
 }
+
+// blockedReview makes T-1 on h's board blocked on a review's Escalation:,
+// which a look hands the judge once no run holds it.
+func blockedReview(t *testing.T, h *harness) {
+	t.Helper()
+	h.ok(nil, "create", "--title", "a")
+	h.ok(nil, "transition", "T-1", "--to", "in_progress")
+	h.ok(nil, "transition", "T-1", "--to", "in_review")
+	if code, out, errs := h.run("Escalation: review at abc1234: which schema?\nReturn-role: engineer", "comment", "T-1", "--body-file", "-"); code != 0 {
+		t.Fatalf("comment: %d %s %s", code, out, errs)
+	}
+	h.ok(nil, "transition", "T-1", "--to", "blocked")
+}
+
+// A run that ended on A and was left to the planner holds no ticket from
+// B's look: the launch says whose its end is.
+func TestLookTakesARunLeftToThePlannerElsewhere(t *testing.T) {
+	uri := sharedBoard(t)
+	a, b := onBoard(t, uri, "reviewer"), onBoard(t, uri, "planner")
+	blockedReview(t, a)
+	ha, err := HostID(a.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	l, err := s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: "reviewer", Ticket: 1, PID: os.Getpid(), Host: ha, Job: "review", Limit: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: l.ID, Outcome: ticket.LaunchResult}); err != nil {
+		t.Fatal(err)
+	}
+	if out := lookAt(t, b); len(out.Judge) != 0 {
+		t.Fatalf("B judged a ticket A's run still holds: %+v", out.Judge)
+	}
+	if err := s.NotifyLaunch(ctx, l.ID, "planner"); err != nil {
+		t.Fatal(err)
+	}
+	if out := lookAt(t, b); len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a run left to the planner held T-1 from B: %+v", out)
+	}
+}
+
+// A chain that leaves a run's end to the planner says so on its launch.
+func TestChainNotifiesTheLaunch(t *testing.T) {
+	uri := sharedBoard(t)
+	a := onBoard(t, uri, "reviewer")
+	blockedReview(t, a)
+	for _, bot := range []string{"reviewer", "planner"} {
+		if code, _, errs := a.run("http://127.0.0.1:1/x\n", "notify", bot, "--url-file", "-"); code != 0 {
+			t.Fatal(errs)
+		}
+	}
+	c := &call{actor: "reviewer", env: Env{Getenv: func(k string) string { return a.env[k] }, Dir: a.dir, Stderr: os.Stderr}}
+	defer c.closeBoard()
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ha, err := HostID(a.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	l, err := s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: "reviewer", Ticket: 1, PID: os.Getpid(), Host: ha, Job: "review", Limit: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(dir, 0o755)
+	r, err := runs.Create(dir, runs.Record{Launcher: "reviewer", Limit: "1h", Command: []string{"true"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	r.State, r.Ticket, r.Job, r.StartedAt, r.EndedAt, r.LaunchID = runs.Done, "T-1", "review", now.Add(-time.Minute), &now, l.ID
+	runs.Save(dir, r)
+	c.chain(ctx, dir, r)
+	if got, _ := runs.Load(dir, r.ID); got.Notify != "planner" {
+		t.Fatalf("the run wasn't left to the planner: %+v", got)
+	}
+	ls, err := s.LaunchesSince(ctx, now.Add(-time.Hour))
+	if err != nil || len(ls) != 1 || ls[0].Notify != "planner" {
+		t.Fatalf("launches: %+v, %v", ls, err)
+	}
+}
