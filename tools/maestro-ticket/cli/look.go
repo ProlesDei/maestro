@@ -333,6 +333,28 @@ func (c *call) refill(ctx context.Context, rdir string) bool {
 	return out.rest == 0 && len(out.Send)+len(out.Judge)+len(out.Errors) == 0
 }
 
+// runHolds reports whether run r still holds its ticket at now, so no
+// other job goes on it: it runs, or it ended within stall and is its
+// bot's to route, or a usage limit stopped it (limited) and it goes on
+// as the limit lifts.
+func runHolds(r runs.Record, now time.Time, stall time.Duration) (holds, limited bool) {
+	// A job run that ended lately and isn't acked is its bot's to
+	// route: its pickup sends what comes next. One whose end left
+	// the rest to the planner is the planner's look's to route.
+	fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < stall && r.Notify != "planner"
+	// One a usage limit stopped goes on when it lifts: its ticket
+	// waits for it, however long that takes.
+	// Until the limit is a stall past lifting: a ring lost to a
+	// reboot must not hold it for good. One whose work landed and
+	// whose end was left to the planner doesn't go on: that look
+	// answers it.
+	limited = r.Ended() && r.Job != "" && r.Notify != "planner" && func() bool {
+		out, reset := routeOutcome(r)
+		return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(stall))
+	}()
+	return !r.Ended() || fresh || limited, limited
+}
+
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return !errors.Is(err, fs.ErrNotExist)
@@ -488,21 +510,8 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if !r.Ended() && r.Job == "build" && r.Ticket != "" {
 				building[r.Ticket] = true
 			}
-			// A job run that ended lately and isn't acked is its bot's to
-			// route: its pickup sends what comes next. One whose end left
-			// the rest to the planner is this look's to route.
-			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall && r.Notify != "planner"
-			// One a usage limit stopped goes on when it lifts: its ticket
-			// waits for it, however long that takes.
-			// Until the limit is a --stall past lifting: a ring lost to a
-			// reboot must not hold it for good. One whose work landed and
-			// whose end was left to the planner doesn't go on: this look
-			// answers it.
-			limited := r.Ended() && r.Job != "" && r.Notify != "planner" && func() bool {
-				out, reset := routeOutcome(r)
-				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
-			}()
-			if (!r.Ended() || fresh || limited) && r.Ticket != "" {
+			holds, limited := runHolds(r, now, o.stall)
+			if holds && r.Ticket != "" {
 				liveRun[r.Ticket] = true
 			}
 			// A build a usage limit stopped holds its slot till it goes on.

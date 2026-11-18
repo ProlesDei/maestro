@@ -230,12 +230,12 @@ func (co coord) startsHeld(now time.Time) (string, bool) {
 }
 
 // doWaits reports whether a run waits while starts are held: it has a do:
-// line, or its work landed and its end left a job for a worker bot, which
-// would only be refused, so neither pickup nor a ring shows its lines, nor
-// does ack count it as more. The run that set the pause shows whole, so
-// its bot tells the planner.
+// line, or it ended done or its work landed and its end left a job for a
+// worker bot, which would only be refused, so neither pickup nor a ring
+// shows its lines, nor does ack count it as more. The run that set the
+// pause shows whole, so its bot tells the planner.
 func doWaits(rt routed) bool {
-	starts := len(rt.Do) > 0 || rt.Landed && slices.ContainsFunc(rt.Send, func(sd send) bool { return chainBots[sd.Bot] })
+	starts := len(rt.Do) > 0 || (rt.Outcome == outDone || rt.Landed) && slices.ContainsFunc(rt.Send, func(sd send) bool { return chainBots[sd.Bot] })
 	return starts && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") })
 }
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -219,7 +220,44 @@ func TestChainHandsOnALandedRun(t *testing.T) {
 		t.Fatalf("a landed build: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
 	worker := []send{{"reviewer", "review T-1"}}
-	if !doWaits(routed{Landed: true, Send: worker}) || doWaits(routed{Send: worker}) || doWaits(routed{Landed: true, Send: []send{{"planner", "block T-1"}}}) {
+	if !doWaits(routed{Landed: true, Send: worker}) || !doWaits(routed{Outcome: outDone, Send: worker}) || doWaits(routed{Send: worker}) || doWaits(routed{Landed: true, Send: []send{{"planner", "block T-1"}}}) {
 		t.Fatal("doWaits holds what a pause would refuse, and only that")
+	}
+}
+
+// A review that ended done with a send-back while a pause holds: the
+// pause refuses the build its end starts, so the run stays its bot's, its
+// ring holds the line rather than wake the bot only to be refused, and it
+// rings again as the pause lifts, carrying the line.
+func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	h.move("T-1", "in_progress", "in_review")
+	h.claimed("T-1", "junior-engineer")
+	h.comment("T-1", "Kickback: 1 blockers at "+sha+"\n- F1 [blocker, auto-fix] a.go:1: x. Fix: y")
+	h.move("T-1", "in_progress")
+	for _, b := range []string{"reviewer", "junior-engineer", "planner"} {
+		h.hook(b)
+	}
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "review: NO-GO")
+	co, _ := h.c.coord()
+	now := time.Now()
+	until := now.Add(time.Hour).UTC().Round(time.Second)
+	co.setPause(pause{Until: until, Why: "usage limit"}, now)
+	h.c.chain(context.Background(), dir, r)
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || !slices.Equal(sends(rt), []string{"send junior-engineer: build T-1"}) || runs.Acked(dir, r.ID) {
+		t.Fatalf("the refused send-back: %v acked %v", sends(rt), runs.Acked(dir, r.ID))
+	}
+	if n, covered := ringDigest(co, dir, "reviewer", now); len(n.Lines) != 0 || slices.Contains(covered, r.ID) {
+		t.Fatalf("a ring under the pause: %q covers %v", n.Lines, covered)
+	}
+	if at := ringAgain(co, got, now); !at.Equal(until.Add(30 * time.Second)) {
+		t.Fatalf("rings again at %v; want 30s after %v", at, until)
+	}
+	if n, _ := ringDigest(co, dir, "reviewer", until.Add(31*time.Second)); !slices.Contains(n.Lines, "send junior-engineer: build T-1") {
+		t.Fatalf("the ring at the lift: %q", n.Lines)
 	}
 }

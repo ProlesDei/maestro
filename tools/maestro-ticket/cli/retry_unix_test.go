@@ -29,6 +29,7 @@ type fakeSup struct {
 	mu      sync.Mutex
 	noStart bool
 	started []string
+	dirs    []string // each supervisor's folder
 	locks   []*os.File
 }
 
@@ -76,7 +77,7 @@ func (f *fakeSup) start(sup *exec.Cmd) error {
 		return err
 	}
 	f.locks = append(f.locks, lock)
-	f.started = append(f.started, id)
+	f.started, f.dirs = append(f.started, id), append(f.dirs, sup.Dir)
 	r.State, r.PID = runs.Running, os.Getpid()
 	return runs.Save(dir, r)
 }
@@ -281,6 +282,45 @@ func TestDiedResumeRace(t *testing.T) {
 	}
 	if flagValue(got[0].Command, "--resume") != "S1" {
 		t.Fatalf("the resume lost its session: %q", got[0].Command)
+	}
+}
+
+// A resume or retry runs in the folder its run ran in, not the caller's:
+// Claude Code keeps sessions per folder. One whose folder is gone runs in
+// the caller's.
+func TestResumeRunsWhereItsRunRan(t *testing.T) {
+	sup := fakeSupervisor(t)
+	h := newRouteHarness(t)
+	dir := filepath.Join(h.dir, "runs")
+	orig := t.TempDir()
+	for i, start := range []func(c *call, id string) (runs.Record, error){
+		func(c *call, id string) (runs.Record, error) {
+			return c.resume(context.Background(), resumeOpts{run: id, died: true})
+		},
+		func(c *call, id string) (runs.Record, error) {
+			return c.again(context.Background(), againOpts{run: id})
+		},
+	} {
+		r := h.endedPlan(runs.Died)
+		r.Dir = orig
+		if err := runs.Save(dir, r); err != nil {
+			t.Fatal(err)
+		}
+		nr, err := start(h.inProc("planner"), r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if nr.Dir != orig || sup.dirs[i] != orig {
+			t.Fatalf("start %d ran in %q (supervisor %q); want %q", i, nr.Dir, sup.dirs[i], orig)
+		}
+		h.endAs(nr.ID, runs.Done)
+	}
+	r := h.endedPlan(runs.Died)
+	r.Dir, r.SessionID = filepath.Join(orig, "gone"), "S2"
+	runs.Save(dir, r)
+	nr, err := h.inProc("planner").resume(context.Background(), resumeOpts{run: r.ID, died: true})
+	if err != nil || nr.Dir != h.dir {
+		t.Fatalf("a resume whose folder went: %v, ran in %q; want %q", err, nr.Dir, h.dir)
 	}
 }
 

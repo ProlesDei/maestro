@@ -274,7 +274,8 @@ var startSupervisor = func(sup *exec.Cmd) error {
 // all start runs here; job, again and resume give side, its facts for
 // stats, and launch none: its side file is empty, and never streams.
 
-// mark, if set, writes the run's id in its marks before it can run.
+// mark, if set, writes the run's id in its marks before it can run. A
+// rec.Dir set runs it there: a retry or resume runs where its run did.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -284,7 +285,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	if err != nil {
 		return runs.Record{}, err
 	}
-	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.env.Dir, time.Now().UTC().Round(time.Millisecond)
+	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
 	r, err := runs.Create(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
@@ -314,7 +315,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	exe, err := os.Executable()
 	if err == nil {
 		sup := exec.Command(exe, "supervise", r.ID, "--store", store, "--rings", ringsText(rings))
-		sup.Dir = c.env.Dir
+		sup.Dir = rec.Dir
 		// Not tagged with the run this launch runs in, if any: when that
 		// run ends, what carries its id is killed, and this run isn't its.
 		sup.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, runs.RunIDEnv+"=") })
@@ -396,17 +397,26 @@ func runSupervise(ctx context.Context, c *call) error {
 			defer cancel()
 			c.chain(cctx, dir, r)
 		},
-		// A run a usage limit stopped rings once more as the limit lifts:
-		// nothing else wakes its bot then.
-		RingAgain: func(r runs.Record) time.Time {
-			if out, reset := routeOutcome(r); out == outUsageLimit {
-				return limitLifts(r, reset).Add(30 * time.Second)
-			}
-			return time.Time{}
-		},
+		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.
 		AfterRing: func(r runs.Record, err error) { c.afterRing(dir, r, err) },
 	})
+}
+
+// ringAgain is when r rings once more, zero for never: a run a usage
+// limit stopped as the limit lifts, and one whose handoff a pause held as
+// the pause lifts. Nothing else wakes its bot then.
+func ringAgain(co coord, r runs.Record, now time.Time) time.Time {
+	if out, reset := routeOutcome(r); out == outUsageLimit {
+		return limitLifts(r, reset).Add(30 * time.Second)
+	}
+	var rt routed
+	if r.Job != "" && len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && doWaits(rt) {
+		if p, ok := co.readPause(now); ok {
+			return p.Until.Add(30 * time.Second)
+		}
+	}
+	return time.Time{}
 }
 
 // endRun does what log-run did once a run ended: record its end and its
@@ -513,7 +523,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 			// Each works as the run's own supervisor would: as its
 			// launcher, on its own copy of the call.
 			cc := *c
-			cc.actor, cc.runCache = r.Launcher, all
+			cc.actor, cc.runCache, cc.env.Dir = r.Launcher, all, c.dirFor(r.Dir)
 			switch {
 			case died:
 				// Only the reader that found it live handles its end: one
@@ -876,8 +886,8 @@ func runAck(ctx context.Context, c *call) error {
 // ones just acked: those a ring only counted, or held for pickup, or that
 // ended since. Runs a usage limit holds while its pause holds don't
 // count: they ring again as it lifts. Nor, while STOP or a pause holds,
-// does any run with a do: line: its command is refused till then, so a
-// pickup for it would only run it to be refused again.
+// does any run doWaits holds: its command or handoff is refused till
+// then, so a pickup for it would only run it to be refused again.
 func (c *call) moreUnacked(dir string, now time.Time) int {
 	list, _ := runs.Unacked(dir, c.actor, now)
 	co := c.runsCoord(dir)
@@ -893,7 +903,7 @@ func (c *call) moreUnacked(dir string, now time.Time) int {
 			if paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
 				continue
 			}
-			if held && len(rt.Do) > 0 {
+			if held && doWaits(rt) {
 				continue
 			}
 		}
@@ -1320,4 +1330,14 @@ func runNotify(ctx context.Context, c *call) error {
 			fmt.Fprintf(w, "%s: rings %s%s\n", bot, runs.Host(u), key)
 		}
 	})
+}
+
+// dirFor is dir, the folder a run ran in, while it is still there, else
+// this call's: Claude Code keeps sessions per folder, so a resume from
+// any other finds none.
+func (c *call) dirFor(dir string) string {
+	if fi, err := os.Stat(dir); dir != "" && err == nil && fi.IsDir() {
+		return dir
+	}
+	return c.env.Dir
 }
