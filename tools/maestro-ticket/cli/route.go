@@ -329,10 +329,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}
 		}
-		if moved {
-			break
-		}
-		if r.Job != "" {
+		if r.Job != "" && !moved {
 			// The work isn't lost: once the pause lifts, the session goes
 			// on where it stopped, answers it was given and all; one with
 			// no session starts afresh. Both refuse till then, and the bot
@@ -340,7 +337,8 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --go-on")
 		}
 		// A limit is no death: free the claim the stopped session left, so
-		// it counts no lease expiry and the rerun can take the ticket.
+		// it counts no lease expiry and the rerun, or the next step of
+		// work that landed, can take the ticket.
 		if id != "" {
 			if tid, err := ticket.ParseID(id); err == nil {
 				if d, err := s.Get(ctx, tid); err == nil {
@@ -352,7 +350,9 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 				}
 			}
 		}
-		return out, nil
+		if !moved {
+			return out, nil
+		}
 	case outDiskFull:
 		planner(strings.Join(strings.Fields("disk_full "+id), " ") + ": " + out.First)
 		return out, nil
@@ -729,35 +729,44 @@ func (c *call) reviewTimedOut(ctx context.Context, s ticket.Store, r runs.Record
 	return out, nil
 }
 
-// landed reports whether r's work reached its ticket before r ended: a
-// build's Handoff: or Escalation:, a review's verdict, QA's merge, send-back
-// or Rereview:. Such a run routes on its ticket however it ended, so a
-// timeout, a limit or a death after the work never drops its next step.
-// What a pickup wrote itself is no work of the run's.
+// landed reports whether r's work reached its ticket before r ended, its
+// note posted and its move made, as a route for a run that ended done
+// reads them: a build's Handoff: in review or Escalation: blocked, a
+// review's GO in review or send-back in progress, QA's merge, send-back
+// in progress or Rereview: in review. Such a run routes on its ticket
+// however it ended, so a timeout, a limit or a death after the work never
+// drops its next step. A note whose move never came is half the work: the
+// session goes on and makes the move. What a pickup wrote itself is no
+// work of the run's.
 func landed(r runs.Record, d ticket.Detail) bool {
 	t := d.Ticket
 	if (r.Job == "qa" || r.Job == "live") && t.Status == ticket.StatusDone {
 		return true
 	}
-	for _, cm := range d.Comments {
-		b := cm.Body
-		if cm.CreatedAt.Before(r.StartedAt) || strings.Contains(b, postedBy(r)) {
-			continue
-		}
-		switch r.Job {
-		case "build":
+	if r.Job == "build" {
+		for _, cm := range d.Comments {
+			b := cm.Body
+			if cm.CreatedAt.Before(r.StartedAt) || strings.Contains(b, postedBy(r)) {
+				continue
+			}
 			if t.Status == ticket.StatusInReview && strings.HasPrefix(b, "Handoff:") || t.Status == ticket.StatusBlocked && strings.HasPrefix(b, "Escalation:") {
 				return true
 			}
-		case "review":
-			if strings.HasPrefix(b, "Review:") || strings.HasPrefix(b, "Kickback:") && !strings.HasPrefix(b, "Kickback: QA fail") {
-				return true
-			}
-		case "qa", "live":
-			if strings.HasPrefix(b, "Kickback: QA fail") || strings.HasPrefix(b, "Rereview:") {
-				return true
-			}
 		}
+		return false
+	}
+	last := latest(d)
+	b := last.Body
+	if last.CreatedAt.Before(r.StartedAt) || strings.Contains(b, postedBy(r)) {
+		return false
+	}
+	switch r.Job {
+	case "review":
+		return t.Status == ticket.StatusInReview && strings.HasPrefix(b, "Review: GO") ||
+			t.Status == ticket.StatusInProgress && strings.HasPrefix(b, "Kickback:") && !strings.HasPrefix(b, "Kickback: QA fail")
+	case "qa", "live":
+		return t.Status == ticket.StatusInProgress && strings.HasPrefix(b, "Kickback: QA fail") ||
+			t.Status == ticket.StatusInReview && strings.HasPrefix(b, "Rereview:")
 	}
 	return false
 }

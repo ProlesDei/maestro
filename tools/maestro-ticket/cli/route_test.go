@@ -710,6 +710,29 @@ func TestRouteWorkThatLanded(t *testing.T) {
 	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-l5l5l5l5 --died"}) {
 		t.Fatalf("died mid-work: %+v", rt)
 	}
+	// A review that posted GO under its claim, then hit a usage limit,
+	// frees the claim for QA, which refuses a ticket another holds.
+	h.ok(nil, "create", "--title", "d")
+	h.move("T-4", "in_progress", "in_review")
+	h.comment("T-4", "Review: GO at "+sha)
+	h.ok(nil, "claim", "T-4", "--holder", "reviewer/s9", "--status", "in_review")
+	rt = h.route(runs.Record{ID: "R-l6l6l6l6", Job: "review", Ticket: "T-4", Launcher: "reviewer", State: runs.Failed, IsError: true, EndedAt: &future,
+		StartedAt: ago, Command: opusCmd(), Reply: "Claude AI usage limit reached|" + strconv.FormatInt(future.Unix(), 10)})
+	if len(rt.Do) != 0 || !slices.Contains(sends(rt), "send qa-lead: qa T-4") || !slices.Contains(rt.Wrote, "released T-4 till the limit lifts") {
+		t.Fatalf("GO, then a usage limit: %+v", rt)
+	}
+	if d, _ := h.s.Get(context.Background(), 4); d.LiveClaim() != nil {
+		t.Fatalf("the reviewer's claim outlived its limit: %+v", d.Claim)
+	}
+	// A send-back whose move never came is half the work: the session
+	// goes on and makes it.
+	h.ok(nil, "create", "--title", "e")
+	h.move("T-5", "in_progress", "in_review")
+	h.comment("T-5", "Kickback: at "+sha)
+	rt = h.route(runs.Record{ID: "R-l7l7l7l7", Job: "review", Ticket: "T-5", Launcher: "reviewer", State: runs.Died, StartedAt: ago, Command: opusCmd()})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-l7l7l7l7 --died"}) {
+		t.Fatalf("Kickback: posted, not moved, then died: %+v", rt)
+	}
 }
 
 // A run whose end was left to the planner holds no ticket from the
