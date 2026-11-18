@@ -274,7 +274,8 @@ var startSupervisor = func(sup *exec.Cmd) error {
 // all start runs here; job, again and resume give side, its facts for
 // stats, and launch none: its side file is empty, and never streams.
 
-// mark, if set, writes the run's id in its marks before it can run.
+// mark, if set, writes the run's id in its marks before it can run. A
+// rec.Dir set runs it there: a retry or resume runs where its run did.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -284,7 +285,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	if err != nil {
 		return runs.Record{}, err
 	}
-	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.env.Dir, time.Now().UTC().Round(time.Millisecond)
+	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
 	r, err := runs.Create(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
@@ -314,7 +315,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	exe, err := os.Executable()
 	if err == nil {
 		sup := exec.Command(exe, "supervise", r.ID, "--store", store, "--rings", ringsText(rings))
-		sup.Dir = c.env.Dir
+		sup.Dir = rec.Dir
 		// Not tagged with the run this launch runs in, if any: when that
 		// run ends, what carries its id is killed, and this run isn't its.
 		sup.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, runs.RunIDEnv+"=") })
@@ -513,7 +514,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 			// Each works as the run's own supervisor would: as its
 			// launcher, on its own copy of the call.
 			cc := *c
-			cc.actor, cc.runCache = r.Launcher, all
+			cc.actor, cc.runCache, cc.env.Dir = r.Launcher, all, c.dirFor(r.Dir)
 			switch {
 			case died:
 				// Only the reader that found it live handles its end: one
@@ -1320,4 +1321,14 @@ func runNotify(ctx context.Context, c *call) error {
 			fmt.Fprintf(w, "%s: rings %s%s\n", bot, runs.Host(u), key)
 		}
 	})
+}
+
+// dirFor is dir, the folder a run ran in, while it is still there, else
+// this call's: Claude Code keeps sessions per folder, so a resume from
+// any other finds none.
+func (c *call) dirFor(dir string) string {
+	if fi, err := os.Stat(dir); dir != "" && err == nil && fi.IsDir() {
+		return dir
+	}
+	return c.env.Dir
 }
