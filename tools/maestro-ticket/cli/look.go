@@ -224,7 +224,9 @@ func runLook(ctx context.Context, c *call) error {
 	}
 	// After a restart the planner's look may come before any pickup: it
 	// takes over runs whose supervisor went away first, as pickup does,
-	// so their ends route and their tickets show busy, not free.
+	// so their ends route and their tickets show busy, not free. The
+	// planner's own ring too, as doctor's do: only a ring brings it to
+	// pickup, where a dead plan or judge run shows.
 	c.ringOrphans(ctx, rdir, "")
 	var out lookOut
 	paused := ""

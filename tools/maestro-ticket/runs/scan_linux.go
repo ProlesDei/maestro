@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 // CanScan reports whether Untracked works on this system.
@@ -97,7 +99,7 @@ func signalRun(id string, sig syscall.Signal, group int) (n, outside int) {
 			procs = append(procs, pid)
 		}
 	}
-	shared := sharedProcs(procs)
+	shared := sharedFor(id, procs)
 	for _, pid := range procs {
 		if shared[pid] {
 			continue
@@ -140,4 +142,38 @@ func ancestors() map[int]bool {
 		out[pid] = true
 	}
 	return out
+}
+
+// spared keeps each run's sharedProcs answer a second: a stop's grace asks
+// runAlive every 100ms, and each answer reads every socket on the
+// machine. A process the answer didn't see, such as one forked since,
+// counts as the run's own.
+var spared = struct {
+	sync.Mutex
+	m map[string]spare
+}{m: map[string]spare{}}
+
+type spare struct {
+	at   time.Time
+	pids map[int]bool
+}
+
+func sharedFor(id string, procs []int) map[int]bool {
+	now := time.Now()
+	spared.Lock()
+	for k, s := range spared.m {
+		if now.Sub(s.at) > time.Second {
+			delete(spared.m, k)
+		}
+	}
+	s, ok := spared.m[id]
+	spared.Unlock()
+	if ok {
+		return s.pids
+	}
+	pids := sharedProcs(procs) // unlocked: other runs' kills go on meanwhile
+	spared.Lock()
+	spared.m[id] = spare{now, pids}
+	spared.Unlock()
+	return pids
 }

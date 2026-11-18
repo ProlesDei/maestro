@@ -1,7 +1,9 @@
 name: ci
 
+# A PR runs once, on its pull_request event; a push runs only on main.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:

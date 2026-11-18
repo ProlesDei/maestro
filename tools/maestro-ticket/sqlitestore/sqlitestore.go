@@ -705,6 +705,14 @@ const (
 // forgetKeys deletes idempotency keys older than ticket.IdempotencyKeep,
 // oldest first.
 func (s *Store) forgetKeys(ctx context.Context) error {
+	// Most reaps find none: a read says so without taking the write lock.
+	old := false
+	if err := s.read(ctx, func(tx *sql.Tx, now int64) error {
+		return tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM idempotency WHERE created_at < ?)",
+			now-ticket.IdempotencyKeep.Milliseconds()).Scan(&old)
+	}); err != nil || !old {
+		return err
+	}
 	for range keyBatches {
 		var n int64
 		err := s.write(ctx, func(tx *sql.Tx, now int64) error {

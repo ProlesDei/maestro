@@ -433,7 +433,20 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 	}
 	if req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
-		req.model, req.effort, req.limit = c.lastOverrides(k.name)
+		// What was picked for this ticket, its tier's model or a review's
+		// model and size, stands: a carried flag replaces only a fixed
+		// default.
+		model, effort, limit, err := c.lastOverrides(k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if k.model != "tier" && k.model != "route" {
+			req.model = model
+		}
+		if k.model != "route" {
+			req.limit = limit
+		}
+		req.effort = effort
 	}
 	var overrides []string
 	if req.model != "" {
@@ -1140,7 +1153,11 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	case o.decide:
 		nudge = "decide"
 	}
-	for _, x := range c.allRuns() {
+	all, err := c.pastRuns()
+	if err != nil {
+		return fail(err)
+	}
+	for _, x := range all {
 		if neverRan(x) {
 			continue // its start failed: it holds nothing
 		}

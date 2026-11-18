@@ -255,6 +255,9 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 // startAs starts req as bot, so the run rings bot and its end chains as
 // bot's would.
 func (c *call) startAs(ctx context.Context, dir, bot string, req jobReq) (runs.Record, error) {
+	if c.runCache == nil {
+		c.runCache = &pastRuns{} // made before the copy, so each start reads it once
+	}
 	cc := *c
 	cc.actor = bot
 	req.inherit = true
@@ -313,17 +316,21 @@ func lastSlots(list []runs.Record, bot, name string) int {
 // or what a start code made for it carried on. A resume or a job again
 // copies its run's command, not the actor's choice, so it counts for
 // none.
-func (c *call) lastOverrides(job string) (model, effort string, limit time.Duration) {
+func (c *call) lastOverrides(job string) (model, effort string, limit time.Duration, err error) {
+	list, err := c.pastRuns()
+	if err != nil {
+		return "", "", 0, err
+	}
 	var last *runs.Record
-	for _, r := range c.allRuns() {
+	for _, r := range list {
 		if r.Launcher == c.actor && r.Job == job && r.ResumeOf == "" && r.AgainOf == "" && (last == nil || r.StartedAt.After(last.StartedAt)) {
 			last = &r
 		}
 	}
 	if last == nil {
-		return "", "", 0
+		return "", "", 0, nil
 	}
 	model, effort = flagValue(last.Overrides, "--model"), flagValue(last.Overrides, "--effort")
 	limit, _ = time.ParseDuration(flagValue(last.Overrides, "--limit"))
-	return model, effort, limit
+	return model, effort, limit, nil
 }

@@ -1165,16 +1165,24 @@ func sessionOf(r runs.Record) string {
 // allRuns lists every run, acked ones too, once per call: a pickup asks
 // for it for each run it routes.
 func (c *call) allRuns() []runs.Record {
+	list, _ := c.pastRuns()
+	return list
+}
+
+// pastRuns is allRuns with the error that listing met, for a check that
+// must refuse rather than pass on a list it couldn't read.
+func (c *call) pastRuns() ([]runs.Record, error) {
 	if c.runCache == nil {
 		c.runCache = &pastRuns{}
 	}
 	l := c.runCache
 	l.once.Do(func() {
-		if dir, err := c.besideStore("runs"); err == nil {
-			l.list, _ = runs.List(dir, time.Now(), true)
+		var dir string
+		if dir, l.err = c.besideStore("runs"); l.err == nil {
+			l.list, l.err = runs.List(dir, time.Now(), true)
 		}
 	})
-	return l.list
+	return l.list, l.err
 }
 
 // pastRuns is allRuns' list, read once however many copies of a call share
@@ -1183,6 +1191,7 @@ func (c *call) allRuns() []runs.Record {
 type pastRuns struct {
 	once sync.Once
 	list []runs.Record
+	err  error
 }
 
 // sessionHad reports whether a run that resumed r's session, and started,

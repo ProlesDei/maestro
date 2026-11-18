@@ -314,6 +314,18 @@ const (
 // oldest first. The store's clock decides, not a TTL index on the
 // server's, so both stores forget the same keys at the same time.
 func (s *Store) forgetKeys(ctx context.Context) error {
+	// Most reaps find none: a read says so without a write on the writer
+	// document every write takes.
+	old := false
+	if err := s.read(ctx, func(tx *txn) error {
+		var docs []idemDoc
+		err := tx.coll(cIdempotency).find(bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: dt(tx.now - ticket.IdempotencyKeep.Milliseconds())}}}}, &docs,
+			options.Find().SetLimit(1).SetProjection(bson.D{{Key: "_id", Value: 1}}))
+		old = len(docs) > 0
+		return err
+	}); err != nil || !old {
+		return err
+	}
 	for range keyBatches {
 		var n int64
 		err := s.write(ctx, func(tx *txn) error {

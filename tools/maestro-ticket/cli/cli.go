@@ -1184,9 +1184,11 @@ func runReap(ctx context.Context, c *call) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
-		res, err := s.Reap(ctx)
-		if err != nil {
-			return err
+		// A reap that failed partway, such as as it forgot old keys, still
+		// freed what it lists: print that, and the error after.
+		res, reapErr := s.Reap(ctx)
+		if reapErr != nil && len(res.Reaped) == 0 {
+			return reapErr
 		}
 		// Reap is the store's upkeep: it also checkpoints the WAL on drivers
 		// that have one.
@@ -1197,7 +1199,7 @@ func runReap(ctx context.Context, c *call) error {
 				fmt.Fprintf(c.env.Stderr, "maestro-ticket reap: checkpoint: %v\n", err)
 			}
 		}
-		return c.out(res, func(w io.Writer) { printReap(w, res) })
+		return errors.Join(c.out(res, func(w io.Writer) { printReap(w, res) }), reapErr)
 	})
 }
 
