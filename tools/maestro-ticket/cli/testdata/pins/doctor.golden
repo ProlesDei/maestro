@@ -3,7 +3,7 @@ exit 0
 stdout:
 ok    store              <DIR>/tickets.db (from MAESTRO_TICKET_STORE)
 ok    filesystem         local
-ok    schema             user_version = 9 (want 9)
+ok    schema             user_version = 10 (want 10)
 ok    journal_mode       journal_mode = wal (want wal)
 ok    synchronous        synchronous = 1 (want 1)
 ok    busy_timeout       busy_timeout = 5000 (want 5000)
@@ -36,7 +36,7 @@ stdout:
     {
       "name": "schema",
       "ok": true,
-      "detail": "user_version = 9 (want 9)"
+      "detail": "user_version = 10 (want 10)"
     },
     {
       "name": "journal_mode",
