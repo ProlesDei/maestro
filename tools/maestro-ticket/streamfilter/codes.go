@@ -26,7 +26,7 @@ var tools = []string{
 // the list to skills/.
 var skillFiles = map[string]struct{ refs, scripts []string }{
 	"maestro-chief-of-staff":     {},
-	"maestro-code-review":        {refs: []string{"passes"}, scripts: []string{"review-prep"}},
+	"maestro-code-review":        {refs: []string{"passes"}, scripts: []string{"graph-leads", "review-prep"}},
 	"maestro-create-edit-skill":  {},
 	"maestro-create-ticket":      {},
 	"maestro-designer":           {refs: []string{"design"}, scripts: []string{"design-pr"}},
