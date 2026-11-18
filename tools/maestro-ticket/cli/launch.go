@@ -385,6 +385,12 @@ func runSupervise(ctx context.Context, c *call) error {
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
+			// Stopped, as at a shutdown: a resume or handoff started now
+			// dies with the machine and spends the run's one resume. The
+			// run stays settling for the first reader after, which chains it.
+			if ctx.Err() != nil {
+				return
+			}
 			// Bounded: a hung gh in a review's start must not hold the ring.
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chainLimit)
 			defer cancel()
