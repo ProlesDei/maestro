@@ -193,3 +193,33 @@ func TestChainSettlesItsRun(t *testing.T) {
 		t.Fatalf("after its chain: settling %v, routed %s", got.Settling, got.Routed)
 	}
 }
+
+// A build that handed off, then died, hands on as one that ended done: a
+// look's handout of its review is on its way, so it acks with nothing left.
+// Under a pause, a landed run's job for a worker waits like a do: line.
+func TestChainHandsOnALandedRun(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Handoff: PR https://x/pull/1 at "+sha)
+	h.hook("reviewer")
+	h.hook("junior-engineer")
+	dir := filepath.Join(h.dir, "runs")
+	h.c.actor = "junior-engineer"
+	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
+		t.Fatal("no handout")
+	}
+	r := h.endedRun("build", "junior-engineer", "")
+	r.State = runs.Died
+	runs.Save(dir, r)
+	h.c.chain(context.Background(), dir, r)
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || !rt.Landed || !runs.Acked(dir, r.ID) {
+		t.Fatalf("a landed build: %+v acked %v", got, runs.Acked(dir, r.ID))
+	}
+	worker := []send{{"reviewer", "review T-1"}}
+	if !doWaits(routed{Landed: true, Send: worker}) || doWaits(routed{Send: worker}) || doWaits(routed{Landed: true, Send: []send{{"planner", "block T-1"}}}) {
+		t.Fatal("doWaits holds what a pause would refuse, and only that")
+	}
+}

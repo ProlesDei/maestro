@@ -83,7 +83,9 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		rt.Do = keep
 		left := rt.Send
 		unsure := false
-		if rt.Outcome == outDone {
+		// A run whose work landed before it ended short hands on the same:
+		// a line left for a bot to pass could meet a pause set meanwhile.
+		if rt.Outcome == outDone || rt.Landed {
 			// As pickup would: a job a look handed out lately is on its way.
 			// A store that can't say starts nothing and stays the
 			// launcher's: its pickup shows why.

@@ -52,6 +52,9 @@ type routed struct {
 	Send     []send   `json:"send"`
 	Do       []string `json:"do"`
 	Wrote    []string `json:"wrote"`
+	// Landed: the run ended short after its work landed, so it routes as
+	// one that ended done, and its end starts its next step the same way.
+	Landed bool `json:"landed,omitempty"`
 	// Reply is the whole reply, shown only when the bot must read it: a
 	// question, a failure, or a text job whose reply is the answer.
 	Reply string `json:"reply,omitempty"`
@@ -434,6 +437,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 	t := d.Ticket
 	// cut: the run ended short after its work landed.
 	cut := moved && (out.Outcome == outTimedOut || out.Outcome == outDied || out.Outcome == outUsageLimit)
+	out.Landed = cut
 	out.Status = string(t.Status)
 	last := latest(d)
 
