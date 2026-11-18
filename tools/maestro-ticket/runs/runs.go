@@ -34,6 +34,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -121,6 +122,9 @@ type Record struct {
 	// Host is the machine the supervisor runs on. It matters only where
 	// the store may sit on a disk machines share: see elsewhere.
 	Host string `json:"host,omitempty"`
+	// Stamp tells PID's process from a later one that reuses its pid,
+	// where a supervisor's death leaves the process running: see Stamp.
+	Stamp string `json:"stamp,omitempty"`
 	// ChainOf is the run whose end started this one as its fixed next
 	// step, and Hops how many such ends in a row led here (cli/chain.go).
 	ChainOf string `json:"chain_of,omitempty"`
@@ -327,7 +331,23 @@ func supervisorGone(dir string, r Record, now time.Time) bool {
 	}
 	// A lock held here is a live supervisor here, whatever the record's
 	// host; a free one may only mean the lock is on another machine.
-	return ok && (!far || overdue(r, now))
+	return ok && (!far || overdue(r, now)) && !orphanLives(dir, r, now)
+}
+
+// orphanLives reports whether a run whose supervisor went away still has
+// its session running here, where nothing ended it with the supervisor:
+// it is the run's till it ends, its limit passes or someone asks it to
+// stop. Then Adopt ends it, as its supervisor would have.
+func orphanLives(dir string, r Record, now time.Time) bool {
+	if elsewhere(r) || !sessionLeft(r) {
+		return false
+	}
+	if _, asked := StopAsked(dir, r.ID); asked {
+		return false
+	}
+	limit := r.LimitDuration()
+	credit, _ := Credit(dir, r.ID, r.StartedAt, now, limit)
+	return limit <= 0 || now.Sub(r.StartedAt) <= limit+credit+KillGrace
 }
 
 // elsewhere reports whether r's supervisor may run on another machine,
@@ -513,10 +533,16 @@ func Adopt(dir, id string, now time.Time) (r Record, release func(), died, ok bo
 		// Its lock may be on another machine: it rings its own result,
 		// and a live one is its own until it is overdue.
 		elsewhere(r) && (r.Ended() || !overdue(r, now)),
-		r.State == Starting && now.Sub(r.StartedAt) < startGrace:
+		r.State == Starting && now.Sub(r.StartedAt) < startGrace,
+		!r.Ended() && orphanLives(dir, r, now):
 		release()
 		return r, nil, false, false
 	case !r.Ended():
+		if sessionLeft(r) {
+			// Past its limit or asked to stop: slot passes this on to
+			// its command, as on its supervisor's stop.
+			killGroup(r.PID, syscall.SIGTERM)
+		}
 		r.State, r.EndedAt = Died, &now
 		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
 		r.Host = hostname() // ours from here on: a failed ring is tried again

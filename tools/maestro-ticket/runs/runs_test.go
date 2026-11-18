@@ -255,7 +255,7 @@ func TestRecordJSONKeys(t *testing.T) {
 		"SessionID session_id,omitempty", "IsError is_error,omitempty", "Reply reply,omitempty",
 		"Error error,omitempty", "Frozen frozen,omitempty", "Rings rings,omitempty", "RingError ring_error,omitempty",
 		"Rang rang,omitempty", "OrphanTries orphan_tries,omitempty", "LaunchID launch_id,omitempty",
-		"Host host,omitempty", "ChainOf chain_of,omitempty", "Hops hops,omitempty",
+		"Host host,omitempty", "Stamp stamp,omitempty", "ChainOf chain_of,omitempty", "Hops hops,omitempty",
 		"Chained chained,omitempty", "Routed routed,omitempty", "Notify notify,omitempty",
 		"Settling settling,omitempty",
 		"AckedAt acked_at,omitempty", "AckedBy acked_by,omitempty",

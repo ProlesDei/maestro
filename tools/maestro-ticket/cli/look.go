@@ -568,6 +568,17 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		keep(err)
 	}
 	sentBuild := map[string]bool{}
+	// The areas of builds on their way to a claim, which the store's
+	// ready check can't see yet: a build whose areas overlap one waits.
+	onWay := map[ticket.ID][]string{}
+	areaHeld := func(t ticket.Ticket) bool {
+		for id, as := range onWay {
+			if _, _, ok := ticket.AnyAreaOverlaps(t.Areas, as); ok && id != t.ID {
+				return true
+			}
+		}
+		return false
+	}
 	// What goals still have work moving, for "the goal needs it next".
 	moving := map[string]bool{}
 	going, busyBoard := 0, false
@@ -578,11 +589,15 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		// A build run holds its slot before its session claims, too: the
 		// busy check below skips its ticket, so build never counts it.
 		claimed := t.Status == ticket.StatusInProgress && t.LiveClaim() != nil
+		toBuild := t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress
 		if claimed || building[t.ID.String()] {
 			going++
-		} else if at, ok := sentAt[t.ID.String()]; ok && at.After(t.UpdatedAt) && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress) {
+		} else if at, ok := sentAt[t.ID.String()]; ok && at.After(t.UpdatedAt) && toBuild {
 			sentBuild[t.ID.String()] = true
 			going++
+		}
+		if toBuild && !claimed && (building[t.ID.String()] || sentBuild[t.ID.String()]) {
+			onWay[t.ID] = t.Areas
 		}
 		if t.Goal != "" && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview) {
 			moving[t.Goal] = true
@@ -599,15 +614,17 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		out.Send = append(out.Send, send{bot, line})
 	}
 	// build hands a build out while a work slot is free; one handed out
-	// lately still holds its slot on its way to a claim.
-	build := func(bot string, id ticket.ID) {
+	// lately still holds its slot on its way to a claim, and its areas.
+	build := func(bot string, t ticket.Ticket) {
+		id := t.ID
 		if sentBuild[id.String()] {
 			return // its handout is counted in going, and stands
 		}
-		if idle || free == 0 {
+		if idle || free == 0 || areaHeld(t) {
 			return
 		}
 		free-- // a build on its way to a claim holds its slot too
+		onWay[id] = t.Areas
 		hand(bot, "build "+id.String(), id)
 	}
 	// judgeIt sends a row to the judge, unless it judged the ticket in
@@ -750,9 +767,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				}
 				switch {
 				case t.Tries <= 1:
-					build(eng, id)
+					build(eng, t)
 				case t.Tries == 2 && eng == "junior-engineer":
-					build("senior-engineer", id)
+					build("senior-engineer", t)
 				case t.Tries == 2:
 					start("plan", id, id.String())
 				case o.refill:
@@ -775,7 +792,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				continue
 			}
 			if !byRole(t) {
-				build(engineer(t), id)
+				build(engineer(t), t)
 			}
 		case ticket.StatusBlocked:
 			n.blocked++
@@ -816,7 +833,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			judgeIt(t, "blocked", first, fmt.Sprint(latest(d).ID))
 		case ticket.StatusTodo:
 			n.todo++
-			if !readyTodo[id] {
+			if !readyTodo[id] || areaHeld(t) {
 				n.waiting++
 				continue
 			}
@@ -826,7 +843,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				if t.Tier == ticket.TierJunior && t.Tries < 2 { // a split keeps its tries
 					bot = "junior-engineer"
 				}
-				build(bot, id)
+				build(bot, t)
 			}
 		case ticket.StatusBacklog:
 			n.backlog++
@@ -997,20 +1014,29 @@ func (c *call) goalProgress(ctx context.Context, s ticket.Store) (string, error)
 }
 
 // alertLines are alerts' lines as look prints them; stalled tickets are
-// left out, since their rows hand them out.
+// left out, since their rows hand them out. Revived claims share one
+// capped line: each stays revived till its claim ends, so it comes back
+// every look.
 func alertLines(r alertReport, now time.Time) []string {
 	var b strings.Builder
-	stalled := r.Stalled
-	r.Stalled = nil
+	stalled, revived := r.Stalled, r.Revived
+	r.Stalled, r.Revived = nil, nil
 	if !r.empty() || r.Restarted {
 		printAlerts(&b, r, now)
 	}
-	r.Stalled = stalled
+	r.Stalled, r.Revived = stalled, revived
 	out := []string{}
 	for _, l := range strings.Split(strings.TrimSpace(b.String()), "\n") {
 		if l != "" && !strings.HasPrefix(l, "died:") && !strings.HasPrefix(l, "eta missed:") {
 			out = append(out, l)
 		}
+	}
+	if len(revived) > 0 {
+		var ids []string
+		for _, v := range revived {
+			ids = append(ids, fmt.Sprintf("%s %dx", v.Ticket, v.Revivals))
+		}
+		out = append(out, "revived: "+capped(ids)+": leases ran out and came back, so a machine froze or a run hung; each limit still ends it, maestro-ticket stop sooner")
 	}
 	return out
 }

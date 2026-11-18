@@ -196,7 +196,7 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	if err := cmd.Start(); err != nil {
 		return fail(err)
 	}
-	r.State, r.PID = Running, cmd.Process.Pid
+	r.State, r.PID, r.Stamp = Running, cmd.Process.Pid, Stamp(cmd.Process.Pid)
 	if o.OnStart != nil {
 		r.LaunchID = o.OnStart(r)
 	}
@@ -512,7 +512,9 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 				if g.Tried {
 					r.Rings++
 				}
-				r.Rang, r.RingError = r.Rang || g.Rang, ""
+				// A ring that left this run out, as one under STOP does,
+				// isn't its ring: a reader's sweep rings it after.
+				r.Rang, r.RingError = r.Rang || g.Covers(r.ID), ""
 				if err != nil {
 					r.RingError = err.Error()
 				}

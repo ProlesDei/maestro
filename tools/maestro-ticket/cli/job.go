@@ -754,7 +754,7 @@ func (co coord) takeMark(name string, body func(runID string) string, held func(
 		} else if err := held(id, m); err != nil {
 			return nil, nil, err
 		}
-		took, cleared := co.s.takeOver(runMarks, name, func(now mark) bool { return markRun(now.body) == id })
+		took, cleared := co.s.takeOver(runMarks, name, func(now mark) bool { return sameMark(m, now) })
 		if !took && !cleared {
 			return nil, nil, busy
 		}
