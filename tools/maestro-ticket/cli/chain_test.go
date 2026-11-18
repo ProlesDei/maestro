@@ -177,3 +177,19 @@ func TestChainRefilesFollowUps(t *testing.T) {
 		t.Fatalf("wrote: %q", rt.Wrote)
 	}
 }
+
+// A chain that ran settles its run itself: a stop that lands after it
+// leaves no reader after boot to chain it a second time.
+func TestChainSettlesItsRun(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "")
+	r.Settling = true
+	runs.Save(dir, r)
+	h.c.chain(context.Background(), dir, r)
+	if got, _ := runs.Load(dir, r.ID); got.Settling || len(got.Routed) == 0 {
+		t.Fatalf("after its chain: settling %v, routed %s", got.Settling, got.Routed)
+	}
+}

@@ -115,7 +115,9 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	if err != nil {
 		return
 	}
-	rec.Chained = chained
+	// Routed and chained: settled, so a stop that lands now leaves no
+	// reader to chain it again.
+	rec.Chained, rec.Settling = chained, false
 	if rec.Routed, err = json.Marshal(rt); err != nil {
 		return
 	}
