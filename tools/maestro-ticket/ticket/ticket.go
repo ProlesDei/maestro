@@ -970,6 +970,19 @@ type TransitionRequest struct {
 	IdempotencyKey string `json:"-"`
 }
 
+// Keyed is what a transition's idempotency key covers. With Release it
+// names the token too, as a release does: else a retry under a later
+// lease replays, reports the ticket free and leaves it held.
+func (r TransitionRequest) Keyed() any {
+	if !r.Release {
+		return r
+	}
+	return struct {
+		TransitionRequest
+		ReleaseToken int64 `json:"release_token"`
+	}{r, r.Token}
+}
+
 // Validate checks the request and fills defaults.
 func (r *TransitionRequest) Validate() error {
 	if !r.To.Valid() {

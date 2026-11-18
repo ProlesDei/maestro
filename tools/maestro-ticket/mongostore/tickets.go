@@ -1234,7 +1234,7 @@ func (s *Store) Transition(ctx context.Context, req ticket.TransitionRequest) (t
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *txn) error {
 		var err error
-		out, err = idempotent(tx, req.IdempotencyKey, "transition", req, func() (ticket.Ticket, error) {
+		out, err = idempotent(tx, req.IdempotencyKey, "transition", req.Keyed(), func() (ticket.Ticket, error) {
 			return tx.applyTransition(req)
 		}, nil)
 		return err

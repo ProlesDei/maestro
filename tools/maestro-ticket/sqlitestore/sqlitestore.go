@@ -1507,7 +1507,7 @@ func (s *Store) Transition(ctx context.Context, req ticket.TransitionRequest) (t
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *sql.Tx, now int64) error {
 		var err error
-		out, err = idempotent(ctx, tx, req.IdempotencyKey, "transition", req, now, func() (ticket.Ticket, error) {
+		out, err = idempotent(ctx, tx, req.IdempotencyKey, "transition", req.Keyed(), now, func() (ticket.Ticket, error) {
 			return s.applyTransition(ctx, tx, req, now)
 		}, nil)
 		return err
