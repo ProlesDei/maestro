@@ -411,7 +411,7 @@ func ringAgain(co coord, r runs.Record, now time.Time) time.Time {
 		return limitLifts(r, reset).Add(30 * time.Second)
 	}
 	var rt routed
-	if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && doWaits(rt) {
+	if r.Job != "" && len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && doWaits(rt) {
 		if p, ok := co.readPause(now); ok {
 			return p.Until.Add(30 * time.Second)
 		}

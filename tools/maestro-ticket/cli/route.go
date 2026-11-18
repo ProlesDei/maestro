@@ -231,11 +231,24 @@ func kickbackRoute(ctx context.Context, s ticket.Store, t ticket.Ticket) (send, 
 }
 
 // readyWork reports whether a build waits for a free slot: new work, or
-// work sent back or stopped with no claim on it, which look hands a slot
-// first.
-func readyWork(ctx context.Context, s ticket.Store) (bool, error) {
-	l, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusTodo, ticket.StatusInProgress}, Ready: true, Limit: 1})
-	return len(l) > 0, err
+// work sent back or stopped with no claim on it and no run that still
+// holds it, which look hands a slot first.
+func (c *call) readyWork(ctx context.Context, s ticket.Store) (bool, error) {
+	l, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusTodo}, Ready: true, Limit: 1})
+	if err != nil || len(l) > 0 {
+		return len(l) > 0, err
+	}
+	if l, err = s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusInProgress}, Ready: true}); err != nil || len(l) == 0 {
+		return false, err
+	}
+	held := map[string]bool{}
+	now := time.Now()
+	for _, r := range c.allRuns() { // none read: each counts as waiting
+		if holds, _ := runHolds(r, now, ticket.DefaultStall); holds && r.Ticket != "" {
+			held[r.Ticket] = true
+		}
+	}
+	return slices.ContainsFunc(l, func(t ticket.Ticket) bool { return !held[t.ID.String()] }), nil
 }
 
 // goalDone reports whether a goal has no open ticket left.
@@ -514,7 +527,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			if err != nil {
 				return out, err
 			}
-			ready, err := readyWork(ctx, s)
+			ready, err := c.readyWork(ctx, s)
 			if err != nil {
 				return out, err
 			}
@@ -597,7 +610,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		planner("block " + id + ": " + headLine(last.Body))
 	case t.Status == ticket.StatusInReview:
 		out.Send = append(out.Send, send{"reviewer", "review " + id})
-		ready, err := readyWork(ctx, s)
+		ready, err := c.readyWork(ctx, s)
 		if err != nil {
 			return out, err
 		}

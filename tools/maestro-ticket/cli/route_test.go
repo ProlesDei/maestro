@@ -128,6 +128,20 @@ func TestRouteBuild(t *testing.T) {
 	if got := sends(h.route(runs.Record{Job: "build", Ticket: "T-1", Command: sonnetCmd()})); !slices.Equal(got, []string{"send reviewer: review T-1", "send planner: slot free T-1"}) {
 		t.Fatalf("work waiting in progress, no slot message: %v", got)
 	}
+	// A build started on it that hasn't claimed yet holds it too.
+	rdir := filepath.Join(h.dir, "runs")
+	os.MkdirAll(rdir, 0o755)
+	b, err := runs.Create(rdir, runs.Record{Launcher: "junior-engineer", Ticket: "T-2", Job: "build", Limit: "1h", Command: sonnetCmd(), StartedAt: time.Now()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sends(h.route(runs.Record{Job: "build", Ticket: "T-1", Command: sonnetCmd()})); !slices.Equal(got, []string{"send reviewer: review T-1"}) {
+		t.Fatalf("work its build runs on, a slot message: %v", got)
+	}
+	now := time.Now()
+	b.State, b.EndedAt = runs.Done, &now
+	b.Notify = "planner" // its end left to the planner: it holds the ticket no more
+	runs.Save(rdir, b)
 	var c2 struct{ Claim struct{ Token int64 } }
 	h.ok(&c2, "claim", "T-2", "--holder", "junior-engineer/s1", "--status", "in_progress")
 	if got := sends(h.route(runs.Record{Job: "build", Ticket: "T-1", Command: sonnetCmd()})); !slices.Equal(got, []string{"send reviewer: review T-1"}) {
