@@ -3,8 +3,8 @@
 # real codebase-memory-mcp (skipped when it isn't on PATH), on a scratch
 # repo whose change copies a helper, adds a function nothing calls and
 # one over the complexity line. Covers the four lists, a moved file, an
-# added line that reads as a file header, graph=none with no tool, a bad
-# base, and that no index is left behind.
+# added line that reads as a file header, a path with a space,
+# graph=none with no tool, a bad base, and that no index is left behind.
 # Run from anywhere: bash scripts/graph_leads_test.sh
 set -euo pipefail
 
@@ -123,18 +123,22 @@ cmp -s "$tmp/md" "$tmp/md-tree" || fail "tree base: graph.md differs"
 
 # A moved file with one edit: its functions aren't new. And an added line
 # that starts "++ ", which reads "+++ " in the diff: the hunk after it
-# stays on its own file.
+# stays on its own file. And a path with a space, which git's header
+# ends with a tab.
 printf 'def first():\n    return 1\n\n\ndef second():\n    return 2\n' >"$r/app/text.py"
+printf 'def third():\n    return 1\n' >"$r/app/two words.py"
 git -C "$r" add -A && git -C "$r" commit -qm text
 base2=$(git -C "$r" rev-parse HEAD)
 git -C "$r" mv app/main.py app/entry.py
 sed -i 's/return x \* 2/return x * 3/' "$r/app/entry.py"
 printf 'def first():\n    return """\n++ b/fake.py\n"""\n\n\ndef second():\n    return 3\n' >"$r/app/text.py"
+printf 'def third():\n    return 4\n' >"$r/app/two words.py"
 git -C "$r" add -A && git -C "$r" commit -qm move
 bash "$leads" "$r" "$base2" "$tmp/md" >"$tmp/out" || fail "move: exit $?"
-grep -qx 'graph=yes changed=3 new=0 uncalled=0 lookalikes=0 complex=0' "$tmp/out" || fail "move: $(cat "$tmp/out")"
+grep -qx 'graph=yes changed=4 new=0 uncalled=0 lookalikes=0 complex=0' "$tmp/out" || fail "move: $(cat "$tmp/out")"
 has "- app/entry.py:26-27 never_used: "
 has "- app/text.py:7-8 second: "
+has "- app/two words.py:1-2 third: "
 lacks "fake.py"
 
 # Uncommitted changes: refused, since the index reads the disk.

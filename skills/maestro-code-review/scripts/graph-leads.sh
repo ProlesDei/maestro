@@ -85,7 +85,8 @@ project=$indexed
 # The new side of each hunk: path, first line, last line. A hunk that
 # only deletes touches the line before it. A file name comes only from a
 # header, between "diff --git" and the first @@, never from an added line
-# that starts "++ ". Renames are followed, so a moved file's functions
+# that starts "++ ". Git ends a name holding a space with a tab, cut
+# here. Renames are followed, so a moved file's functions
 # aren't new; old[] maps each new path back to its base path.
 declare -A old=()
 while IFS= read -r -d '' st; do
@@ -96,7 +97,7 @@ while IFS= read -r -d '' st; do
 done < <(gd --name-status -z -M "$base" HEAD)
 gd -U0 -M "$base" HEAD |
 	awk '/^diff --git /{h = 1; f = ""; next}
-		h && /^\+\+\+ /{f = substr($0, 5); sub(/^b\//, "", f); if (f == "/dev/null") f = ""; next}
+		h && /^\+\+\+ /{f = substr($0, 5); sub(/^b\//, "", f); sub(/\t$/, "", f); if (f == "/dev/null") f = ""; next}
 		/^@@ /{h = 0; if (f == "") next; split($3, a, ","); s = substr(a[1], 2) + 0; n = (2 in a) ? a[2] + 0 : 1
 			if (n == 0) { if (s > 0) print f "\t" s "\t" s } else print f "\t" s "\t" s + n - 1}' >"$tmp/hunks.tsv"
 
@@ -133,6 +134,8 @@ fi
 # A look-alike shares at least 3 of the new function's rare words (in at
 # most 3% of functions, or 2 in a small repo), worth at least 45% of
 # their weight (idf). Only functions that share a rare word are scored.
+# The word index comes from group_by: appending in a reduce copies the
+# list each time, minutes on a big repo.
 jq -r --slurpfile ch "$tmp/changed.json" --rawfile new "$tmp/new.txt" --slurpfile callers "$tmp/callers.json" \
 	--slurpfile counts "$tmp/counts.json" --argjson complex "$COMPLEX" --argjson cap "$CAP" '
 	. as $fs | ($fs | length) as $N | $ch[0] as $changed
@@ -140,7 +143,7 @@ jq -r --slurpfile ch "$tmp/changed.json" --rawfile new "$tmp/new.txt" --slurpfil
 	| ($counts[0] | map({key: .[0], value: (.[1] | tonumber)}) | from_entries) as $ncalls
 	| ($callers[0] | group_by(.[0]) | map({key: .[0][0], value: (map(if .[3] == .[1] then "\(.[1]) (imports it)"
 		else "\(.[1]):\(.[2]) \(.[3])" end) | unique)}) | from_entries) as $callmap
-	| (reduce $fs[] as $f ({}; reduce $f.t[] as $w (.; .[$w] += [$f.i]))) as $inv
+	| ([$fs[] | .i as $i | .t[] | {w: ., i: $i}] | group_by(.w) | map({key: .[0].w, value: map(.i)}) | from_entries) as $inv
 	| ([2, $N * 0.03] | max) as $rare
 	| def idf($w): (($N / ($inv[$w] | length)) | log);
 	  def capped($xs): ($xs[:$cap] + (if ($xs | length) > $cap then ["- and \(($xs | length) - $cap) more"] else [] end));
