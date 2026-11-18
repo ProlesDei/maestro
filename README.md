@@ -7,7 +7,7 @@ A team installs it into its own repo and gets:
 - `maestro-ticket`, a ticket store and CLI.
 - 19 `maestro-*` skills, and seven bot profiles.
 
-Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts every job; the one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md)).
+Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts each job, save two: a run that ends starts its ticket's fixed next step, and one that frees a build slot or merges takes the planner's look to fill it. The one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md), 1).
 
 ## Who drives it
 
@@ -23,7 +23,7 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
 7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
-Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot rereads its whole chat at every step.
+Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: its ring, `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot resends its whole chat at every model call.
 
 <!-- Source: docs/team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
@@ -54,8 +54,8 @@ flowchart TD
     Planner -.->|"board status, blocks it can't settle"| CoS
 
     %% The Planner hands out builds, and what stalled
-    Planner -->|"senior-tier ticket"| Sr
-    Planner -->|"junior-tier ticket"| Jr
+    Planner -->|"senior-tier ticket:<br/>look starts its build"| Sr
+    Planner -->|"junior-tier ticket:<br/>look starts its build"| Jr
     Planner -->|"a stalled review"| Rev
     Planner -->|"a stalled test,<br/>a goal's live run"| QA
     Planner -->|"a goal's screens:<br/>Design: ticket"| Des
@@ -73,14 +73,13 @@ flowchart TD
     Build -.->|"a question it can't settle"| Sr
     Build -.->|"a question it can't settle"| Jr
     Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle,<br/>a slot free"| Planner
-    Jr -.->|"a slot free"| Planner
+    Sr -.->|"what the ticket can't settle"| Planner
     QA -.->|"a block, a goal done"| Planner
     Rev -.->|"a block to settle"| Planner
     Planner -.->|"judge: Answer note, unblock"| Tickets
 
     %% Review, then test
-    Build -->|"in_review: its end starts the review"| Rev
+    Build -->|"in_review: its end starts the review,<br/>and the next build in its slot"| Rev
     Rev -->|"GO: its end starts QA"| QA
     QA -->|"pass: gh pr merge, ticket done"| Done
     Planner -.->|"PR merged outside QA: ticket done"| Done
@@ -149,7 +148,7 @@ Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-rev
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-qa-lead <id or pr>` is the last check before production, and it tests only a head sha that review passed. It builds that sha on today's main the way production does, walks each criterion and the critical flows in a browser, tries harder angles as the risk goes up (upgrade from old data, rollback, a second user, a dependency down), and reruns the project's checks. A pass adds a `QA: pass` comment with evidence, merges the PR and moves the ticket to `done`. A fail moves it back to `in_progress` with a `Kickback: QA fail` note. It blocks a ticket when it can't test it, GitHub refuses the merge, or the PR already merged. `/maestro-qa-lead <ask>` does the QA lead's other jobs: a second look at a verdict, a bug reproduced, a ticket checked before it's built, a test plan.
 - `/maestro-code-review <pr>` reviews the PR at its head sha, in a fresh session apart from the author. GO adds a `Review: GO` comment and leaves the ticket in `in_review` for QA; review never merges. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the engineer runs the ticket again with that feedback. ESCALATE blocks the ticket with an `Escalation:` note when the change needs the owner's yes (a dependency, CI or hook change, or one a revert can't undo) or a third kickback would repeat the last two. The review's depth follows the PR's risk: a docs fix gets one pass, an auth or migration change all nine. Add `--report-only` for the report alone.
-- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a bot's report or get a second opinion on a call; the planner runs it to group blocked tickets by cause. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
+- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a bot's report or get a second opinion on a call. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
 - `/maestro-software-engineer <id or change>` takes a ticket to an open PR, or makes a change by hand, always in its own worktree kept up to date with main: plan, build, self-review. The engineer bots run it on each ticket, and any session that writes code loads it.
 
 ## Your own skills
@@ -163,7 +162,7 @@ What a bot loads and what the installer leaves in your repo:
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
+    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only its ring, look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
 
     subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
         direction LR
@@ -187,7 +186,7 @@ flowchart TD
     Runtime -->|"loads the profile for the role it plays"| Profile
     Runtime ==>|"maestro-ticket job in their repo"| H
     Installed --> H
-    H -.->|"pickup: what to send, read by Grok Bot"| Runtime
+    H -.->|"ring and pickup: what to send, read by Grok Bot"| Runtime
     Guard -.-> H
     H ~~~ Roles
 

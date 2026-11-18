@@ -11,7 +11,9 @@
 #   maestro-sha: <sha>              the commit this Maestro is on (required)
 #   harnesses: claude codex grok    claude reads .claude/skills, codex and
 #                                   grok .agents/skills (required; must
-#                                   hold claude, which every bot runs)
+#                                   hold claude, which every bot runs);
+#                                   where one is a symlink to the other,
+#                                   both install once, in the real one
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
 #   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
 #   code-graph: mcp|none            codebase-memory-mcp in the repo's .mcp.json,
@@ -182,6 +184,57 @@ for h in "${harnesses[@]}"; do
 	esac
 	[[ " ${dirs[*]-} " == *" $d "* ]] || dirs+=("$d")
 done
+# A write or delete behind a symlink lands where the record and exclude
+# don't look: outside the repo, or in a folder of the team's. A team may
+# link one harness's skills to the other's, such as .claude/skills ->
+# ../.agents/skills, to share them: then the real folder is the harness
+# folder, and both install there once.
+# harness_of <d>: set real to .claude or .agents, the folder <d>/skills
+# is once each symlink on the way is followed; else set why, return 1.
+harness_of() {
+	local p=$1/skills r
+	real='' why=''
+	if [ ! -d "$target/$p" ]; then
+		[ ! -L "$target/$p" ] && [ ! -e "$target/$p" ] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
+		p=$1
+		if [ ! -d "$target/$p" ]; then
+			[ ! -L "$target/$p" ] && [ ! -e "$target/$p" ] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
+			real=$1
+			return 0
+		fi
+	fi
+	r=$(cd -P -- "$target/$p" && pwd -P) || { why="can't follow $target/$p"; return 1; }
+	[ "$p" != "$1" ] || r=$r/skills
+	case $r in
+	"$target/.claude/skills") real=.claude ;;
+	"$target/.agents/skills") real=.agents ;;
+	*) why="$target/$1/skills is a symlink to $r" ;;
+	esac
+	[ -n "$real" ]
+}
+declare -A canon=() canonwhy=()
+for d in .claude .agents; do
+	if harness_of "$d"; then canon[$d]=$real; else canonwhy[$d]=$why; fi
+done
+# canon_path <path>: set cpath to the path from its harness folder's real
+# one. apply refuses one it can't follow; check and uninstall keep it,
+# and leave what's behind the link alone.
+canon_path() {
+	local h=${1%%/*}
+	if [ -n "${canon[$h]-}" ]; then
+		cpath=${canon[$h]}${1#"$h"}
+	elif [ "$cmd" = apply ]; then
+		die "${canonwhy[$h]}; install writes through a symlink only to the other harness's skills folder in this repo: make it a real folder, or a link to .claude/skills or .agents/skills; nothing was changed"
+	else
+		cpath=$1
+	fi
+}
+real_dirs=()
+for d in "${dirs[@]}"; do
+	canon_path "$d"
+	[[ " ${real_dirs[*]-} " == *" $cpath "* ]] || real_dirs+=("$cpath")
+done
+dirs=("${real_dirs[@]}")
 # Every bot runs its jobs with claude -p, which reads only .claude/skills.
 [ "$cmd" = uninstall ] || [[ " ${harnesses[*]} " == *" claude "* ]] ||
 	die "install.yaml: harnesses must include claude: every bot runs its jobs through Claude Code"
@@ -244,7 +297,8 @@ for r in "${reads[@]}"; do
 		p=${p%$'\r'} # a CRLF checkout of the committed record
 		[[ $h =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ && $p =~ $recpath && /$p/ != */../* && /$p/ != */./* && $p != *//* && $p != */ ]] ||
 			die "$r:$n: want a blob hash, a tab and a file under .claude/skills/maestro-<skill>/ or .agents/skills/maestro-<skill>/; nothing was changed"
-		old[$p]=$h
+		canon_path "$p"
+		old[$cpath]=$h
 	done <"$r"
 done
 
@@ -277,6 +331,8 @@ prune() {
 			[ -z "$(find "$(full "$d")" -depth -type d -empty -print -quit 2>/dev/null)" ] ||
 			die "couldn't remove the empty folders under $d: check its permissions and run again"
 	done
+	# A folder the other harness's link leads to stays, or the link dangles.
+	[ "${canon[.claude]-c}" != "${canon[.agents]-a}" ] || return 0
 	for d in .claude .agents; do rmdir -- "$target/$d/skills" "$target/$d" 2>/dev/null || true; done
 }
 
@@ -428,6 +484,11 @@ if [ "$cmd" = check ]; then
 			done
 			rm -rf -- "$probe"
 		fi
+	fi
+	# mobile.dev's Maestro keeps its flows in .maestro/ too: a flows glob
+	# that recurses would run the copies in Maestro's folders as tests.
+	if compgen -G "$target/.maestro/*.yaml" >/dev/null || compgen -G "$target/.maestro/*.yml" >/dev/null; then
+		warn ".maestro/ also holds mobile.dev Maestro flows: a flows glob in its config.yaml that recurses, such as **, also runs the copies in src/, worktrees/ and bots/: list only the folders that hold the team's flows"
 	fi
 	# Its own skill, in the repo or the user's home, loads in every session
 	# and tells it to close every browser session, other runs' too.
@@ -697,16 +758,10 @@ if [ ${#old[@]} -eq 0 ]; then
 	[ -z "$lines" ] || read_shipped
 	for l in $lines; do [ -z "${names[$(skill_of "$l")]-}" ] || legacy+=$l$'\n'; done
 fi
-# A write or delete behind a symlink lands where the record and exclude
-# don't look: outside the repo, or in another harness's folder. Guard each
-# harness folder apply writes to or the record names; a link elsewhere,
-# such as .claude/skills for a codex-only install, is the team's.
-guard=(.maestro .maestro/project)
-for d in "${dirs[@]}" "${!old[@]}" $legacy; do
-	d=${d%%/*}
-	[[ " ${guard[*]} " == *" $d "* ]] || guard+=("$d" "$d/skills")
-done
-for p in "${guard[@]}"; do
+# The harness folders apply writes to or the record names were followed
+# above; a link in another, such as .claude/skills for a codex-only
+# install, is the team's. Maestro's own folders must be real.
+for p in .maestro .maestro/project; do
 	[ ! -L "$target/$p" ] || die "$target/$p is a symlink; install won't write or delete through one: make it a real folder"
 done
 # The folders to scan: each this install writes to, and each one the
@@ -714,7 +769,10 @@ done
 declare -A writing=() folders=() seen=()
 for n in "${!from[@]}"; do for d in "${dirs[@]}"; do writing[$d/skills/$n]=1 folders[$d/skills/$n]=1; done; done
 for p in "${!old[@]}"; do folders[${p%/"${p#*/skills/*/}"}]=1; done
-for l in $legacy; do folders[${l%/}]=1; done
+for l in $legacy; do
+	canon_path "${l%/}"
+	folders[$cpath]=1
+done
 for dir in "${!folders[@]}"; do
 	if [ -L "$target/$dir" ]; then
 		seen[$dir]='link'

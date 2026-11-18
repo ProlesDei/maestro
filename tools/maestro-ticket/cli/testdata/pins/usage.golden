@@ -31,20 +31,25 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
@@ -179,20 +184,25 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
@@ -327,20 +337,25 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
@@ -475,20 +490,25 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
@@ -726,9 +746,9 @@ Usage of maestro-ticket look:
   -json
     	machine-readable output
   -judge
-    	start one judge session on the judge rows, the standing rules on stdin
+    	start one judge session on the judge rows, with the standing rules of maestro-ticket rules
   -limit int
-    	work runs at once, as your memories set (required; 0 hands out no build) (default -1)
+    	work runs at once: a one-off, or the planner's old way to set it (default: rules set limit's; 0 hands out no build) (default -1)
   -report
     	add the fixed lines of the report to the chief of staff
   -stall duration

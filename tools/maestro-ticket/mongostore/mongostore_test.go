@@ -60,6 +60,9 @@ func TestConformance(t *testing.T) {
 	if storetest.ReapTickets <= 2*reapBatch {
 		t.Fatalf("reap batch %d: the suite's %d leases don't cross two batches", reapBatch, storetest.ReapTickets)
 	}
+	if storetest.ForgetKeys <= 2*keyBatch || storetest.ForgetKeys > keyBatch*keyBatches {
+		t.Fatalf("key batch %d, %d a reap: the suite's %d keys don't cross two batches in one reap", keyBatch, keyBatches, storetest.ForgetKeys)
+	}
 	storetest.Run(t, func(t *testing.T, now func() time.Time) func() (ticket.Store, error) {
 		db := freshDB(t, uri)
 		return func() (ticket.Store, error) {

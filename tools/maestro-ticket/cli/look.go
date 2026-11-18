@@ -164,6 +164,10 @@ type lookOut struct {
 	Report  []string   `json:"report,omitempty"`
 	Counts  string     `json:"counts"`
 	Errors  []string   `json:"errors"`
+	// rest counts what a refill left for the planner's own look: a
+	// missed date, a card or a send-back count it would send the chief of
+	// staff.
+	rest int
 }
 
 func (o lookOut) quiet() bool {
@@ -178,9 +182,9 @@ var lookPrefixes = []string{"Split into", "Answer:", "QA:", "Review:", "Rereview
 // the fixed writes, and one line per message to send. What needs reading
 // comes out as judge rows, for --judge to hand to one Opus session.
 func runLook(ctx context.Context, c *call) error {
-	limit := c.fs.Int("limit", -1, "work runs at once, as your memories set (required; 0 hands out no build)")
+	limit := c.fs.Int("limit", -1, "work runs at once: a one-off, or the planner's old way to set it (default: rules set limit's; 0 hands out no build)")
 	stall := c.fs.Duration("stall", ticket.DefaultStall, "how long a handout stands before look sends the job again")
-	judge := c.fs.Bool("judge", false, "start one judge session on the judge rows, the standing rules on stdin")
+	judge := c.fs.Bool("judge", false, "start one judge session on the judge rows, with the standing rules of maestro-ticket rules")
 	report := c.fs.Bool("report", false, "add the fixed lines of the report to the chief of staff")
 	if err := c.parse(); err != nil {
 		return err
@@ -188,22 +192,26 @@ func runLook(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
-	if *limit < 0 {
-		return usagef("look: pass --limit <n>, the work runs at once your memories set")
-	}
 	if *stall <= 0 {
 		return usagef("look: --stall must be more than 0")
 	}
 	if err := c.needActor("look"); err != nil {
 		return err
 	}
-	rules := ""
+	lim, alerts, err := c.lookLimit(*limit)
+	if err != nil {
+		return err
+	}
 	if *judge {
 		b, err := c.readStdin()
 		if err != nil {
 			return err
 		}
-		rules = strings.TrimSpace(string(b))
+		more, err := c.seedRules(string(b))
+		if err != nil {
+			return err
+		}
+		alerts = append(alerts, more...)
 	}
 	hdir, err := c.besideStore("handouts")
 	if err != nil {
@@ -214,6 +222,12 @@ func runLook(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	// After a restart the planner's look may come before any pickup: it
+	// takes over runs whose supervisor went away first, as pickup does,
+	// so their ends route and their tickets show busy, not free. The
+	// planner's own ring too, as doctor's do: only a ring brings it to
+	// pickup, where a dead plan or judge run shows.
+	c.ringOrphans(ctx, rdir, "")
 	var out lookOut
 	paused := ""
 	if p, ok := co.readPause(time.Now()); ok {
@@ -225,15 +239,23 @@ func runLook(ctx context.Context, c *call) error {
 	}
 	err = c.withStore(ctx, func(s ticket.Store) error {
 		var err error
-		out, err = c.look(ctx, s, lookOpts{limit: *limit, stall: *stall, report: *report, paused: paused,
+		out, err = c.look(ctx, s, lookOpts{limit: lim, stall: *stall, report: *report, paused: paused,
 			stopped: stopped, handouts: co, runs: rdir, host: co.host})
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	c.startSends(ctx, rdir, &out)
+	if len(alerts) > 0 {
+		out.Alerts = append(alerts, out.Alerts...)
+	}
 	if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
-		c.startJudge(ctx, &out, rules, co)
+		if rules, ok := c.standingRules(); ok {
+			c.startJudge(ctx, &out, rules, co)
+		} else {
+			out.Errors = append(out.Errors, "judge: no maestro/rules.md: set the planner's standing rules with maestro-ticket rules text")
+		}
 	}
 	co.pruneHandouts(time.Now())
 	if err := c.out(out, func(w io.Writer) { printLook(w, out) }); err != nil {
@@ -246,6 +268,91 @@ func runLook(ctx context.Context, c *call) error {
 		return errors.New(strings.Join(out.Errors, "; "))
 	}
 	return nil
+}
+
+// startSends starts each send that is a fixed job for a worker bot with a
+// webhook, as that bot: the bot would only have woken, reread its chat
+// and run job (owner's ruling, Nov 17 2026). A send it can't start stays,
+// for the bot to run and see why.
+func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
+	notify := filepath.Join(filepath.Dir(rdir), "notify")
+	left := []send{}
+	for _, sd := range out.Send {
+		k, id, ok := nextStep(runs.Record{}, sd)
+		if !ok || !hasHook(notify, sd.Bot) {
+			left = append(left, sd)
+			continue
+		}
+		r, err := c.startAs(ctx, rdir, sd.Bot, jobReq{kind: k, ids: []string{id}})
+		var going alreadyGoing
+		switch {
+		case err == nil:
+			out.Started = append(out.Started, fmt.Sprintf("%s %s as %s", r.ID, sd.Line, sd.Bot))
+		case !errors.As(err, &going):
+			left = append(left, sd)
+		}
+	}
+	out.Send = left
+}
+
+// refill is the look a run's end takes when its only line for the planner
+// was a freed slot or a merge, which woke the planner just to look. It
+// looks as the planner, without the judge or the report, starts what it
+// hands out, and frees each handout it couldn't start, for the planner's
+// own look. It reports whether it left the planner nothing: no judge row,
+// error, send or card.
+func (c *call) refill(ctx context.Context, rdir string) bool {
+	cc := *c
+	cc.actor, cc.runCache = "planner", nil
+	if cc.mayStart() != nil {
+		return false // stopped or paused: the planner's look says so
+	}
+	co, err := cc.coord()
+	if err != nil {
+		return false
+	}
+	lim, _, err := cc.lookLimit(-1)
+	if err != nil {
+		return false
+	}
+	s, err := cc.open(ctx)
+	if err != nil {
+		return false
+	}
+	out, err := cc.look(ctx, s, lookOpts{limit: lim, stall: ticket.DefaultStall, refill: true, handouts: co, runs: rdir, host: co.host})
+	s.Close()
+	if err != nil {
+		return false
+	}
+	cc.startSends(ctx, rdir, &out)
+	for _, sd := range out.Send {
+		if id := ticketInLine.FindString(sd.Line); id != "" {
+			co.dropHandout(id, sd.Bot)
+		}
+	}
+	return out.rest == 0 && len(out.Send)+len(out.Judge)+len(out.Errors) == 0
+}
+
+// runHolds reports whether run r still holds its ticket at now, so no
+// other job goes on it: it runs, or it ended within stall and is its
+// bot's to route, or a usage limit stopped it (limited) and it goes on
+// as the limit lifts.
+func runHolds(r runs.Record, now time.Time, stall time.Duration) (holds, limited bool) {
+	// A job run that ended lately and isn't acked is its bot's to
+	// route: its pickup sends what comes next. One whose end left
+	// the rest to the planner is the planner's look's to route.
+	fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < stall && r.Notify != "planner"
+	// One a usage limit stopped goes on when it lifts: its ticket
+	// waits for it, however long that takes.
+	// Until the limit is a stall past lifting: a ring lost to a
+	// reboot must not hold it for good. One whose work landed and
+	// whose end was left to the planner doesn't go on: that look
+	// answers it.
+	limited = r.Ended() && r.Job != "" && r.Notify != "planner" && func() bool {
+		out, reset := routeOutcome(r)
+		return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(stall))
+	}()
+	return !r.Ended() || fresh || limited, limited
 }
 
 func fileExists(p string) bool {
@@ -285,7 +392,7 @@ func (c *call) startJudge(ctx context.Context, out *lookOut, rules string, co co
 		rules = "none"
 	}
 	text := strings.Join(rows, "\n") + "\nStanding rules:\n" + rules
-	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text})
+	r, _, _, err := c.startJob(ctx, jobReq{kind: k, ids: ids, text: text, inherit: true})
 	if err != nil {
 		for _, k := range claimed { // only this look's: another's stand
 			co.dropHandout(k, "judge")
@@ -326,6 +433,7 @@ type lookOpts struct {
 	handouts coord
 	runs     string
 	host     string // this machine's id on a shared store, else ""
+	refill   bool   // a run's end looks: it sends the chief of staff nothing
 }
 
 // launchesSince is a store that lists recent launches with their hosts:
@@ -357,7 +465,14 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
 		// Once per promise: a missed date stays missed every look.
-		if !idle && o.handouts.claimHandout(fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix()), "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
+		key := fmt.Sprintf("eta-%s-%d", e.Goal, e.Due.Unix())
+		if o.refill {
+			if !idle && o.handouts.handoutBody(key, "chief-of-staff") == "" {
+				out.rest++ // the planner's own look sends it
+			}
+			continue
+		}
+		if !idle && o.handouts.claimHandout(key, "chief-of-staff", "eta missed", 30*24*time.Hour, now) {
 			out.Send = append(out.Send, send{"chief-of-staff", fmt.Sprintf("eta missed: %s due %s; open: %s", e.Goal, e.Due.Local().Format("Jan 2 15:04"), openText(e.Open))})
 		}
 	}
@@ -395,19 +510,13 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			if !r.Ended() && r.Job == "build" && r.Ticket != "" {
 				building[r.Ticket] = true
 			}
-			// A job run that ended lately and isn't acked is its bot's to
-			// route: its pickup sends what comes next.
-			fresh := r.Ended() && r.Job != "" && r.EndedAt != nil && now.Sub(*r.EndedAt) < o.stall
-			// One a usage limit stopped goes on when it lifts: its ticket
-			// waits for it, however long that takes.
-			// Until the limit is a --stall past lifting: a ring lost to a
-			// reboot must not hold it for good.
-			limited := r.Ended() && r.Job != "" && func() bool {
-				out, reset := outcomeOf(r)
-				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
-			}()
-			if (!r.Ended() || fresh || limited) && r.Ticket != "" {
+			holds, limited := runHolds(r, now, o.stall)
+			if holds && r.Ticket != "" {
 				liveRun[r.Ticket] = true
+			}
+			// A build a usage limit stopped holds its slot till it goes on.
+			if limited && r.Job == "build" && r.Ticket != "" {
+				building[r.Ticket] = true
 			}
 			if !r.Ended() {
 				for _, tk := range r.Tickets { // a judge run's
@@ -428,9 +537,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				continue
 			}
 			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
-			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall
-			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall))
-			if l.Ticket != 0 && live && l.Job == "build" {
+			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall && l.Notify != "planner"
+			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall)) && l.Notify != "planner"
+			if l.Ticket != 0 && (live || limited) && l.Job == "build" {
 				building[l.Ticket.String()] = true
 			}
 			if l.Ticket != 0 && (live || fresh || limited) {
@@ -443,6 +552,22 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 		}
 	}
+	// A build handed out lately holds its slot on its way to a run, by
+	// its mark, not by where its ticket falls in this look's order: a
+	// ticket that became ready since would take the slot again. A mark
+	// older than its ticket's last change was for a build that has run.
+	sentAt := map[string]time.Time{}
+	if ms, err := o.handouts.s.list(handoutMarks); err == nil {
+		for _, m := range ms {
+			id, bot, _ := strings.Cut(m.name, ".")
+			if (bot == "junior-engineer" || bot == "senior-engineer") && now.Sub(m.at) < o.stall && m.at.After(sentAt[id]) {
+				sentAt[id] = m.at
+			}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		keep(err)
+	}
+	sentBuild := map[string]bool{}
 	// What goals still have work moving, for "the goal needs it next".
 	moving := map[string]bool{}
 	going, busyBoard := 0, false
@@ -452,7 +577,11 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		}
 		// A build run holds its slot before its session claims, too: the
 		// busy check below skips its ticket, so build never counts it.
-		if t.Status == ticket.StatusInProgress && t.LiveClaim() != nil || building[t.ID.String()] {
+		claimed := t.Status == ticket.StatusInProgress && t.LiveClaim() != nil
+		if claimed || building[t.ID.String()] {
+			going++
+		} else if at, ok := sentAt[t.ID.String()]; ok && at.After(t.UpdatedAt) && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress) {
+			sentBuild[t.ID.String()] = true
 			going++
 		}
 		if t.Goal != "" && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview) {
@@ -472,6 +601,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// build hands a build out while a work slot is free; one handed out
 	// lately still holds its slot on its way to a claim.
 	build := func(bot string, id ticket.ID) {
+		if sentBuild[id.String()] {
+			return // its handout is counted in going, and stands
+		}
 		if idle || free == 0 {
 			return
 		}
@@ -503,7 +635,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			return
 		}
 		k, _ := findJob(kind)
-		req := jobReq{kind: k, text: text}
+		req := jobReq{kind: k, text: text, inherit: true}
 		if k.ticket {
 			req.ids = []string{id.String()}
 		} else {
@@ -623,6 +755,8 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					build("senior-engineer", id)
 				case t.Tries == 2:
 					start("plan", id, id.String())
+				case o.refill:
+					out.rest++
 				default:
 					c.sendUpTries(ctx, s, t, &out, keep, idle)
 				}
@@ -655,7 +789,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			if designReady(d) {
 				// The owner's card on a design: up, not stuck.
-				if !idle {
+				if o.refill {
+					out.rest++
+				} else if !idle {
 					var rt routed
 					if err := c.designUp(ctx, s, d, "look "+newSessionID()[:8], &rt); err != nil {
 						keep(err)

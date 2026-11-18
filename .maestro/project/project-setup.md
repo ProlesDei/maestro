@@ -49,7 +49,7 @@ cd $s/repo && PATH=$GOBIN:$PATH maestro-ticket create --title "try it" --status 
 - Build and install as `## Run` says, from the PR's head, into a fresh scratch repo with its own store; never this repo's store.
 - Flows that must never break:
   - `install.sh apply` into a fresh repo, `install.sh check` on it, a second `apply` that changes nothing, then `uninstall`.
-  - A ticket's path through the CLI: `create`, `look`, `pickup`, a note, `close`.
+  - A ticket's path through the CLI: `create`, `look`, `pickup`, a note, a `transition` to `done`.
   - A changed skill: its trial prompts, run in the scratch repo as AGENTS.md says.
 - No screens, so no screen sizes and no browser.
 

@@ -12,10 +12,13 @@
 // (wait.go); <id>.stats, the facts job, again and resume know at its start
 // that stats.db keeps and the record doesn't (cli); and <id>.stream, a
 // streamed run's stdout, which its supervisor reads once the command is
-// over and removes once its end is recorded (Options.Stream). Only one
-// process writes a record at a
-// time: launch until the supervisor starts, then whoever holds <id>.lock: the
-// supervisor, or, once it went away, a reader that Adopt let in.
+// over and removes once its end is recorded (Options.Stream). A record
+// saved as it ended is settling while its supervisor still routes it and
+// starts its next step (Options.OnEnd): no reader lists it as a result
+// until that is over, so no bot acts on a send the end starts itself.
+// Only one process writes a record at a time: launch until the supervisor
+// starts, then whoever holds <id>.lock: the supervisor, or, once it went
+// away, a reader that Adopt let in.
 package runs
 
 import (
@@ -80,6 +83,13 @@ type Record struct {
 	// the one resume a session gets after its run died.
 	ResumeOf   string `json:"resume_of,omitempty"`
 	AfterDeath bool   `json:"after_death,omitempty"`
+	// AgainOf is the run this one started afresh (job again): a run goes
+	// again once, so a run that already did goes up when it stops.
+	AgainOf string `json:"again_of,omitempty"`
+	// Overrides are the --model, --effort and --limit flags its job
+	// started with, as its launcher's memories set them: the jobs code
+	// starts for that launcher later carry them (cli's lastOverrides).
+	Overrides []string `json:"overrides,omitempty"`
 	// Nudge is the fixed resume a run began with (opus, escalate,
 	// decide): each comes once per session, so a session that asks again
 	// goes up instead of round and round.
@@ -96,7 +106,8 @@ type Record struct {
 	Error     string     `json:"error,omitempty"`
 	// Frozen marks a time limit that ended a run only because the machine
 	// was frozen: by the monotonic clock it had time left. Pickup counts
-	// it as no repeat timeout, so one freeze escalates nothing.
+	// it as no repeat timeout, so one freeze escalates nothing; it reruns
+	// it at its limit twice at most per head.
 	Frozen    bool   `json:"frozen,omitempty"`
 	Rings     int    `json:"rings,omitempty"`
 	RingError string `json:"ring_error,omitempty"`
@@ -122,6 +133,11 @@ type Record struct {
 	Chained []string        `json:"chained,omitempty"`
 	Routed  json.RawMessage `json:"routed,omitempty"`
 	Notify  string          `json:"notify,omitempty"`
+	// Settling is true while the run's end is still being handled: saved
+	// ended, but not yet routed and chained. Readers leave it out of the
+	// results until whoever holds its lock clears it. Missing means
+	// settled, so an older record reads as before.
+	Settling bool `json:"settling,omitempty"`
 	// Filled in by readers, never stored.
 	AckedAt *time.Time `json:"acked_at,omitempty"`
 	AckedBy string     `json:"acked_by,omitempty"`
@@ -442,6 +458,19 @@ func once(name string, body []byte) (bool, error) {
 // fail, so a webhook that is down can't slow every pickup for good.
 const orphanTries = 5
 
+// Unacked lists the ended runs left to bot that it hasn't acked and whose
+// end is settled, oldest first: what its ring and its pickup carry.
+func Unacked(dir, bot string, now time.Time) ([]Record, error) {
+	list, err := List(dir, now, false)
+	out := []Record{}
+	for _, r := range list {
+		if r.State != Unreadable && r.Ended() && !r.Settling && r.Owner() == bot {
+			out = append(out, r)
+		}
+	}
+	return out, err
+}
+
 // Orphans lists the unacked runs whose supervisor may have gone away
 // before a ring reached the launcher: a died run, or an ended one that
 // never rang. Adopt takes each for one caller.
@@ -463,17 +492,19 @@ func Orphans(dir string, now time.Time) ([]string, error) {
 // it, and returns the record as stored, with a live one written as died:
 // a supervisor holds that lock from before it writes running until it
 // exits, so a free lock means it is gone, and while the caller holds it no
-// late supervisor, nor any other reader, can write the record. The caller
+// late supervisor, nor any other reader, can write the record. died says
+// this call wrote it died, so its end is the caller's to handle; a run
+// saved died before had its end handled by an earlier caller. The caller
 // rings, saves, then calls release. A caller killed halfway lets go of
 // the lock, and the next one takes the run over.
-func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
+func Adopt(dir, id string, now time.Time) (r Record, release func(), died, ok bool) {
 	f, err := os.OpenFile(path(dir, id, ".lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		return r, nil, false
+		return r, nil, false, false
 	}
 	if got, err := holdLock(f); err != nil || !got {
 		f.Close()
-		return r, nil, false
+		return r, nil, false, false
 	}
 	release = func() { f.Close() }
 	r, err = Load(dir, id)
@@ -484,13 +515,14 @@ func Adopt(dir, id string, now time.Time) (r Record, release func(), ok bool) {
 		elsewhere(r) && (r.Ended() || !overdue(r, now)),
 		r.State == Starting && now.Sub(r.StartedAt) < startGrace:
 		release()
-		return r, nil, false
+		return r, nil, false, false
 	case !r.Ended():
 		r.State, r.EndedAt = Died, &now
 		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
 		r.Host = hostname() // ours from here on: a failed ring is tried again
+		died = true
 	}
-	return r, release, true
+	return r, release, died, true
 }
 
 var host = sync.OnceValue(func() string {
@@ -520,7 +552,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".stop", ".stats", streamExt, ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}

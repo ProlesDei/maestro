@@ -4,8 +4,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,13 +80,13 @@ func TestChainLeavesALooksHandout(t *testing.T) {
 	h.c.actor = "junior-engineer"
 
 	// A launcher with no webhook, such as a person, reads its own pickup:
-	// the run stays for it.
+	// the run stays for it, routed.
 	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
 		t.Fatal("no handout")
 	}
 	r := h.endedRun("build", "junior-engineer", "build: done")
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || runs.Acked(dir, r.ID) {
+	if got, _ := runs.Load(dir, r.ID); len(got.Routed) == 0 || len(got.Chained) != 0 || runs.Acked(dir, r.ID) {
 		t.Fatalf("a launcher with no webhook: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
 	h.hook("junior-engineer")
@@ -100,9 +102,10 @@ func TestChainLeavesALooksHandout(t *testing.T) {
 	}
 }
 
-// A run that hit the usage limit is pickup's to route: the chain leaves
-// it whole, so the planner still hears of the pause.
-func TestChainLeavesALimitToPickup(t *testing.T) {
+// A run that hit the usage limit starts nothing, but its end routes it
+// and keeps the route: the pause is set once, and the planner hears of it
+// from the run's ring and pickup, which show that route.
+func TestChainStoresALimitsRoute(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
@@ -111,14 +114,13 @@ func TestChainLeavesALimitToPickup(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "Claude AI usage limit reached|"+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || got.Notify != "" || runs.Acked(dir, r.ID) {
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || got.Notify != "" || len(got.Chained) != 0 || runs.Acked(dir, r.ID) {
 		t.Fatalf("chained a limit: %+v", got)
 	}
-	if fileExists(pausePath(h.dir)) {
-		t.Fatal("the chain set the pause, which pickup shows the planner once")
-	}
-	if rt := h.route(r); len(sends(rt)) != 1 || !strings.HasPrefix(sends(rt)[0], "send planner: usage_limit T-1") {
-		t.Fatalf("pickup after: %+v", rt)
+	if !fileExists(pausePath(h.dir)) || len(sends(rt)) != 1 || !strings.HasPrefix(sends(rt)[0], "send planner: usage_limit T-1") {
+		t.Fatalf("stored route: %+v", rt)
 	}
 }
 
@@ -153,11 +155,13 @@ func TestChainLeavesACommandToTheBot(t *testing.T) {
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "review: stopped: tier 2 needs the full model")
 	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) != 0 || got.Notify != "" || runs.Acked(dir, r.ID) {
+	got, _ := runs.Load(dir, r.ID)
+	if got.Notify != "" || runs.Acked(dir, r.ID) {
 		t.Fatalf("a do: line: %+v acked %v", got, runs.Acked(dir, r.ID))
 	}
-	if rt := h.route(r); len(rt.Do) != 1 || !strings.Contains(rt.Do[0], "job again "+r.ID+" --full") {
-		t.Fatalf("pickup after: %+v", rt)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || len(rt.Do) != 1 || !strings.Contains(rt.Do[0], "job again "+r.ID+" --full") {
+		t.Fatalf("stored route: %+v", rt)
 	}
 }
 
@@ -172,5 +176,88 @@ func TestChainRefilesFollowUps(t *testing.T) {
 	h.c.refileFollowUps(context.Background(), h.s, r, &rt)
 	if len(rt.Wrote) != 1 || !strings.HasPrefix(rt.Wrote[0], "1 follow-ups from T-1 on T-2") {
 		t.Fatalf("wrote: %q", rt.Wrote)
+	}
+}
+
+// A chain that ran settles its run itself: a stop that lands after it
+// leaves no reader after boot to chain it a second time.
+func TestChainSettlesItsRun(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "")
+	r.Settling = true
+	runs.Save(dir, r)
+	h.c.chain(context.Background(), dir, r)
+	if got, _ := runs.Load(dir, r.ID); got.Settling || len(got.Routed) == 0 {
+		t.Fatalf("after its chain: settling %v, routed %s", got.Settling, got.Routed)
+	}
+}
+
+// A build that handed off, then died, hands on as one that ended done: a
+// look's handout of its review is on its way, so it acks with nothing left.
+// Under a pause, a landed run's job for a worker waits like a do: line.
+func TestChainHandsOnALandedRun(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Handoff: PR https://x/pull/1 at "+sha)
+	h.hook("reviewer")
+	h.hook("junior-engineer")
+	dir := filepath.Join(h.dir, "runs")
+	h.c.actor = "junior-engineer"
+	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
+		t.Fatal("no handout")
+	}
+	r := h.endedRun("build", "junior-engineer", "")
+	r.State = runs.Died
+	runs.Save(dir, r)
+	h.c.chain(context.Background(), dir, r)
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || !rt.Landed || !runs.Acked(dir, r.ID) {
+		t.Fatalf("a landed build: %+v acked %v", got, runs.Acked(dir, r.ID))
+	}
+	worker := []send{{"reviewer", "review T-1"}}
+	if !doWaits(routed{Landed: true, Send: worker}) || !doWaits(routed{Outcome: outDone, Send: worker}) || doWaits(routed{Send: worker}) || doWaits(routed{Landed: true, Send: []send{{"planner", "block T-1"}}}) {
+		t.Fatal("doWaits holds what a pause would refuse, and only that")
+	}
+}
+
+// A review that ended done with a send-back while a pause holds: the
+// pause refuses the build its end starts, so the run stays its bot's, its
+// ring holds the line rather than wake the bot only to be refused, and it
+// rings again as the pause lifts, carrying the line.
+func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
+	h := newRouteHarness(t)
+	h.ok(nil, "create", "--title", "a", "--tier", "junior")
+	h.move("T-1", "in_progress", "in_review")
+	h.claimed("T-1", "junior-engineer")
+	h.comment("T-1", "Kickback: 1 blockers at "+sha+"\n- F1 [blocker, auto-fix] a.go:1: x. Fix: y")
+	h.move("T-1", "in_progress")
+	for _, b := range []string{"reviewer", "junior-engineer", "planner"} {
+		h.hook(b)
+	}
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("review", "reviewer", "review: NO-GO")
+	co, _ := h.c.coord()
+	now := time.Now()
+	until := now.Add(time.Hour).UTC().Round(time.Second)
+	co.setPause(pause{Until: until, Why: "usage limit"}, now)
+	h.c.chain(context.Background(), dir, r)
+	got, _ := runs.Load(dir, r.ID)
+	var rt routed
+	if json.Unmarshal(got.Routed, &rt) != nil || !slices.Equal(sends(rt), []string{"send junior-engineer: build T-1"}) || runs.Acked(dir, r.ID) {
+		t.Fatalf("the refused send-back: %v acked %v", sends(rt), runs.Acked(dir, r.ID))
+	}
+	if n, covered := ringDigest(co, dir, "reviewer", now); len(n.Lines) != 0 || slices.Contains(covered, r.ID) {
+		t.Fatalf("a ring under the pause: %q covers %v", n.Lines, covered)
+	}
+	if at := ringAgain(co, got, now); !at.Equal(until.Add(30 * time.Second)) {
+		t.Fatalf("rings again at %v; want 30s after %v", at, until)
+	}
+	if n, _ := ringDigest(co, dir, "reviewer", until.Add(31*time.Second)); !slices.Contains(n.Lines, "send junior-engineer: build T-1") {
+		t.Fatalf("the ring at the lift: %q", n.Lines)
 	}
 }

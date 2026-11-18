@@ -3,7 +3,7 @@ exit 0
 stdout:
 ok    store              <DIR>/tickets.db (from MAESTRO_TICKET_STORE)
 ok    filesystem         local
-ok    schema             user_version = 9 (want 9)
+ok    schema             user_version = 10 (want 10)
 ok    journal_mode       journal_mode = wal (want wal)
 ok    synchronous        synchronous = 1 (want 1)
 ok    busy_timeout       busy_timeout = 5000 (want 5000)
@@ -16,6 +16,7 @@ ok    statuses           every open ticket has a known status
 ok    roles              every open ticket has a known role or none
 ok    parked             every backlog ticket says why it waits, and no other does
 ok    events             last seq 15; append-only triggers 2/2
+warn  rules              no limit in board.json: look needs --limit until rules set limit; no rules.md: a judge session starts only once rules text sets the standing rules
 warn  runs               7 ended runs not acked by the bot they were left to (died, or ended over D ago): R-1 (senior-engineer, done), R-2 (senior-engineer, failed), R-3 (senior-engineer, failed), R-4 (senior-engineer, timed_out), R-5 (senior-engineer, died), R-6 (senior-engineer, done), R-7 (reviewer, done)
 $ maestro-ticket doctor --json
 exit 0
@@ -35,7 +36,7 @@ stdout:
     {
       "name": "schema",
       "ok": true,
-      "detail": "user_version = 9 (want 9)"
+      "detail": "user_version = 10 (want 10)"
     },
     {
       "name": "journal_mode",
@@ -96,6 +97,12 @@ stdout:
       "name": "events",
       "ok": true,
       "detail": "last seq 15; append-only triggers 2/2"
+    },
+    {
+      "name": "rules",
+      "ok": true,
+      "detail": "no limit in board.json: look needs --limit until rules set limit; no rules.md: a judge session starts only once rules text sets the standing rules",
+      "warn": true
     },
     {
       "name": "runs",

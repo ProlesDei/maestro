@@ -7,8 +7,8 @@
 # draft PR on the main branch the setup names, spec and card comments in
 # order, the block) past hooks that fail; motion clips, every
 # direction's and never a strip; a rework that updates the PR and swaps
-# the shots; a rerun that repeats nothing; and a repo with no
-# draft PRs.
+# the shots; a rerun that repeats nothing; a repo with no draft PRs;
+# shots the repo ignores; and shots it tracks with Git LFS.
 # Run from anywhere: bash scripts/design_pr_test.sh
 set -euo pipefail
 
@@ -173,8 +173,9 @@ ticket blocked ""; nope "is blocked, not in_progress"
 ticket in_progress designer/other; nope "not claimed by $H"
 [ -z "$(git ls-remote --heads origin maestro/T-7)" ] || fail "pushed for a ticket not ours"
 
-# The first hand-up.
+# The first hand-up, in a repo that ignores *.png.
 ticket in_progress "$H"
+echo '*.png' >>"$(git rev-parse --git-common-dir)/info/exclude"
 : >"$FX/log"
 run T-7 "$run_dir" --holder "$H" --token 3 || fail "the hand-up failed"
 has "status=blocked"
@@ -271,5 +272,24 @@ has "status=blocked"
 sha3=$(sed -n 's/^sha=//p' "$tmp/out")
 ! git ls-tree -r --name-only "$sha3" -- .maestro/design/T-7 | grep -q motion || fail "Motion: none put clips on the branch"
 ! grep -q "motion" "$FX/body" || fail "Motion: none put clips in the PR body"
+
+# A team that tracks *.png with Git LFS: with no pre-push hook run, the
+# shots' objects still reach origin's LFS store.
+if command -v git-lfs >/dev/null; then
+	git config filter.lfs.clean 'git-lfs clean -- %f'
+	git config filter.lfs.smudge 'git-lfs smudge -- %f'
+	git config filter.lfs.process 'git-lfs filter-process'
+	git config filter.lfs.required true
+	echo '*.png filter=lfs diff=lfs merge=lfs -text' >.gitattributes
+	git add .gitattributes && git commit -q --no-verify -m lfs && git push -q --no-verify origin HEAD:trunk
+	git push -q --no-verify origin --delete maestro/T-7
+	rm -f "$FX/open-pr" "$FX/no-draft"
+	ticket in_progress "$H"
+	run T-7 "$run_dir" --holder "$H" --token 3 || fail "the hand-up failed with LFS"
+	sha4=$(sed -n 's/^sha=//p' "$tmp/out")
+	oid=$(git cat-file -p "$sha4:.maestro/design/T-7/sheet-375.png" | sed -n 's/^oid sha256://p')
+	[ -n "$oid" ] || fail "sheet-375.png went up as a blob, not an LFS pointer"
+	[ -f "$tmp/origin.git/lfs/objects/${oid:0:2}/${oid:2:2}/$oid" ] || fail "origin's LFS store lacks sheet-375.png"
+fi
 
 echo "design_pr_test: ok"

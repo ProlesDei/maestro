@@ -3,10 +3,12 @@ exit 0
 stdout:
 acked R-1
 acked R-2
+4 more unacked for you: run pickup
 $ maestro-ticket ack R-1
 exit 0
 stdout:
 R-1 was already acked by senior-engineer
+4 more unacked for you: run pickup
 $ maestro-ticket ack R-3
 exit 4
 stderr:
@@ -44,7 +46,8 @@ stdout:
       "acked_by": "senior-engineer",
       "acked_at": "T"
     }
-  ]
+  ],
+  "more": 4
 }
 $ maestro-ticket ack R-1 --json
 exit 0
@@ -57,7 +60,8 @@ stdout:
       "acked_by": "senior-engineer",
       "acked_at": "T"
     }
-  ]
+  ],
+  "more": 4
 }
 $ maestro-ticket ack R-3 --json
 exit 4

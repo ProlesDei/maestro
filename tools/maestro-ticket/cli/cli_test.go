@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -22,6 +24,11 @@ import (
 const childEnv = "MAESTRO_TICKET_CLI_CHILD"
 
 func TestMain(m *testing.M) {
+	// Tests ring on schedules of seconds, where a gate of minutes would
+	// hold each second ring back.
+	runs.GateWindow = 500 * time.Millisecond
+	// A start here starts no supervisor: it fails, as with no binary.
+	startSupervisor = func(*exec.Cmd) error { return errors.New("unit tests start no supervisor") }
 	// Tests here are unit tests (AGENTS.md). A copy a test started writes
 	// the file and stops at once, and the package fails.
 	if mark := os.Getenv(childEnv); mark != "" {

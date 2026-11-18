@@ -317,7 +317,9 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-git worktree add -q --detach "$R" "$H" || die 1 "git worktree add $R failed"
+# The team's hooks expect their dependencies, which a fresh worktree
+# lacks: run none, as the merge below does.
+git -c core.hooksPath=/dev/null worktree add -q --detach "$R" "$H" || die 1 "git worktree add $R failed"
 [ "$(git -C "$R" rev-parse HEAD)" = "$H" ] || die 1 "worktree $R isn't at $H"
 
 merged=yes

@@ -165,8 +165,19 @@ stdout:
       "pid": N,
       "ended_at": "T",
       "error": "its supervisor went away with no result: the machine restarted, or it was killed",
-      "orphan_tries": 1,
-      "host": "<host>"
+      "host": "<host>",
+      "routed": {
+        "run": "R-5",
+        "job": "build",
+        "ticket": "T-5",
+        "outcome": "died",
+        "first": "its supervisor went away with no result: the machine restarted, or it was killed",
+        "send": [],
+        "do": [
+          "maestro-ticket resume R-5 --died"
+        ],
+        "wrote": []
+      }
     },
     {
       "id": "R-6",
@@ -191,6 +202,7 @@ stdout:
       "host": "<host>"
     }
   ],
+  "held": [],
   "routes": [
     {
       "run": "R-1",
@@ -219,14 +231,10 @@ stdout:
       "outcome": "failed",
       "status": "in_progress",
       "first": "Error: something went wrong",
-      "mismatch": "in_review with a Handoff:, found in_progress with no note",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "build T-2 stopped in_progress: Error: something went wrong"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket job again R-2"
       ],
-      "do": [],
       "wrote": []
     },
     {
@@ -249,13 +257,10 @@ stdout:
       "outcome": "timed_out",
       "status": "in_progress",
       "first": "the 2h time limit ended it",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "timed_out T-4"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket job again R-4 --limit 4h"
       ],
-      "do": [],
       "wrote": []
     },
     {
@@ -470,8 +475,20 @@ stdout:
       "pid": N,
       "ended_at": "T",
       "error": "its supervisor went away with no result: the machine restarted, or it was killed",
-      "orphan_tries": 1,
-      "host": "<host>"
+      "rang": true,
+      "host": "<host>",
+      "routed": {
+        "run": "R-5",
+        "job": "build",
+        "ticket": "T-5",
+        "outcome": "died",
+        "first": "its supervisor went away with no result: the machine restarted, or it was killed",
+        "send": [],
+        "do": [
+          "maestro-ticket resume R-5 --died"
+        ],
+        "wrote": []
+      }
     },
     {
       "id": "R-6",
@@ -496,6 +513,7 @@ stdout:
       "host": "<host>"
     }
   ],
+  "held": [],
   "routes": [
     {
       "run": "R-1",
@@ -524,14 +542,10 @@ stdout:
       "outcome": "failed",
       "status": "in_progress",
       "first": "Error: something went wrong",
-      "mismatch": "in_review with a Handoff:, found in_progress with no note",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "build T-2 stopped in_progress: Error: something went wrong"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket job again R-2"
       ],
-      "do": [],
       "wrote": []
     },
     {
@@ -554,13 +568,10 @@ stdout:
       "outcome": "timed_out",
       "status": "in_progress",
       "first": "the 2h time limit ended it",
-      "send": [
-        {
-          "bot": "planner",
-          "line": "timed_out T-4"
-        }
+      "send": [],
+      "do": [
+        "maestro-ticket job again R-4 --limit 4h"
       ],
-      "do": [],
       "wrote": []
     },
     {

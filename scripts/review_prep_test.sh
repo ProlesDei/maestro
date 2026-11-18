@@ -7,8 +7,8 @@
 # history or a redone delta; a fork, merged or other-base PR stopped
 # with nothing fetched; a PR with no ticket, read from trusted PR
 # comments and fetched from pull/<n>/head; a merge conflict; bad
-# targets; graph= with and without the code graph asked for; and a
-# failed prep that leaves no worktree.
+# targets; graph= with and without the code graph asked for; a team
+# hook that fails; and a failed prep that leaves no worktree.
 # Run from anywhere: bash scripts/review_prep_test.sh
 set -euo pipefail
 
@@ -127,8 +127,11 @@ bash "$prep" --route 8 >"$tmp/out" || fail "route without setup exited $?"
 has route=full
 mv "$tmp/setup" .maestro/project/project-setup.md
 
-# A ticket with no verdict: full mode, and every file it names is there.
+# A ticket with no verdict: full mode, and every file it names is there,
+# though the team's post-checkout hook fails in a fresh worktree.
+printf '#!/bin/sh\nexit 1\n' >.git/hooks/post-checkout && chmod +x .git/hooks/post-checkout
 bash "$prep" T-7 >"$tmp/out" || fail "prep T-7 exited $?"
+rm .git/hooks/post-checkout
 for l in ticket=T-7 pr=7 branch=maestro/T-7 main=main "H=$H" merges=yes files=2 lines=3 tier2_paths=0 docs_only=no K=none mode=full; do has "$l"; done
 R=$(val R) C=$(val C)
 [ "$(git -C "$R" rev-parse HEAD)" = "$H" ] || fail "worktree $R isn't at H"

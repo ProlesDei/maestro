@@ -36,6 +36,7 @@
 # failure. The browser session is named after the run and closed on exit;
 # the file server stops with this script.
 set -euo pipefail
+unset CDPATH
 
 die() { echo "screens: $2" >&2; exit "$1"; }
 

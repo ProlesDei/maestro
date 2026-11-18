@@ -21,12 +21,31 @@ var (
 // build, a review and a QA proof.
 const maxCriteria = 6
 
+// roleTitles are the roles look hands out by role, and the title each
+// one's skill refuses to work without: look sends any qa-lead ticket as a
+// live run and any designer ticket as a design, and the session refuses
+// one that isn't a scout titled so, after it spent its start.
+var roleTitles = map[string]string{
+	ticket.RoleQALead:   "Live run:",
+	ticket.RoleDesigner: "Design:",
+}
+
 // lintTicket checks that a ticket an engineer builds has the shape the
 // maestro-create-ticket skill asks for, so a ticket that would cost a
 // round in review is caught when it costs a line. It returns what must
 // change before the ticket is made, and what is only worth a look. A
+// qa-lead or designer ticket must be the scout its job takes; any other
 // scout, or a ticket another role works, has no such shape.
-func lintTicket(typ ticket.Type, role, body string, areas []string) (refuse, warn []string) {
+func lintTicket(typ ticket.Type, role, title, body string, areas []string) (refuse, warn []string) {
+	if want, ok := roleTitles[role]; ok {
+		if typ != ticket.TypeScout {
+			refuse = append(refuse, fmt.Sprintf("a %s ticket is a scout: pass --type scout", role))
+		}
+		if !strings.HasPrefix(strings.TrimSpace(title), want) {
+			refuse = append(refuse, fmt.Sprintf("a %s ticket's title must start %q, which its job routes on: title it \"%s ...\"", role, want, want))
+		}
+		return refuse, nil
+	}
 	if typ != ticket.TypeShip || (role != "" && role != ticket.RoleEngineer) {
 		return nil, nil
 	}

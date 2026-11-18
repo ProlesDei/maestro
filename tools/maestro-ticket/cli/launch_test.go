@@ -44,6 +44,12 @@ func newHook(t *testing.T) (*hook, string) {
 	return k, srv.URL + "/hook/secret-token"
 }
 
+func (k *hook) count() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return len(k.rings)
+}
+
 func (k *hook) lastAuth() string {
 	k.mu.Lock()
 	defer k.mu.Unlock()

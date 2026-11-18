@@ -298,9 +298,11 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.Reap(ctx)
-	if err != nil || len(res.Reaped) == 0 {
-		return err
+	// What a reap freed before it failed, such as in a later batch or as
+	// it forgot old keys, is freed all the same: list it with the error.
+	res, reapErr := s.Reap(ctx)
+	if len(res.Reaped) == 0 {
+		return reapErr
 	}
 	// What the reap freed is printed even if the holders can't be read.
 	evs, evErr := s.Events(ctx, ticket.EventFilter{Since: before, Type: ticket.EventLeaseExpired})
@@ -314,7 +316,7 @@ func reapReport(ctx context.Context, s ticket.Store, rep *alertReport) error {
 	for _, id := range res.Reaped {
 		rep.Expired = append(rep.Expired, expiredLease{id, holder[id]})
 	}
-	return evErr
+	return errors.Join(reapErr, evErr)
 }
 
 // diedReport ends each open run whose log-run is gone as died. After a

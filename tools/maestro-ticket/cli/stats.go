@@ -122,12 +122,21 @@ func (c *call) refuseBot(view string) error {
 
 // botActor is the bot --actor or MAESTRO_TICKET_ACTOR names, or "".
 func (c *call) botActor() string {
-	for _, a := range []string{c.actor, c.env.Getenv("MAESTRO_TICKET_ACTOR")} {
-		if slices.Contains(botProfiles, a) {
-			return a
-		}
+	if b := c.botActors(); len(b) > 0 {
+		return b[0]
 	}
 	return ""
+}
+
+// botActors is every bot --actor and MAESTRO_TICKET_ACTOR name.
+func (c *call) botActors() []string {
+	var out []string
+	for _, a := range []string{c.actor, c.env.Getenv("MAESTRO_TICKET_ACTOR")} {
+		if slices.Contains(botProfiles, a) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // refuseBundle keeps stats bundle to a person: not a bot, and not any

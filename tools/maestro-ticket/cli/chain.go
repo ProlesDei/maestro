@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -19,8 +20,9 @@ import (
 // review goes to review, a GO to QA, a send-back to its engineer, a
 // Rereview: to review. Each of those was a line a bot passed to another
 // bot, which woke, reread its chat and ran job: Grok spent a turn on each
-// and decided nothing (owner's ruling, Nov 15 2026). It picks no new work,
-// and whatever it can't start stays for the launcher's pickup, as before.
+// and decided nothing (owner's ruling, Nov 15 2026). New work it picks
+// only through refill, the planner's look without the judge; whatever it
+// can't start stays for the launcher's pickup, as before.
 var (
 	chainJobs = map[string]bool{"build": true, "review": true, "qa": true, "live": true}
 	chainBots = map[string]bool{"junior-engineer": true, "senior-engineer": true, "reviewer": true, "qa-lead": true}
@@ -38,15 +40,16 @@ const chainLimit = 2 * time.Minute
 const chainBy = "chain"
 
 // chain runs in a job run's supervisor once the run ended, before the
-// first ring. It routes a run that ended done as pickup would and starts
-// each fixed handoff itself, as the bot it was for. What is left only tells the
-// planner something goes to the planner; a run that leaves nothing to do
-// is acked, and rings no one.
+// first ring, while the record is settling. It routes the run as pickup
+// would and stores the route, so the ring's body and every pickup show
+// the same lines. It runs a fixed do: line itself first, as the launcher
+// (a retry, a died run's resume), so no bot wakes to type it. For a run
+// that ended done, it starts each fixed handoff itself, as the bot it was
+// for. What is left only tells the planner something goes to the
+// planner; a run that leaves nothing to do is acked, and rings no one. A
+// run that ended short with nothing routed is never acked here.
 func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
-	// A failure, a limit or a full disk stays the launcher's: routing one
-	// here would spend what pickup shows once, such as a usage limit's
-	// line to the planner.
-	if out, _ := outcomeOf(r); !chainJobs[r.Job] || out != outDone {
+	if r.Job == "" {
 		return
 	}
 	s, err := c.open(ctx)
@@ -64,46 +67,146 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	now := time.Now().UTC().Round(time.Millisecond)
-	// As pickup would: a job a look handed out lately is on its way. A
-	// store that can't say stays the launcher's: its pickup shows why.
-	sends, err := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
-	if err != nil {
-		return
-	}
 	var chained []string
-	left := []send{}
-	for _, sd := range sends {
-		if c.handOn(ctx, dir, notify, r, sd) {
-			chained = append(chained, sd.Bot+": "+sd.Line)
-		} else {
-			left = append(left, sd)
+	done, toPlanner := false, false
+	if chainJobs[r.Job] {
+		before := rt
+		// First, so a retry runs before anything counts its slot free.
+		keep := []string{}
+		for _, l := range rt.Do {
+			switch on, gone := c.runDo(ctx, dir, notify, r, l); {
+			case on:
+				chained = append(chained, r.Launcher+": "+l)
+			case !gone:
+				keep = append(keep, l)
+			}
 		}
+		rt.Do = keep
+		left := rt.Send
+		unsure := false
+		// A run whose work landed before it ended short hands on the same:
+		// a line left for a bot to pass could meet a pause set meanwhile.
+		if rt.Outcome == outDone || rt.Landed {
+			// As pickup would: a job a look handed out lately is on its way.
+			// A store that can't say starts nothing and stays the
+			// launcher's: its pickup shows why.
+			sends, err := co.pickupSends(r.ID, r.StartedAt, rt.Send, now)
+			if err != nil {
+				sends, unsure = nil, true
+			} else {
+				left = []send{}
+			}
+			for _, sd := range sends {
+				if c.handOn(ctx, dir, notify, r, sd) {
+					chained = append(chained, sd.Bot+": "+sd.Line)
+				} else {
+					left = append(left, sd)
+				}
+			}
+		}
+		// A freed slot or a merge woke the planner only to look: the end
+		// looks itself, and wakes it only for what that look leaves
+		// (owner's ruling, Nov 17 2026).
+		if !unsure && slices.ContainsFunc(left, refillLine) && hasHook(notify, "planner") && c.refill(ctx, dir) {
+			left = slices.DeleteFunc(left, refillLine)
+		}
+		rt.Send = left
+		// A launcher with no webhook, such as a person, reads its pickup:
+		// leave it what it would have seen.
+		bot := hasHook(notify, r.Launcher)
+		rest := leftForBot(rt)
+		done = bot && !unsure && len(left) == 0 && !rest && ackable(before)
+		toPlanner = bot && !unsure && len(left) > 0 && !rest && r.Launcher != "planner" &&
+			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
 	}
-	rt.Send = left
-	// A launcher with no webhook, such as a person, reads its pickup:
-	// leave it what it would have seen.
-	bot := hasHook(notify, r.Launcher)
-	rest := leftForBot(rt)
-	done := bot && len(left) == 0 && !rest
-	toPlanner := bot && len(left) > 0 && !rest && r.Launcher != "planner" &&
-		!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
-	if len(chained) == 0 && !done && !toPlanner {
-		return // as before: the launcher's pickup routes it
-	}
+	// One save, after every start: no reader sees the route before the
+	// handoffs it names have started.
 	rec, err := runs.Load(dir, r.ID)
 	if err != nil {
 		return
 	}
-	rec.Chained = chained
+	// Routed and chained: settled, so a stop that lands now leaves no
+	// reader to chain it again.
+	rec.Chained, rec.Settling = chained, false
 	if rec.Routed, err = json.Marshal(rt); err != nil {
 		return
 	}
 	if toPlanner {
 		rec.Notify = "planner"
 	}
-	if runs.Save(dir, rec) == nil && done {
+	if runs.Save(dir, rec) != nil {
+		return
+	}
+	if done {
 		runs.Ack(dir, r.ID, chainBy, now)
 	}
+	// On a board machines share, the launch says it too, before the ring
+	// sends the planner to look from wherever it runs.
+	if host, _ := c.hostID(); toPlanner && rec.LaunchID > 0 && host != "" {
+		b, err := c.board()
+		if err == nil {
+			err = b.NotifyLaunch(ctx, rec.LaunchID, "planner")
+		}
+		if err != nil {
+			fmt.Fprintf(c.env.Stderr, "maestro-ticket: run %s: the planner's look elsewhere holds its ticket a stall: %v\n", r.ID, err)
+		}
+	}
+}
+
+// ackable reports whether a route, as first made, may be acked once
+// nothing is left of it: a run that ended done, or one whose end routed
+// something. A run that ended short with nothing routed stays for its
+// launcher, never acked unseen.
+func ackable(rt routed) bool {
+	return rt.Outcome == outDone || len(rt.Send)+len(rt.Do) > 0 || rt.Reply != "" || rt.quiet
+}
+
+// doGrammar is every do: line a run's end runs itself: a died run's one
+// resume, a limited one's go-on, and one job again. Nothing else, and
+// never a rules write: the supervisor runs outside any run, as the
+// launcher, so a looser grammar would let a reply set what only a bot
+// outside a run may.
+var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on)|job again (R-[a-z2-7]{8})(?: --limit ([0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
+
+// runDo runs one do: line of r's route as r's launcher would, and reports
+// whether the work goes on: started now, or by another start of the same
+// line; and whether the line is gone for good, its ticket moved on. It
+// runs none for a launcher with no webhook, such as a person, who reads
+// its pickup, and none that names another run. Any other refusal, such as
+// a pause, leaves the line for the launcher.
+func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) (on, gone bool) {
+	m := doGrammar.FindStringSubmatch(line)
+	if m == nil || !hasHook(notify, r.Launcher) {
+		return false, false
+	}
+	cc := *c // the route's list of past runs serves its resume too
+	cc.actor = r.Launcher
+	var err error
+	switch {
+	case m[1] != "":
+		if m[1] != r.ID {
+			return false, false
+		}
+		_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on"})
+	default:
+		if m[3] != r.ID {
+			return false, false
+		}
+		var lim time.Duration
+		if m[4] != "" {
+			if lim, err = time.ParseDuration(m[4]); err != nil {
+				return false, false
+			}
+		}
+		_, err = cc.again(ctx, againOpts{run: m[3], limit: lim})
+	}
+	var a alreadyGoing
+	if errors.As(err, &a) {
+		// Only a start that exists carries the work on.
+		_, gerr := runs.Get(dir, a.run, time.Now())
+		return gerr == nil, false
+	}
+	return err == nil, errors.As(err, new(movedOn))
 }
 
 // leftForBot reports whether a route holds more than sends for a bot to
@@ -144,15 +247,33 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 	if !ok || !hasHook(notify, sd.Bot) {
 		return false
 	}
-	cc := *c
-	cc.actor, cc.runCache = sd.Bot, nil
-	req := jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1}
-	if k.slot != "" {
-		req.slots = lastSlots(dir, sd.Bot, k.slot)
-	}
-	_, _, _, err := cc.startJob(ctx, req)
+	_, err := c.startAs(ctx, dir, sd.Bot, jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1})
 	var a alreadyGoing
 	return err == nil || errors.As(err, &a)
+}
+
+// startAs starts req as bot, so the run rings bot and its end chains as
+// bot's would.
+func (c *call) startAs(ctx context.Context, dir, bot string, req jobReq) (runs.Record, error) {
+	if c.runCache == nil {
+		c.runCache = &pastRuns{} // made before the copy, so each start reads it once
+	}
+	cc := *c
+	cc.actor = bot
+	req.inherit = true
+	// QA runs at once: rules set qa_slots's, which startJob reads, else
+	// what the bot passed last.
+	if req.kind.slot != "" && c.boardQASlots() == 0 {
+		req.slots = lastSlots(cc.allRuns(), bot, req.kind.slot)
+	}
+	r, _, _, err := cc.startJob(ctx, req)
+	return r, err
+}
+
+// refillLine is a line that woke the planner only to look: a freed build
+// slot, or a merge that frees what waited on it.
+func refillLine(sd send) bool {
+	return sd.Bot == "planner" && (strings.HasPrefix(sd.Line, "slot free ") || strings.HasPrefix(sd.Line, "merged "))
 }
 
 // nextStep is the job and ticket of a send that is a fixed handoff to a
@@ -174,8 +295,7 @@ func hasHook(notify, bot string) bool {
 
 // lastSlots is the slot count bot passed on its newest run in slot name,
 // as its memories set it; 0, the default, if none of its runs did.
-func lastSlots(dir, bot, name string) int {
-	list, _ := runs.List(dir, time.Now(), true)
+func lastSlots(list []runs.Record, bot, name string) int {
 	var at time.Time
 	n := 0
 	for _, r := range list {
@@ -189,4 +309,28 @@ func lastSlots(dir, bot, name string) int {
 		}
 	}
 	return n
+}
+
+// lastOverrides are the --model, --effort and --limit the actor's newest
+// job run of kind job started with: what it typed, as its memories say,
+// or what a start code made for it carried on. A resume or a job again
+// copies its run's command, not the actor's choice, so it counts for
+// none.
+func (c *call) lastOverrides(job string) (model, effort string, limit time.Duration, err error) {
+	list, err := c.pastRuns()
+	if err != nil {
+		return "", "", 0, err
+	}
+	var last *runs.Record
+	for _, r := range list {
+		if r.Launcher == c.actor && r.Job == job && r.ResumeOf == "" && r.AgainOf == "" && (last == nil || r.StartedAt.After(last.StartedAt)) {
+			last = &r
+		}
+	}
+	if last == nil {
+		return "", "", 0, nil
+	}
+	model, effort = flagValue(last.Overrides, "--model"), flagValue(last.Overrides, "--effort")
+	limit, _ = time.ParseDuration(flagValue(last.Overrides, "--limit"))
+	return model, effort, limit, nil
 }

@@ -37,6 +37,11 @@ type Factory func(t *testing.T, now func() time.Time) (open func() (ticket.Store
 // batch boundaries.
 const ReapTickets = 207
 
+// ForgetKeys is how many old idempotency keys the forget test has one reap
+// delete. A store's key batch must be under half of it, and the keys one
+// reap may delete at least it, so the test crosses two batch boundaries.
+const ForgetKeys = 207
+
 // Clock is a fake clock that tests move by hand. It is safe for
 // concurrent use.
 type Clock struct {
@@ -116,6 +121,7 @@ func Run(t *testing.T, f Factory) {
 		{"UnclaimedWritesLogExpiredLease", testUnclaimedWritesLogExpiredLease},
 		{"LeaseExpiriesCount", testLeaseExpiriesCount},
 		{"ReapBatches", testReapBatches},
+		{"ReapForgetsOldKeys", testReapForgetsOldKeys},
 		{"LeaseExpiresAtExactMillisecond", testLeaseExpiresAtExactMillisecond},
 		{"HeartbeatNeverShortensLease", testHeartbeatNeverShortensLease},
 		{"KeyedWriteReplaysUnderNewToken", testKeyedWriteReplaysUnderNewToken},

@@ -55,11 +55,13 @@ type launchDoc struct {
 	Limit   string  `bson:"limit,omitempty"`
 	// When the usage limit that stopped it lifts.
 	Lifts *bson.DateTime `bson:"lifts,omitempty"`
+	// The bot its end was left to, when not its launcher.
+	Notify string `bson:"notify,omitempty"`
 }
 
 func toLaunch(d launchDoc) ticket.Launch {
 	l := ticket.Launch{ID: d.ID, Actor: d.Actor, PID: d.PID, Stamp: d.Stamp, StartedAt: msTime(int64(d.StartedAt)),
-		Outcome: d.Outcome, Session: d.Session, Host: d.Host, Job: d.Job, Limit: d.Limit}
+		Outcome: d.Outcome, Session: d.Session, Host: d.Host, Job: d.Job, Limit: d.Limit, Notify: d.Notify}
 	if d.TicketID != nil {
 		l.Ticket = ticket.ID(*d.TicketID)
 	}
@@ -275,6 +277,25 @@ func (s *Store) EndLaunch(ctx context.Context, req ticket.EndLaunchRequest) (boo
 		return nil
 	})
 	return ended, err
+}
+
+// NotifyLaunch records the bot a run's end was left to, when not its
+// launcher, so another machine's look leaves the run's ticket to it. A
+// second call with the same bot changes nothing.
+func (s *Store) NotifyLaunch(ctx context.Context, id int64, bot string) error {
+	if id <= 0 {
+		return fmt.Errorf("%w: bad launch id %d", ticket.ErrInvalid, id)
+	}
+	if bot = strings.TrimSpace(bot); bot == "" || len(bot) > 64 || ticket.HasControl(bot) {
+		return fmt.Errorf("%w: a bot id is one line of up to 64 characters", ticket.ErrInvalid)
+	}
+	return s.write(ctx, func(tx *txn) error {
+		res, err := tx.coll(cLaunches).update(bson.D{{Key: "_id", Value: id}}, bson.D{{Key: "$set", Value: bson.D{{Key: "notify", Value: bot}}}})
+		if err == nil && res.MatchedCount == 0 {
+			err = fmt.Errorf("%w: launch %d", ticket.ErrNotFound, id)
+		}
+		return err
+	})
 }
 
 // OpenLaunches implements ticket.Store.

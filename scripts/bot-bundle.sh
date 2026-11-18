@@ -3,7 +3,9 @@
 # the profile's persona, the team rules and where it works, refused over
 # Grok's 20,000-character limit for a bot's instructions. A bot with
 # starting memories also gets <profile>.memories.md, a message to send it
-# once its instructions are in, and again each time they change.
+# once its instructions are in, and again each time they change. Every
+# bot gets <profile>.routine.md, the instruction of its one Grok routine,
+# the run Maestro's webhook starts, with its bot id filled in.
 #
 #   scripts/bot-bundle.sh <repo>
 #
@@ -104,11 +106,17 @@ state() {
 	[ -z "${3:-}" ] || was=${was%- Maestro: *} t=${t%- Maestro: *}
 	if [ "$was" = "$t" ]; then echo same; else echo changed; fi
 }
-files=(.md .memories.md) # each bot's, in .maestro/bots/
+files=(.md .memories.md .routine.md) # each bot's, in .maestro/bots/
+# routine <bot>: the routine's instruction for the bot, ending in an x as block's does.
+routine() {
+	local t
+	t=$(cat "$profiles/routine.md"; echo x)
+	printf '%s' "${t//<bot id>/$1}"
+}
 
 # Build and check every bot's files before writing any, so a refusal
 # leaves .maestro/bots/ as it was.
-blocks=() msgs=()
+blocks=() msgs=() routines=()
 for b in "${bots[@]}"; do
 	# The name goes into paths, so no / or ..
 	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$profiles/$b/persona.md" ]; } || die "no bot profile $b in $profiles"
@@ -122,7 +130,8 @@ for b in "${bots[@]}"; do
 	memory=$target/.maestro/project/bots/$b.memory.md
 	[ -f "$memory" ] || memory=$profiles/$b/memory.md
 	msg=$(memories "$memory" "$target/.maestro/bots/$b.memories.md" "$target/.maestro/bots/$b.md"; echo x)
-	blocks+=("$text") msgs+=("${msg%x}")
+	r=$(routine "$b")
+	blocks+=("$text") msgs+=("${msg%x}") routines+=("${r%x}")
 done
 
 mkdir -p "$target/.maestro/bots"
@@ -132,6 +141,12 @@ for i in "${!bots[@]}"; do
 	st=$(state "$out" "$text" block)
 	[ "$st" = same ] || printf '%s' "$text" >"$out"
 	echo "$b: $st, $(wc -c <"$out" | tr -d ' ') bytes in .maestro/bots/$b.md"
+	rt=$target/.maestro/bots/$b.routine.md
+	st=$(state "$rt" "${routines[$i]}")
+	[ "$st" = same ] || printf '%s' "${routines[$i]}" >"$rt"
+	if [ "$st" = same ]; then echo "$b routine: same"
+	else echo "$b routine: $st, paste .maestro/bots/$b.routine.md as the instruction of $b's Grok routine"
+	fi
 	# Memories go in a message apart from the block: Grok caps the block.
 	[ -n "$msg" ] || continue
 	st=$(state "$mem" "$msg")

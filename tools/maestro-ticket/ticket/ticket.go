@@ -970,6 +970,19 @@ type TransitionRequest struct {
 	IdempotencyKey string `json:"-"`
 }
 
+// Keyed is what a transition's idempotency key covers. With Release it
+// names the token too, as a release does: else a retry under a later
+// lease replays, reports the ticket free and leaves it held.
+func (r TransitionRequest) Keyed() any {
+	if !r.Release {
+		return r
+	}
+	return struct {
+		TransitionRequest
+		ReleaseToken int64 `json:"release_token"`
+	}{r, r.Token}
+}
+
 // Validate checks the request and fills defaults.
 func (r *TransitionRequest) Validate() error {
 	if !r.To.Valid() {
@@ -1102,7 +1115,9 @@ type Store interface {
 	// Reap frees every expired lease, logging lease_expired for each and
 	// counting it on the ticket, so a session that died is reported without
 	// waiting for someone to claim its ticket. Any write to a ticket with an
-	// expired lease does the same for that ticket first.
+	// expired lease does the same for that ticket first. It also deletes
+	// idempotency keys older than IdempotencyKeep, oldest first, up to a
+	// bound per call, so a backlog goes over several reaps.
 	Reap(ctx context.Context) (ReapResult, error)
 	Release(ctx context.Context, req ReleaseRequest) (Ticket, error)
 	Transition(ctx context.Context, req TransitionRequest) (Ticket, error)

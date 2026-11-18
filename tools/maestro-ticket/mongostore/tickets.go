@@ -296,9 +296,58 @@ func (s *Store) Reap(ctx context.Context) (ticket.ReapResult, error) {
 		}
 		res.Reaped = append(res.Reaped, batch...)
 		if len(batch) < reapBatch {
-			return res, nil
+			return res, s.forgetKeys(ctx)
 		}
 	}
+}
+
+// keyBatch caps how many idempotency keys one transaction deletes, and
+// keyBatches how many such transactions one reap runs: each key holds a
+// whole result, so a backlog goes over many reaps, never one long
+// transaction.
+const (
+	keyBatch   = 100
+	keyBatches = 10
+)
+
+// forgetKeys deletes idempotency keys older than ticket.IdempotencyKeep,
+// oldest first. The store's clock decides, not a TTL index on the
+// server's, so both stores forget the same keys at the same time.
+func (s *Store) forgetKeys(ctx context.Context) error {
+	// Most reaps find none: a read says so without a write on the writer
+	// document every write takes.
+	old := false
+	if err := s.read(ctx, func(tx *txn) error {
+		var docs []idemDoc
+		err := tx.coll(cIdempotency).find(bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: dt(tx.now - ticket.IdempotencyKeep.Milliseconds())}}}}, &docs,
+			options.Find().SetLimit(1).SetProjection(bson.D{{Key: "_id", Value: 1}}))
+		old = len(docs) > 0
+		return err
+	}); err != nil || !old {
+		return err
+	}
+	for range keyBatches {
+		var n int64
+		err := s.write(ctx, func(tx *txn) error {
+			n = 0 // reset: a retry reruns this closure
+			var docs []idemDoc
+			err := tx.coll(cIdempotency).find(bson.D{{Key: "created_at", Value: bson.D{{Key: "$lt", Value: dt(tx.now - ticket.IdempotencyKeep.Milliseconds())}}}}, &docs,
+				options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}).SetLimit(keyBatch).SetProjection(bson.D{{Key: "_id", Value: 1}}))
+			if err != nil || len(docs) == 0 {
+				return err
+			}
+			keys := make([]string, len(docs))
+			for i, d := range docs {
+				keys[i] = d.Key
+			}
+			n, err = tx.coll(cIdempotency).deleteMany(bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: keys}}}})
+			return err
+		})
+		if err != nil || n < keyBatch {
+			return err
+		}
+	}
+	return nil
 }
 
 // idempotent runs do once per key. A retry with the same op and request
@@ -1234,7 +1283,7 @@ func (s *Store) Transition(ctx context.Context, req ticket.TransitionRequest) (t
 	var out ticket.Ticket
 	err := s.write(ctx, func(tx *txn) error {
 		var err error
-		out, err = idempotent(tx, req.IdempotencyKey, "transition", req, func() (ticket.Ticket, error) {
+		out, err = idempotent(tx, req.IdempotencyKey, "transition", req.Keyed(), func() (ticket.Ticket, error) {
 			return tx.applyTransition(req)
 		}, nil)
 		return err

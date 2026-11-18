@@ -25,7 +25,6 @@ import (
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/envcheck"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
@@ -94,20 +93,25 @@ Commands:
   alerts      [--stall 20m]   (each look's first step: frees what dead runs hold, then lists runs
               that died with no result, leases that ran out, missed ETAs, revived leases and
               in_review tickets with no one on them past --stall)
-  look        --limit N [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
-              the board, the fixed writes, a line per message to send, judge rows for the rest;
-              --judge starts one judge session on them, standing rules on stdin)
+  look        [--limit N] [--judge] [--report] [--stall 20m]   (the planner's look in one call: alerts,
+              the board, the fixed writes, worker jobs started as their bots, a line per message
+              left to send, judge rows for the rest;
+              --judge starts one judge session on them with the standing rules; the limit is
+              rules set limit's, and --limit is a one-off)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
+              runs at once and the standing rules, which code reads; text and add read stdin; set
+              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  launch      [--ticket T-1] [--limit 2h] [--rings 0s,2m,5m,10m,20m,40m] -- claude -p [flags]
+  launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
-              ask on stdin. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
+              ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
               design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
@@ -251,13 +255,16 @@ var commands = []command{
 	{"export", runExport},
 	{"render", runRender},
 	{"doctor", runDoctor},
+	{"rules", runRules},
 	{"store", runStoreURI},
 	{"migrate", runMigrate},
 	{"slot", runSlot},
 	{"check", runCheck},
 	{"cache", runCache},
-	// Left out of the usage text: no bot reads it.
+	// Left out of the usage text: no bot reads them. Claude Code runs
+	// stop-check as a job's Stop hook.
 	{"stats", runStats},
+	{"stop-check", runStopCheck},
 }
 
 // call is one parsed invocation.
@@ -268,9 +275,9 @@ type call struct {
 	storeFlag string
 	actor     string
 	idemKey   string
-	args      []string       // positional arguments
-	runCache  *[]runs.Record // every run, listed once a call (allRuns)
-	store     struct {       // storePath's answer, so git runs once a call
+	args      []string  // positional arguments
+	runCache  *pastRuns // every run, listed once a call (allRuns)
+	store     struct {  // storePath's answer, so git runs once a call
 		done         bool
 		path, source string
 		err          error
@@ -668,7 +675,7 @@ func runCreate(ctx context.Context, c *call) error {
 	parked := c.fs.String("parked", "", "why a backlog ticket waits: hold, deferred, unready or planning (required for backlog)")
 	goal := c.fs.String("goal", "", "slug of the goal the ticket serves")
 	tier := c.fs.String("tier", "", "which engineer builds it: senior or junior (default: the split's, else none, which means senior)")
-	lint := c.fs.Bool("lint", false, "refuse an engineer's ship ticket with no numbered criterion, no Not handled: list or no areas")
+	lint := c.fs.Bool("lint", false, "refuse an engineer's ship ticket with no numbered criterion, no Not handled: list or no areas, and a qa-lead or designer ticket that isn't a scout titled Live run: or Design:")
 	return c.withStore(ctx, func(s ticket.Store) error {
 		if err := c.noArgs(); err != nil {
 			return err
@@ -701,7 +708,7 @@ func runCreate(ctx context.Context, c *call) error {
 			return err
 		}
 		if *lint {
-			refuse, warn := lintTicket(ty, strings.TrimSpace(*role), b, ticket.SplitList(*areas))
+			refuse, warn := lintTicket(ty, strings.TrimSpace(*role), *title, b, ticket.SplitList(*areas))
 			if len(refuse) > 0 {
 				return lintError(refuse)
 			}
@@ -1177,9 +1184,11 @@ func runReap(ctx context.Context, c *call) error {
 		if err := c.noArgs(); err != nil {
 			return err
 		}
-		res, err := s.Reap(ctx)
-		if err != nil {
-			return err
+		// A reap that failed partway, such as as it forgot old keys, still
+		// freed what it lists: print that, and the error after.
+		res, reapErr := s.Reap(ctx)
+		if reapErr != nil && len(res.Reaped) == 0 {
+			return reapErr
 		}
 		// Reap is the store's upkeep: it also checkpoints the WAL on drivers
 		// that have one.
@@ -1190,7 +1199,7 @@ func runReap(ctx context.Context, c *call) error {
 				fmt.Fprintf(c.env.Stderr, "maestro-ticket reap: checkpoint: %v\n", err)
 			}
 		}
-		return c.out(res, func(w io.Writer) { printReap(w, res) })
+		return errors.Join(c.out(res, func(w io.Writer) { printReap(w, res) }), reapErr)
 	})
 }
 
@@ -1488,7 +1497,7 @@ func runDoctor(ctx context.Context, c *call) error {
 	}
 	rep.Checks = append(rep.Checks, checks...)
 	if envcheck.Err(checks) == nil {
-		rep.Checks = append(rep.Checks, c.runsCheck(ctx, loc.sqlitePath))
+		rep.Checks = append(rep.Checks, c.rulesCheck(), c.runsCheck(ctx, loc.sqlitePath))
 	}
 	res := map[string]any{"ok": rep.OK(), "store": store, "checks": rep.Checks}
 	if err := c.out(res, func(w io.Writer) { printDoctor(w, rep) }); err != nil {

@@ -39,6 +39,10 @@ type Launch struct {
 	// machine holds its ticket for it; zero if none stopped it. A store on
 	// one machine keeps none.
 	Lifts time.Time `json:"lifts,omitzero"`
+	// Notify is the bot the run's end was left to when not its launcher,
+	// so another machine's look leaves its ticket to that bot. A store on
+	// one machine keeps none.
+	Notify string `json:"notify,omitempty"`
 }
 
 // LimitOr is the launch's time limit, or d when it names none.

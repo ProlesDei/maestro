@@ -10,6 +10,8 @@
 # install by the install.sh before the record is taken over, a copy a
 # merge made too; a switch of
 # skills-home takes over the copies, and a switch to hidden untracks them;
+# a harness skills folder linked to the other's installs once, and any
+# other link refuses;
 # a CRLF source or checkout, the record's too, still matches the record, from any
 # directory; check finds what's wrong, also through a symlinked path, and
 # reads project-setup.md, changes nothing, and names a store that is no
@@ -405,8 +407,12 @@ mkdir -p "$r/.maestro/project/bots"
 printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
 # INSTALL.md runs it as a command, not through bash.
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
-[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md reviewer.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
-b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md
+[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md planner.routine.md reviewer.md reviewer.routine.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
+b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md br=$r/.maestro/bots/planner.routine.md
+# Each bot's routine is the shipped one with its id filled in.
+[ "$(cat "$br")" = "$(sed 's/<bot id>/planner/g' "$m/bot-profiles/routine.md")" ] && ! grep -qF '<bot id>' "$br" || fail "planner routine: $(cat "$br")"
+grep -qF "MAESTRO_TICKET_ACTOR=reviewer maestro-ticket pickup" "$r/.maestro/bots/reviewer.routine.md" || fail "reviewer routine lacks its id"
+says "planner routine: new, paste .maestro/bots/planner.routine.md"
 grep -qxF -- "- Runs at once: up to 3." "$bm" && grep -qxF "  Wrapped." "$bm" || fail "planner memories lack the team's memory"
 ! grep -qF "Intro." "$bm" || fail "planner memories hold the memory file's intro"
 grep -qF 'save each bullet below as one memory that starts `Starting:`' "$bm" || fail "planner memories don't say to save them"
@@ -417,7 +423,7 @@ grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
 # A rebuild says which blocks changed, and drops a bot no longer listed.
 says "planner: new" && says "planner memories: new"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && says "planner memories: same" && says "reviewer: same"
+says "planner: same" && says "planner memories: same" && says "reviewer: same" && says "planner routine: same"
 ! grep -qF "reviewer memories" "$tmp/out" || fail "bot-bundle wrote memories for a bot with none"
 # An update that changes no persona changes only the block's Maestro line:
 # the block is the same, so no one pastes it again.
@@ -440,7 +446,8 @@ sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
 bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
 says "planner memories: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
 grep -qxF -- "- Another." "$bm" || fail "planner memories lack the new memory"
-[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ ! -e "$r/.maestro/bots/reviewer.routine.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
+says "reviewer: removed .maestro/bots/reviewer.routine.md"
 # A dropped bot loses its memories too. A bot whose memories went gets a
 # message to forget the old ones.
 sed -i 's|^bots: .*|bots: reviewer|' "$r/.maestro/project/install.yaml"
@@ -481,6 +488,9 @@ for p in $all; do
 	*) max=8500 ;;
 	esac
 	[ "$n" -le "$max" ] || fail "$p: persona and team rules are $n bytes; a router's block stays under $max, since Grok rereads it at every step"
+	# Every ring bills the routine's instruction.
+	n=$(wc -c <"$r/.maestro/bots/$p.routine.md")
+	[ "$n" -le 1000 ] || fail "$p: its routine is $n bytes; keep it under 1,000, since every ring bills it"
 done
 cp "$tmp/choices" "$r/.maestro/project/install.yaml"
 "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
@@ -515,6 +525,12 @@ if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle 
 says ".maestro/bots/planner.memories.md is a symlink"
 [ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked memories file"
 rm "$bm" && mv "$tmp/planner.memories.md" "$bm"
+echo outside >"$tmp/victim"
+mv "$br" "$tmp/planner.routine.md" && ln -s "$tmp/victim" "$br"
+if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked routine"; fi
+says ".maestro/bots/planner.routine.md is a symlink"
+[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked routine"
+rm "$br" && mv "$tmp/planner.routine.md" "$br"
 # A block over Grok's limit refuses before any bot's files are written,
 # even a bot listed first that is due a new one.
 sed -i 's|^bots: .*|bots: reviewer planner|' "$r/.maestro/project/install.yaml"
@@ -879,7 +895,13 @@ refuses "no $r4/.maestro/project/install.yaml" "$r4" apply "$r4"
 r5=$tmp/link
 repo "$r5" "harnesses: claude" "skills-home: hidden"
 mkdir "$tmp/elsewhere" && ln -s "$tmp/elsewhere" "$r5/.claude"
-refuses "is a symlink" "$r5" apply "$r5"
+refuses "install writes through a symlink only to the other harness's skills folder in this repo" "$r5" apply "$r5"
+# A link to a folder of the team's in the repo, which the record and
+# exclude don't name, refuses too.
+r5f=$tmp/link-inside
+repo "$r5f" "harnesses: claude" "skills-home: hidden"
+mkdir -p "$r5f/shared" "$r5f/.claude" && ln -s ../shared "$r5f/.claude/skills"
+refuses "$r5f/.claude/skills is a symlink to $(cd "$r5f" && pwd -P)/shared" "$r5f" apply "$r5f"
 # A link in a harness folder install neither writes to nor names in its
 # record is the team's: a claude-only install goes ahead.
 r5b=$tmp/link-other
@@ -887,14 +909,35 @@ repo "$r5b" "harnesses: claude" "skills-home: hidden"
 mkdir -p "$r5b/.claude/skills" "$r5b/.agents" && ln -s ../.claude/skills "$r5b/.agents/skills"
 ok apply "$r5b"
 installed "$r5b" .claude
-# Dropping a harness whose folder is now a link to the other's: a delete
-# through it would take the kept harness's copies, so apply refuses.
+# Dropping a harness whose folder is now a link to the other's: its
+# record lines name the kept harness's copies, which stay.
 r5c=$tmp/link-dropped
 repo "$r5c" "harnesses: claude codex" "skills-home: hidden"
 ok apply "$r5c"
 rm -r "$r5c/.agents/skills" && ln -s ../.claude/skills "$r5c/.agents/skills"
 sed -i 's/^harnesses: .*/harnesses: claude/' "$r5c/.maestro/project/install.yaml"
-refuses "$r5c/.agents/skills is a symlink" "$r5c" apply "$r5c"
+ok apply "$r5c"
+says "0 files written, 0 removed"
+installed "$r5c" .claude
+! grep -q $'\t\\.agents/' "$r5c/.git/maestro/installed.list" || fail "the record still names .agents/ copies"
+! grep -q '^/\.agents/' "$r5c/.git/info/exclude" || fail "the exclude still names .agents/ copies"
+# A harness folder linked to the other's, to share skills: both install
+# once, in the real folder, and a rerun, check and uninstall agree.
+r5e=$tmp/link-shared
+repo "$r5e" "harnesses: claude codex" "skills-home: committed"
+mkdir -p "$r5e/.agents/skills" "$r5e/.claude" && ln -s ../.agents/skills "$r5e/.claude/skills"
+ok apply "$r5e"
+installed "$r5e" .agents
+[ -L "$r5e/.claude/skills" ] || fail "apply replaced the team's link"
+rec=$r5e/.maestro/project/installed.list
+[ "$(grep -c . "$rec")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) + 1)) ] && ! grep -q $'\t\\.claude/' "$rec" ||
+	fail "the record should list each file once, under .agents/"
+ok apply "$r5e"
+says "0 files written, 0 removed"
+ok check "$r5e"
+ok uninstall "$r5e"
+[ -z "$(find "$r5e/.agents" -type f)" ] || fail "uninstall left copies behind the link"
+[ -L "$r5e/.claude/skills" ] && [ -d "$r5e/.claude/skills/" ] || fail "uninstall broke the team's link"
 # An install without claude leaves every bot without its skills: check
 # fails, and uninstall still works.
 r5d=$tmp/no-claude

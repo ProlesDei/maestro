@@ -17,8 +17,9 @@
 #     (<pick>-*.png, the pick's letter in lowercase) and every clip
 #     of a direction (<letter>[-+]*-motion.png, the pick's first), but
 #     no strip (*-strip.png), to
-#     .maestro/design/<T-n>/ on branch maestro/<T-n>, pushed with
-#     [skip ci]; opens a draft PR for it, or updates the open one; posts
+#     .maestro/design/<T-n>/ on branch maestro/<T-n>, even where the
+#     repo ignores them, pushed with [skip ci] (Git LFS objects first,
+#     where the repo tracks them with LFS); opens a draft PR for it, or updates the open one; posts
 #     "Design spec:" and then "Escalation: design ready: PR <url>: owner's
 #     call", holding the owner's card, on the ticket; and blocks the
 #     ticket, releasing the claim. Prints pr=, sha=, status=blocked, ok=1.
@@ -27,8 +28,10 @@
 # maestro-ticket. Exit 1: any other failure; a rerun with the same run
 # folder repeats no comment and no move.
 set -euo pipefail
+unset CDPATH
 
 die() { echo "design-pr: $2" >&2; exit "$1"; }
+((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
 
 [ $# -ge 2 ] || die 2 "usage: design-pr.sh <T-n> <run folder> --holder <holder> --token <n>"
 id=$1 dir=$2
@@ -123,11 +126,12 @@ title=$(jq -r '.title' <<<"$t")
 [ "$(jq -r '.claim.holder // empty' <<<"$t")" = "$holder" ] || stop "$id is not claimed by $holder"
 
 # The main branch, as review-prep.sh reads it; main when none is set.
+# The install's .git is looked for, so no PR's tree can pass for it.
 wts=$(git worktree list --porcelain)
 mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
 if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
 	while IFS= read -r w; do
-		[ -d "$w/.maestro/src" ] && { mainwt=$w; break; }
+		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
 	done < <(sed -n 's/^worktree //p' <<<"$wts")
 fi
 setup=$mainwt/.maestro/project/project-setup.md
@@ -172,12 +176,25 @@ d=.maestro/design/$id
 rm -rf "${wt:?}/$d"
 mkdir -p "$wt/$d"
 cp "$spec" "$dir"/sheet-*.png "${stills[@]}" "${clips[@]}" "$wt/$d/"
-git -C "$wt" add -A -- "$d"
+# The folder is Maestro's: a .gitignore or global exclude that ignores
+# *.png must not drop the shots.
+git -C "$wt" add -A -f -- "$d" || die 1 "git add of $d failed"
 if ! git -C "$wt" diff --cached --quiet; then
 	printf 'Design %s for the owner'"'"'s look [skip ci]\n\nShots and spec only; this branch never merges.\n' "$id" >"$tmp/msg"
 	nohook -C "$wt" commit -q --no-verify -F "$tmp/msg" || die 1 "commit failed"
 fi
 sha=$(git -C "$wt" rev-parse HEAD)
+want=$(cd "$wt/$d" && LC_ALL=C ls -A)
+got=$(git -C "$wt" ls-tree --name-only "HEAD:$d")
+[ "$want" = "$got" ] || die 1 "the commit at $sha lacks some of $d: $(LC_ALL=C comm -23 <(echo "$want") <(echo "$got") | tr '\n' ' ')"
+# With hooks off, LFS's pre-push hook can't upload the shots a team
+# tracks with LFS, and the host refuses a push that names objects it
+# lacks: upload them as that hook would.
+attrs=$(git -C "$wt" ls-tree -r --name-only HEAD -- "$d" | git -C "$wt" check-attr --stdin filter) || die 1 "git check-attr failed"
+if command -v git-lfs >/dev/null && grep -q ': filter: lfs$' <<<"$attrs"; then
+	retry git -C "$wt" lfs push origin "$sha" ||
+		die 1 "can't upload the shots in $d to origin's Git LFS store, which this repo's .gitattributes sends them to"
+fi
 retry nohook -C "$wt" push -q --no-verify origin "HEAD:refs/heads/$branch" || die 1 "push to $branch failed"
 
 # The draft PR, from this repo only: a fork's PR on the same branch

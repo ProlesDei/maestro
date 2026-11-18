@@ -2,7 +2,7 @@
 
 Sent to the planner as a message once it is set up; it saves each bullet as one memory. Change each default to your own answer first. Delete a bullet to have it ask the chief of staff instead. Each is set by the owner; the chief of staff, speaking for the owner, can change it.
 
-- Runs at once: up to 20 work runs (builds), passed to each look as `--limit`. Review and QA don't count; the QA lead caps its own runs.
+- Runs at once: up to 20 work runs (builds), set at install with `maestro-ticket rules set limit`. Review and QA don't count; the QA lead caps its own runs.
 - Junior or senior: give the junior only a ticket where a wrong change can't hurt: clear criteria, one area, easy to revert, and no money, user data, security or public API. When in doubt, the senior. A senior run costs more tokens; a bad change that ships costs more than that.
 - Ticket size: each ticket costs a QA run and a review, so don't split small. Split only what one review can't hold: more than one area, or criteria that don't belong together. Fold small changes in one area into one ticket.
 - Stop the line: 3 tickets failing or blocking at one step with one cause.

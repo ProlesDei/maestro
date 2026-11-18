@@ -260,11 +260,22 @@ func runLaunch(ctx context.Context, c *call) error {
 	})
 }
 
+// startSupervisor starts a run's supervisor and lets it go. Unit tests,
+// which start no process, stand in for it.
+var startSupervisor = func(sup *exec.Cmd) error {
+	if err := sup.Start(); err != nil {
+		return err
+	}
+	return sup.Process.Release()
+}
+
 // startRun records a run for the actor and hands it to a detached
 // supervisor, and returns once its command runs. launch, job and resume
 // all start runs here; job, again and resume give side, its facts for
 // stats, and launch none: its side file is empty, and never streams.
-// mark, if set, writes the run's id in its marks before it can run.
+
+// mark, if set, writes the run's id in its marks before it can run. A
+// rec.Dir set runs it there: a retry or resume runs where its run did.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
 	dir, err := c.besideStore("runs")
 	if err != nil {
@@ -274,7 +285,7 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	if err != nil {
 		return runs.Record{}, err
 	}
-	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.env.Dir, time.Now().UTC().Round(time.Millisecond)
+	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
 	r, err := runs.Create(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
@@ -304,14 +315,12 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	exe, err := os.Executable()
 	if err == nil {
 		sup := exec.Command(exe, "supervise", r.ID, "--store", store, "--rings", ringsText(rings))
-		sup.Dir = c.env.Dir
+		sup.Dir = rec.Dir
 		// Not tagged with the run this launch runs in, if any: when that
 		// run ends, what carries its id is killed, and this run isn't its.
 		sup.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, runs.RunIDEnv+"=") })
 		sup.SysProcAttr = runs.Detach()
-		if err = sup.Start(); err == nil {
-			sup.Process.Release()
-		}
+		err = startSupervisor(sup)
 	}
 	if err != nil {
 		r.State, r.Error = runs.Failed, "start the supervisor: "+err.Error()
@@ -359,11 +368,16 @@ func runSupervise(ctx context.Context, c *call) error {
 	defer stop()
 	c.startStats(filepath.Dir(dir))
 	defer c.waitStats() // the row of a run whose first ring never came
+	co := c.runsCoord(dir)
 	return runs.Supervise(ctx, dir, c.args[0], runs.Options{
 		Env:    os.Environ(),
 		Rings:  rings,
 		Stream: c.streamNames(dir, c.args[0]),
 		Hook:   func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
+		Gate:   notify,
+		Digest: func(bot string, now time.Time) (runs.Notification, []string) {
+			return ringDigest(co, dir, bot, now)
+		},
 		// The supervisor stands in for log-run: it lives as long as the
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
@@ -372,22 +386,37 @@ func runSupervise(ctx context.Context, c *call) error {
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
+			// Stopped, as at a shutdown: a resume or handoff started now
+			// dies with the machine and spends the run's one resume. The
+			// run stays settling for the first reader after, which chains it.
+			if ctx.Err() != nil {
+				return
+			}
 			// Bounded: a hung gh in a review's start must not hold the ring.
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chainLimit)
 			defer cancel()
 			c.chain(cctx, dir, r)
 		},
-		// A run a usage limit stopped rings once more as the limit lifts:
-		// nothing else wakes its bot then.
-		RingAgain: func(r runs.Record) time.Time {
-			if out, reset := outcomeOf(r); out == outUsageLimit {
-				return limitLifts(r, reset).Add(30 * time.Second)
-			}
-			return time.Time{}
-		},
+		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.
 		AfterRing: func(r runs.Record, err error) { c.afterRing(dir, r, err) },
 	})
+}
+
+// ringAgain is when r rings once more, zero for never: a run a usage
+// limit stopped as the limit lifts, and one whose handoff a pause held as
+// the pause lifts. Nothing else wakes its bot then.
+func ringAgain(co coord, r runs.Record, now time.Time) time.Time {
+	if out, reset := routeOutcome(r); out == outUsageLimit {
+		return limitLifts(r, reset).Add(30 * time.Second)
+	}
+	var rt routed
+	if r.Job != "" && len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil && doWaits(rt) {
+		if p, ok := co.readPause(now); ok {
+			return p.Until.Add(30 * time.Second)
+		}
+	}
+	return time.Time{}
 }
 
 // endRun does what log-run did once a run ended: record its end and its
@@ -459,16 +488,27 @@ func runTicket(r runs.Record) ticket.ID {
 // ringOrphans rings for each run whose supervisor went away before a
 // ring reached its launcher (the machine restarted, or it was killed):
 // it saves a run that had no result as died, kills what is left of it,
-// frees its ticket as the supervisor would have, and rings. pickup and
-// doctor call it, whoever runs them, so the first look after a restart
-// wakes every bot that lost a run. A ring that fails is tried again on a
-// later look, a few times.
-func (c *call) ringOrphans(ctx context.Context, dir string) {
+// frees its ticket as the supervisor would have, routes it, and rings.
+// pickup and doctor call it, whoever runs them, so the first look after
+// a restart wakes every bot that lost a run: one ring per bot, through
+// its gate. A ring that fails, or that the gate held back, is tried again
+// on a later look. It rings none for own, the bot whose pickup shows its
+// orphans in this same call; it returns those, unrung, for that pickup
+// to mark once it shows them.
+func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 	ids, err := runs.Orphans(dir, time.Now())
 	if err != nil || len(ids) == 0 {
-		return
+		return nil
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
+	co := c.runsCoord(dir) // once: the rings below run at once
+	all := &pastRuns{}     // and the past runs their routes read
+	type adopted struct {
+		r       runs.Record
+		release func()
+	}
+	var mu sync.Mutex
+	byOwner := map[string][]adopted{}
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	for _, id := range ids {
@@ -476,22 +516,64 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			r, release, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
+			r, release, died, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
 			if !ok {
 				return
 			}
-			defer release()
-			if r.State == runs.Died && r.OrphanTries == 0 {
+			// Each works as the run's own supervisor would: as its
+			// launcher, on its own copy of the call.
+			cc := *c
+			cc.actor, cc.runCache, cc.env.Dir = r.Launcher, all, c.dirFor(r.Dir)
+			switch {
+			case died:
+				// Only the reader that found it live handles its end: one
+				// whose ring didn't land comes back each sweep, to ring.
 				runs.KillRun(r.ID)
+				r.Settling = true
 				runs.Save(dir, r)
 				// What its supervisor would have read of its stream, so
 				// a result Claude printed still logs its cost.
 				r.Stream = runs.RecoverStream(dir, r.ID, scanNames())
-				c.endRun(ctx, dir, r)
+				cc.endRun(ctx, dir, r)
+				fallthrough
+			case r.Settling:
+				// Its end was never routed, or its supervisor died while it
+				// routed it: route it now, so its ring carries its lines.
+				// Every start the chain makes is safe to make twice.
+				cctx, cancel := context.WithTimeout(ctx, chainLimit)
+				cc.chain(cctx, dir, r)
+				cancel()
+				if got, err := runs.Load(dir, r.ID); err == nil {
+					r = got
+				}
+				r.Settling = false
+				runs.Save(dir, r)
 			}
 			// One killed after it saved the end leaves the file too.
 			runs.DropStream(dir, r.ID)
-			h, err := runs.Webhook(notify, r.Owner())
+			mu.Lock()
+			byOwner[r.Owner()] = append(byOwner[r.Owner()], adopted{r, release})
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	var mine []string
+	for owner, as := range byOwner {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				for _, a := range as {
+					a.release()
+				}
+			}()
+			if owner == own {
+				for _, a := range as {
+					mine = append(mine, a.r.ID)
+				}
+				return
+			}
+			h, err := runs.Webhook(notify, owner)
 			if err != nil || h.URL == "" {
 				msg := ""
 				if err != nil {
@@ -499,24 +581,56 @@ func (c *call) ringOrphans(ctx context.Context, dir string) {
 				}
 				// Nothing to ring: write the record only when this
 				// changes it, not on every look.
-				if r.OrphanTries < 1 || r.RingError != msg {
-					r.RingError, r.OrphanTries = msg, max(r.OrphanTries, 1)
-					runs.Save(dir, r)
+				for _, a := range as {
+					if a.r.OrphanTries < 1 || a.r.RingError != msg {
+						a.r.RingError, a.r.OrphanTries = msg, max(a.r.OrphanTries, 1)
+						runs.Save(dir, a.r)
+					}
 				}
 				return
 			}
-			r.OrphanTries++
-			r.Rings++
-			r.RingError = ""
-			if err := runs.Ring(ctx, h, runs.Notice(r)); err != nil {
-				r.RingError = err.Error()
-			} else {
-				r.Rang = true
+			ids := make([]string, len(as))
+			for i, a := range as {
+				ids[i] = a.r.ID
 			}
-			runs.Save(dir, r)
+			now := time.Now().UTC().Round(time.Millisecond)
+			g, err := runs.RingBot(ctx, dir, notify, owner, ids, h, now, func(now time.Time) (runs.Notification, []string) {
+				return ringDigest(co, dir, owner, now)
+			})
+			for _, a := range as {
+				r := a.r
+				if g.Tried {
+					r.Rings++
+				}
+				switch {
+				case err != nil:
+					// Only a ring that failed counts as a try: one the gate
+					// held back, or that only counted it, is no failure.
+					r.OrphanTries++
+					r.RingError = err.Error()
+				case g.Covers(r.ID):
+					r.Rang, r.RingError = true, ""
+				case !g.Tried:
+					continue // the gate held it back: a later look rings it
+				}
+				runs.Save(dir, r)
+			}
 		}()
 	}
 	wg.Wait()
+	return mine
+}
+
+// markRang marks own orphans pickup just showed as rung: its bot read
+// them in this call, so no ring need wake it for them.
+func markRang(dir string, ids []string) {
+	for _, id := range ids {
+		if r, release, _, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond)); ok {
+			r.Rang = true
+			runs.Save(dir, r)
+			release()
+		}
+	}
 }
 
 // runPickup shows each run the actor launched that ended and that it
@@ -538,7 +652,7 @@ func runPickup(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	c.ringOrphans(ctx, dir)
+	own := c.ringOrphans(ctx, dir, c.actor)
 	now := time.Now().UTC().Round(time.Millisecond)
 	list, err := runs.List(dir, now, false)
 	if err != nil {
@@ -548,7 +662,7 @@ func runPickup(ctx context.Context, c *call) error {
 	for _, r := range list {
 		switch {
 		case r.Owner() != c.actor:
-		case !r.Ended():
+		case !r.Ended() || r.Settling: // a settling run's end is still being routed
 			running = append(running, r)
 		default:
 			ended = append(ended, r)
@@ -595,7 +709,8 @@ func runPickup(ctx context.Context, c *call) error {
 		return err
 	}
 	pause, paused := co.readPause(now)
-	waiting, shown := []string{}, []runs.Record{}
+	why, held := co.startsHeld(now)
+	waiting, stuck, shown := []string{}, []string{}, []runs.Record{}
 	more := 0
 	for _, r := range ended {
 		rt, ok := routes[r.ID]
@@ -604,6 +719,10 @@ func runPickup(ctx context.Context, c *call) error {
 		// planner; the rest of those it stopped wait.
 		case ok && paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }):
 			waiting = append(waiting, r.ID)
+		// While STOP or a pause holds, a do: line is only refused: the
+		// run waits, one line for all, so no pickup reruns it in a loop.
+		case ok && held && doWaits(rt):
+			stuck = append(stuck, r.ID)
 		case len(shown) == maxPickup:
 			more++ // the next pickup, after these are acked, shows them
 		default:
@@ -611,6 +730,9 @@ func runPickup(ctx context.Context, c *call) error {
 		}
 	}
 	ended = shown
+	markRang(dir, slices.DeleteFunc(own, func(id string) bool {
+		return !slices.ContainsFunc(shown, func(r runs.Record) bool { return r.ID == id })
+	}))
 	routeList := []routed{}
 	for _, r := range ended {
 		if rt, ok := routes[r.ID]; ok {
@@ -623,7 +745,7 @@ func runPickup(ctx context.Context, c *call) error {
 			routeList = append(routeList, rt)
 		}
 	}
-	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting}, func(w io.Writer) {
+	return c.out(map[string]any{"ended": ended, "running": running, "routes": routeList, "waiting": waiting, "held": stuck}, func(w io.Writer) {
 		ids := []string{}
 		for _, r := range ended {
 			// A run with a do: line is acked by that command when it
@@ -644,7 +766,10 @@ func runPickup(ctx context.Context, c *call) error {
 		}
 		defer func() {
 			if len(waiting) > 0 {
-				fmt.Fprintf(w, "%d runs wait for the usage limit to lift at %s: nothing to do till then; they ring you as it lifts\n", len(waiting), pause.Until.Format(time.RFC3339))
+				fmt.Fprintln(w, waitingLine(len(waiting), pause.Until))
+			}
+			if len(stuck) > 0 {
+				fmt.Fprintln(w, heldLine(len(stuck), why))
 			}
 			if more > 0 {
 				fmt.Fprintf(w, "and %d more ended: run pickup again once these are acked\n", more)
@@ -667,7 +792,11 @@ func runPickup(ctx context.Context, c *call) error {
 					s = append(s, fmt.Sprintf("and %d more", len(running)-10))
 					break
 				}
-				s = append(s, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), ago(now.Sub(r.StartedAt))))
+				since := ago(now.Sub(r.StartedAt))
+				if r.Settling {
+					since = "ending"
+				}
+				s = append(s, fmt.Sprintf("%s (%s, %s)", r.ID, dash(r.Ticket), since))
 			}
 			fmt.Fprintf(w, "running: %s\n", strings.Join(s, ", "))
 		}
@@ -733,7 +862,13 @@ func runAck(ctx context.Context, c *call) error {
 		}
 		res = append(res, result{Run: id, Acked: ok, AckedBy: r.AckedBy, AckedAt: r.AckedAt})
 	}
-	return c.out(map[string]any{"acks": res}, func(w io.Writer) {
+	more := c.moreUnacked(dir, now)
+	return c.out(map[string]any{"acks": res, "more": more}, func(w io.Writer) {
+		defer func() {
+			if more > 0 { // last: the bot's routine reads it
+				fmt.Fprintf(w, "%d more unacked for you: run pickup\n", more)
+			}
+		}()
 		for _, a := range res {
 			switch {
 			case a.LeftTo != "":
@@ -745,6 +880,36 @@ func runAck(ctx context.Context, c *call) error {
 			}
 		}
 	})
+}
+
+// moreUnacked counts the actor's settled results still to ack, past the
+// ones just acked: those a ring only counted, or held for pickup, or that
+// ended since. Runs a usage limit holds while its pause holds don't
+// count: they ring again as it lifts. Nor, while STOP or a pause holds,
+// does any run doWaits holds: its command or handoff is refused till
+// then, so a pickup for it would only run it to be refused again.
+func (c *call) moreUnacked(dir string, now time.Time) int {
+	list, _ := runs.Unacked(dir, c.actor, now)
+	co := c.runsCoord(dir)
+	_, paused := co.readPause(now)
+	_, held := co.startsHeld(now)
+	n := 0
+	for _, r := range list {
+		if slices.Contains(c.args, r.ID) || runs.Acked(dir, r.ID) {
+			continue
+		}
+		var rt routed
+		if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil {
+			if paused && rt.Outcome == outUsageLimit && !slices.ContainsFunc(rt.Wrote, func(w string) bool { return strings.HasPrefix(w, "paused every job") }) {
+				continue
+			}
+			if held && doWaits(rt) {
+				continue
+			}
+		}
+		n++
+	}
+	return n
 }
 
 // stopWait is how long stop waits for the supervisor to record the end:
@@ -871,29 +1036,8 @@ func (co coord) pickupSends(runID string, since time.Time, sends []send, now tim
 // message to send, command to run and write made, and the reply only
 // when the bot has to read it.
 func printRoute(w io.Writer, rt routed, full bool) {
-	on, st := "", ""
-	if rt.Ticket != "" {
-		on = " on " + rt.Ticket
-	}
-	if rt.Status != "" {
-		st = " (" + rt.Status + ")"
-	}
-	reset := ""
-	if rt.Reset != "" {
-		reset = ", resets " + rt.Reset
-	}
-	fmt.Fprintf(w, "%s %s %s%s%s%s: %s\n", rt.Run, rt.Job, rt.Outcome, on, st, reset, dash(rt.First))
-	if rt.Mismatch != "" {
-		fmt.Fprintf(w, "mismatch: want %s\n", rt.Mismatch)
-	}
-	for _, x := range rt.Wrote {
-		fmt.Fprintf(w, "wrote: %s\n", x)
-	}
-	for _, x := range rt.Do {
-		fmt.Fprintf(w, "do: %s\n", x)
-	}
-	for _, x := range rt.Send {
-		fmt.Fprintln(w, x.String())
+	for _, l := range routeLines(rt) {
+		fmt.Fprintln(w, l)
 	}
 	if rt.Reply != "" && !full {
 		fmt.Fprintf(w, "reply:\n%s\n", indent(rt.Reply))
@@ -1035,7 +1179,7 @@ func (c *call) untracked() ([]runs.Session, error) {
 // harms the store, and a doctor that failed would stop an install.
 func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 	dir := filepath.Join(filepath.Dir(store), "runs")
-	c.ringOrphans(ctx, dir)
+	c.ringOrphans(ctx, dir, "")
 	now := time.Now()
 	list, err := runs.List(dir, now, false)
 	if err != nil {
@@ -1162,7 +1306,8 @@ func runNotify(ctx context.Context, c *call) error {
 		if u == "" {
 			return fmt.Errorf("%w: notify: %s has no webhook", ticket.ErrNotFound, bot)
 		}
-		n := runs.Notification{Text: "Maestro test ring: launch rings here when a run " + bot + " launched ends.", Launcher: bot, State: "test"}
+		// Straight to the webhook: a test ring skips the bot's gate.
+		n := runs.Notification{Text: "Maestro test ring: launch rings here when a run " + bot + " launched ends.", Bot: bot, Launcher: bot, State: "test"}
 		if err := runs.Ring(ctx, h, n); err != nil {
 			return fmt.Errorf("%w: notify: %v", ticket.ErrInvalid, err)
 		}
@@ -1185,4 +1330,14 @@ func runNotify(ctx context.Context, c *call) error {
 			fmt.Fprintf(w, "%s: rings %s%s\n", bot, runs.Host(u), key)
 		}
 	})
+}
+
+// dirFor is dir, the folder a run ran in, while it is still there, else
+// this call's: Claude Code keeps sessions per folder, so a resume from
+// any other finds none.
+func (c *call) dirFor(dir string) string {
+	if fi, err := os.Stat(dir); dir != "" && err == nil && fi.IsDir() {
+		return dir
+	}
+	return c.env.Dir
 }
