@@ -27,6 +27,7 @@
 # maestro-ticket. Exit 1: any other failure; a rerun with the same run
 # folder repeats no comment and no move.
 set -euo pipefail
+unset CDPATH
 
 die() { echo "design-pr: $2" >&2; exit "$1"; }
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
