@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 // CanScan reports whether Untracked works on this system.
@@ -51,8 +54,10 @@ func Untracked(roots []string) ([]Session, error) {
 
 // KillRun kills every process launch started for run id, and every one
 // they started, found by RunIDEnv in its environment: what is left of a
-// run whose supervisor went away, even outside its process group. A
-// process can fork between a scan and its kill, so it scans again until a
+// run whose supervisor went away, even outside its process group. It
+// spares a daemon the run started that now serves a process outside it,
+// and what that daemon started, as sharedProcs finds them. A process can
+// fork between a scan and its kill, so it scans again until a
 // scan finds none.
 func KillRun(id string) {
 	for range 20 {
@@ -69,38 +74,44 @@ func termRun(id string, group int) (escaped int) {
 	return escaped
 }
 
-// runAlive reports whether any process of run id is left.
+// runAlive reports whether any process of run id that KillRun would
+// kill is left.
 func runAlive(id string) bool {
 	n, _ := signalRun(id, 0, 0)
 	return n > 0
 }
 
 // signalRun sends sig to every process with run id in its environment,
-// but this one, and returns how many took it; with a group, also how
-// many of those were outside it.
+// but this one and those serving a process outside the run, and returns
+// how many took it; with a group, also how many of those were outside it.
 func signalRun(id string, sig syscall.Signal, group int) (n, outside int) {
 	ents, err := os.ReadDir("/proc")
 	if err != nil {
 		return 0, 0
 	}
+	var procs []int
 	for _, e := range ents {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid == os.Getpid() {
 			continue
 		}
-		for _, kv := range procList(pid, "environ") {
-			if kv == RunIDEnv+"="+id {
-				pg := group
-				if group != 0 {
-					pg, _ = syscall.Getpgid(pid) // before the signal ends it
-				}
-				if syscall.Kill(pid, sig) == nil {
-					n++
-					if pg != group {
-						outside++
-					}
-				}
-				break
+		if slices.Contains(procList(pid, "environ"), RunIDEnv+"="+id) {
+			procs = append(procs, pid)
+		}
+	}
+	shared := sharedFor(id, procs)
+	for _, pid := range procs {
+		if shared[pid] {
+			continue
+		}
+		pg := group
+		if group != 0 {
+			pg, _ = syscall.Getpgid(pid) // before the signal ends it
+		}
+		if syscall.Kill(pid, sig) == nil {
+			n++
+			if pg != group {
+				outside++
 			}
 		}
 	}
@@ -127,18 +138,42 @@ func hasEnv(env []string, key string) bool {
 // ancestors returns this process and every process above it.
 func ancestors() map[int]bool {
 	out := map[int]bool{}
-	for pid := os.Getpid(); pid > 1 && !out[pid]; {
+	for pid := os.Getpid(); pid > 1 && !out[pid]; pid = ppid(pid) {
 		out[pid] = true
-		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-		if err != nil {
-			break
-		}
-		i := bytes.LastIndexByte(b, ')')
-		f := bytes.Fields(b[i+1:]) // state is f[0], ppid f[1]
-		if i < 0 || len(f) < 2 {
-			break
-		}
-		pid, _ = strconv.Atoi(string(f[1]))
 	}
 	return out
+}
+
+// spared keeps each run's sharedProcs answer a second: a stop's grace asks
+// runAlive every 100ms, and each answer reads every socket on the
+// machine. A process the answer didn't see, such as one forked since,
+// counts as the run's own.
+var spared = struct {
+	sync.Mutex
+	m map[string]spare
+}{m: map[string]spare{}}
+
+type spare struct {
+	at   time.Time
+	pids map[int]bool
+}
+
+func sharedFor(id string, procs []int) map[int]bool {
+	now := time.Now()
+	spared.Lock()
+	for k, s := range spared.m {
+		if now.Sub(s.at) > time.Second {
+			delete(spared.m, k)
+		}
+	}
+	s, ok := spared.m[id]
+	spared.Unlock()
+	if ok {
+		return s.pids
+	}
+	pids := sharedProcs(procs) // unlocked: other runs' kills go on meanwhile
+	spared.Lock()
+	spared.m[id] = spare{now, pids}
+	spared.Unlock()
+	return pids
 }

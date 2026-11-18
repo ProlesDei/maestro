@@ -36,7 +36,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -267,6 +267,12 @@ CREATE TABLE IF NOT EXISTS etas (
 // which reads as senior.
 const schemaV9 = `
 ALTER TABLE tickets ADD COLUMN tier TEXT NOT NULL DEFAULT '';
+`
+
+// schemaV10 indexes idempotency keys by age, so a reap finds the old ones
+// without reading every stored result.
+const schemaV10 = `
+CREATE INDEX IF NOT EXISTS idempotency_created ON idempotency(created_at);
 `
 
 // Options tune a Store. The zero value is fine for production.
@@ -682,9 +688,48 @@ func (s *Store) Reap(ctx context.Context) (ticket.ReapResult, error) {
 		}
 		res.Reaped = append(res.Reaped, batch...)
 		if len(batch) < reapBatch {
-			return res, nil
+			return res, s.forgetKeys(ctx)
 		}
 	}
+}
+
+// keyBatch caps how many idempotency keys one transaction deletes, and
+// keyBatches how many such transactions one reap runs: each key holds a
+// whole result, so a backlog goes over many reaps, never in one long hold
+// of the write lock.
+const (
+	keyBatch   = 100
+	keyBatches = 10
+)
+
+// forgetKeys deletes idempotency keys older than ticket.IdempotencyKeep,
+// oldest first.
+func (s *Store) forgetKeys(ctx context.Context) error {
+	// Most reaps find none: a read says so without taking the write lock.
+	old := false
+	if err := s.read(ctx, func(tx *sql.Tx, now int64) error {
+		return tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM idempotency WHERE created_at < ?)",
+			now-ticket.IdempotencyKeep.Milliseconds()).Scan(&old)
+	}); err != nil || !old {
+		return err
+	}
+	for range keyBatches {
+		var n int64
+		err := s.write(ctx, func(tx *sql.Tx, now int64) error {
+			res, err := tx.ExecContext(ctx, `DELETE FROM idempotency WHERE key IN
+				(SELECT key FROM idempotency WHERE created_at < ? ORDER BY created_at LIMIT ?)`,
+				now-ticket.IdempotencyKeep.Milliseconds(), keyBatch)
+			if err != nil {
+				return err
+			}
+			n, err = res.RowsAffected()
+			return err
+		})
+		if err != nil || n < keyBatch {
+			return err
+		}
+	}
+	return nil
 }
 
 // idempotent runs do once per key. A retry with the same op and request

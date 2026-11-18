@@ -492,6 +492,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 	}
 	notify := filepath.Join(filepath.Dir(dir), "notify")
 	co := c.runsCoord(dir) // once: the rings below run at once
+	all := &pastRuns{}     // and the past runs their routes read
 	type adopted struct {
 		r       runs.Record
 		release func()
@@ -505,17 +506,18 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			r, release, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
+			r, release, died, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
 			if !ok {
 				return
 			}
 			// Each works as the run's own supervisor would: as its
-			// launcher, on its own copy of the call, whose caches no other
-			// goroutine shares.
+			// launcher, on its own copy of the call.
 			cc := *c
-			cc.actor, cc.runCache = r.Launcher, nil
+			cc.actor, cc.runCache = r.Launcher, all
 			switch {
-			case r.State == runs.Died && r.OrphanTries == 0:
+			case died:
+				// Only the reader that found it live handles its end: one
+				// whose ring didn't land comes back each sweep, to ring.
 				runs.KillRun(r.ID)
 				r.Settling = true
 				runs.Save(dir, r)
@@ -613,7 +615,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 // them in this call, so no ring need wake it for them.
 func markRang(dir string, ids []string) {
 	for _, id := range ids {
-		if r, release, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond)); ok {
+		if r, release, _, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond)); ok {
 			r.Rang = true
 			runs.Save(dir, r)
 			release()

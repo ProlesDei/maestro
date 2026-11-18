@@ -21,6 +21,9 @@ func TestConformance(t *testing.T) {
 	if storetest.ReapTickets <= 2*reapBatch {
 		t.Fatalf("reap batch %d: the suite's %d leases don't cross two batches", reapBatch, storetest.ReapTickets)
 	}
+	if storetest.ForgetKeys <= 2*keyBatch || storetest.ForgetKeys > keyBatch*keyBatches {
+		t.Fatalf("key batch %d, %d a reap: the suite's %d keys don't cross two batches in one reap", keyBatch, keyBatches, storetest.ForgetKeys)
+	}
 	storetest.Run(t, func(t *testing.T, now func() time.Time) func() (ticket.Store, error) {
 		path := filepath.Join(t.TempDir(), "maestro", "tickets.db")
 		return func() (ticket.Store, error) {
@@ -530,5 +533,74 @@ func TestBusyAfterRetriesIsBusy(t *testing.T) {
 	err := retryBusy(context.Background(), func() error { return busyErr{} })
 	if code, _ := ticket.Classify(err); code != "busy" || !isBusy(err) {
 		t.Fatalf("err %v: code %q", err, code)
+	}
+}
+
+// A reap deletes at most keyBatch*keyBatches old idempotency keys, by the
+// age index, and never a key inside the window.
+func TestReapForgetsKeysInBounds(t *testing.T) {
+	s, clk := newStore(t)
+	ctx := context.Background()
+	add := func(prefix string, n int) {
+		t.Helper()
+		tx, err := s.w.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range n {
+			if _, err := tx.Exec("INSERT INTO idempotency (key, op, request_hash, result, created_at) VALUES (?, 'comment', 'h', '{}', ?)",
+				fmt.Sprint(prefix, i), clk.Now().UnixMilli()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := func(where string) int {
+		t.Helper()
+		var n int
+		if err := s.r.QueryRow("SELECT count(*) FROM idempotency WHERE " + where).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	bound := keyBatch * keyBatches
+	add("old-", bound+bound/2)
+	clk.Advance(ticket.IdempotencyKeep - time.Millisecond)
+	add("fresh-", 3)
+	clk.Advance(time.Millisecond)
+	if _, err := s.Reap(ctx); err != nil || count("1") != bound+bound/2+3 {
+		t.Fatalf("a reap at exactly the window deleted keys: %d left, %v", count("1"), err)
+	}
+	clk.Advance(time.Millisecond)
+	if _, err := s.Reap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if old, fresh := count("key LIKE 'old-%'"), count("key LIKE 'fresh-%'"); old != bound/2 || fresh != 3 {
+		t.Fatalf("after one reap: %d old, %d fresh; want %d, 3", old, fresh, bound/2)
+	}
+	if _, err := s.Reap(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if old, fresh := count("key LIKE 'old-%'"), count("key LIKE 'fresh-%'"); old != 0 || fresh != 3 {
+		t.Fatalf("after two reaps: %d old, %d fresh; want 0, 3", old, fresh)
+	}
+	var plan strings.Builder
+	rows, err := s.r.Query("EXPLAIN QUERY PLAN SELECT key FROM idempotency WHERE created_at < 0 ORDER BY created_at LIMIT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(detail + "\n")
+	}
+	if !strings.Contains(plan.String(), "idempotency_created") {
+		t.Fatalf("the age query reads no index:\n%s", plan.String())
 	}
 }

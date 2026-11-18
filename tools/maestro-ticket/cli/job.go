@@ -219,7 +219,8 @@ type jobReq struct {
 	full          bool     // review
 	model, effort string   // overrides
 	limit         time.Duration
-	slots         int // QA runs at once; 0 for the default
+	slots         int  // QA runs at once; 0 for the default
+	inherit       bool // a start no bot typed: it takes the launcher's last overrides
 	chainOf       string
 	hops          int // a chained start: the run whose end starts it, and its hops
 }
@@ -431,11 +432,35 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			prompt += "\nStanding rules:\n" + rules
 		}
 	}
+	if req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
+		// What was picked for this ticket, its tier's model or a review's
+		// model and size, stands: a carried flag replaces only a fixed
+		// default.
+		model, effort, limit, err := c.lastOverrides(k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if k.model != "tier" && k.model != "route" {
+			req.model = model
+		}
+		if k.model != "route" {
+			req.limit = limit
+		}
+		req.effort = effort
+	}
+	var overrides []string
 	if req.model != "" {
 		if req.model != m {
 			side.Why = "override"
 		}
 		m = req.model
+		overrides = append(overrides, "--model", req.model)
+	}
+	if req.effort != "" {
+		overrides = append(overrides, "--effort", req.effort)
+	}
+	if req.limit != 0 {
+		overrides = append(overrides, "--limit", req.limit.String())
 	}
 	e := effortHigh
 	if req.effort != "" {
@@ -456,7 +481,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	}
 	rec := runs.Record{
 		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
-		Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops,
+		Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides,
 	}
 	if k.ids {
 		rec.Tickets = ids
@@ -1114,8 +1139,9 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	if session == "" {
 		return fail(fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID))
 	}
-	all, err := runs.List(dir, now, true)
-	if err != nil {
+	// Stopped or paused, it starts nothing: say so before reading every
+	// past run.
+	if err := c.mayStart(); err != nil {
 		return fail(err)
 	}
 	nudge := ""
@@ -1126,6 +1152,10 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		nudge = "escalate"
 	case o.decide:
 		nudge = "decide"
+	}
+	all, err := c.pastRuns()
+	if err != nil {
+		return fail(err)
 	}
 	for _, x := range all {
 		if neverRan(x) {
@@ -1175,9 +1205,6 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
 		ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops,
-	}
-	if err := c.mayStart(); err != nil {
-		return fail(err)
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
 		if errors.Is(err, ticket.ErrStatusConflict) {

@@ -145,18 +145,18 @@ func TestAdoptOnce(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	r, _ := Create(dir, Record{Launcher: "planner", Limit: "2h", Command: []string{"true"}, StartedAt: now}, nil)
-	if _, _, ok := Adopt(dir, r.ID, now); ok {
+	if _, _, _, ok := Adopt(dir, r.ID, now); ok {
 		t.Fatal("adopted a run still inside its start grace")
 	}
 	later := now.Add(startGrace + time.Minute)
 	if ids, _ := Orphans(dir, later); len(ids) != 1 || ids[0] != r.ID {
 		t.Fatalf("orphans: %v", ids)
 	}
-	got, release, ok := Adopt(dir, r.ID, later)
+	got, release, _, ok := Adopt(dir, r.ID, later)
 	if !ok || got.State != Died || got.EndedAt == nil {
 		t.Fatalf("adopt: %+v %v", got, ok)
 	}
-	if _, _, ok := Adopt(dir, r.ID, later); ok {
+	if _, _, _, ok := Adopt(dir, r.ID, later); ok {
 		t.Fatal("two callers adopted one run")
 	}
 	if g, _ := Get(dir, r.ID, later); g.State == Died {
@@ -165,7 +165,7 @@ func TestAdoptOnce(t *testing.T) {
 	got.Rang = true
 	Save(dir, got)
 	release()
-	if _, _, ok := Adopt(dir, r.ID, later); ok {
+	if _, _, _, ok := Adopt(dir, r.ID, later); ok {
 		t.Fatal("adopted a run that already rang")
 	}
 	if ids, _ := Orphans(dir, later); len(ids) != 0 {
@@ -186,7 +186,7 @@ func TestRenamedHostReadsByItsLock(t *testing.T) {
 	if g, _ := Get(dir, old.ID, later); g.State != Died {
 		t.Fatalf("a dead run under an old host name read as %s", g.State)
 	}
-	got, release, ok := Adopt(dir, old.ID, later)
+	got, release, _, ok := Adopt(dir, old.ID, later)
 	if !ok || got.State != Died || got.Host != hostname() {
 		t.Fatalf("adopt: %+v %v", got, ok)
 	}
@@ -194,7 +194,7 @@ func TestRenamedHostReadsByItsLock(t *testing.T) {
 	got.OrphanTries = 1
 	Save(dir, got)
 	release()
-	if _, release, ok := Adopt(dir, old.ID, later); !ok {
+	if _, release, _, ok := Adopt(dir, old.ID, later); !ok {
 		t.Fatal("a failed ring isn't tried again")
 	} else {
 		release()
@@ -216,7 +216,7 @@ func TestRunElsewhereOnASharedStore(t *testing.T) {
 	if g, _ := Get(dir, far.ID, later); g.State != Running {
 		t.Fatalf("a run on another machine read as %s", g.State)
 	}
-	if _, _, ok := Adopt(dir, far.ID, later); ok {
+	if _, _, _, ok := Adopt(dir, far.ID, later); ok {
 		t.Fatal("adopted a run on another machine")
 	}
 	gone := now.Add(2*time.Hour + maxSlotCredit + KillGrace + 2*time.Hour)
@@ -236,7 +236,7 @@ func TestRunElsewhereOnASharedStore(t *testing.T) {
 	if g, _ := Get(dir, far.ID, gone); g.State != Died {
 		t.Fatalf("an overdue run on another machine read as %s", g.State)
 	}
-	if _, release, ok := Adopt(dir, far.ID, gone); !ok {
+	if _, release, _, ok := Adopt(dir, far.ID, gone); !ok {
 		t.Fatal("didn't adopt an overdue run on another machine")
 	} else {
 		release()
@@ -250,7 +250,7 @@ func TestRecordJSONKeys(t *testing.T) {
 	want := []string{
 		"ID id", "Launcher launcher", "Ticket ticket,omitempty", "Limit limit", "Command command",
 		"Job job,omitempty", "Tickets tickets,omitempty", "ResumeOf resume_of,omitempty",
-		"AfterDeath after_death,omitempty", "AgainOf again_of,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",
+		"AfterDeath after_death,omitempty", "AgainOf again_of,omitempty", "Overrides overrides,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",
 		"State state", "PID pid,omitempty", "EndedAt ended_at,omitempty", "Exit exit,omitempty",
 		"SessionID session_id,omitempty", "IsError is_error,omitempty", "Reply reply,omitempty",
 		"Error error,omitempty", "Frozen frozen,omitempty", "Rings rings,omitempty", "RingError ring_error,omitempty",

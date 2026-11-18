@@ -179,8 +179,8 @@ func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, lin
 	if m == nil || !hasHook(notify, r.Launcher) {
 		return false, false
 	}
-	cc := *c
-	cc.actor, cc.runCache = r.Launcher, nil
+	cc := *c // the route's list of past runs serves its resume too
+	cc.actor = r.Launcher
 	var err error
 	switch {
 	case m[1] != "":
@@ -255,12 +255,16 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 // startAs starts req as bot, so the run rings bot and its end chains as
 // bot's would.
 func (c *call) startAs(ctx context.Context, dir, bot string, req jobReq) (runs.Record, error) {
+	if c.runCache == nil {
+		c.runCache = &pastRuns{} // made before the copy, so each start reads it once
+	}
 	cc := *c
-	cc.actor, cc.runCache = bot, nil
+	cc.actor = bot
+	req.inherit = true
 	// QA runs at once: rules set qa_slots's, which startJob reads, else
 	// what the bot passed last.
 	if req.kind.slot != "" && c.boardQASlots() == 0 {
-		req.slots = lastSlots(dir, bot, req.kind.slot)
+		req.slots = lastSlots(cc.allRuns(), bot, req.kind.slot)
 	}
 	r, _, _, err := cc.startJob(ctx, req)
 	return r, err
@@ -291,8 +295,7 @@ func hasHook(notify, bot string) bool {
 
 // lastSlots is the slot count bot passed on its newest run in slot name,
 // as its memories set it; 0, the default, if none of its runs did.
-func lastSlots(dir, bot, name string) int {
-	list, _ := runs.List(dir, time.Now(), true)
+func lastSlots(list []runs.Record, bot, name string) int {
 	var at time.Time
 	n := 0
 	for _, r := range list {
@@ -306,4 +309,28 @@ func lastSlots(dir, bot, name string) int {
 		}
 	}
 	return n
+}
+
+// lastOverrides are the --model, --effort and --limit the actor's newest
+// job run of kind job started with: what it typed, as its memories say,
+// or what a start code made for it carried on. A resume or a job again
+// copies its run's command, not the actor's choice, so it counts for
+// none.
+func (c *call) lastOverrides(job string) (model, effort string, limit time.Duration, err error) {
+	list, err := c.pastRuns()
+	if err != nil {
+		return "", "", 0, err
+	}
+	var last *runs.Record
+	for _, r := range list {
+		if r.Launcher == c.actor && r.Job == job && r.ResumeOf == "" && r.AgainOf == "" && (last == nil || r.StartedAt.After(last.StartedAt)) {
+			last = &r
+		}
+	}
+	if last == nil {
+		return "", "", 0, nil
+	}
+	model, effort = flagValue(last.Overrides, "--model"), flagValue(last.Overrides, "--effort")
+	limit, _ = time.ParseDuration(flagValue(last.Overrides, "--limit"))
+	return model, effort, limit, nil
 }
