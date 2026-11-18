@@ -413,8 +413,10 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			// One a usage limit stopped goes on when it lifts: its ticket
 			// waits for it, however long that takes.
 			// Until the limit is a --stall past lifting: a ring lost to a
-			// reboot must not hold it for good.
-			limited := r.Ended() && r.Job != "" && func() bool {
+			// reboot must not hold it for good. One whose work landed and
+			// whose end was left to the planner doesn't go on: this look
+			// answers it.
+			limited := r.Ended() && r.Job != "" && r.Notify != "planner" && func() bool {
 				out, reset := routeOutcome(r)
 				return out == outUsageLimit && now.Before(limitLifts(r, reset).Add(o.stall))
 			}()
@@ -441,7 +443,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			}
 			live := l.EndedAt.IsZero() && !launchOver(l, o.host, now)
 			fresh := !l.EndedAt.IsZero() && l.Job != "" && now.Sub(l.EndedAt) < o.stall && l.Notify != "planner"
-			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall))
+			limited := !l.EndedAt.IsZero() && l.Job != "" && !l.Lifts.IsZero() && now.Before(l.Lifts.Add(o.stall)) && l.Notify != "planner"
 			if l.Ticket != 0 && live && l.Job == "build" {
 				building[l.Ticket.String()] = true
 			}

@@ -757,4 +757,21 @@ func TestLookTakesARunLeftToThePlanner(t *testing.T) {
 	if len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
 		t.Fatalf("a run left to the planner held T-1: %+v", out)
 	}
+	// One a usage limit stopped after its work landed doesn't go on: the
+	// limit holds nothing from the planner it was left to.
+	lifts := time.Now().Add(5 * time.Hour)
+	r.State, r.IsError, r.Reply = runs.Failed, true, "Claude AI usage limit reached|"+strconv.FormatInt(lifts.Unix(), 10)
+	r.Notify = ""
+	runs.Save(dir, r)
+	os.RemoveAll(filepath.Join(h.dir, "handouts"))
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 0 {
+		t.Fatalf("judged a ticket a limited run holds: %+v", out.Judge)
+	}
+	r.Notify = "planner"
+	runs.Save(dir, r)
+	h.ok(&out, "look", "--limit", "10", "--actor", "planner")
+	if len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a limited run left to the planner held T-1: %+v", out)
+	}
 }

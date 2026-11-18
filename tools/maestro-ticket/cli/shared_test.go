@@ -571,6 +571,20 @@ func TestLookTakesARunLeftToThePlannerElsewhere(t *testing.T) {
 	if out := lookAt(t, b); len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
 		t.Fatalf("a run left to the planner held T-1 from B: %+v", out)
 	}
+	// So does one a usage limit stopped after its work landed.
+	l, err = s.StartLaunch(ctx, ticket.StartLaunchRequest{Actor: "reviewer", Ticket: 1, PID: os.Getpid(), Host: ha, Job: "review", Limit: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndLaunch(ctx, ticket.EndLaunchRequest{ID: l.ID, Outcome: ticket.LaunchResult, Lifts: time.Now().Add(5 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.NotifyLaunch(ctx, l.ID, "planner"); err != nil {
+		t.Fatal(err)
+	}
+	if out := lookAt(t, b); len(out.Judge) != 1 || out.Judge[0].ID != "T-1" {
+		t.Fatalf("a limited run left to the planner held T-1 from B: %+v", out)
+	}
 }
 
 // A chain that leaves a run's end to the planner says so on its launch.
