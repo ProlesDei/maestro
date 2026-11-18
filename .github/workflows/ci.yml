@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  maestro-ticket:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tools/maestro-ticket
+    env:
+      # The MongoDB store tests skip without it.
+      MAESTRO_TICKET_TEST_MONGO: mongodb://127.0.0.1:27017/?replicaSet=rs0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/maestro-ticket/go.mod
+          cache-dependency-path: tools/maestro-ticket/go.sum
+      - name: MongoDB, a one-node replica set
+        run: |
+          docker run -d --name mongo -p 127.0.0.1:27017:27017 mongo:8.0.4 --replSet rs0 --bind_ip_all
+          mongo_eval() { docker exec mongo mongosh --quiet --eval "$1"; }
+          for _ in $(seq 60); do mongo_eval 'db.runCommand({ping: 1}).ok' >/dev/null 2>&1 && break; sleep 1; done
+          mongo_eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "127.0.0.1:27017"}]})'
+          for _ in $(seq 60); do [ "$(mongo_eval 'db.hello().isWritablePrimary')" = true ] && exit 0; sleep 1; done
+          docker logs mongo | tail -n 20
+          echo "the replica set has no primary after 60s" >&2
+          exit 1
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          [ -z "$out" ] || { echo "$out"; exit 1; }
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  scripts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash scripts/install_test.sh
+      - run: bash scripts/review_prep_test.sh
+      - run: bash scripts/qa_prep_test.sh
+      - run: bash scripts/screens_test.sh
+      - run: bash scripts/design_pr_test.sh
+      - run: shellcheck --version && shellcheck scripts/*.sh skills/*/scripts/*.sh

@@ -10,6 +10,7 @@
 # from this file's own path. Exit codes are review-prep.sh's; 1 with a
 # reason when that skill isn't there.
 set -euo pipefail
+unset CDPATH
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 prep=$here/../../maestro-code-review/scripts/review-prep.sh
