@@ -230,9 +230,11 @@ func kickbackRoute(ctx context.Context, s ticket.Store, t ticket.Ticket) (send, 
 	return send{"planner", fmt.Sprintf("kickback %s tries %d", t.ID, t.Tries)}, nil
 }
 
-// readyWork reports whether a build waits for a free slot.
+// readyWork reports whether a build waits for a free slot: new work, or
+// work sent back or stopped with no claim on it, which look hands a slot
+// first.
 func readyWork(ctx context.Context, s ticket.Store) (bool, error) {
-	l, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusTodo}, Ready: true, Limit: 1})
+	l, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusTodo, ticket.StatusInProgress}, Ready: true, Limit: 1})
 	return len(l) > 0, err
 }
 
