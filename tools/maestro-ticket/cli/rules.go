@@ -196,12 +196,17 @@ func writeRules(dir, via string, lines []string) error {
 }
 
 // logRules appends one change to rules.log; the caller holds the lock.
-func (c *call) logRules(dir, key, old, new string) error {
+// note, when there is one, ends the line: what was added or dropped, and
+// why, so a retro reads why each rule came and went, not just hashes.
+func (c *call) logRules(dir, key, old, new, note string) error {
 	f, err := os.OpenFile(filepath.Join(dir, rulesLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(f, "%s %s %s %s -> %s\n", c.now().UTC().Format(time.RFC3339), c.actor, key, old, new)
+	if note != "" {
+		note = " " + note
+	}
+	_, err = fmt.Fprintf(f, "%s %s %s %s -> %s%s\n", c.now().UTC().Format(time.RFC3339), c.actor, key, old, new, note)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -290,7 +295,7 @@ func (c *call) lookLimit(flag int) (int, []string, error) {
 			if err := c.writeBoard(dir, b); err != nil {
 				return 0, nil, err
 			}
-			if err := c.logRules(dir, "limit", old, strconv.Itoa(flag)); err != nil {
+			if err := c.logRules(dir, "limit", old, strconv.Itoa(flag), ""); err != nil {
 				return 0, nil, err
 			}
 		}
@@ -350,7 +355,7 @@ func (c *call) seedRules(stdin string) ([]string, error) {
 	if err := writeRules(dir, "look", lines); err != nil {
 		return nil, err
 	}
-	return alerts, c.logRules(dir, "text", linesSum(old), linesSum(lines))
+	return alerts, c.logRules(dir, "text", linesSum(old), linesSum(lines), "")
 }
 
 func checkRuleLines(lines []string) error {
@@ -365,12 +370,29 @@ func checkRuleLines(lines []string) error {
 	return nil
 }
 
+// The rule budget: every look, plan, rule and judge session reads all of
+// rules.md, so past either a write warns.
+const (
+	ruleBudget      = 20
+	ruleBytesBudget = 8 << 10
+)
+
+// liftsClause is what a new rule must say lifts it: "Lifts when ..." or
+// "Lifts: ...", "never" included. A rule that names no lift stays for
+// good, and the list only grows.
+var liftsClause = regexp.MustCompile(`(?i)\blifts(\s+when\b|\s*:)`)
+
 // runRules shows or sets the standing values: show (the default), set
 // limit|qa_slots <n>, text (the whole list on stdin), add (lines on
 // stdin) and drop <n>.
 func runRules(ctx context.Context, c *call) error {
+	whyFlag := c.fs.String("why", "", "why the change, kept beside it in rules.log (drop needs it)")
 	if err := c.parse(); err != nil {
 		return err
+	}
+	why := oneLineText(*whyFlag)
+	if ticket.HasControl(why) {
+		return usagef("rules: --why must be one line with no control characters")
 	}
 	verb := "show"
 	if len(c.args) > 0 {
@@ -393,7 +415,7 @@ func runRules(ctx context.Context, c *call) error {
 		if err := c.refuseRulesWrite(c.args[1]); err != nil {
 			return err
 		}
-		return c.setBoard(c.args[1], n)
+		return c.setBoard(c.args[1], n, why)
 	case "text", "add", "drop":
 		want := 1
 		if verb == "drop" {
@@ -405,12 +427,15 @@ func runRules(ctx context.Context, c *call) error {
 		if err := c.refuseRulesWrite("text"); err != nil {
 			return err
 		}
-		return c.editRules(verb)
+		if verb == "drop" && why == "" {
+			return usagef("rules drop: say why with --why, such as --why \"lifted: lint.go refuses it since T-412\"; rules.log keeps it")
+		}
+		return c.editRules(verb, why)
 	}
 	return usagef("rules: unknown %q: want show, set, text, add or drop", verb)
 }
 
-func (c *call) setBoard(key string, n int) error {
+func (c *call) setBoard(key string, n int, why string) error {
 	dir, err := c.standingDir()
 	if err != nil {
 		return err
@@ -433,7 +458,7 @@ func (c *call) setBoard(key string, n int) error {
 	if err := c.writeBoard(dir, b); err != nil {
 		return err
 	}
-	if err := c.logRules(dir, key, old, strconv.Itoa(n)); err != nil {
+	if err := c.logRules(dir, key, old, strconv.Itoa(n), whyNote(why)); err != nil {
 		return err
 	}
 	return c.out(map[string]any{"key": key, "value": n, "was": old}, func(w io.Writer) {
@@ -441,7 +466,23 @@ func (c *call) setBoard(key string, n int) error {
 	})
 }
 
-func (c *call) editRules(verb string) error {
+func whyNote(why string) string {
+	if why == "" {
+		return ""
+	}
+	return "why: " + why
+}
+
+// ruleBudgetWarn says when a list is past the rule budget, or "".
+func ruleBudgetWarn(lines []string) string {
+	n := len(strings.Join(lines, "\n"))
+	if len(lines) <= ruleBudget && n <= ruleBytesBudget {
+		return ""
+	}
+	return fmt.Sprintf("%d rules, %.1f KB: past the budget of %d rules or %d KB that every look, plan and judge session reads; drop the rules that lifted, and ask job retro which to turn into code", len(lines), float64(n)/1024, ruleBudget, ruleBytesBudget>>10)
+}
+
+func (c *call) editRules(verb, why string) error {
 	var in []string
 	drop := 0
 	if verb == "drop" {
@@ -459,6 +500,11 @@ func (c *call) editRules(verb string) error {
 		if err := checkRuleLines(in); err != nil {
 			return err
 		}
+		for _, l := range in {
+			if verb == "add" && strings.TrimSpace(l) != "" && !liftsClause.MatchString(l) {
+				return usagef("rules add: %q says nothing lifts it: end it with \"Lifts when <what ends it>\", or \"Lifts when: never\" for a rule that stays", strings.TrimSpace(l))
+			}
+		}
 	}
 	dir, err := c.standingDir()
 	if err != nil {
@@ -474,24 +520,43 @@ func (c *call) editRules(verb string) error {
 		return err
 	}
 	var lines []string
+	var notes []string
 	switch verb {
 	case "text":
 		lines = c.tagRules(in, old)
 	case "add":
-		lines = append(slices.Clone(old), c.tagRules(in, nil)...)
+		added := c.tagRules(in, nil)
+		lines = append(slices.Clone(old), added...)
+		for _, l := range added {
+			notes = append(notes, fmt.Sprintf("added: %q", l))
+		}
 	case "drop":
 		if drop > len(old) {
 			return fmt.Errorf("%w: rules drop %d: there are %d rules", ticket.ErrNotFound, drop, len(old))
 		}
 		lines = slices.Delete(slices.Clone(old), drop-1, drop)
+		notes = append(notes, fmt.Sprintf("dropped: %q", old[drop-1]))
+	}
+	if why != "" {
+		notes = append(notes, whyNote(why))
 	}
 	if err := writeRules(dir, "rules", lines); err != nil {
 		return err
 	}
-	if err := c.logRules(dir, "text", linesSum(old), linesSum(lines)); err != nil {
+	if err := c.logRules(dir, "text", linesSum(old), linesSum(lines), strings.Join(notes, " ")); err != nil {
 		return err
 	}
-	return c.out(map[string]any{"rules": cmpNil(lines)}, func(w io.Writer) { printRules(w, lines) })
+	warn := ruleBudgetWarn(lines)
+	res := map[string]any{"rules": cmpNil(lines)}
+	if warn != "" {
+		res["warn"] = warn
+	}
+	return c.out(res, func(w io.Writer) {
+		printRules(w, lines)
+		if warn != "" {
+			fmt.Fprintln(w, "warn: "+warn)
+		}
+	})
 }
 
 func cmpNil(l []string) []string {

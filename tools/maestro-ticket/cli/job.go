@@ -79,6 +79,10 @@ var jobKinds = []jobKind{
 		help: "design <id>: a goal's Design: ticket, new or sent back with changes"},
 	{name: "cos", skill: "/maestro-chief-of-staff", text: "need", model: modelOpus, lean: true,
 		help: "cos [--ticket T-1] < ask: a check, second opinion, audit or card draft"},
+	// Reads the standing rules and their log, costs and flow, and writes
+	// nothing: its reply is up to 3 proposals for the owner's yes.
+	{name: "retro", skill: "/maestro-retro", model: modelOpus, lean: true,
+		help: "retro: up to 3 proposals that turn standing rules into code, a lint or a script; it changes nothing"},
 }
 
 func findJob(name string) (jobKind, bool) {
@@ -427,7 +431,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	case k.text != "" && req.text != "":
 		prompt += " " + req.text
 	}
-	if k.name == "plan" || k.name == "rule" {
+	if k.name == "plan" || k.name == "rule" || k.name == "retro" {
 		if rules, _ := c.standingRules(); rules != "" {
 			prompt += "\nStanding rules:\n" + rules
 		}

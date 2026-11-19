@@ -36,9 +36,11 @@ Commands:
               left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
-  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
-              runs at once and the standing rules, which code reads; text and add read stdin; set
-              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n> [--why W]   (the planner's
+              limit, QA runs at once and the standing rules, which code reads; text and add read
+              stdin; add refuses a rule with no "Lifts when"; drop needs --why, which rules.log
+              keeps; past 20 rules or 8 KB a write warns; set outside a run by the planner, the chief
+              of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -51,7 +53,7 @@ Commands:
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
-              design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
+              design <id>, retro; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
@@ -189,9 +191,11 @@ Commands:
               left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
-  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
-              runs at once and the standing rules, which code reads; text and add read stdin; set
-              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n> [--why W]   (the planner's
+              limit, QA runs at once and the standing rules, which code reads; text and add read
+              stdin; add refuses a rule with no "Lifts when"; drop needs --why, which rules.log
+              keeps; past 20 rules or 8 KB a write warns; set outside a run by the planner, the chief
+              of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -204,7 +208,7 @@ Commands:
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
-              design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
+              design <id>, retro; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
@@ -342,9 +346,11 @@ Commands:
               left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
-  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
-              runs at once and the standing rules, which code reads; text and add read stdin; set
-              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n> [--why W]   (the planner's
+              limit, QA runs at once and the standing rules, which code reads; text and add read
+              stdin; add refuses a rule with no "Lifts when"; drop needs --why, which rules.log
+              keeps; past 20 rules or 8 KB a write warns; set outside a run by the planner, the chief
+              of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -357,7 +363,7 @@ Commands:
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
-              design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
+              design <id>, retro; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
@@ -495,9 +501,11 @@ Commands:
               left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
-  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
-              runs at once and the standing rules, which code reads; text and add read stdin; set
-              outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
+  rules       [show] | set limit|qa_slots <n> | text | add | drop <n> [--why W]   (the planner's
+              limit, QA runs at once and the standing rules, which code reads; text and add read
+              stdin; add refuses a rule with no "Lifts when"; drop needs --why, which rules.log
+              keeps; past 20 rules or 8 KB a write warns; set outside a run by the planner, the chief
+              of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)
   claim       (--next | <id>) --holder <bot-id>/<session-id> [--status S,...] [--role R] [--ttl 30m]
@@ -510,7 +518,7 @@ Commands:
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
-              design <id>; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
+              design <id>, retro; again <run-id> [--limit D] [--full] starts a run's job afresh, flags kept)
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)

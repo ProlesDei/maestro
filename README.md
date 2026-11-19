@@ -5,7 +5,7 @@ Maestro is infrastructure for a fully agentic workflow: a swarm of up to hundred
 A team installs it into its own repo and gets:
 
 - `maestro-ticket`, a ticket store and CLI.
-- 19 `maestro-*` skills, and seven bot profiles.
+- 20 `maestro-*` skills, and seven bot profiles.
 
 Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts each job, save two: a run that ends starts its ticket's fixed next step, and one that frees a build slot or merges takes the planner's look to fill it. The one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md), 1).
 
@@ -153,7 +153,7 @@ Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-rev
 
 ## Your own skills
 
-Maestro ships 19 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
+Maestro ships 20 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
 
 ## How a bot works
 
@@ -171,7 +171,7 @@ flowchart TD
 
     subgraph Installed ["Their repo after INSTALL.md"]
         direction LR
-        S1["<b>19 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
+        S1["<b>20 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
     end
 
     H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]

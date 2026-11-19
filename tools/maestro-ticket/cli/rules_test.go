@@ -169,17 +169,17 @@ func TestRulesAddDrop(t *testing.T) {
 	h := newRulesHarness(t, "planner")
 	h.must("one\ntwo\n", "rules", "text")
 	_, before := h.rules()
-	h.must("three (set by owner, 2026-01-01)\n", "rules", "add")
+	h.must("three. Lifts when: never (set by owner, 2026-01-01)\n", "rules", "add")
 	_, got := h.rules()
-	if !slices.Equal(got[:2], before) || got[2] != "three (set by planner, "+today()+")" {
+	if !slices.Equal(got[:2], before) || got[2] != "three. Lifts when: never (set by planner, "+today()+")" {
 		t.Fatalf("after add: %q", got)
 	}
-	h.must("", "rules", "drop", "1")
+	h.must("", "rules", "drop", "1", "--why", "lifted")
 	_, got2 := h.rules()
 	if !slices.Equal(got2, got[1:]) {
 		t.Fatalf("after drop: %q", got2)
 	}
-	if code, _ := h.try("", "rules", "drop", "9"); code != 3 {
+	if code, _ := h.try("", "rules", "drop", "9", "--why", "x"); code != 3 {
 		t.Fatalf("drop past the end: exit %d", code)
 	}
 	if n := len(h.logLines()); n != 3 {
@@ -584,5 +584,108 @@ func TestPlanAndRulePromptsCarryRules(t *testing.T) {
 	}
 	if _, s := startedRun(h, dir, "drop it\n", "rule", "T-1"); !slices.Equal(s, []string{"/maestro-planner rule T-1: drop it", "Standing rules:", rule}) {
 		t.Fatalf("rule prompt %q", s)
+	}
+}
+
+// rules add refuses a rule that names nothing that lifts it, and writes
+// none of a list that holds one; text, the whole list, takes any.
+func TestRulesAddNeedsLift(t *testing.T) {
+	h := newRulesHarness(t, "planner")
+	h.must("old rule\n", "rules", "text")
+	for _, in := range []string{"api/: senior only\n", "a. Lifts when: never\nb: no lift\n", "uplifts the team\n"} {
+		code, out := h.try(in, "rules", "add")
+		if code != 2 || !strings.Contains(out, "says nothing lifts it") {
+			t.Fatalf("add %q: exit %d %s", in, code, out)
+		}
+	}
+	if _, got := h.rules(); len(got) != 1 || len(h.logLines()) != 1 {
+		t.Fatalf("a refused add wrote: %q, %d log lines", got, len(h.logLines()))
+	}
+	for _, in := range []string{"a. Lifts when T-521 merges.\n", "b. Lifts: never.\n", "c. lifts when the owner says\n"} {
+		h.must(in, "rules", "add")
+	}
+	if _, got := h.rules(); len(got) != 4 {
+		t.Fatalf("after adds: %q", got)
+	}
+}
+
+// Past 20 rules or 8 KB, a write warns and still writes.
+func TestRulesBudgetWarns(t *testing.T) {
+	h := newRulesHarness(t, "planner")
+	var list strings.Builder
+	for i := range ruleBudget {
+		fmt.Fprintf(&list, "rule %d\n", i)
+	}
+	if out := h.must(list.String(), "rules", "text"); strings.Contains(out, "warn:") {
+		t.Fatalf("%d rules warned:\n%s", ruleBudget, out)
+	}
+	out := h.must("one more. Lifts when: never\n", "rules", "add")
+	if !strings.Contains(out, "warn: 21 rules") || !strings.Contains(out, "job retro") {
+		t.Fatalf("21 rules:\n%s", out)
+	}
+	if _, got := h.rules(); len(got) != ruleBudget+1 {
+		t.Fatalf("the warned add wrote no rule: %d", len(got))
+	}
+	var res struct{ Warn string }
+	h.ok(&res, "rules", "drop", "1", "--why", "lifted")
+	if res.Warn != "" {
+		t.Fatalf("back to 20: warn %q", res.Warn)
+	}
+	big := strings.Repeat("x", 9000) + ". Lifts when: never\n"
+	if out := h.must(big, "rules", "add"); !strings.Contains(out, "warn: 21 rules") {
+		t.Fatalf("9 KB:\n%s", out)
+	}
+	h.must("", "rules", "drop", "21", "--why", "too long")
+	h.must("", "rules", "drop", "1", "--why", "x")
+	if out := h.must(big, "rules", "add"); !strings.Contains(out, "warn: 20 rules, 9.") {
+		t.Fatalf("20 rules, 9 KB:\n%s", out)
+	}
+}
+
+// rules.log keeps what changed and why beside each change's hashes; a
+// drop must say why.
+func TestRulesLogKeepsWhy(t *testing.T) {
+	h := newRulesHarness(t, "planner")
+	h.must("", "rules", "set", "limit", "2", "--why", "inodes at 12%")
+	h.must("first. Lifts when T-9 merges\n", "rules", "add", "--why", "T-9 leaks temp dirs")
+	if code, out := h.try("", "rules", "drop", "1"); code != 2 || !strings.Contains(out, "say why with --why") {
+		t.Fatalf("drop with no why: exit %d %s", code, out)
+	}
+	if code, out := h.try("", "rules", "drop", "1", "--why", "a\x07b"); code != 2 {
+		t.Fatalf("a why with a control character: exit %d %s", code, out)
+	}
+	h.must("", "rules", "drop", "1", "--why", "T-9\n merged")
+	h.env["MAESTRO_TICKET_ACTOR"] = "chief-of-staff"
+	h.must("", "rules", "set", "qa_slots", "3")
+	got := h.logLines()
+	rule := `"first. Lifts when T-9 merges (set by planner, ` + today() + `)"`
+	for i, want := range []string{
+		` limit none -> 2 why: inodes at 12%$`,
+		` text none -> [0-9a-f]{12} added: ` + regexp.QuoteMeta(rule) + ` why: T-9 leaks temp dirs$`,
+		` text [0-9a-f]{12} -> none dropped: ` + regexp.QuoteMeta(rule) + ` why: T-9 merged$`,
+		` chief-of-staff qa_slots none -> 3$`,
+	} {
+		if i >= len(got) || !regexp.MustCompile(want).MatchString(got[i]) {
+			t.Fatalf("log line %d: want %s, log:\n%s", i, want, strings.Join(got, "\n"))
+		}
+	}
+}
+
+// job retro runs /maestro-retro on Opus with the standing rules after it,
+// on no ticket.
+func TestRetroJobCarriesRules(t *testing.T) {
+	h := newRulesHarness(t, "chief-of-staff")
+	dir := rulesSupervisor(h)
+	h.must("api/: senior only. Lifts when: never\n", "rules", "add")
+	r, s := startedRun(h, dir, "", "retro")
+	rule := "api/: senior only. Lifts when: never (set by chief-of-staff, " + today() + ")"
+	if !slices.Equal(s, []string{"/maestro-retro", "Standing rules:", rule}) {
+		t.Fatalf("retro prompt %q", s)
+	}
+	if r.Ticket != "" || flagValue(r.Command, "--model") != modelOpus {
+		t.Fatalf("retro run: ticket %q, command %q", r.Ticket, r.Command)
+	}
+	if code, out := h.try("", "job", "retro", "T-1"); code != 2 || !strings.Contains(out, "takes no ticket id") {
+		t.Fatalf("retro with an id: exit %d %s", code, out)
 	}
 }

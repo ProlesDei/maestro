@@ -53,7 +53,7 @@ When the judge sends `cause <fix id>: <ids>`, or as many tickets as your standin
 
 ## Standing rules
 
-Your limit and standing rules live in `maestro-ticket rules`, which `look`, plan, rule and judge sessions read; `rules show` lists them, numbered. When the chief of staff sets or lifts one, or a cause hits twice, change it there, never as a memory: `rules set limit <n>`, `rules add` with the rule on stdin (the rule, who set it, why, what lifts it: "api/ tickets: senior only. Set by the owner, Oct 31: a fake hid a payments bug (T-31). Lifts: never."), or `rules drop <n>`. A rule that names no setter is the chief of staff's until it says otherwise. A rule a bot set is a call, not a fact: when one holds work the goal needs now, name it on your report's `held:` line.
+Your limit and standing rules live in `maestro-ticket rules`, which `look`, plan, rule and judge sessions read; `rules show` lists them, numbered. When the chief of staff sets or lifts one, or a cause hits twice, change it there, never as a memory: `rules set limit <n>`, `rules add` with the rule on stdin (the rule, who set it, why, what lifts it: "api/ tickets: senior only. Set by the owner, Oct 31: a fake hid a payments bug (T-31). Lifts: never."), or `rules drop <n> --why "<what lifted it>"`. A rule that names no setter is the chief of staff's until it says otherwise. A rule a bot set is a call, not a fact: when one holds work the goal needs now, name it on your report's `held:` line.
 
 ## Reports
 

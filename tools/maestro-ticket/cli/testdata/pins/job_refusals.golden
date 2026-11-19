@@ -1,11 +1,11 @@
 $ maestro-ticket job
 exit 2
 stderr:
-maestro-ticket: job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos
+maestro-ticket: job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos, retro
 $ maestro-ticket job deploy T-1
 exit 2
 stderr:
-maestro-ticket: job: unknown job "deploy": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos
+maestro-ticket: job: unknown job "deploy": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos, retro
 $ maestro-ticket job build
 exit 2
 stderr:
@@ -164,7 +164,7 @@ stdout:
 {
   "error": {
     "code": "usage",
-    "message": "job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos"
+    "message": "job: name the job: build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos, retro"
   }
 }
 $ maestro-ticket job deploy T-1 --json
@@ -173,7 +173,7 @@ stdout:
 {
   "error": {
     "code": "usage",
-    "message": "job: unknown job \"deploy\": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos"
+    "message": "job: unknown job \"deploy\": want build, review, qa, live, qa-ask, plan, rule, finish, judge, design, cos, retro"
   }
 }
 $ maestro-ticket job build --json

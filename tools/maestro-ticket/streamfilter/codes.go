@@ -37,6 +37,7 @@ var skillFiles = map[string]struct{ refs, scripts []string }{
 	"maestro-qa-lead":            {refs: []string{"browser", "live-run", "test-a-pr"}, scripts: []string{"qa-prep", "screens"}},
 	"maestro-recall":             {},
 	"maestro-refactor-code":      {},
+	"maestro-retro":              {},
 	"maestro-sharpen":            {refs: []string{"example"}},
 	"maestro-software-engineer":  {},
 	"maestro-swarm":              {},

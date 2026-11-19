@@ -61,7 +61,7 @@ Where Maestro takes from them: the chief of staff is a firstmate; `/maestro-code
 ## Layout
 
 - `bot-profiles/`: the seven personas (`chief-of-staff`, `planner`, `senior-engineer`, `junior-engineer`, `qa-lead`, `reviewer`, `designer`) and `team-rules.md`. Format in `bot-profiles/README.md`.
-- `skills/`: Maestro's 19 `maestro-*` skills. List and writing format in `skills/README.md`.
+- `skills/`: Maestro's 20 `maestro-*` skills. List and writing format in `skills/README.md`.
 - `templates/project-setup.md`: copied to `.maestro/project/project-setup.md` on install.
 - `INSTALL.md`: the install guide an agent follows in a team's repo. `scripts/install.sh` applies the choices it writes down; `scripts/bot-bundle.sh` builds each Grok bot's paste block; `scripts/install_test.sh` tests both.
 - `tools/maestro-ticket/`: the ticket store and CLI.
