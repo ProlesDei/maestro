@@ -6,7 +6,7 @@
 - `## Checks`: only bullets of a name, a colon and the command in backticks. Engineers, review and QA run them in order in a worktree; a non-zero exit fails the check. Checks must leave `git status` clean: gitignore what they write.
 - `## Proof`: one word, `qa` or `engineer`: who proves each criterion on the running app. `qa`, the default when the section is missing: engineers prove each criterion with one real run, and QA proves the rest before it merges, so engineers spend no build run on QA's work. `engineer`: engineers also prove each criterion in full, with evidence, before review.
 
-Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads.
+Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads, and `## Env`, whose bullets every run's start reads.
 
 ## Project
 
@@ -24,6 +24,10 @@ main
 ## Run
 
 <how to start the app locally, and the URL or command to check it works; `/maestro-qa-lead` and `maestro-prove-complete` read this>
+
+## Env
+
+<leave as it is to set nothing. Else one bullet per variable every Maestro run's session needs, as the name, a colon, `from` and the variable in the bots' own environment that holds the value, such as - GH_TOKEN: from GITHUB_TEAM_TOKEN. Only names go here, never a value: `maestro-ticket` copies it from one environment to the next, so a secret stays off command lines, out of files and out of logs>
 
 ## QA
 

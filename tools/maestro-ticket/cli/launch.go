@@ -319,6 +319,9 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 		// Not tagged with the run this launch runs in, if any: when that
 		// run ends, what carries its id is killed, and this run isn't its.
 		sup.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, runs.RunIDEnv+"=") })
+		// ## Env's names, after the rest so they win, as the last of a
+		// name does; the supervisor hands its environment to the session.
+		sup.Env = append(sup.Env, c.runEnv()...)
 		sup.SysProcAttr = runs.Detach()
 		err = startSupervisor(sup)
 	}
