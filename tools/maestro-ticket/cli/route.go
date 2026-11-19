@@ -504,7 +504,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			planner(out.Outcome + " " + id + " after its verdict")
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
+		case t.Status == ticket.StatusInReview && !c.stoppedOnPurpose(r) && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
@@ -554,7 +554,7 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
+		case t.Status == ticket.StatusInReview && !c.stoppedOnPurpose(r) && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
@@ -807,8 +807,10 @@ func limitLifts(r runs.Record, reset string) time.Time {
 
 // noVerdictRuns counts the other runs of r's job on its ticket since its
 // latest mark (a Handoff: for review, a Review: GO for QA) that ended
-// with no verdict, deaths and limits aside. A run that ended past the Stop
-// hook's blocks counts even if it then timed out: the hook kept it going.
+// with no verdict, deaths, limits and stops on purpose aside: a run
+// someone stopped, such as a QA run still waiting for its slot, never had
+// its say. A run that ended past the Stop hook's blocks counts even if it
+// then timed out: the hook kept it going.
 func (c *call) noVerdictRuns(r runs.Record, d ticket.Detail, mark string) int {
 	return len(c.noVerdicts(r, d, mark))
 }
@@ -821,7 +823,7 @@ func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Re
 	var list []runs.Record
 	for _, o := range c.allRuns() {
 		if o.ID != r.ID && o.Job == r.Job && o.Ticket == r.Ticket && o.Ended() && !neverRan(o) && o.StartedAt.After(since) {
-			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) && !o.LauncherStopped() {
+			if out, _ := routeOutcome(o); out != outUsageLimit && out != outDied && (out != outTimedOut || c.stopCapped(o.ID)) && !c.stoppedOnPurpose(o) {
 				list = append(list, o)
 			}
 		}
