@@ -43,6 +43,9 @@ type Env struct {
 	// DiskFree measures a directory's filesystem for claim and slot; nil
 	// means envcheck.DiskFree. Tests use it to fake a full disk.
 	DiskFree func(dir string) (envcheck.Free, bool, error)
+	// LoadAvg reads the 1-minute load average for rules set floor load;
+	// nil means envcheck.LoadAvg. Tests use it to fake a busy machine.
+	LoadAvg func() (float64, bool)
 	// StatsOpen opens stats.db for one write; nil means stats.Open. Tests
 	// use it to fake a broken file.
 	StatsOpen func(path string, create bool) (*sql.DB, error)
@@ -98,8 +101,9 @@ Commands:
               left to send, judge rows for the rest;
               --judge starts one judge session on them with the standing rules; the limit is
               rules set limit's, and --limit is a one-off)
-  rules       [show] | set limit|qa_slots <n> | text | add | drop <n>   (the planner's limit, QA
-              runs at once and the standing rules, which code reads; text and add read stdin; set
+  rules       [show] | set limit|qa_slots <n> | set floor inodes <pct>|load <n> | text | add | drop <n>
+              (the planner's limit, QA runs at once, the floors past which look and job start
+              nothing, and the standing rules, which code reads; text and add read stdin; set
               outside a run by the planner, the chief of staff, the QA lead (qa_slots) or a person)
   eta         [--goal G --by TIME [--tickets T-1,..] | --goal G --clear]   (set, drop or list the
               times the owner was told goals would be ready; alerts reports a missed one)

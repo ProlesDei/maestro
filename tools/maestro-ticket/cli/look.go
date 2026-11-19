@@ -233,6 +233,11 @@ func runLook(ctx context.Context, c *call) error {
 	if p, ok := co.readPause(time.Now()); ok {
 		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
 	}
+	// Past a floor, look starts nothing, as under a pause, till it clears.
+	floor, floorWhy := c.overFloor()
+	if paused == "" && floor != "" {
+		paused = floorWhy
+	}
 	stopped, err := co.s.stopped()
 	if err != nil {
 		return err
@@ -247,6 +252,9 @@ func runLook(ctx context.Context, c *call) error {
 		return err
 	}
 	c.startSends(ctx, rdir, &out)
+	if floor != "" {
+		out.Counts += "; paused: " + floor
+	}
 	if len(alerts) > 0 {
 		out.Alerts = append(alerts, out.Alerts...)
 	}
@@ -304,8 +312,8 @@ func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 func (c *call) refill(ctx context.Context, rdir string) bool {
 	cc := *c
 	cc.actor, cc.runCache = "planner", nil
-	if cc.mayStart() != nil {
-		return false // stopped or paused: the planner's look says so
+	if cc.admit() != nil {
+		return false // stopped, paused or past a floor: the planner's look says so
 	}
 	co, err := cc.coord()
 	if err != nil {

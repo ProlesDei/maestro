@@ -20,6 +20,7 @@ var (
 	ErrHasDependents       = errors.New("open tickets depend on it")
 	ErrStopped             = errors.New("refused: the kill switch is on")
 	ErrPaused              = errors.New("refused: a usage limit holds")
+	ErrPastFloor           = errors.New("refused: past an admission floor")
 	ErrBusy                = errors.New("store busy")
 	ErrNoSlot              = errors.New("no free slot")
 	ErrLowDisk             = errors.New("low disk")
@@ -56,6 +57,7 @@ var errorKinds = []struct {
 	{ErrHasDependents, "has_dependents", ExitConflict},
 	{ErrStopped, "stopped", ExitConflict},
 	{ErrPaused, "paused", ExitConflict},
+	{ErrPastFloor, "paused", ExitConflict}, // a bot waits it out as a pause
 	{ErrBusy, "busy", ExitConflict},
 	{ErrNoSlot, "no_slot", ExitConflict},
 	{ErrLowDisk, "low_disk", ExitConflict},

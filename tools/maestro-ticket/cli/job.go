@@ -313,7 +313,7 @@ func runJob(ctx context.Context, c *call) error {
 func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, string, error) {
 	k, ids := req.kind, slices.Clone(req.ids)
 	fail := func(err error) (runs.Record, string, string, error) { return runs.Record{}, "", "", err }
-	if err := c.mayStart(); err != nil {
+	if err := c.admit(); err != nil {
 		return fail(err)
 	}
 	switch {
@@ -955,7 +955,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	if err != nil {
 		return fail(err)
 	}
-	if err := c.mayStart(); err != nil {
+	if err := c.admit(); err != nil {
 		return fail(err)
 	}
 	k, _ := findJob(r.Job)
@@ -1139,9 +1139,9 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	if session == "" {
 		return fail(fmt.Errorf("%w: resume: run %s has no session id to resume", ticket.ErrInvalid, r.ID))
 	}
-	// Stopped or paused, it starts nothing: say so before reading every
-	// past run.
-	if err := c.mayStart(); err != nil {
+	// Stopped, paused or past a floor, it starts nothing: say so before
+	// reading every past run.
+	if err := c.admit(); err != nil {
 		return fail(err)
 	}
 	nudge := ""
