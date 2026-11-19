@@ -63,6 +63,9 @@ type harness struct {
 	disk func(dir string) (envcheck.Free, bool, error)
 	// statsOpen replaces stats.Open when set.
 	statsOpen func(path string, create bool) (*sql.DB, error)
+	// load reads the load average for rules set floor load; nil reports
+	// an idle machine, so no test reads the real one.
+	load func() (float64, bool)
 }
 
 func halfFree(string) (envcheck.Free, bool, error) {
@@ -81,10 +84,14 @@ func (h *harness) run(stdin string, args ...string) (int, string, string) {
 	if disk == nil {
 		disk = halfFree
 	}
+	load := h.load
+	if load == nil {
+		load = func() (float64, bool) { return 0.5, true }
+	}
 	code := Run(context.Background(), args, Env{
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb,
 		Getenv: func(k string) string { return h.env[k] }, Dir: h.dir, Now: h.now, StoreChecks: h.checks,
-		DiskFree: disk, StatsOpen: h.statsOpen,
+		DiskFree: disk, StatsOpen: h.statsOpen, LoadAvg: load,
 	})
 	return code, out.String(), errb.String()
 }

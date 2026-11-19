@@ -233,6 +233,11 @@ func runLook(ctx context.Context, c *call) error {
 	if p, ok := co.readPause(time.Now()); ok {
 		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
 	}
+	// Past a floor, look starts nothing, as under a pause, till it clears.
+	floor, floorWhy := c.overFloor()
+	if paused == "" && floor != "" {
+		paused = floorWhy
+	}
 	stopped, err := co.s.stopped()
 	if err != nil {
 		return err
@@ -247,6 +252,9 @@ func runLook(ctx context.Context, c *call) error {
 		return err
 	}
 	c.startSends(ctx, rdir, &out)
+	if floor != "" {
+		out.Counts += "; paused: " + floor
+	}
 	if len(alerts) > 0 {
 		out.Alerts = append(alerts, out.Alerts...)
 	}
@@ -304,8 +312,8 @@ func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 func (c *call) refill(ctx context.Context, rdir string) bool {
 	cc := *c
 	cc.actor, cc.runCache = "planner", nil
-	if cc.mayStart() != nil {
-		return false // stopped or paused: the planner's look says so
+	if cc.admit() != nil {
+		return false // stopped, paused or past a floor: the planner's look says so
 	}
 	co, err := cc.coord()
 	if err != nil {
@@ -505,10 +513,16 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	}
 	liveRun := map[string]bool{}
 	building := map[string]bool{} // tickets with a live build run
+	// QA runs going here, in their slot or waiting in line for it: the
+	// slot is a lock on this machine, so only its own runs fill it.
+	qaGoing := 0
 	if list, err := runs.List(o.runs, now, false); err == nil {
 		for _, r := range list {
 			if !r.Ended() && r.Job == "build" && r.Ticket != "" {
 				building[r.Ticket] = true
+			}
+			if k, ok := findJob(r.Job); ok && k.slot == "qa" && !r.Ended() {
+				qaGoing++
 			}
 			holds, limited := runHolds(r, now, o.stall)
 			if holds && r.Ticket != "" {
@@ -557,11 +571,15 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	// ticket that became ready since would take the slot again. A mark
 	// older than its ticket's last change was for a build that has run.
 	sentAt := map[string]time.Time{}
+	qaSentAt := map[string]time.Time{} // QA handed out lately, as for builds
 	if ms, err := o.handouts.s.list(handoutMarks); err == nil {
 		for _, m := range ms {
 			id, bot, _ := strings.Cut(m.name, ".")
 			if (bot == "junior-engineer" || bot == "senior-engineer") && now.Sub(m.at) < o.stall && m.at.After(sentAt[id]) {
 				sentAt[id] = m.at
+			}
+			if bot == "qa-lead" && now.Sub(m.at) < o.stall {
+				qaSentAt[id] = m.at
 			}
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -602,16 +620,44 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		if t.Goal != "" && (t.Status == ticket.StatusTodo || t.Status == ticket.StatusInProgress || t.Status == ticket.StatusInReview) {
 			moving[t.Goal] = true
 		}
+		// A QA line handed out lately, with no run on it yet, holds a QA
+		// slot on its way, as a build's handout holds a work slot.
+		if at, ok := qaSentAt[t.ID.String()]; ok && at.After(t.UpdatedAt) && !liveRun[t.ID.String()] {
+			qaGoing++
+		}
 	}
 	free := max(o.limit-going, 0)
+	// QA goes out only to free QA slots: a run past them would wait in
+	// line inside slot, holding its ticket and its time, and a stop of
+	// the waiter would cost the ticket a start.
+	qaSlots := c.boardQASlots()
+	if qaSlots == 0 {
+		qaSlots = cmp.Or(lastSlots(c.allRuns(), "qa-lead", "qa"), defaultQASlots)
+	}
+	qaFree := max(qaSlots-qaGoing, 0)
 
-	n := struct{ busy, build, review, blocked, sentUp, todo, ready, backlog, waiting int }{}
+	n := struct{ busy, build, review, blocked, sentUp, todo, ready, backlog, waiting, qaQueued int }{}
 	var stuck, held, sentUp []string
-	hand := func(bot, line string, id ticket.ID) {
+	hand := func(bot, line string, id ticket.ID) bool {
 		if idle || !o.handouts.claimHandout(id.String(), bot, line, o.stall, now) {
-			return
+			return false
 		}
 		out.Send = append(out.Send, send{bot, line})
+		return true
+	}
+	// handQA hands a QA or live run to the QA lead while a QA slot is
+	// free; the rest wait for a later look, which a QA run's end takes.
+	// A handout that stands holds its slot already, and stays.
+	handQA := func(line string, id ticket.ID) {
+		if qaFree == 0 {
+			if _, ok := qaSentAt[id.String()]; !ok && !idle {
+				n.qaQueued++
+			}
+			return
+		}
+		if hand("qa-lead", line, id) {
+			qaFree--
+		}
 	}
 	// build hands a build out while a work slot is free; one handed out
 	// lately still holds its slot on its way to a claim, and its areas.
@@ -697,7 +743,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		case ticket.RoleDesigner:
 			hand("designer", "design "+t.ID.String(), t.ID)
 		case ticket.RoleQALead:
-			hand("qa-lead", "live "+t.ID.String(), t.ID)
+			handQA("live "+t.ID.String(), t.ID)
 		default:
 			judgeIt(t, "blocked", "a "+string(t.Status)+" ticket for role "+t.Role+": who takes it?", "")
 		}
@@ -730,7 +776,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			n.review++
 			switch p {
 			case "QA:", "Review:":
-				hand("qa-lead", "qa "+id.String(), id)
+				handQA("qa "+id.String(), id)
 			case "Rereview:":
 				hand("reviewer", "review "+id.String(), id)
 			case "Answer:":
@@ -739,7 +785,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					continue
 				}
 				if e, ok := latestWith(d, "Escalation:"); ok && strings.HasPrefix(e.Body, "Escalation: QA") {
-					hand("qa-lead", "qa "+id.String(), id)
+					handQA("qa "+id.String(), id)
 				} else {
 					judgeIt(t, "rerun", "answered, back in review: "+firstLine(latest(d).Body), fmt.Sprint(latest(d).ID))
 				}
@@ -893,6 +939,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	}
 	out.Counts = fmt.Sprintf("open %d; building %d/%d; review %d; blocked %d (sent up %d); todo %d (ready %d); backlog %d; busy %d; waiting on deps or areas %d",
 		len(open), going, o.limit, n.review, n.blocked, n.sentUp, n.todo, n.ready, n.backlog, n.busy, n.waiting)
+	if n.qaQueued > 0 {
+		out.Counts += fmt.Sprintf("; qa %d/%d, %d waiting for a slot", max(qaGoing, qaSlots-qaFree), qaSlots, n.qaQueued)
+	}
 	if o.report {
 		rows, err := c.goalProgress(ctx, s)
 		keep(err)

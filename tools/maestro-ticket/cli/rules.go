@@ -39,8 +39,12 @@ type board struct {
 	Limit    *int   `json:"limit,omitempty"`
 	LimitVia string `json:"limit_via,omitempty"`
 	QASlots  *int   `json:"qa_slots,omitempty"`
-	SetBy    string `json:"set_by,omitempty"`
-	At       string `json:"at,omitempty"`
+	// The admission floors (floor.go): free inodes as a whole percent,
+	// and the 1-minute load average. Unset, none holds.
+	FloorInodes *int     `json:"floor_inodes,omitempty"`
+	FloorLoad   *float64 `json:"floor_load,omitempty"`
+	SetBy       string   `json:"set_by,omitempty"`
+	At          string   `json:"at,omitempty"`
 }
 
 // rulesWriters are the bots that may set each standing value; a person
@@ -48,6 +52,7 @@ type board struct {
 var rulesWriters = map[string][]string{
 	"limit":    {"planner", "chief-of-staff"},
 	"qa_slots": {"qa-lead", "chief-of-staff"},
+	"floor":    {"planner", "chief-of-staff"},
 	"text":     {"planner", "chief-of-staff"},
 }
 
@@ -405,8 +410,11 @@ func runRules(ctx context.Context, c *call) error {
 		}
 		return c.showRules()
 	case "set":
+		if len(c.args) > 1 && c.args[1] == "floor" {
+			return c.setFloor(c.args[2:], why)
+		}
 		if len(c.args) != 3 || (c.args[1] != "limit" && c.args[1] != "qa_slots") {
-			return usagef("rules set: want limit <n> or qa_slots <n>")
+			return usagef("rules set: want limit <n>, qa_slots <n>, floor inodes <pct> or floor load <n>")
 		}
 		n, err := strconv.Atoi(c.args[2])
 		if err != nil || n < 0 || (n == 0 && c.args[1] == "qa_slots") {
@@ -589,13 +597,13 @@ func (c *call) showRules() error {
 		return err
 	}
 	res := map[string]any{"limit": b.Limit, "limit_via": b.LimitVia, "qa_slots": b.QASlots, "set_by": b.SetBy, "at": b.At,
-		"rules": cmpNil(lines), "rules_file": ok, "rules_via": via}
+		"floor_inodes": b.FloorInodes, "floor_load": b.FloorLoad, "rules": cmpNil(lines), "rules_file": ok, "rules_via": via}
 	return c.out(res, func(w io.Writer) {
 		lim := intText(b.Limit)
 		if b.Limit != nil {
 			lim += " (via " + b.LimitVia + ")"
 		}
-		fmt.Fprintf(w, "limit: %s\nqa_slots: %s\n", lim, intText(b.QASlots))
+		fmt.Fprintf(w, "limit: %s\nqa_slots: %s\nfloor: %s\n", lim, intText(b.QASlots), floorText(b))
 		if b.SetBy != "" {
 			fmt.Fprintf(w, "set by %s at %s\n", b.SetBy, b.At)
 		}

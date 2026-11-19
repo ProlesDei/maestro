@@ -326,6 +326,42 @@ func TestNoVerdictRetriesOnceThenMismatch(t *testing.T) {
 	}
 }
 
+// A run someone stopped on purpose, such as a QA run stopped while it
+// waited for its slot, is no strike: stops never block the ticket, and
+// the run after them is still the first with no verdict.
+func TestStopsOnPurposeAreNoStrikes(t *testing.T) {
+	h := newRouteHarness(t)
+	rdir := filepath.Join(h.dir, "runs")
+	stopped := func(job, id string) {
+		r := h.saveRun(runs.Record{Launcher: "qa-lead", Job: job, Ticket: id, State: runs.Failed, Error: "stopped by chief-of-staff"})
+		runs.AskStop(rdir, r.ID, "chief-of-staff", time.Now())
+	}
+	h.ok(nil, "create", "--title", "a")
+	h.move("T-1", "in_progress", "in_review")
+	h.comment("T-1", "Review: GO at "+sha)
+	h.ok(nil, "create", "--title", "b")
+	h.move("T-2", "in_progress", "in_review")
+	h.comment("T-2", "Handoff: PR x at "+sha)
+	for _, c := range []struct{ job, id string }{{"qa", "T-1"}, {"review", "T-2"}} {
+		stopped(c.job, c.id)
+		stopped(c.job, c.id)
+		// A third stop routes as a stop, not a third strike.
+		r := h.saveRun(runs.Record{Launcher: "qa-lead", Job: c.job, Ticket: c.id, State: runs.Failed, Error: "stopped by chief-of-staff"})
+		runs.AskStop(rdir, r.ID, "chief-of-staff", time.Now())
+		if rt := h.route(r); rt.Status == "blocked" {
+			t.Fatalf("%s: three stops blocked it: %+v", c.job, rt)
+		}
+		// The run after the stops that ends with no verdict is the first.
+		r = h.saveRun(runs.Record{Launcher: "qa-lead", Job: c.job, Ticket: c.id, State: runs.Done, Reply: "done, I think"})
+		if rt := h.route(r); !slices.Equal(rt.Do, []string{"maestro-ticket job again " + r.ID}) || rt.Status == "blocked" {
+			t.Fatalf("%s: first no verdict after three stops: %+v", c.job, rt)
+		}
+	}
+	if d := h.ticketOf(1); d.Status != ticket.StatusInReview {
+		t.Fatalf("T-1 after stops: %s", d.Status)
+	}
+}
+
 // A plan, rule or finish run that failed or timed out with no card runs
 // again once, in code, and keeps holding its ticket; a second end like
 // it goes to the chief of staff as one fault line, and its ticket waits
