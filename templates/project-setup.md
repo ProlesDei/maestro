@@ -31,7 +31,7 @@ main
 
 ## QA
 
-<what every QA run covers, read by `/maestro-qa-lead`: how to build and start the app the way production does; the user flows that must never break, one per line; how to load data like production's; test accounts, by environment variable name; the screen sizes to check; a browser tool only if QA uses one other than Playwright CLI>
+<what every QA run covers, read by `/maestro-qa-lead`: how to build and start the app the way production does, best as one script, `scripts/qa_env.sh up|doctor|down <ticket>`, so no session retypes the steps: `up` makes the run's own folder and data, starts the app on a free port and prints its URL and PIDs, `doctor` checks it answers, and `down` stops it by PID and removes the folder (copy `.maestro/src/templates/qa_env.sh`, fill in its three EDIT places, and prove all three once); then this section says to run `up`, what to check, and `down`; the user flows that must never break, one per line; how to load data like production's; test accounts, by environment variable name; the screen sizes to check; a browser tool only if QA uses one other than Playwright CLI>
 
 ## Proof
 

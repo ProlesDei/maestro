@@ -27,6 +27,7 @@ main
 - qa-prep: `maestro-ticket slot --max 4 -- bash scripts/qa_prep_test.sh`
 - screens: `maestro-ticket slot --max 4 -- bash scripts/screens_test.sh`
 - design-pr: `maestro-ticket slot --max 4 -- bash scripts/design_pr_test.sh`
+- qa-env: `maestro-ticket slot --max 4 -- bash scripts/qa_env_test.sh`
 
 ## Run
 

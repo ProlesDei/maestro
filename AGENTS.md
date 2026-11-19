@@ -77,7 +77,7 @@ From `tools/maestro-ticket/`:
 - Lint/format: `gofmt -l . && go vet ./...` (gofmt must print nothing)
 - Install: `go install ./cmd/<tool>`
 
-Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review and QA prep: `bash scripts/review_prep_test.sh` and `bash scripts/qa_prep_test.sh`, after changing `skills/maestro-code-review/scripts/` or `skills/maestro-qa-lead/scripts/qa-prep.sh`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`.
+Installer: `bash scripts/install_test.sh` and `shellcheck scripts/*.sh skills/*/scripts/*.sh`. Run both after changing `scripts/` or the layout of `skills/`. Review and QA prep: `bash scripts/review_prep_test.sh` and `bash scripts/qa_prep_test.sh`, after changing `skills/maestro-code-review/scripts/` or `skills/maestro-qa-lead/scripts/qa-prep.sh`. Screens and design PRs: `bash scripts/screens_test.sh` and `bash scripts/design_pr_test.sh`, after changing `skills/maestro-qa-lead/scripts/` or `skills/maestro-designer/scripts/`. The QA setup reference: `bash scripts/qa_env_test.sh`, after changing `templates/qa_env.sh`.
 
 ## Changing shipped skills
 
