@@ -12,7 +12,12 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 env_sh=$here/templates/qa_env.sh
 tmp=$(mktemp -d)
 pids=()
-trap 'for p in "${pids[@]}"; do kill -KILL -- "-$p" 2>/dev/null || true; done; rm -rf "$tmp"' EXIT
+cleanup() {
+	local p
+	for p in "${pids[@]}"; do kill -KILL -- "-$p" 2>/dev/null || true; done
+	rm -rf "$tmp"
+}
+trap cleanup EXIT
 fail() { cat "$tmp/out" 2>/dev/null || true; echo "FAIL: $*" >&2; exit 1; }
 val() { sed -n "s/^$1=//p" "$tmp/out"; }
 q() { MAESTRO_RUN_ID=$1 bash "$2" "$3" "$4" >"$tmp/out" 2>&1; }
@@ -47,6 +52,7 @@ kill -0 "$b_pid" 2>/dev/null || fail "one run's down stopped another's app"
 q R-bbbbbbbb "$env_sh" down T-12 || fail "the second run's down exited $?"
 
 # An app that starts a child: down stops the child too.
+# shellcheck disable=SC2016 # "$1" is literal text in the template, not this shell's
 sed 's|exec python3 -m http.server "$1"|python3 -m http.server "$1"|' "$env_sh" >"$tmp/child.sh"
 q R-cccccccc "$tmp/child.sh" up T-7 || fail "up of an app with a child exited $?"
 c_pid=$(val pid)

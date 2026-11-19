@@ -39,6 +39,53 @@ func TestSetupEnvReadsNamesOnly(t *testing.T) {
 	}
 }
 
+// A bullet that isn't NAME: from NAME prints its line number, and its name
+// only when that looks like one: never a value written in, with or
+// without a colon, nor a token pasted in a name's place.
+func TestSetupEnvNeverPrintsAValue(t *testing.T) {
+	env := map[string]string{"SRC": "v"}
+	for _, l := range []string{
+		"GH_TOKEN=secret",
+		"GH_TOKEN secret",
+		"export GH_TOKEN=\"secret\"",
+		"secret",
+		"GH_TOKEN: secret",
+		"secret: oops",
+	} {
+		kv, skipped := setupEnv("## Env\n\n- "+l+"\n", func(k string) string { return env[k] })
+		if len(kv) != 0 || len(skipped) != 1 {
+			t.Fatalf("%q: kv %q skipped %q, want one skip", l, kv, skipped)
+		}
+		if strings.Contains(skipped[0], "secret") || !strings.HasPrefix(skipped[0], "line 3") {
+			t.Fatalf("%q: skip %q", l, skipped[0])
+		}
+	}
+	// A token in a name's place: a valid bullet, but its skip line
+	// prints "a name", never the token.
+	_, skipped := setupEnv("## Env\n- GH_TOKEN: from ghp_secretsecretsecret\n- ghp_secret: from SRC\n- ghp_secret: from SRC\n", func(k string) string { return env[k] })
+	if len(skipped) != 2 || strings.Contains(strings.Join(skipped, "\n"), "secret") {
+		t.Fatalf("a token as a name: %q", skipped)
+	}
+	_, skipped = setupEnv("## Env\n- GH_TOKEN: secret\n", func(string) string { return "" })
+	if want := "line 2 (GH_TOKEN): want"; len(skipped) != 1 || !strings.HasPrefix(skipped[0], want) {
+		t.Fatalf("a name before a colon: %q, want %q…", skipped, want)
+	}
+}
+
+// ## Env sets none of the names that change what a session runs, loads or
+// reads, nor maestro-ticket's own.
+func TestSetupEnvRefusesReservedNames(t *testing.T) {
+	setup := "## Env\n"
+	for _, n := range []string{"PATH", "HOME", "LD_PRELOAD", "LD_LIBRARY_PATH", "GIT_DIR", "GIT_SSH_COMMAND", "CLAUDE_CONFIG_DIR", "MAESTRO_RUN_ID", "path"} {
+		setup += "- " + n + ": from SRC\n"
+	}
+	setup += "- GH_TOKEN: from SRC\n"
+	kv, skipped := setupEnv(setup, func(string) string { return "v" })
+	if !slices.Equal(kv, []string{"GH_TOKEN=v"}) || len(skipped) != 9 {
+		t.Fatalf("kv %q, skipped %q", kv, skipped)
+	}
+}
+
 // A job's session gets ## Env's names from the launcher's environment, by
 // the supervisor's environment: never in the run's command, its prompt or
 // what the job prints.

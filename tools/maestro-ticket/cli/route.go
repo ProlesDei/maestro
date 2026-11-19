@@ -266,7 +266,7 @@ func goalDone(ctx context.Context, s ticket.Store, goal string) (bool, error) {
 }
 
 // textJobs reply with what the bot asked for: it reads the reply.
-var textJobs = map[string]bool{"plan": true, "rule": true, "finish": true, "judge": true, "cos": true, "qa-ask": true}
+var textJobs = map[string]bool{"plan": true, "rule": true, "finish": true, "judge": true, "cos": true, "qa-ask": true, "retro": true}
 
 // route sorts one ended job and says what comes next. Its writes to the
 // ticket are keyed, so a second pickup of the same run writes nothing new.

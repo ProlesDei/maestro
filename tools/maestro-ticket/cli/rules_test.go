@@ -689,3 +689,19 @@ func TestRetroJobCarriesRules(t *testing.T) {
 		t.Fatalf("retro with an id: exit %d %s", code, out)
 	}
 }
+
+// A done retro's proposals are what it ran for: pickup prints its whole
+// reply, as it does a cos run's.
+func TestRetroReplyReachesPickup(t *testing.T) {
+	h := newRouteHarness(t)
+	reply := "Window: Nov 12-19; 40 rule changes\n1. Rule 25: PROPOSAL-ONE\n2. Rule 32: PROPOSAL-TWO"
+	r := h.saveRun(runs.Record{Launcher: "chief-of-staff", Job: "retro", State: runs.Done, Reply: reply})
+	if rt := h.route(r); rt.Reply != reply {
+		t.Fatalf("retro route: %+v", rt)
+	}
+	h.env["MAESTRO_TICKET_ACTOR"] = "chief-of-staff"
+	code, out, errs := h.run("", "pickup")
+	if code != 0 || !strings.Contains(out, "reply:") || !strings.Contains(out, "PROPOSAL-ONE") || !strings.Contains(out, "PROPOSAL-TWO") {
+		t.Fatalf("pickup: exit %d\n%s%s", code, out, errs)
+	}
+}
