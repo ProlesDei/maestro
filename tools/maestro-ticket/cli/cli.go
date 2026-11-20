@@ -107,9 +107,11 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
+              (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
-  job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
+  job         <job> [<id>...] [--profile ALIAS] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
@@ -122,7 +124,7 @@ Commands:
               by you; its launcher or the planner)
   stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
-  notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
+  notify      [set] [<bot-id>] [--url-file F|- | --exec-file PATH | --code] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
@@ -235,6 +237,8 @@ var commands = []command{
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
+	{"profile", runProfile},
+	{"native-worker", runNativeWorker},
 	{"launch", runLaunch},
 	{"job", runJob},
 	{"resume", runResume},

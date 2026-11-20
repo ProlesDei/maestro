@@ -459,6 +459,8 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	switch {
 	case r.State == runs.Died:
 		end.Outcome = ticket.LaunchDied
+	case r.Harness == "codex" && r.SessionID != "" && !r.IsError && r.State == runs.Done:
+		end.Session = r.SessionID
 	case replyErr != nil:
 		end.Outcome = ticket.LaunchNoResult
 	}
@@ -574,7 +576,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 				return
 			}
 			h, err := runs.Webhook(notify, owner)
-			if err != nil || h.URL == "" {
+			if err != nil || !h.CanRing() {
 				msg := ""
 				if err != nil {
 					msg = err.Error()
@@ -1219,6 +1221,8 @@ func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 // runNotify sets, clears, tests or shows the webhook launch rings when a
 // bot's run ends. It never prints the URL, which often holds a secret.
 func runNotify(ctx context.Context, c *call) error {
+	code := c.fs.Bool("code", false, "serve the role in the supervisor")
+	execFile := c.fs.String("exec-file", "", "absolute path to the fixed wake executable")
 	urlFile := c.fs.String("url-file", "", "read the webhook URL from this file, or - for stdin")
 	keyFile := c.fs.String("key-file", "", "read the key the webhook wants as Authorization: Bearer from this file, or - for stdin")
 	clr := c.fs.Bool("clear", false, "remove the bot's webhook")
@@ -1230,8 +1234,14 @@ func runNotify(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	if len(c.args) == 2 && c.args[0] == "set" {
+		c.args = c.args[1:]
+	}
+	if (*code || *execFile != "") && (*urlFile != "" || *keyFile != "" || *clr || (*code && *execFile != "") || (*code && *test)) {
+		return usagef("notify: choose one server; --test requires an external wake")
+	}
 	if len(c.args) == 0 {
-		if *urlFile != "" || *keyFile != "" || *clr || *test {
+		if *urlFile != "" || *keyFile != "" || *clr || *test || *code || *execFile != "" {
 			return usagef("notify: name the bot")
 		}
 		bots, err := runs.Webhooks(dir)
@@ -1262,6 +1272,11 @@ func runNotify(ctx context.Context, c *call) error {
 		return usagef("notify: use --url-file and --key-file, or --clear, not both")
 	case *urlFile == "-" && *keyFile == "-":
 		return usagef("notify: only one of --url-file and --key-file can read stdin")
+	}
+	if *code || *execFile != "" {
+		if err := runs.SetLocalServer(dir, bot, *execFile); err != nil {
+			return usagef("notify: %v", err)
+		}
 	}
 	if *urlFile != "" {
 		u, err := c.readBody("", *urlFile)
@@ -1303,7 +1318,7 @@ func runNotify(ctx context.Context, c *call) error {
 	}
 	u := h.URL
 	if *test {
-		if u == "" {
+		if !h.CanRing() {
 			return fmt.Errorf("%w: notify: %s has no webhook", ticket.ErrNotFound, bot)
 		}
 		// Straight to the webhook: a test ring skips the bot's gate.
@@ -1313,6 +1328,12 @@ func runNotify(ctx context.Context, c *call) error {
 		}
 	}
 	res := map[string]any{"bot": bot, "webhook": u != "", "key": h.Key != "", "rang": *test}
+	if h.Code {
+		res["server"] = "code"
+	}
+	if h.Exec != "" {
+		res["server"] = "exec"
+	}
 	if u != "" {
 		res["host"] = runs.Host(u)
 	}
@@ -1322,6 +1343,10 @@ func runNotify(ctx context.Context, c *call) error {
 			key = " with its key"
 		}
 		switch {
+		case h.Code:
+			fmt.Fprintf(w, "%s: served by code\n", bot)
+		case h.Exec != "":
+			fmt.Fprintf(w, "%s: fixed wake command configured\n", bot)
 		case u == "":
 			fmt.Fprintf(w, "%s: no webhook; it learns a run ended only when it runs maestro-ticket pickup\n", bot)
 		case *test:

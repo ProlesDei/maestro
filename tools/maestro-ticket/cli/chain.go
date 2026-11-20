@@ -107,17 +107,17 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// A freed slot or a merge woke the planner only to look: the end
 		// looks itself, and wakes it only for what that look leaves
 		// (owner's ruling, Nov 17 2026).
-		if !unsure && slices.ContainsFunc(left, refillLine) && hasHook(notify, "planner") && c.refill(ctx, dir) {
+		if !unsure && slices.ContainsFunc(left, refillLine) && served(notify, "planner") && c.refill(ctx, dir) {
 			left = slices.DeleteFunc(left, refillLine)
 		}
 		rt.Send = left
 		// A launcher with no webhook, such as a person, reads its pickup:
 		// leave it what it would have seen.
-		bot := hasHook(notify, r.Launcher)
+		bot := served(notify, r.Launcher)
 		rest := leftForBot(rt)
 		done = bot && !unsure && len(left) == 0 && !rest && ackable(before)
 		toPlanner = bot && !unsure && len(left) > 0 && !rest && r.Launcher != "planner" &&
-			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && hasHook(notify, "planner")
+			!slices.ContainsFunc(left, func(sd send) bool { return sd.Bot != "planner" }) && served(notify, "planner")
 	}
 	// One save, after every start: no reader sees the route before the
 	// handoffs it names have started.
@@ -176,7 +176,7 @@ var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --
 // a pause, leaves the line for the launcher.
 func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) (on, gone bool) {
 	m := doGrammar.FindStringSubmatch(line)
-	if m == nil || !hasHook(notify, r.Launcher) {
+	if m == nil || !served(notify, r.Launcher) {
 		return false, false
 	}
 	cc := *c // the route's list of past runs serves its resume too
@@ -244,7 +244,7 @@ func (c *call) refileFollowUps(ctx context.Context, s ticket.Store, r runs.Recor
 // with no webhook, which would never hear how its run ended.
 func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd send) bool {
 	k, id, ok := nextStep(r, sd)
-	if !ok || !hasHook(notify, sd.Bot) {
+	if !ok || !served(notify, sd.Bot) {
 		return false
 	}
 	_, err := c.startAs(ctx, dir, sd.Bot, jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1})
@@ -287,10 +287,10 @@ func nextStep(r runs.Record, sd send) (jobKind, string, bool) {
 	return k, m[2], ok
 }
 
-// hasHook reports whether bot has a webhook to ring.
-func hasHook(notify, bot string) bool {
+// served reports whether the role has a configured server.
+func served(notify, bot string) bool {
 	h, err := runs.Webhook(notify, bot)
-	return err == nil && h.URL != ""
+	return err == nil && h.Served()
 }
 
 // lastSlots is the slot count bot passed on its newest run in slot name,

@@ -470,7 +470,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 		after(err)
 		return
 	}
-	if h.URL == "" {
+	if !h.CanRing() {
 		return
 	}
 	gateDir := cmp.Or(o.Gate, dir)

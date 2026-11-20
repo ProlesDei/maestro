@@ -70,6 +70,9 @@ func withStopHook(cmd []string, hooked bool, exe, store string) []string {
 
 // stopHook is withStopHook for a run of job on this call's store.
 func (c *call) stopHook(cmd []string, job string) ([]string, error) {
+	if isNativeCommand(cmd) {
+		return cmd, nil
+	}
 	k, ok := findJob(job)
 	if !ok {
 		return cmd, nil // a plain launch's command is the launcher's own

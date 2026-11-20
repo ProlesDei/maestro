@@ -93,9 +93,11 @@ func lockBoard(dir string) (unlock func(), err error) {
 }
 
 // writeWhole replaces p with b through a temporary file in its folder.
-func writeWhole(p string, b []byte) error {
+func writeWhole(p string, b []byte) error { return writeWholeMode(p, b, 0644) }
+
+func writeWholeMode(p string, b []byte, mode os.FileMode) error {
 	tmp := p + ".tmp" + newSessionID()[:8]
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}

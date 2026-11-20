@@ -279,7 +279,7 @@ func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 	left := []send{}
 	for _, sd := range out.Send {
 		k, id, ok := nextStep(runs.Record{}, sd)
-		if !ok || !hasHook(notify, sd.Bot) {
+		if !ok || !served(notify, sd.Bot) {
 			left = append(left, sd)
 			continue
 		}

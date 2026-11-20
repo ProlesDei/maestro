@@ -210,6 +210,7 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 
 // jobReq is one job to start, as runJob parses it or look builds it.
 type jobReq struct {
+	profile       string
 	kind          jobKind
 	ids           []string // ticket ids, as T-<n>
 	ticket        string   // a text job's ticket
@@ -229,6 +230,7 @@ type jobReq struct {
 // picks the model, effort and time limit, gives the run a session id,
 // and launches it as launch does. A bot spends one step on it.
 func runJob(ctx context.Context, c *call) error {
+	profile := c.fs.String("profile", "", "registered native subscription profile")
 	model := c.fs.String("model", "", "override the job's model (opus or sonnet as a rule)")
 	effort := c.fs.String("effort", "", "override the effort (default high)")
 	limit := c.fs.Duration("limit", 0, "override the time limit (default 2h; a review's is sized to its diff)")
@@ -254,7 +256,7 @@ func runJob(ctx context.Context, c *call) error {
 	if !ok {
 		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
 	}
-	req := jobReq{kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit, slots: *slots}
+	req := jobReq{profile: *profile, kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit, slots: *slots}
 	if *slots != 0 && k.slot == "" {
 		return usagef("job %s: --slots is for qa, live and qa-ask", k.name)
 	}
@@ -432,7 +434,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			prompt += "\nStanding rules:\n" + rules
 		}
 	}
-	if req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
+	if req.profile == "" && req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
 		// What was picked for this ticket, its tier's model or a review's
 		// model and size, stands: a carried flag replaces only a fixed
 		// default.
@@ -472,17 +474,32 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if runLimit < time.Second || runLimit > 24*time.Hour {
 		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
-	cmd, err := c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
-	if err != nil {
-		return fail(err)
+	var cmd []string
+	var harness string
+	if req.profile != "" {
+		p, binding, err := c.jobProfile(req.profile, k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if req.model != "" && req.model != binding.Model || req.effort != "" && req.effort != binding.Effort {
+			return fail(usagef("job: model or effort differs from the profile binding"))
+		}
+		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "bound subscription profile"
+		cmd, err = c.nativeCommand(req.profile, k.name, binding, harness)
+		if err != nil {
+			return fail(err)
+		}
+	} else {
+		var err error
+		cmd, err = c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if k.slot != "" {
+			cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
+		}
 	}
-	if k.slot != "" {
-		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
-	}
-	rec := runs.Record{
-		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
-		Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides,
-	}
+	rec := runs.Record{Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
 	if k.ids {
 		rec.Tickets = ids
 	}
@@ -975,7 +992,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		switch {
 		case cmd[i] == "--session-id":
 			cmd[i+1] = newSessionID()
-		case cmd[i] == "--model" && (o.full || flagValue(r.Command, "--model") == modelOpus):
+		case r.Profile == "" && cmd[i] == "--model" && (o.full || flagValue(r.Command, "--model") == modelOpus):
 			cmd[i+1] = modelOpus // a session moved to Opus stays there
 		}
 	}
@@ -990,7 +1007,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
-		AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+		Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
 	// Once: of agains at once one makes the mark; a later one finds it
 	// naming the run it made. A start that fails takes it back.
 	co, err := c.coord()
@@ -1204,7 +1221,7 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
+		Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
 		if errors.Is(err, ticket.ErrStatusConflict) {
@@ -1254,7 +1271,7 @@ func thisSlotBinary(cmd []string) []string {
 		return cmd
 	}
 	for i := 0; i+1 < len(cmd); i++ {
-		if cmd[i+1] == "slot" && filepath.Base(cmd[i]) == filepath.Base(exe) {
+		if (cmd[i+1] == "slot" || cmd[i+1] == "native-worker") && filepath.Base(cmd[i]) == filepath.Base(exe) {
 			cmd[i] = exe
 		}
 	}

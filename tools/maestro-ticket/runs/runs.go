@@ -68,6 +68,8 @@ const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
+	Profile  string   `json:"profile,omitempty"`
+	Harness  string   `json:"harness,omitempty"`
 	ID       string   `json:"id"`
 	Launcher string   `json:"launcher"`
 	Ticket   string   `json:"ticket,omitempty"`
