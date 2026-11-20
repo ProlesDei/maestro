@@ -23,6 +23,16 @@ unset CDPATH
 # shellcheck disable=SC2046 # one variable name per word
 unset $(git rev-parse --local-env-vars)
 
+if [ "${1-}" = --chief ]; then
+	[ $# -eq 2 ] || die "--chief needs a new private directory"
+	root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+	umask 077
+	mkdir -- "$2" || die "choose a new directory in the chief account"
+	cp -- "$root/bot-profiles/chief-of-staff/t3.md" "$2/AGENTS.md"
+	cp -- "$2/AGENTS.md" "$2/CLAUDE.md"
+	exit 0
+fi
+
 [ $# -eq 1 ] || { echo "usage: scripts/bot-bundle.sh <repo>" >&2; exit 2; }
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 profiles=$root/bot-profiles

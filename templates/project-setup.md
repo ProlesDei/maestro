@@ -13,6 +13,10 @@ Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro
 - Name: <name>
 - Summary: <one or two sentences on what it does and who uses it>
 
+## Runtime
+
+Grok webhook by default. For T3, record the board ID, served roles and eligible profile aliases here. Keep connection files and account credentials in the OS accounts that use them.
+
 ## Main branch
 
 main

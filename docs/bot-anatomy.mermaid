@@ -1,42 +1,12 @@
-flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only its ring, look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
-
-    subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
-        direction LR
-        P1["<b>persona.md</b><br/>Who the bot is,<br/>what it runs"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"]
-    end
-
-    subgraph Installed ["Their repo after INSTALL.md"]
-        direction LR
-        S1["<b>19 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
-    end
-
-    H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]
-
-    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
-
-    subgraph Roles ["One Grok Bot, seven profiles: what each role does"]
-        direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"] ~~~ E7["<b>Designer</b><br/>/maestro-designer ·<br/>screens the owner approves"]
-    end
-
-    Runtime -->|"loads the profile for the role it plays"| Profile
-    Runtime ==>|"maestro-ticket job in their repo"| H
-    Installed --> H
-    H -.->|"ring and pickup: what to send, read by Grok Bot"| Runtime
-    Guard -.-> H
-    H ~~~ Roles
-
-    classDef runtime fill:#f5f5f5,stroke:#555,color:#1a1a1a
-    classDef profile fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
-    classDef harness fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
-    classDef ours fill:#c8e6c9,stroke:#2e7d32,color:#1a1a1a
-    classDef role fill:#ffffff,stroke:#6a4c9c,color:#1a1a1a
-    classDef note fill:#ffe0b2,stroke:#e65100,color:#1a1a1a
-
-    class Runtime runtime
-    class P1,P2 profile
-    class H harness
-    class S1,S2,S3 ours
-    class E1,E2,E3,E6,E4,E5,E7 role
-    class Guard note
+flowchart LR
+    Owner([Owner]) <--> Chief["T3 chief session"]
+    Chief <--> Private[("Private chief memory")]
+    Chief -->|"cos verb and published delivery ID"| Door["Fixed commands across OS users"]
+    Door --> Relay["Worker code relay"]
+    Relay -.->|"wake without worker text"| Door
+    Door -.->|"ring: run pickup"| Chief
+    Relay <--> Board[("Board, usage and receipts")]
+    Relay -->|"job with verified profile"| Harness["Claude Code or Codex"]
+    Repo["Team repo · role skills and project setup"] --> Harness
+    Harness -->|"commit, verdict and evidence"| Board
+    Hook["Grok webhook server"] -->|"job in its own installation"| Harness

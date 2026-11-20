@@ -1,80 +1,30 @@
 flowchart TD
-    User([User])
-
-    subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
-        CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>maestro-ticket look · job plan<br/>Product owner and project manager<br/>Turns goals into tickets, tagged by tier<br/>Hands out builds; a judge session settles blocks"]
-        Sr["<b>Senior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Opus, high effort<br/>Senior-tier tickets, a junior's sent back twice"]
-        Jr["<b>Junior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Sonnet, high effort<br/>Junior-tier tickets"]
-        Rev["<b>Reviewer</b><br/>job review &lt;id&gt; · /maestro-code-review<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
-        QA["<b>QA Lead</b><br/>job qa &lt;id&gt; · /maestro-qa-lead<br/>Last check before production<br/>Tests the reviewed head in the running app"]
-        Des["<b>Designer</b><br/>job design &lt;id&gt; · /maestro-designer<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
+    Owner([Owner])
+    subgraph Chief["Chief account"]
+        C["Chief of staff · Astra or Opus"]
+        Memory[("Private drafts, decisions and accepted briefs")]
+        C <--> Memory
     end
-
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
-
-    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · build · project checks ·<br/>a real run per criterion · open PR · ticket to in_review"]
-
-    Done([Merged · ticket done])
-
-    %% User and Chief of Staff
-    User <-->|"goals, decisions, approvals"| CoS
-
-    %% The Chief of Staff leads through the Planner
-    CoS -->|"goals, answers"| Planner
-    Planner -.->|"board status, blocks it can't settle"| CoS
-
-    %% The Planner hands out builds, and what stalled
-    Planner -->|"senior-tier ticket:<br/>look starts its build"| Sr
-    Planner -->|"junior-tier ticket:<br/>look starts its build"| Jr
-    Planner -->|"a stalled review"| Rev
-    Planner -->|"a stalled test,<br/>a goal's live run"| QA
-    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
-    Des -.->|"draft PR: pickup sends<br/>the owner's card up"| CoS
-    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
-
-    %% Planning
-    Planner -->|"writes tickets"| Tickets
-    Tickets -->|"todo"| Sr
-    Tickets -->|"routine todo"| Jr
-
-    %% Build
-    Sr --> Build
-    Jr --> Build
-    Build -.->|"a question it can't settle"| Sr
-    Build -.->|"a question it can't settle"| Jr
-    Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle"| Planner
-    QA -.->|"a block, a goal done"| Planner
-    Rev -.->|"a block to settle"| Planner
-    Planner -.->|"judge: Answer note, unblock"| Tickets
-
-    %% Review, then test
-    Build -->|"in_review: its end starts the review,<br/>and the next build in its slot"| Rev
-    Rev -->|"GO: its end starts QA"| QA
-    QA -->|"pass: gh pr merge, ticket done"| Done
-    Planner -.->|"PR merged outside QA: ticket done"| Done
-    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
-    Rev -.->|"NO-GO"| Jr
-    QA -.->|"fail: Kickback note,<br/>back to in_progress: +1 try"| Sr
-    QA -.->|"fail"| Jr
-
-    %% Legend
-    subgraph Legend ["Legend"]
-        direction LR
-        L6["Role Grok Bot plays"] ~~~ L1["Claude Code session"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+    subgraph Worker["Worker account"]
+        P["Planner · plan and judge sessions"]
+        Router["Code relay · recover and look"]
+        D["Designer"]
+        J["Junior engineer"]
+        S["Senior engineer"]
+        R["Reviewer · fresh Claude or Codex session"]
+        Q["QA lead"]
+        Board[("Tickets, handoffs and receipts")]
+        Router <--> Board
+        P --> Board
+        Router --> D & J & S
+        J & S -->|"branch and criteria revision"| R
+        R -->|"GO at current head"| Q
+        R & Q -.->|"kickback"| Router
+        Q -->|"verified merge"| Board
+        Router -->|"delivery dispute"| P
     end
-
-    %% Styles
-    classDef session fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
-    classDef storage fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
-    classDef person fill:#f5f5f5,stroke:#555,color:#1a1a1a
-    classDef bot fill:#fff3c4,stroke:#b38f00,color:#1a1a1a
-    classDef note fill:#ffffff,stroke:#999,color:#1a1a1a,stroke-dasharray:3 3
-
-    class Build,L1 session
-    class Tickets,L4 storage
-    class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
-    class L5 note
-    style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
+    Owner <--> C
+    C -->|"accepted brief or ruling"| P
+    Router -.->|"fixed wake for pending goal items"| C
+    D -->|"design for owner approval"| Board
+    Grok["Grok Bot · webhook runtime"] --> Old[("Separate Grok board")]

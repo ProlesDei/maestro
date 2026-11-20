@@ -4,7 +4,7 @@ Maestro ships 19 skills. Each has the `maestro-` prefix, so none clashes with a 
 
 | Group | Skills |
 |---|---|
-| Ticket to merge | `maestro-create-ticket` (one ticket), `maestro-code-review` (pass to QA, or kick back) |
+| Ticket to merge | `maestro-create-ticket` (one ticket), `maestro-code-review` (record a verdict against the reviewed head and criteria) |
 | Roles | `maestro-planner`, `maestro-qa-lead` (the last check: merge and close, or kick back), `maestro-chief-of-staff`, `maestro-designer` (a goal's screens, for the owner's yes) |
 | Working tools | `maestro-figure-it-out`, `maestro-swarm`, `maestro-sharpen`, `maestro-recall`, `maestro-unslop`, `maestro-prune`, `maestro-refactor-code`, `maestro-technical-writing`, `maestro-create-edit-skill` |
 | How to build | `maestro-working-principles`, `maestro-software-engineer`, `maestro-prove-complete`, `maestro-tdd` (only when a person asks for tests) |

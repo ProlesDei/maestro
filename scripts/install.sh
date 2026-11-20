@@ -80,6 +80,40 @@ usage() { echo "usage: scripts/install.sh apply [--replace <skill>]... <repo> | 
 
 cmd=${1-}
 [ $# -gt 0 ] && shift
+# Print exact arguments for the root-owned door. The owner applies them with visudo.
+if [ "$cmd" = runtime-sudoers ]; then
+	[ $# -eq 0 ] || usage
+	door=/usr/local/libexec/maestro-door
+	echo "maestro ALL=(maestro-cos) NOPASSWD: NOSETENV: $door wake, $door wake store-down"
+	printf 'maestro-cos ALL=(maestro) NOPASSWD: NOSETENV: '
+	sep=
+	for verb in plan rule ask rules stop start pickup ack look goals eta; do
+		printf '%s%s cos %s' "$sep" "$door" "$verb"
+		sep=', '
+	done
+	printf '\n'
+	exit 0
+fi
+if [ "$cmd" = runtime-service ]; then
+	[ $# -eq 0 ] || usage
+	cat <<'UNIT'
+[Unit]
+Description=Recover this Maestro worker board on startup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=maestro
+ExecStart=/usr/local/libexec/maestro-door startup
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+	exit 0
+fi
 replace=()
 while [ "$cmd" = apply ] && [ "${1-}" = --replace ]; do
 	[ $# -ge 2 ] || usage
