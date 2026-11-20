@@ -1,6 +1,6 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v7, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). The proposed runtime is still unbuilt. The team works on this spec from here.
+**Status:** draft v8, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
@@ -106,6 +106,7 @@ flowchart TD
 | `review <id> --approved <sha> --drop …` from a judge | Starts that review |
 | `do: resume <run> --died`, `--go-on`, `job again <run>` | Runs it, as now **[code]** `tools/maestro-ticket/cli/chain.go:169` |
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Map the existing `--opus` line to a senior escalation under section 8. Keep the other fixed shapes; the grammar still allows no rules write. |
+| Ticket revision request (4.2) | Hold affected work and send the evidence to the planner once. |
 | `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route a concrete defect to its engineer. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
 | `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Planner owns triage and groups related causes. Send goal outcomes, material deviations and unresolved product or owner decisions to the goal inbox (5.2). |
@@ -185,6 +186,32 @@ sequenceDiagram
 ```
 
 A send-back from review or QA goes straight back to the engineer. The planner handles delivery blocks. The goal’s chief receives material deviations and unresolved product choices.
+
+### 4.1 When an accepted brief changes
+
+Record the goal, the brief revision the planner last checked, and the ticket’s own acceptance criteria (AC) revision on each ticket. Publishing a brief makes its new revision visible to the merge gate before the planner finishes assessing affected tickets. Use one Atlas transaction for the private acceptance and a board-visible goal revision marker; allow the chief service to write that marker only through the publish operation. The full planner handoff still uses the delivery receipt in 5.4.
+
+The planner compares the accepted revisions and records a disposition per open ticket. Work may continue during assessment. QA waits to merge a ticket until its disposition covers the current brief.
+
+| Disposition | Planner action |
+|---|---|
+| Still fits | Advance the checked brief revision. Carry applicable evidence and continue. |
+| Criteria changed | Publish the revised ticket criteria. Identify affected code paths and evidence that needs fresh review or QA. |
+| Deferred or replaced | Pause affected work, preserve its branch and commits, release the slot, and update dependencies. |
+
+Other goals keep moving. Within the changed goal, a cleared ticket can merge while the planner assesses the rest. For example, dropping Excel from a Friday release can leave CSV ready for QA, park the Excel branch, and narrow an unstarted export-menu ticket.
+
+### 4.2 Engineer requests a ticket revision
+
+When reading the code reveals a material ambiguity, contradiction, missing dependency or infeasible criterion, the engineer can request a revision before review. A technical choice that preserves agreed behavior stays with the engineer. The normal build path adds no planner turn.
+
+1. Identify the ticket, brief and AC revisions, affected criterion, concrete evidence, proposed wording or split, and decision needed. Save the branch and commit or worktree checkpoint. Give the request a stable ID.
+2. Record the request and hold the ticket before releasing its claim and worker slot. Hold dependent work only where it needs the disputed point. Replays reuse the request. Count this as a clarification, separate from failed builds, retries and review or QA kickbacks.
+3. The planner returns revised criteria, a split or dependency, a reason the existing criterion settles the issue, or a product escalation with options and impact. Only a change beyond the accepted brief goes to the goal’s chief. The chief uses delegated authority or asks the owner.
+4. Apply the response against the current request and revisions. Reconcile a stale response before reopening work. A ticket-only clarification increments the AC revision when the text changes. Resume from the saved work once its dependencies allow.
+5. Bind the engineer handoff, review verdict and QA evidence to both the PR head and AC revision. Before merge, verify that the ticket is cleared for the latest brief and that review and QA cover the current criteria. Serialize merge authorization with revision publication; if a merge is already in flight, reconcile its actual result before treating a conflicting change as effective. Record exactly which evidence carries forward and which needs another run.
+
+**S3 acceptance.** Change a brief while CSV is in QA and Excel is in development. Confirm that cleared CSV can merge, Excel retains its saved work, and neither can merge under withdrawn criteria. Then have an engineer find conflicting access rules before review. A brief that settles the rule yields one planner answer and zero chief wakes. An unresolved product choice yields one goal escalation. Replay the request, change the AC at the same commit, and verify that stale proof cannot authorize a merge. Run a ticket with clear criteria through the ordinary path and count zero clarification turns.
 
 ## 5. The chief of staff
 
@@ -357,6 +384,7 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 | `bot-profiles/chief-of-staff/persona.md` | feature specs, outcome reviews, scoped delegation and goal-aware handoffs |
 | `bot-profiles/planner/persona.md` | becomes the spec the code relay follows, and the Grok persona if a team keeps one |
 | `bot-profiles/team-rules.md`, `routine.md` | Grok bots only; the thread gets its own short rules |
+| Engineer, review and QA skills | record and resolve revision requests; bind evidence and merge authority to current criteria (4.2) |
 | `skills/maestro-chief-of-staff`, `skills/maestro-planner` | give the chief feature specs and delegated product decisions; give the planner board triage, delivery reporting, recovery and ticket investigations |
 | `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | configure runtime, profiles, role models, effort and reserves; print the sudoers lines; build both private instruction bundles |
 | `templates/project-setup.md` | a `## Runtime` section |
@@ -385,7 +413,7 @@ flowchart LR
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
 | S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
-| S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the S3 acceptance cases in 5.4; an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
+| S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the brief-change and AC revision trials (4.1–4.2) and the memory trials (5.4); an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
 | S6 | The rewrite (section 9) | review |
