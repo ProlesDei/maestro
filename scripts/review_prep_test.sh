@@ -48,6 +48,7 @@ jq -r "$q" "$f"
 EOF
 cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = branch ]; then echo "${BOARD_PREFIX:-maestro/}${2-}"; exit 0; fi
 [ "$1 $3" = "get --json" ] || exit 9
 [ -z "${MT_FAIL-}" ] || exit 1
 cat "$FX/ticket-$2.json"
@@ -96,7 +97,16 @@ echo '[{"number": 7}]' >"$FX/pulls-maestro_T-7.json"
 pr 7 maestro/T-7 "$H" false README.md src/a.go
 comments T-7 "Handoff: PR 7 at $H"
 
-# --route reads the file list only.
+# Two boards have T-7 in one repo. Each must resolve its own PR.
+pr 70 maestro/abc123/T-7 "$H" false README.md
+echo '[{"number":70}]' >"$FX/pulls-maestro_abc123_T-7.json"
+BOARD_PREFIX=maestro/abc123/ bash "$prep" --route T-7 >"$tmp/out" || fail "scoped PR lookup"
+has pr=70
+if BOARD_PREFIX=maestro/abc123/ bash "$prep" 7 >"$tmp/out" 2>&1; then fail "accepted another board's PR"; fi
+
+if BOARD_PREFIX=maestro/abc123/ bash "$prep" --route 7 >"$tmp/out" 2>&1; then fail "routed another board's PR"; fi
+
+# --route reads the changed paths and board branch in one call.
 pr 8 docs-only "$H" false README.md docs/guide.md docs/rules-old/x.md docs/sub/a.rst .gitignore LICENSE .mailmap DELETED:docs/old.md
 bash "$prep" --route 8 >"$tmp/out" || fail "route light exited $?"
 has route=light

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 )
@@ -71,6 +73,19 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	cmd := profileCommand(ctx, p.Harness, p.ConfigDir, args...)
 	cmd.Dir = c.env.Dir
 	cmd.Stdin = c.env.Stdin
+	if p.Harness == "codex" && *resume == "" {
+		reader := bufio.NewReader(c.env.Stdin)
+		k, _ := findJob(*job)
+		if prefix, _ := reader.Peek(len(k.skill)); string(prefix) == k.skill {
+			reader.Discard(1)
+			cmd.Stdin = io.MultiReader(strings.NewReader("$"), reader)
+		}
+	}
+	if len(st.Windows) != 0 {
+		if err := c.copyNativeUsage(st); err != nil {
+			return err
+		}
+	}
 	// Preserve the supervisor identity and the board chosen by the launcher.
 	store, _, err := c.storePath()
 	if err != nil {

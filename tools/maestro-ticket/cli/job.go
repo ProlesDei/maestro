@@ -210,6 +210,7 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 
 // jobReq is one job to start, as runJob parses it or look builds it.
 type jobReq struct {
+	checkpoint    string
 	profile       string
 	kind          jobKind
 	ids           []string // ticket ids, as T-<n>
@@ -421,6 +422,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 	}
 	prompt := strings.Join(words, " ")
+	if req.checkpoint != "" {
+		prompt += "\nContinue the unfinished build from run " + req.checkpoint + " in its saved worktree. Inspect its ticket, worktree and run result before editing. Preserve pending changes."
+	}
 	switch {
 	case k.name == "rule":
 		prompt += ": " + req.text
@@ -434,7 +438,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			prompt += "\nStanding rules:\n" + rules
 		}
 	}
-	if req.profile == "" && req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
+	loc, err := c.location()
+	if err != nil {
+		return fail(err)
+	}
+	if loc.boardID == "" && req.profile == "" && req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
 		// What was picked for this ticket, its tier's model or a review's
 		// model and size, stands: a carried flag replaces only a fixed
 		// default.
@@ -523,6 +531,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if err != nil {
 		abort()
 		return fail(err)
+	}
+	if r.Profile != "" {
+		m, why = flagValue(r.Command, "--model"), "subscription "+r.Profile
 	}
 	return r, m, why, nil
 }

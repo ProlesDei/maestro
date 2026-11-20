@@ -141,6 +141,8 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  branch      [T-n]   (branch name or prefix for this board)
+  store       init --uri-file F|-   (initialize or verify an independent MongoDB board)
   store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
               the URI connects, or removes it; prints the store, with only the URI's host)
   migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
@@ -237,6 +239,7 @@ var commands = []command{
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
+	{"branch", runBranch},
 	{"profile", runProfile},
 	{"native-worker", runNativeWorker},
 	{"launch", runLaunch},

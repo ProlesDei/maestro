@@ -68,6 +68,7 @@ const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
+	Estimate float64  `json:"estimate_percent,omitempty"`
 	Profile  string   `json:"profile,omitempty"`
 	Harness  string   `json:"harness,omitempty"`
 	ID       string   `json:"id"`

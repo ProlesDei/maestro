@@ -343,7 +343,16 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			if apiDown(r) {
 				why = "API outage"
 			}
-			if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
+			if r.Profile != "" {
+				if err := c.holdSubscription(r, until, apiDown(r)); err != nil {
+					return out, err
+				}
+				scope := r.Profile
+				if apiDown(r) {
+					scope = r.Harness
+				}
+				out.Wrote = append(out.Wrote, "paused "+scope+" until "+until.Format(time.RFC3339))
+			} else if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}

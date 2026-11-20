@@ -258,6 +258,13 @@ func runMigrate(ctx context.Context, c *call) error {
 	if err := c.parse(); err != nil {
 		return err
 	}
+	loc, locErr := c.location()
+	if locErr != nil {
+		return locErr
+	}
+	if loc.boardID != "" {
+		return usagef("migrate: this runtime board has an independent identity; recover it in place")
+	}
 	if err := c.noArgs(); err != nil {
 		return err
 	}

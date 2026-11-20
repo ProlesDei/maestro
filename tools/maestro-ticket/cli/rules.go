@@ -259,6 +259,13 @@ func (c *call) standingRules() (string, bool) {
 // --limit, from its old block, seeds board.json until rules set limit
 // takes over; anyone else's is a one-off that writes nothing.
 func (c *call) lookLimit(flag int) (int, []string, error) {
+	loc, err := c.location()
+	if err != nil {
+		return 0, nil, err
+	}
+	if loc.boardID != "" {
+		return -1, nil, nil
+	}
 	dir, err := c.standingDir()
 	if err != nil {
 		return 0, nil, err

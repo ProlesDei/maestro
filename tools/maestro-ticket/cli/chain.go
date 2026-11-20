@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -69,7 +70,7 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 	now := time.Now().UTC().Round(time.Millisecond)
 	var chained []string
 	done, toPlanner := false, false
-	if chainJobs[r.Job] {
+	if chainJobs[r.Job] || codeRole(notify, r.Launcher) {
 		before := rt
 		// First, so a retry runs before anything counts its slot free.
 		keep := []string{}
@@ -168,6 +169,8 @@ func ackable(rt routed) bool {
 // outside a run may.
 var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on)|job again (R-[a-z2-7]{8})(?: --limit ([0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
 
+var runtimeDo = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on|opus|escalate|decide)|job again (R-[a-z2-7]{8})(?: (--full|--limit [0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
+
 // runDo runs one do: line of r's route as r's launcher would, and reports
 // whether the work goes on: started now, or by another start of the same
 // line; and whether the line is gone for good, its ticket moved on. It
@@ -175,7 +178,11 @@ var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --
 // its pickup, and none that names another run. Any other refusal, such as
 // a pause, leaves the line for the launcher.
 func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) (on, gone bool) {
-	m := doGrammar.FindStringSubmatch(line)
+	grammar := doGrammar
+	if codeRole(notify, r.Launcher) {
+		grammar = runtimeDo
+	}
+	m := grammar.FindStringSubmatch(line)
 	if m == nil || !served(notify, r.Launcher) {
 		return false, false
 	}
@@ -187,18 +194,30 @@ func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, lin
 		if m[1] != r.ID {
 			return false, false
 		}
-		_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on"})
+		if m[2] == "opus" && r.Profile != "" {
+			if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(notify, "senior-engineer") {
+				return false, false
+			}
+			if info, e := os.Stat(r.Dir); e != nil || !info.IsDir() {
+				return false, false
+			}
+			k, _ := findJob("build")
+			cc.env.Dir = r.Dir
+			_, err = cc.startAs(ctx, dir, "senior-engineer", jobReq{kind: k, ids: []string{r.Ticket}, chainOf: r.ID, hops: r.Hops + 1, checkpoint: r.ID})
+		} else {
+			_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on", opus: m[2] == "opus", escalate: m[2] == "escalate", decide: m[2] == "decide"})
+		}
 	default:
 		if m[3] != r.ID {
 			return false, false
 		}
 		var lim time.Duration
-		if m[4] != "" {
-			if lim, err = time.ParseDuration(m[4]); err != nil {
+		if m[4] != "" && m[4] != "--full" {
+			if lim, err = time.ParseDuration(strings.TrimPrefix(m[4], "--limit ")); err != nil {
 				return false, false
 			}
 		}
-		_, err = cc.again(ctx, againOpts{run: m[3], limit: lim})
+		_, err = cc.again(ctx, againOpts{run: m[3], limit: lim, full: m[4] == "--full"})
 	}
 	var a alreadyGoing
 	if errors.As(err, &a) {
@@ -243,11 +262,12 @@ func (c *call) refileFollowUps(ctx context.Context, s ticket.Store, r runs.Recor
 // that job now runs: started, or already going. It starts none for a bot
 // with no webhook, which would never hear how its run ended.
 func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd send) bool {
-	k, id, ok := nextStep(r, sd)
+	req, ok := stepRequest(notify, r, sd)
 	if !ok || !served(notify, sd.Bot) {
 		return false
 	}
-	_, err := c.startAs(ctx, dir, sd.Bot, jobReq{kind: k, ids: []string{id}, chainOf: r.ID, hops: r.Hops + 1})
+	req.chainOf, req.hops = r.ID, r.Hops+1
+	_, err := c.startAs(ctx, dir, sd.Bot, req)
 	var a alreadyGoing
 	return err == nil || errors.As(err, &a)
 }
@@ -285,6 +305,39 @@ func nextStep(r runs.Record, sd send) (jobKind, string, bool) {
 	}
 	k, ok := findJob(m[1])
 	return k, m[2], ok
+}
+
+var runtimeStep = regexp.MustCompile(`^(build|review|qa|live|design) (T-[0-9]+)(?: --approved ([0-9a-f]{7,40}))?(?: --drop ([A-Za-z0-9._,-]+): ([^\r\n]+))?$`)
+
+func codeRole(dir, bot string) bool {
+	h, err := runs.Webhook(dir, bot)
+	return err == nil && h.Code
+}
+
+func stepRequest(notify string, r runs.Record, sd send) (jobReq, bool) {
+	if !codeRole(notify, sd.Bot) {
+		k, id, ok := nextStep(r, sd)
+		return jobReq{kind: k, ids: []string{id}}, ok
+	}
+	m := runtimeStep.FindStringSubmatch(sd.Line)
+	if m == nil || r.Hops >= maxHops {
+		return jobReq{}, false
+	}
+	roles := map[string]string{"review": "reviewer", "qa": "qa-lead", "live": "qa-lead", "design": "designer"}
+	if m[1] == "build" {
+		if sd.Bot != "junior-engineer" && sd.Bot != "senior-engineer" {
+			return jobReq{}, false
+		}
+	} else if sd.Bot != roles[m[1]] {
+		return jobReq{}, false
+	}
+	if m[3] != "" || m[4] != "" {
+		if r.Job != "judge" || m[1] != "review" || (m[4] != "" && !dropPattern.MatchString(m[4])) {
+			return jobReq{}, false
+		}
+	}
+	k, _ := findJob(m[1])
+	return jobReq{kind: k, ids: []string{m[2]}, approved: m[3], drop: m[4], dropWhy: m[5]}, true
 }
 
 // served reports whether the role has a configured server.

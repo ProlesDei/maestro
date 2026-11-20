@@ -103,3 +103,27 @@ func (c *call) initBoard(ctx context.Context, file string) error {
 	}
 	return c.out(pin, func(w io.Writer) { fmt.Fprintf(w, "board %s at %s/%s\n", pin.ID, pin.Host, pin.Database) })
 }
+
+// runBranch names the branch in this board's namespace. A numeric ticket
+// ID can exist on more than one board in the same Git repository.
+func runBranch(_ context.Context, c *call) error {
+	if err := c.parse(); err != nil {
+		return err
+	}
+	loc, err := c.location()
+	if err != nil {
+		return err
+	}
+	branch := "maestro/"
+	if loc.boardID != "" {
+		branch += loc.boardID + "/"
+	}
+	if len(c.args) > 0 {
+		id, err := c.idArg()
+		if err != nil {
+			return err
+		}
+		branch += id.String()
+	}
+	return c.out(map[string]string{"branch": branch}, func(w io.Writer) { fmt.Fprintln(w, branch) })
+}

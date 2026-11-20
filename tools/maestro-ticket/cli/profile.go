@@ -60,8 +60,42 @@ func runProfile(ctx context.Context, c *call) error {
 	job := c.fs.String("job", "", "eligible job for a binding")
 	model := c.fs.String("model", "", "approved model for the job")
 	effort := c.fs.String("effort", "", "approved reasoning effort for the job")
+	estimate := c.fs.Float64("estimate-percent", 0, "estimated allowance points per job in each window")
+	role := c.fs.String("role", "", "eligible launcher for this job")
+	window := c.fs.String("window", "", "manually observed window name")
+	reset := c.fs.String("reset", "", "observed reset timestamp")
+	used := c.fs.Float64("used-percent", -1, "observed percentage used")
 	if err := c.parse(); err != nil {
 		return err
+	}
+	if len(c.args) == 1 && c.args[0] == "usage" {
+		return c.usageStatus()
+	}
+	if len(c.args) == 2 && c.args[0] == "sample" {
+		alias := c.args[1]
+		path, err := c.besideStore("profiles.json")
+		if err != nil {
+			return err
+		}
+		ps, err := loadBindings(path)
+		if err != nil {
+			return err
+		}
+		p, ok := ps[alias]
+		if !ok {
+			return usagef("profile sample: unknown alias")
+		}
+		st, err := readProfile(ctx, alias, p.Harness, p.ConfigDir)
+		if err != nil {
+			return err
+		}
+		if st.identity != p.Identity {
+			return errors.New("profile sample: login changed")
+		}
+		if *window != "" || *reset != "" || *used != -1 {
+			return c.recordUsage(alias, *window, *reset, *used)
+		}
+		return c.copyNativeUsage(st)
 	}
 	bind := len(c.args) == 2 && c.args[0] == "bind"
 	if bind {
@@ -86,7 +120,7 @@ func runProfile(ctx context.Context, c *call) error {
 		return err
 	}
 	if bind {
-		if err = c.bindProfile(st, *dir, *job, *model, *effort); err != nil {
+		if err = c.bindProfile(st, *dir, *job, *model, *effort, *role, *estimate); err != nil {
 			return err
 		}
 	}

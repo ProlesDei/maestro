@@ -52,6 +52,7 @@ jq -r "$q" "$f"
 EOF
 cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = branch ]; then echo "${BOARD_PREFIX:-maestro/}${2-}"; exit 0; fi
 [ "$1 $3" = "get --json" ] || exit 9
 [ -z "${MT_FAIL-}" ] || exit 1
 cat "$FX/ticket-$2.json"

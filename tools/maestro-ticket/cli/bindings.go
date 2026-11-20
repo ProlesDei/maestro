@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,8 +14,10 @@ import (
 )
 
 type jobModel struct {
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+	Estimate float64 `json:"estimate_percent,omitempty"`
+	Role     string  `json:"role,omitempty"`
+	Model    string  `json:"model"`
+	Effort   string  `json:"effort"`
 }
 type boundProfile struct {
 	Harness   string              `json:"harness"`
@@ -41,9 +44,12 @@ func loadBindings(path string) (map[string]boundProfile, error) {
 
 var modelSlug = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
-func (c *call) bindProfile(st profileStatus, config, job, model, effort string) error {
+func (c *call) bindProfile(st profileStatus, config, job, model, effort, role string, estimate float64) error {
 	if _, ok := findJob(job); !ok || !modelSlug.MatchString(model) || !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, effort) {
 		return usagef("profile bind: give an eligible --job, --model and --effort")
+	}
+	if estimate < 0 || estimate > 100 || math.IsNaN(estimate) || role != "" && !runs.BotPattern.MatchString(role) {
+		return usagef("profile bind: invalid role or estimated allowance percentage")
 	}
 	if st.identity == "" {
 		return errors.New("profile bind: native account did not report an identity")
@@ -80,13 +86,25 @@ func (c *call) bindProfile(st profileStatus, config, job, model, effort string) 
 		p.Jobs = make(map[string]jobModel)
 	}
 	p.Plan = st.Plan
-	p.Jobs[job] = jobModel{model, effort}
+	key := job
+	if role != "" {
+		key += "/" + role
+	}
+	p.Jobs[key] = jobModel{Model: model, Effort: effort, Estimate: estimate, Role: role}
 	profiles[st.Alias] = p
 	b, err := json.MarshalIndent(profiles, "", "  ")
 	if err != nil {
 		return err
 	}
 	return writeWholeMode(path, b, 0600)
+}
+
+func (p boundProfile) binding(job, role string) (jobModel, bool) {
+	if m, ok := p.Jobs[job+"/"+role]; ok {
+		return m, m.Role == role
+	}
+	m, ok := p.Jobs[job]
+	return m, ok && (m.Role == "" || m.Role == role)
 }
 
 func (c *call) jobProfile(alias, job string) (boundProfile, jobModel, error) {
@@ -99,7 +117,7 @@ func (c *call) jobProfile(alias, job string) (boundProfile, jobModel, error) {
 		return boundProfile{}, jobModel{}, err
 	}
 	p := profiles[alias]
-	m, ok := p.Jobs[job]
+	m, ok := p.binding(job, c.actor)
 	if !ok || !runs.BotPattern.MatchString(alias) {
 		return p, m, usagef("profile: alias %q has no binding for job %q", alias, job)
 	}

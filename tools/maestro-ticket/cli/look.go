@@ -227,37 +227,45 @@ func runLook(ctx context.Context, c *call) error {
 	// so their ends route and their tickets show busy, not free. The
 	// planner's own ring too, as doctor's do: only a ring brings it to
 	// pickup, where a dead plan or judge run shows.
-	c.ringOrphans(ctx, rdir, "")
 	var out lookOut
-	paused := ""
-	if p, ok := co.readPause(time.Now()); ok {
-		paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
-	}
-	stopped, err := co.s.stopped()
-	if err != nil {
-		return err
-	}
-	err = c.withStore(ctx, func(s ticket.Store) error {
-		var err error
-		out, err = c.look(ctx, s, lookOpts{limit: lim, stall: *stall, report: *report, paused: paused,
-			stopped: stopped, handouts: co, runs: rdir, host: co.host})
-		return err
+	err = c.withLook(ctx, func(ctx context.Context) error {
+		c.runCache = nil
+		c.ringOrphans(ctx, rdir, "")
+		out = lookOut{}
+		paused := ""
+		if p, ok := co.readPause(time.Now()); ok {
+			paused = p.Why + ", until " + p.Until.Format(time.RFC3339)
+		}
+		stopped, err := co.s.stopped()
+		if err != nil {
+			return err
+		}
+		err = c.withStore(ctx, func(s ticket.Store) error {
+			var err error
+			out, err = c.look(ctx, s, lookOpts{limit: lim, stall: *stall, report: *report, paused: paused,
+				stopped: stopped, handouts: co, runs: rdir, host: co.host})
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		c.startSends(ctx, rdir, &out)
+		if len(alerts) > 0 {
+			out.Alerts = append(alerts, out.Alerts...)
+		}
+		if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
+			if rules, ok := c.standingRules(); ok {
+				c.startJudge(ctx, &out, rules, co)
+			} else {
+				out.Errors = append(out.Errors, "judge: no maestro/rules.md: set the planner's standing rules with maestro-ticket rules text")
+			}
+		}
+		co.pruneHandouts(time.Now())
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	c.startSends(ctx, rdir, &out)
-	if len(alerts) > 0 {
-		out.Alerts = append(alerts, out.Alerts...)
-	}
-	if *judge && len(out.Judge) > 0 && !out.Stopped && out.Paused == "" {
-		if rules, ok := c.standingRules(); ok {
-			c.startJudge(ctx, &out, rules, co)
-		} else {
-			out.Errors = append(out.Errors, "judge: no maestro/rules.md: set the planner's standing rules with maestro-ticket rules text")
-		}
-	}
-	co.pruneHandouts(time.Now())
 	if err := c.out(out, func(w io.Writer) { printLook(w, out) }); err != nil {
 		return err
 	}
@@ -278,17 +286,20 @@ func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 	notify := filepath.Join(filepath.Dir(rdir), "notify")
 	left := []send{}
 	for _, sd := range out.Send {
-		k, id, ok := nextStep(runs.Record{}, sd)
+		req, ok := stepRequest(notify, runs.Record{}, sd)
 		if !ok || !served(notify, sd.Bot) {
 			left = append(left, sd)
 			continue
 		}
-		r, err := c.startAs(ctx, rdir, sd.Bot, jobReq{kind: k, ids: []string{id}})
+		r, err := c.startAs(ctx, rdir, sd.Bot, req)
 		var going alreadyGoing
 		switch {
 		case err == nil:
 			out.Started = append(out.Started, fmt.Sprintf("%s %s as %s", r.ID, sd.Line, sd.Bot))
 		case !errors.As(err, &going):
+			if errors.Is(err, ticket.ErrPaused) {
+				out.Alerts = append(out.Alerts, sd.Line+" waiting: "+err.Error())
+			}
 			left = append(left, sd)
 		}
 	}
@@ -302,6 +313,11 @@ func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 // own look. It reports whether it left the planner nothing: no judge row,
 // error, send or card.
 func (c *call) refill(ctx context.Context, rdir string) bool {
+	ok := true
+	err := c.withLook(ctx, func(ctx context.Context) error { ok = c.refillOnce(ctx, rdir); return nil })
+	return err == nil && ok
+}
+func (c *call) refillOnce(ctx context.Context, rdir string) bool {
 	cc := *c
 	cc.actor, cc.runCache = "planner", nil
 	if cc.mayStart() != nil {
@@ -604,6 +620,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		}
 	}
 	free := max(o.limit-going, 0)
+	if o.limit < 0 {
+		free = len(open)
+	}
 
 	n := struct{ busy, build, review, blocked, sentUp, todo, ready, backlog, waiting int }{}
 	var stuck, held, sentUp []string
@@ -891,12 +910,16 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		judgeIt(ticket.Ticket{ID: mustID(trouble[0])}, "cause", capped(trouble)+" are blocked or sent back: one cause?", strings.Join(trouble, " "))
 
 	}
-	out.Counts = fmt.Sprintf("open %d; building %d/%d; review %d; blocked %d (sent up %d); todo %d (ready %d); backlog %d; busy %d; waiting on deps or areas %d",
-		len(open), going, o.limit, n.review, n.blocked, n.sentUp, n.todo, n.ready, n.backlog, n.busy, n.waiting)
+	buildCount := fmt.Sprintf("%d/%d", going, o.limit)
+	if o.limit < 0 {
+		buildCount = fmt.Sprint(going)
+	}
+	out.Counts = fmt.Sprintf("open %d; building %s; review %d; blocked %d (sent up %d); todo %d (ready %d); backlog %d; busy %d; waiting on deps or areas %d",
+		len(open), buildCount, n.review, n.blocked, n.sentUp, n.todo, n.ready, n.backlog, n.busy, n.waiting)
 	if o.report {
 		rows, err := c.goalProgress(ctx, s)
 		keep(err)
-		out.Report = append(out.Report, "progress: "+rows, fmt.Sprintf("runs: %d/%d", going, o.limit),
+		out.Report = append(out.Report, "progress: "+rows, "runs: "+buildCount,
 			"stuck: "+capped(stuck), "held: "+capped(held), "sent up: "+capped(sentUp))
 	}
 	return out, nil
@@ -1112,4 +1135,56 @@ func trim(s string, n int) string {
 func mustID(s string) ticket.ID {
 	id, _ := ticket.ParseID(s)
 	return id
+}
+
+// withLook serializes planner wakes on runtime boards. A wake arriving as
+// the holder finishes either requests another pass or acquires the lease.
+func (c *call) withLook(ctx context.Context, work func(context.Context) error) error {
+	loc, err := c.location()
+	if err != nil {
+		return err
+	}
+	if loc.boardID == "" {
+		return work(ctx)
+	}
+	board, err := c.board()
+	if err != nil {
+		return err
+	}
+	token := newSessionID()
+	acquired, err := board.AcquireLook(ctx, token)
+	if err != nil || !acquired {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		t := time.NewTicker(2 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if board.RenewLook(ctx, token) != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	defer func() { cancel(); <-ended }()
+	var workErr error
+	for ctx.Err() == nil {
+		workErr = errors.Join(workErr, work(ctx))
+		again, err := board.FinishLook(ctx, token)
+		if err != nil {
+			return err
+		}
+		if !again {
+			return workErr
+		}
+	}
+	return ctx.Err()
 }

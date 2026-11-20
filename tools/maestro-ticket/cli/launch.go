@@ -285,8 +285,13 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	if err != nil {
 		return runs.Record{}, err
 	}
+	if rec.Profile != "" && rec.Dir != "" {
+		if info, err := os.Stat(rec.Dir); err != nil || !info.IsDir() {
+			return runs.Record{}, errors.New("saved native worktree unavailable; recover the worktree before resuming")
+		}
+	}
 	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
-	r, err := runs.Create(dir, rec, stdin)
+	r, err := c.createPacedRun(dir, rec, stdin)
 	if err != nil {
 		return runs.Record{}, err
 	}
