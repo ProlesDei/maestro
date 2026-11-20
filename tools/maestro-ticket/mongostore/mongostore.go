@@ -160,13 +160,14 @@ type Options struct {
 
 // Store is a ticket.Store on one MongoDB database.
 type Store struct {
-	client *sharedClient
-	name   string
-	now    func() time.Time
-	stop   string
-	host   string
-	mover  string
-	closed sync.Once
+	boardID string
+	client  *sharedClient
+	name    string
+	now     func() time.Time
+	stop    string
+	host    string
+	mover   string
+	closed  sync.Once
 }
 
 var _ ticket.Store = (*Store)(nil)
@@ -219,7 +220,7 @@ func open(ctx context.Context, uri string, opts Options) (*Store, error) {
 	if strings.ContainsAny(opts.Host, ".$ ") {
 		return nil, fmt.Errorf("%w: bad host id %q", ticket.ErrInvalid, opts.Host)
 	}
-	s := &Store{client: acquire(uri), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
+	s := &Store{boardID: opts.BoardID, client: acquire(uri), name: name, now: opts.Now, stop: opts.StopFile, host: opts.Host, mover: opts.Mover}
 	if opts.BoardID != "" {
 		if err := s.verifyIdentity(ctx, opts.BoardID, opts.Create); err != nil {
 			s.Close()

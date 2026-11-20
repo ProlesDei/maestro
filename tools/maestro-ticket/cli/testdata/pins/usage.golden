@@ -45,6 +45,10 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
@@ -203,6 +207,10 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
@@ -361,6 +369,10 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
@@ -519,6 +531,10 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)

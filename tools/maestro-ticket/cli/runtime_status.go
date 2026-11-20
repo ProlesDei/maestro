@@ -1,0 +1,83 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+)
+
+// Status reads only local usage and run files and verifies the board. A
+// failed Atlas connection still leaves a usable local report.
+func runRuntimeStatus(ctx context.Context, c *call) error {
+	if err := c.parse(); err != nil {
+		return err
+	}
+	if err := c.noArgs(); err != nil {
+		return err
+	}
+	loc, err := c.location()
+	if err != nil {
+		return err
+	}
+	if loc.boardID == "" {
+		return usagef("status: select a T3 runtime board")
+	}
+	root := loc.localDir
+	ps, err := loadBindings(filepath.Join(root, "profiles.json"))
+	if err != nil {
+		return err
+	}
+	usage, err := readUsage(filepath.Join(root, "usage.json"))
+	if err != nil {
+		return err
+	}
+	all, err := runs.List(filepath.Join(root, "runs"), time.Now(), true)
+	if err != nil {
+		return err
+	}
+	type profile struct {
+		Alias, Harness, Login string
+		Reserve               float64 `json:"reserve_percent"`
+		Windows               map[string]paceWindow
+		HoldUntil             time.Time `json:"hold_until,omitzero"`
+		Running               []string
+	}
+	now := time.Now().UTC()
+	profiles := []profile{}
+	for _, alias := range sortedAliases(ps) {
+		p := profile{Alias: alias, Reserve: ps[alias].Reserve, Harness: ps[alias].Harness, Login: "verified at binding; live login unchecked", Windows: usage[alias], Running: []string{}}
+		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
+			p.Login = "verification required"
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		for _, scope := range []string{"account-" + alias, "provider-" + p.Harness} {
+			hold, err := readHold(filepath.Join(root, scope+".hold"))
+			if err != nil {
+				return err
+			}
+			if hold.After(now) && hold.After(p.HoldUntil) {
+				p.HoldUntil = hold
+			}
+		}
+		for _, r := range all {
+			if !r.Ended() && r.Profile == alias {
+				p.Running = append(p.Running, r.ID)
+			}
+		}
+		profiles = append(profiles, p)
+	}
+	boardStatus := "available"
+	s, err := c.open(ctx)
+	if err != nil {
+		boardStatus = "unavailable"
+	} else {
+		s.Close()
+	}
+	return json.NewEncoder(c.env.Stdout).Encode(map[string]any{"as_of": now, "board": loc.boardID, "store": boardStatus, "profiles": profiles})
+}

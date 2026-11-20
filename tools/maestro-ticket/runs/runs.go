@@ -68,17 +68,21 @@ const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
-	BoardID    string   `json:"board_id,omitempty"`
-	ActionID   string   `json:"action_id,omitempty"`
-	ActionHash string   `json:"action_hash,omitempty"`
-	Estimate   float64  `json:"estimate_percent,omitempty"`
-	Profile    string   `json:"profile,omitempty"`
-	Harness    string   `json:"harness,omitempty"`
-	ID         string   `json:"id"`
-	Launcher   string   `json:"launcher"`
-	Ticket     string   `json:"ticket,omitempty"`
-	Limit      string   `json:"limit"`
-	Command    []string `json:"command"`
+	ACRevision    int      `json:"ac_revision,omitempty"`
+	BriefRevision int      `json:"brief_revision,omitempty"`
+	DeliveryRun   string   `json:"delivery_run,omitempty"`
+	Delivery      string   `json:"delivery,omitempty"`
+	BoardID       string   `json:"board_id,omitempty"`
+	ActionID      string   `json:"action_id,omitempty"`
+	ActionHash    string   `json:"action_hash,omitempty"`
+	Estimate      float64  `json:"estimate_percent,omitempty"`
+	Profile       string   `json:"profile,omitempty"`
+	Harness       string   `json:"harness,omitempty"`
+	ID            string   `json:"id"`
+	Launcher      string   `json:"launcher"`
+	Ticket        string   `json:"ticket,omitempty"`
+	Limit         string   `json:"limit"`
+	Command       []string `json:"command"`
 	// Job is the kind of work maestro-ticket job started (build, review,
 	// qa, ...), which pickup reads to say what the result means; empty for
 	// a plain launch.
@@ -716,4 +720,15 @@ func tail(s string, n int) string {
 		s = s[1:]
 	}
 	return "…" + s
+}
+
+// DeliveryOwner is the first run the planner returned for this delivery.
+func (r Record) DeliveryOwner() string {
+	if r.Delivery == "" {
+		return ""
+	}
+	if r.DeliveryRun != "" {
+		return r.DeliveryRun
+	}
+	return r.ID
 }

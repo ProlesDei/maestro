@@ -291,7 +291,23 @@ func runLook(ctx context.Context, c *call) error {
 func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 	notify := filepath.Join(filepath.Dir(rdir), "notify")
 	left := []send{}
+	loc, locErr := c.location()
 	for _, sd := range out.Send {
+		if locErr == nil && loc.boardID != "" && sd.Bot == "chief-of-staff" {
+			if err := c.queueGoalItem(ctx, notify, runs.Record{}, sd); err == nil {
+				continue
+			}
+			left = append(left, sd)
+			continue
+		}
+		if locErr == nil && loc.boardID != "" && sd.Bot == "qa-lead" && strings.HasPrefix(sd.Line, "qa ") && codeRole(notify, sd.Bot) {
+			if c.handOn(ctx, rdir, notify, runs.Record{}, sd) {
+				out.Started = append(out.Started, sd.Line+" receipt verified")
+				continue
+			}
+			left = append(left, sd)
+			continue
+		}
 		req, ok := stepRequest(notify, runs.Record{}, sd)
 		if !ok || !served(notify, sd.Bot) {
 			left = append(left, sd)
@@ -447,15 +463,16 @@ func (co coord) claimJudge(id, fp string, now time.Time) bool {
 }
 
 type lookOpts struct {
-	limit    int
-	stall    time.Duration
-	report   bool
-	stopped  bool
-	paused   string // a usage limit pickup saw: why, and until when
-	handouts coord
-	runs     string
-	host     string // this machine's id on a shared store, else ""
-	refill   bool   // a run's end looks: it sends the chief of staff nothing
+	recovered *recoveryReport
+	limit     int
+	stall     time.Duration
+	report    bool
+	stopped   bool
+	paused    string // a usage limit pickup saw: why, and until when
+	handouts  coord
+	runs      string
+	host      string // this machine's id on a shared store, else ""
+	refill    bool   // a run's end looks: it sends the chief of staff nothing
 }
 
 // launchesSince is a store that lists recent launches with their hosts:
@@ -483,7 +500,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 	if err != nil {
 		return out, err
 	}
-	if loc.boardID != "" {
+	if o.recovered != nil {
+		recovery = *o.recovered
+	} else if loc.boardID != "" {
 		recovery, err = c.reconcile(ctx, s, o.runs, loc.boardID)
 		if err != nil {
 			return out, err
@@ -684,7 +703,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 		// A planner job holds its ticket for hours: one that waits on the
 		// chief of staff mustn't start again each look; one that failed
 		// frees it in pickup.
-		if idle || !o.handouts.claimHandout(id.String(), "planner-job", kind, 6*time.Hour, now) {
+		if idle || loc.boardID != "" && !codeRole(filepath.Join(filepath.Dir(o.runs), "notify"), "planner") || !o.handouts.claimHandout(id.String(), "planner-job", kind, 6*time.Hour, now) {
 			return
 		}
 		k, _ := findJob(kind)
@@ -749,6 +768,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			n.sentUp++
 			sentUp = append(sentUp, id.String())
 			continue
+		}
+		if hold := recovery.Held[id.String()]; hold != "" && t.Status == ticket.StatusInProgress && t.LiveClaim() == nil && !liveRun[id.String()] {
+			judgeIt(t, "blocked", hold, "recovery")
 		}
 		if t.LiveClaim() != nil || liveRun[id.String()] || recovery.Held[id.String()] != "" {
 			n.busy++
@@ -1173,7 +1195,7 @@ func (c *call) withLook(ctx context.Context, work func(context.Context) error) e
 	if err != nil || !acquired {
 		return err
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(context.WithValue(ctx, lookOwnerKey{}, loc.boardID))
 	ended := make(chan struct{})
 	go func() {
 		defer close(ended)

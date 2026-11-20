@@ -247,6 +247,21 @@ func (c *call) boardQASlots() int {
 // standingRules is rules.md's lines, as a plan, rule or judge prompt
 // carries them, and whether the file is there.
 func (c *call) standingRules() (string, bool) {
+	if loc, err := c.location(); err == nil && loc.boardID != "" {
+		b, err := c.board()
+		if err != nil {
+			return "", false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), markTimeout)
+		defer cancel()
+		rules, err := b.RuntimeRules(ctx)
+		if err != nil {
+			return "", false
+		}
+		if rules != "" {
+			return rules, true
+		}
+	}
 	dir, err := c.standingDir()
 	if err != nil {
 		return "", false

@@ -23,7 +23,9 @@ type paceWindow struct {
 	Read   time.Time `json:"read_at"`
 	Source string    `json:"source"`
 	// Burn is allowance points per hour. The first sample has no measured trend.
-	Burn float64 `json:"burn_per_hour"`
+	Burn     float64            `json:"estimated_background_points_per_hour"`
+	Measured bool               `json:"has_two_readings"`
+	Covered  map[string]float64 `json:"estimated_points_already_observed,omitempty"`
 }
 type usageLedger map[string]map[string]paceWindow
 
@@ -59,6 +61,10 @@ func saveObservation(dir, alias string, windows map[string]paceWindow) error {
 	if state[alias] == nil {
 		state[alias] = map[string]paceWindow{}
 	}
+	records, err := runs.List(filepath.Join(dir, "runs"), time.Now(), true)
+	if err != nil {
+		return err
+	}
 	for key, w := range windows {
 		previous, ok := state[alias][key]
 		if ok && !w.Read.After(previous.Read) {
@@ -68,7 +74,23 @@ func saveObservation(dir, alias string, windows map[string]paceWindow) error {
 			if w.Used < previous.Used {
 				return errors.New("allowance decreased within the same reset window")
 			}
-			w.Burn = (w.Used - previous.Used) / w.Read.Sub(previous.Read).Hours()
+			// Split this observed delta once. Attribution to Maestro runs is
+			// an estimate; the unassigned portion includes owner and child turns.
+			delta := w.Used - previous.Used
+			w.Covered = map[string]float64{}
+			for _, r := range records {
+				if r.Profile != alias || neverRan(r) || r.StartedAt.After(w.Read) || r.EndedAt != nil && !r.EndedAt.After(previous.Read) {
+					continue
+				}
+				credited := previous.Covered[r.ID]
+				points := min(delta, max(0, r.Estimate-credited))
+				if r.EndedAt == nil || r.EndedAt.After(w.Read) {
+					w.Covered[r.ID] = credited + points
+				}
+				delta -= points
+			}
+			w.Burn = delta / w.Read.Sub(previous.Read).Hours()
+			w.Measured = true
 		}
 		state[alias][key] = w
 	}
@@ -148,6 +170,12 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		if old.State == runs.Unreadable {
 			return r, errors.New("usage unknown: unreadable run record")
 		}
+		if r.ActionID != "" && old.ActionID == r.ActionID && !neverRan(old) {
+			if r.ActionHash != old.ActionHash {
+				return r, errors.New("action ID has conflicting payloads")
+			}
+			return r, alreadyGoing{run: old.ID, ran: old.Ended()}
+		}
 		if r.ChainOf != "" && r.ResumeOf == "" && r.AgainOf == "" && old.ResumeOf == "" && old.AgainOf == "" && old.ChainOf == r.ChainOf && old.Job == r.Job && old.Ticket == r.Ticket && old.Launcher == r.Launcher && !neverRan(old) {
 			return r, alreadyGoing{run: old.ID, ran: old.Ended()}
 		}
@@ -155,6 +183,12 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 	best := -1.0
 	var chosen string
 	var reasons []string
+	var next time.Time
+	wakeAt := func(at time.Time) {
+		if at.After(now) && (next.IsZero() || at.Before(next)) {
+			next = at
+		}
+	}
 	for _, alias := range sortedAliases(profiles) {
 		p := profiles[alias]
 		binding, ok := p.binding(r.Job, r.Launcher)
@@ -163,6 +197,12 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		}
 		if m, e := flagValue(r.Overrides, "--model"), flagValue(r.Overrides, "--effort"); (m != "" && binding.Model != m) || (e != "" && binding.Effort != e) {
 			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
+			reasons = append(reasons, alias+": login verification required")
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return r, err
 		}
 		account, err := readHold(filepath.Join(root, "account-"+alias+".hold"))
 		if err != nil {
@@ -177,11 +217,15 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 			if provider.After(until) {
 				until = provider
 			}
+			wakeAt(until)
 			reasons = append(reasons, alias+": paused until "+until.UTC().Format(time.RFC3339))
 			continue
 		}
-		room, reason := projectedRoom(alias, binding, usage[alias], list, now)
+		room, reason := projectedRoom(alias, binding, p.Reserve, usage[alias], list, now)
 		if reason != "" {
+			for _, w := range usage[alias] {
+				wakeAt(w.Reset)
+			}
 			reasons = append(reasons, alias+": "+reason)
 			continue
 		}
@@ -193,7 +237,7 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		if len(reasons) == 0 {
 			reasons = append(reasons, "no eligible account")
 		}
-		return r, fmt.Errorf("%w: %s: %s", ticket.ErrPaused, r.Job, strings.Join(reasons, ", "))
+		return r, waitingForReset{at: next, reason: fmt.Sprintf("%s: %s: %s", ticket.ErrPaused, r.Job, strings.Join(reasons, ", "))}
 	}
 	p := profiles[chosen]
 	b, _ := p.binding(r.Job, r.Launcher)
@@ -217,7 +261,7 @@ func sortedAliases(profiles map[string]boundProfile) []string {
 	return keys
 }
 
-func projectedRoom(alias string, b jobModel, windows map[string]paceWindow, list []runs.Record, now time.Time) (float64, string) {
+func projectedRoom(alias string, b jobModel, reserve float64, windows map[string]paceWindow, list []runs.Record, now time.Time) (float64, string) {
 	if len(windows) == 0 || b.Estimate <= 0 {
 		return 0, "missing usage reading or job estimate"
 	}
@@ -226,10 +270,10 @@ func projectedRoom(alias string, b jobModel, windows map[string]paceWindow, list
 		if !now.Before(w.Reset) {
 			return 0, "reset passed; refresh usage"
 		}
-		remaining := 100 - w.Used - w.Burn*w.Reset.Sub(w.Read).Hours() - b.Estimate
+		remaining := 100 - reserve - w.Used - w.Burn*w.Reset.Sub(w.Read).Hours() - b.Estimate
 		for _, old := range list {
 			if old.Profile == alias && !neverRan(old) && (old.EndedAt == nil || old.EndedAt.After(w.Read)) {
-				remaining -= old.Estimate
+				remaining -= max(0, old.Estimate-w.Covered[old.ID])
 			}
 		}
 		if remaining < 0 {

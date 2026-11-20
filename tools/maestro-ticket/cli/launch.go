@@ -293,6 +293,12 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
 	r, err := c.createPacedRun(dir, rec, stdin)
 	if err != nil {
+		var wait waitingForReset
+		if errors.As(err, &wait) && !wait.at.IsZero() {
+			if e := c.scheduleReconsider(filepath.Dir(dir), wait.at.Add(time.Second)); e != nil {
+				return runs.Record{}, errors.Join(err, e)
+			}
+		}
 		return runs.Record{}, err
 	}
 	// Before the supervisor, which may end the run at once; stats off
@@ -387,12 +393,17 @@ func runSupervise(ctx context.Context, c *call) error {
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
 			c.actor = r.Launcher
+			launch := c.startLaunch(ctx, runTicket(r), r)
+			if r.BoardID != "" && launch == 0 {
+				c.runtimeStoreDown(filepath.Dir(dir))
+				return 0
+			}
 			if r.ActionID != "" {
 				if err := saveActionReceipt(co, r); err != nil {
 					fmt.Fprintln(c.env.Stderr, "handoff receipt:", err)
 				}
 			}
-			return c.startLaunch(ctx, runTicket(r), r)
+			return launch
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
@@ -408,26 +419,7 @@ func runSupervise(ctx context.Context, c *call) error {
 			c.chain(cctx, dir, r)
 		},
 		CodeWake: func(r runs.Record) error {
-			if r.Job == "" || runs.Acked(dir, r.ID) {
-				return nil
-			}
-			// Reuse the saved route. Computing a limit from this later clock
-			// could postpone a reset indefinitely.
-			var rt routed
-			if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil {
-				for _, line := range rt.Do {
-					cc := *c
-					cc.actor = r.Launcher
-					cc.runCache = nil
-					if on, gone := cc.runDo(ctx, dir, notify, r, line); on || gone {
-						if len(rt.Do) == 1 && len(rt.Send) == 0 && rt.Reply == "" {
-							_, err := runs.Ack(dir, r.ID, chainBy, time.Now())
-							return err
-						}
-					}
-				}
-			}
-			return nil
+			return c.replayCode(ctx, dir, notify, r)
 		},
 		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.
@@ -484,6 +476,9 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	s, err := c.open(ctx)
 	if err != nil {
 		warn(err)
+		if r.BoardID != "" {
+			c.runtimeStoreDown(filepath.Dir(dir))
+		}
 		return
 	}
 	defer s.Close()
@@ -502,6 +497,11 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		end.Lifts = limitLifts(r, reset)
 	}
 	c.endLaunch(ctx, s, end)
+	if outcome, _ := routeOutcome(r); r.Delivery != "" && r.State == runs.Done && !r.IsError && outcome == outDone {
+		if b, err := c.board(); err == nil {
+			warn(b.CompleteDelivery(ctx, r.Delivery, r.ActionHash, r.DeliveryOwner(), r.ID, r.Reply))
+		}
+	}
 	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}

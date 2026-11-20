@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -118,11 +118,32 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// looks itself, and wakes it only for what that look leaves
 		// (owner's ruling, Nov 17 2026).
 		// A code planner resolves a delivery dispute by judging its current board rows.
-		if !unsure && codeRole(notify, "planner") && slices.ContainsFunc(left, func(sd send) bool { return sd.Bot == "planner" && strings.HasPrefix(sd.Line, "kickback ") }) && c.refill(ctx, dir) {
-			left = slices.DeleteFunc(left, func(sd send) bool { return sd.Bot == "planner" && strings.HasPrefix(sd.Line, "kickback ") })
+		if !unsure && r.BoardID != "" && codeRole(notify, "planner") {
+			remaining := make([]send, 0, len(left))
+			for _, sd := range left {
+				if sd.Bot == "planner" && !(strings.HasPrefix(sd.Line, "goal ") && strings.HasSuffix(sd.Line, " done")) {
+					if err := c.savePlannerWake(co, dir, r.ID, sd.Line); err == nil {
+						chained = append(chained, "planner: wake saved")
+						continue
+					}
+				}
+				remaining = append(remaining, sd)
+			}
+			left = remaining
 		}
 		if !unsure && slices.ContainsFunc(left, refillLine) && served(notify, "planner") && c.refill(ctx, dir) {
 			left = slices.DeleteFunc(left, refillLine)
+		}
+		if r.BoardID != "" {
+			remaining := left[:0]
+			for _, sd := range left {
+				if (sd.Bot == "chief-of-staff" || sd.Bot == "planner" && strings.HasPrefix(sd.Line, "goal ") && strings.HasSuffix(sd.Line, " done")) && c.queueGoalItem(ctx, notify, r, sd) == nil {
+					chained = append(chained, "chief-of-staff: inbox")
+					continue
+				}
+				remaining = append(remaining, sd)
+			}
+			left = remaining
 		}
 		rt.Send = left
 		// A launcher with no webhook, such as a person, reads its pickup:
@@ -207,19 +228,7 @@ func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, lin
 		if m[1] != r.ID {
 			return false, false
 		}
-		if m[2] == "opus" && r.Profile != "" {
-			if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(notify, "senior-engineer") {
-				return false, false
-			}
-			if info, e := os.Stat(r.Dir); e != nil || !info.IsDir() {
-				return false, false
-			}
-			k, _ := findJob("build")
-			cc.env.Dir = r.Dir
-			_, err = cc.startAs(ctx, dir, "senior-engineer", jobReq{kind: k, ids: []string{r.Ticket}, chainOf: r.ID, hops: r.Hops + 1, checkpoint: r.ID})
-		} else {
-			_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on", opus: m[2] == "opus", escalate: m[2] == "escalate", decide: m[2] == "decide"})
-		}
+		_, err = cc.resume(ctx, resumeOpts{run: m[1], died: m[2] == "died", goOn: m[2] == "go-on", opus: m[2] == "opus", escalate: m[2] == "escalate", decide: m[2] == "decide"})
 	default:
 		if m[3] != r.ID {
 			return false, false
@@ -453,4 +462,136 @@ func (c *call) lastOverrides(job string) (model, effort string, limit time.Durat
 	model, effort = flagValue(last.Overrides, "--model"), flagValue(last.Overrides, "--effort")
 	limit, _ = time.ParseDuration(flagValue(last.Overrides, "--limit"))
 	return model, effort, limit, nil
+}
+
+func (c *call) queueGoalItem(ctx context.Context, notify string, r runs.Record, sd send) error {
+	goal := "all"
+	fields := strings.Fields(sd.Line)
+	if len(fields) == 3 && fields[0] == "goal" && fields[2] == "done" && ticket.ValidateGoal(fields[1]) == nil {
+		goal = fields[1]
+	} else if len(fields) >= 3 && fields[0] == "eta" && fields[1] == "missed:" && ticket.ValidateGoal(fields[2]) == nil {
+		goal = fields[2]
+	} else if id := ticketInLine.FindString(sd.Line); id != "" {
+		t, err := c.ticketForJob(ctx, id)
+		if err != nil {
+			return err
+		}
+		if t.Goal != "" {
+			goal = t.Goal
+		}
+	} else if r.Delivery != "" {
+		goal, _, _ = strings.Cut(r.Delivery, "/")
+	} else if r.Ticket != "" {
+		t, err := c.ticketForJob(ctx, r.Ticket)
+		if err != nil {
+			return err
+		}
+		if t.Goal != "" {
+			goal = t.Goal
+		}
+	}
+	b, err := c.board()
+	if err != nil {
+		return err
+	}
+	id := fmt.Sprintf("item-%x", sha256.Sum256([]byte(goal+"\n"+sd.Line)))
+	if err := b.PutGoalItem(ctx, id, goal, sd.Line); err != nil {
+		return err
+	}
+	h, err := runs.Webhook(notify, "chief-of-staff")
+	if err == nil && h.Exec != "" {
+		return c.wakeGoalInbox(ctx, b, filepath.Join(filepath.Dir(notify), "runs"), h)
+	}
+	return nil
+}
+
+// A successful invocation can still leave new items behind the private wake gate.
+func (c *call) wakeGoalInbox(ctx context.Context, b *mongostore.Store, dir string, h runs.Hook) error {
+	err := runs.Ring(ctx, h, runs.Notification{})
+	pending, checkErr := b.HasPendingGoalItem(ctx)
+	if err != nil || checkErr != nil || pending {
+		if e := c.scheduleReconsider(filepath.Dir(dir), time.Now().Add(runs.GateWindow)); e != nil {
+			return errors.Join(err, checkErr, e)
+		}
+	}
+	return errors.Join(err, checkErr)
+}
+
+// Replay only the remaining fixed actions. Each start checks its original
+// receipt or resume mark. The saved route keeps the original reset time.
+func (c *call) replayCode(ctx context.Context, dir, notify string, r runs.Record) error {
+	if r.Job == "" || runs.Acked(dir, r.ID) || r.Settling {
+		return nil
+	}
+	var rt routed
+	if len(r.Routed) == 0 || json.Unmarshal(r.Routed, &rt) != nil {
+		return nil
+	}
+	cc := *c
+	cc.actor, cc.runCache = r.Launcher, nil
+	if err := cc.mayStart(); err != nil {
+		if errors.Is(err, ticket.ErrStopped) || errors.Is(err, ticket.ErrPaused) {
+			return nil
+		}
+		return err
+	}
+	done := true
+	for _, line := range rt.Do {
+		on, gone := cc.runDo(ctx, dir, notify, r, line)
+		if !on && !gone {
+			done = false
+		}
+	}
+	for _, sd := range rt.Send {
+		switch {
+		case sd.Bot == "chief-of-staff" || sd.Bot == "planner" && strings.HasPrefix(sd.Line, "goal ") && strings.HasSuffix(sd.Line, " done"):
+			if err := cc.queueGoalItem(ctx, notify, r, sd); err != nil {
+				return err
+			}
+		case sd.Bot == "planner":
+			co, err := cc.coord()
+			if err != nil {
+				return err
+			}
+			if !codeRole(notify, "planner") {
+				done = false
+				continue
+			}
+			if err := cc.savePlannerWake(co, dir, r.ID, sd.Line); err != nil {
+				return err
+			}
+		default:
+			if !cc.handOn(ctx, dir, notify, r, sd) {
+				done = false
+			}
+		}
+	}
+	if outcome, _ := routeOutcome(r); r.Delivery != "" && r.State == runs.Done && !r.IsError && outcome == outDone {
+		b, err := cc.board()
+		if err != nil {
+			return err
+		}
+		if err := b.CompleteDelivery(ctx, r.Delivery, r.ActionHash, r.DeliveryOwner(), r.ID, r.Reply); err != nil {
+			return err
+		}
+		rt.Reply = ""
+	}
+	if done && rt.Reply == "" && (len(rt.Send)+len(rt.Do) > 0 || rt.Outcome == outDone) {
+		_, err := runs.Ack(dir, r.ID, chainBy, time.Now())
+		return err
+	}
+	return nil
+}
+
+// A pending planner wake survives a failed timer, a restart or a dirty lease.
+// Its stable key distinguishes a second event on the same ticket.
+func (c *call) savePlannerWake(co coord, dir, run, line string) error {
+	id := fmt.Sprintf("%s-%x", run, sha256.Sum256([]byte(line)))
+	if err := co.s.create("planner-pending", id, line); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	return c.scheduleReconsider(filepath.Dir(dir), time.Now())
 }

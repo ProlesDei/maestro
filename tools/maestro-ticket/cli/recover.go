@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
@@ -38,6 +39,15 @@ func runRecover(ctx context.Context, c *call) error {
 		return usagef("recover: select a T3 runtime board")
 	}
 	dir := filepath.Join(loc.localDir, "runs")
+	for _, file := range []string{"reconsider.active", "reconsider.at"} {
+		if at, e := readHold(filepath.Join(loc.localDir, file)); e != nil {
+			return e
+		} else if !at.IsZero() {
+			if e := c.scheduleReconsider(loc.localDir, at); e != nil {
+				return e
+			}
+		}
+	}
 	var report recoveryReport
 	ran := false
 	err = c.withLook(ctx, func(ctx context.Context) error {
@@ -45,7 +55,13 @@ func runRecover(ctx context.Context, c *call) error {
 		return c.withStore(ctx, func(s ticket.Store) error {
 			var err error
 			report, err = c.reconcile(ctx, s, dir, loc.boardID)
-			return err
+			if err != nil {
+				return err
+			}
+			if err := recordRecoveredBoot(loc.localDir); err != nil {
+				return err
+			}
+			return c.dispatchRuntimeLook(ctx, s, dir, &report, false)
 		})
 	})
 	if err != nil {
@@ -76,13 +92,15 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 		return out, err
 	}
 	byID := map[string]runs.Record{}
-	byLaunch := map[int64]bool{}
+	byLaunch := map[int64]runs.Record{}
+	byTicket := map[string]bool{}
 	for _, r := range records {
 		if r.State == runs.Unreadable {
 			return out, errors.New("recover: unreadable run record " + r.ID)
 		}
 		byID[r.ID] = r
-		byLaunch[r.LaunchID] = true
+		byLaunch[r.LaunchID] = r
+		byTicket[r.Ticket] = true
 	}
 	for _, p := range procs {
 		r, ok := byID[p.ID]
@@ -112,7 +130,26 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 			return out, err
 		}
 		for _, l := range launches {
-			if l.Host != host || byLaunch[l.ID] {
+			if l.Host != host {
+				continue
+			}
+			if r, ok := byLaunch[l.ID]; ok {
+				if r.EndedAt != nil && r.BoardID == board && r.PID == l.PID && r.Stamp == l.Stamp {
+					outcome := ticket.LaunchResult
+					if r.State == runs.Died {
+						outcome = ticket.LaunchDied
+					} else if r.IsError || r.State != runs.Done {
+						outcome = ticket.LaunchNoResult
+					}
+					req := ticket.EndLaunchRequest{ID: l.ID, Outcome: outcome, Session: r.SessionID}
+					if outcome, reset := routeOutcome(r); outcome == outUsageLimit {
+						req.Lifts = limitLifts(r, reset)
+					}
+					if _, err := s.EndLaunch(ctx, req); err != nil {
+						return out, err
+					}
+					out.Findings = append(out.Findings, r.ID+": recovered end of board launch")
+				}
 				continue
 			}
 			line := fmt.Sprintf("launch %d: board entry has no matching run record on this host", l.ID)
@@ -139,9 +176,72 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 		}
 		out.Findings = append(out.Findings, line)
 	}
+	active, err := s.List(ctx, ticket.ListFilter{Statuses: []ticket.Status{ticket.StatusInProgress}})
+	if err != nil {
+		return out, err
+	}
+	for _, t := range active {
+		if !byTicket[t.ID.String()] && out.Held[t.ID.String()] == "" {
+			out.Held[t.ID.String()] = "in-progress ticket has no local run; verify its branch and claim"
+			out.Findings = append(out.Findings, t.ID.String()+": "+out.Held[t.ID.String()])
+		}
+	}
+	co, err := c.coord()
+	if err != nil {
+		return out, err
+	}
+	prior, err := co.s.list("recovery-holds")
+	if err != nil {
+		return out, err
+	}
+	for id, reason := range out.Held {
+		if err := co.s.write("recovery-holds", id, reason); err != nil {
+			return out, err
+		}
+	}
+	for _, old := range prior {
+		if out.Held[old.name] == "" {
+			if err := co.s.remove("recovery-holds", old.name); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return out, err
+			}
+		}
+	}
 	c.ringOrphans(ctx, dir, "")
+	notify := filepath.Join(filepath.Dir(dir), "notify")
+	for _, r := range records {
+		if r.EndedAt != nil && r.BoardID == board && codeRole(notify, r.Owner()) {
+			if err := c.replayCode(ctx, dir, notify, r); err != nil {
+				return out, err
+			}
+		}
+	}
 	if err := c.recoverReviews(ctx, s, dir, board, records, &out); err != nil {
 		return out, err
+	}
+	if b, err := c.board(); err == nil && codeRole(filepath.Join(filepath.Dir(dir), "notify"), "planner") {
+		pending, err := b.PendingDeliveries(ctx, "")
+		if err != nil {
+			return out, err
+		}
+		for _, d := range pending {
+			if _, err = c.deliver(ctx, b, d.ID, ""); err != nil {
+				out.Findings = append(out.Findings, d.Goal+": "+err.Error())
+			}
+		}
+	}
+	if b, err := c.board(); err == nil {
+		pending, err := b.HasPendingGoalItem(ctx)
+		if err != nil {
+			return out, err
+		}
+		if pending {
+			h, err := runs.Webhook(filepath.Join(filepath.Dir(dir), "notify"), "chief-of-staff")
+			if err == nil && h.Exec != "" {
+				if err := c.wakeGoalInbox(ctx, b, dir, h); err != nil {
+					out.Findings = append(out.Findings, "chief wake pending")
+				}
+			}
+		}
 	}
 	slices.Sort(out.Findings)
 	return out, nil
@@ -267,7 +367,7 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			return err
 		}
 		note, head, qa := recoveryProof(d)
-		if head == "" {
+		if head == "" || d.Criteria != nil && d.Criteria.Review != head {
 			continue
 		}
 		key := qaReceiptID(id, note)
@@ -288,12 +388,22 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			continue
 		}
 		switch {
-		case pr.State == "MERGED" && qa == head && pr.HeadRefOid == head:
+		case pr.State == "MERGED" && qa == head && pr.HeadRefOid == head && (d.Criteria == nil || d.Criteria.QA == head && d.Criteria.Merge == head):
 			_, err = s.Transition(ctx, ticket.TransitionRequest{ID: t.ID, From: ticket.StatusInReview, To: ticket.StatusDone, Actor: "planner", ActorRole: "planner", ExpectVersion: d.Version, IdempotencyKey: key + "-merged", Note: fmt.Sprintf("Recovered QA closure for PR %d at %s", pr.Number, head)})
 			if err != nil {
 				return err
 			}
 			report.Findings = append(report.Findings, id+": verified review, QA and merged PR at "+head+"; closed")
+		case pr.State == "CLOSED" && d.Criteria != nil && d.Criteria.Merge == head:
+			b, err := c.board()
+			if err != nil {
+				return err
+			}
+			if _, err := b.ChangeCriteria(ctx, mongostore.CriteriaRequest{Verb: "closed-unmerged", ID: t.ID, Head: head, Actor: "planner"}, key+"-closed-unmerged"); err != nil {
+				return err
+			}
+			report.Held[id] = "PR closed without merging; released merge reservation"
+			report.Findings = append(report.Findings, id+": "+report.Held[id])
 		case pr.State != "OPEN":
 			report.Held[id] = "PR closed without matching merge evidence"
 			report.Findings = append(report.Findings, id+": "+report.Held[id])
@@ -311,6 +421,115 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			}
 			report.Findings = append(report.Findings, id+": review passed "+head+"; "+report.Held[id])
 		}
+	}
+	return nil
+}
+
+// Ordinary worker wakes share the same lease as startup recovery. Consume
+// only the events present before the look; a concurrent arrival stays pending.
+func (c *call) dispatchRuntimeLook(ctx context.Context, s ticket.Store, dir string, report *recoveryReport, force bool) error {
+	notify := filepath.Join(filepath.Dir(dir), "notify")
+	if !codeRole(notify, "planner") {
+		return nil
+	}
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	pending, err := co.s.list("planner-pending")
+	if err != nil {
+		return err
+	}
+	if !force && len(pending) == 0 {
+		return nil
+	}
+	if err := c.mayStart(); err != nil {
+		if errors.Is(err, ticket.ErrStopped) || errors.Is(err, ticket.ErrPaused) {
+			return nil
+		}
+		return err
+	}
+	cc := *c
+	cc.actor, cc.runCache = "planner", nil
+	out, err := cc.look(ctx, s, lookOpts{recovered: report, limit: -1, stall: ticket.DefaultStall, handouts: co, runs: dir, host: co.host})
+	if err != nil {
+		return err
+	}
+	cc.startSends(ctx, dir, &out)
+	if len(out.Judge) > 0 {
+		rules, _ := cc.standingRules()
+		cc.startJudge(ctx, &out, rules, co)
+	}
+	for _, sd := range out.Send {
+		if id := ticketInLine.FindString(sd.Line); id != "" {
+			co.dropHandout(id, sd.Bot)
+		}
+	}
+	if len(out.Errors) > 0 {
+		return errors.New(strings.Join(out.Errors, "; "))
+	}
+	if len(out.Send) > 0 {
+		return nil
+	}
+	for _, m := range pending {
+		if err := co.s.remove("planner-pending", m.name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+type lookOwnerKey struct{}
+
+func bootStamp() ([]byte, error) { return os.ReadFile("/proc/sys/kernel/random/boot_id") }
+func recordRecoveredBoot(root string) error {
+	stamp, err := bootStamp()
+	if err != nil {
+		return err
+	}
+	return writeWholeMode(filepath.Join(root, "recovered.boot"), stamp, 0600)
+}
+
+// Manual starts also run startup recovery if the system service has not run
+// in this Linux boot. Starts inside the lease share its current reconciliation.
+func (c *call) ensureRuntimeReady(ctx context.Context) error {
+	loc, err := c.location()
+	if err != nil || loc.boardID == "" {
+		return err
+	}
+	if ctx.Value(lookOwnerKey{}) == loc.boardID {
+		return nil
+	}
+	current, err := bootStamp()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(loc.localDir, "recovered.boot")
+	saved, err := os.ReadFile(path)
+	if err == nil && string(saved) == string(current) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	err = c.withLook(ctx, func(ctx context.Context) error {
+		b, err := c.board()
+		if err != nil {
+			return err
+		}
+		cc := *c
+		cc.actor = "planner"
+		if _, err = cc.reconcile(ctx, b, filepath.Join(loc.localDir, "runs"), loc.boardID); err != nil {
+			return err
+		}
+		return recordRecoveredBoot(loc.localDir)
+	})
+	if err != nil {
+		return err
+	}
+	saved, err = os.ReadFile(path)
+	if err != nil || string(saved) != string(current) {
+		return fmt.Errorf("%w: startup recovery owns the board", ticket.ErrPaused)
 	}
 	return nil
 }

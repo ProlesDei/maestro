@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -107,6 +108,10 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
@@ -237,6 +242,11 @@ var commands = []command{
 	{"alerts", runAlerts},
 	{"look", runLook},
 	{"recover", runRecover},
+	{"reconsider", runReconsider},
+	{"status", runRuntimeStatus},
+	{"cos", runCos},
+	{"wake", runWake},
+	{"criteria", runCriteria},
 	{"track-worker", runTrackWorker},
 	{"eta", runETA},
 	{"claim", runClaim},
@@ -671,6 +681,8 @@ func checkBody(s string) error {
 }
 
 func runCreate(ctx context.Context, c *call) error {
+	defaultRevision, _ := strconv.Atoi(c.env.Getenv("MAESTRO_BRIEF_REVISION"))
+	briefRev := c.fs.Int("brief-revision", defaultRevision, "accepted revision of a runtime goal")
 	title := c.fs.String("title", "", "one-line title (required)")
 	body := c.fs.String("body", "", "ticket body")
 	bodyFile := c.fs.String("body-file", "", "read the body from a file, or - for stdin")
@@ -727,7 +739,7 @@ func runCreate(ctx context.Context, c *call) error {
 			}
 		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
-			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
+			BriefRevision: *briefRev, Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
 			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from,
 			Parked: pk, Goal: strings.TrimSpace(*goal), Tier: strings.TrimSpace(*tier), Actor: c.actor, IdempotencyKey: c.idemKey,
 		})

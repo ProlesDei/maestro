@@ -248,7 +248,7 @@ func TestRunElsewhereOnASharedStore(t *testing.T) {
 // stay as they are. A field a reader never sees is tagged json:"-".
 func TestRecordJSONKeys(t *testing.T) {
 	want := []string{
-		"BoardID board_id,omitempty", "ActionID action_id,omitempty", "ActionHash action_hash,omitempty", "Estimate estimate_percent,omitempty", "Profile profile,omitempty", "Harness harness,omitempty",
+		"ACRevision ac_revision,omitempty", "BriefRevision brief_revision,omitempty", "DeliveryRun delivery_run,omitempty", "Delivery delivery,omitempty", "BoardID board_id,omitempty", "ActionID action_id,omitempty", "ActionHash action_hash,omitempty", "Estimate estimate_percent,omitempty", "Profile profile,omitempty", "Harness harness,omitempty",
 		"ID id", "Launcher launcher", "Ticket ticket,omitempty", "Limit limit", "Command command",
 		"Job job,omitempty", "Tickets tickets,omitempty", "ResumeOf resume_of,omitempty",
 		"AfterDeath after_death,omitempty", "AgainOf again_of,omitempty", "Overrides overrides,omitempty", "Nudge nudge,omitempty", "Dir dir", "StartedAt started_at",

@@ -20,6 +20,7 @@ type jobModel struct {
 	Effort   string  `json:"effort"`
 }
 type boundProfile struct {
+	Reserve   float64             `json:"reserve_percent,omitempty"`
 	Harness   string              `json:"harness"`
 	ConfigDir string              `json:"config_dir,omitempty"`
 	Identity  string              `json:"identity"`
@@ -44,9 +45,12 @@ func loadBindings(path string) (map[string]boundProfile, error) {
 
 var modelSlug = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
-func (c *call) bindProfile(st profileStatus, config, job, model, effort, role string, estimate float64) error {
+func (c *call) bindProfile(st profileStatus, config, job, model, effort, role string, estimate, reserve float64) error {
 	if _, ok := findJob(job); !ok || !modelSlug.MatchString(model) || !slices.Contains([]string{"low", "medium", "high", "xhigh", "max"}, effort) {
 		return usagef("profile bind: give an eligible --job, --model and --effort")
+	}
+	if reserve != -1 && (reserve < 0 || reserve > 100 || math.IsNaN(reserve)) {
+		return usagef("profile bind: reserve must be 0 to 100 percent")
 	}
 	if estimate < 0 || estimate > 100 || math.IsNaN(estimate) || role != "" && !runs.BotPattern.MatchString(role) {
 		return usagef("profile bind: invalid role or estimated allowance percentage")
@@ -84,6 +88,9 @@ func (c *call) bindProfile(st profileStatus, config, job, model, effort, role st
 	}
 	if p.Jobs == nil {
 		p.Jobs = make(map[string]jobModel)
+	}
+	if reserve != -1 {
+		p.Reserve = reserve
 	}
 	p.Plan = st.Plan
 	key := job

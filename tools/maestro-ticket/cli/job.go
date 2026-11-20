@@ -215,22 +215,23 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 
 // jobReq is one job to start, as runJob parses it or look builds it.
 type jobReq struct {
-	actionID, actionHash string
-	checkpoint           string
-	profile              string
-	kind                 jobKind
-	ids                  []string // ticket ids, as T-<n>
-	ticket               string   // a text job's ticket
-	text                 string   // the bot's text, for a text job
-	approved             string   // review
-	drop, dropWhy        string   // review
-	full                 bool     // review
-	model, effort        string   // overrides
-	limit                time.Duration
-	slots                int  // QA runs at once; 0 for the default
-	inherit              bool // a start no bot typed: it takes the launcher's last overrides
-	chainOf              string
-	hops                 int // a chained start: the run whose end starts it, and its hops
+	briefRevision                  int
+	actionID, actionHash, delivery string
+	checkpoint                     string
+	profile                        string
+	kind                           jobKind
+	ids                            []string // ticket ids, as T-<n>
+	ticket                         string   // a text job's ticket
+	text                           string   // the bot's text, for a text job
+	approved                       string   // review
+	drop, dropWhy                  string   // review
+	full                           bool     // review
+	model, effort                  string   // overrides
+	limit                          time.Duration
+	slots                          int  // QA runs at once; 0 for the default
+	inherit                        bool // a start no bot typed: it takes the launcher's last overrides
+	chainOf                        string
+	hops                           int // a chained start: the run whose end starts it, and its hops
 }
 
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
@@ -322,6 +323,9 @@ func runJob(ctx context.Context, c *call) error {
 func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, string, error) {
 	k, ids := req.kind, slices.Clone(req.ids)
 	fail := func(err error) (runs.Record, string, string, error) { return runs.Record{}, "", "", err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.mayStart(); err != nil {
 		return fail(err)
 	}
@@ -513,7 +517,21 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
 		}
 	}
-	rec := runs.Record{ActionID: req.actionID, ActionHash: req.actionHash, Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
+	rec := runs.Record{BriefRevision: req.briefRevision, Delivery: req.delivery, ActionID: req.actionID, ActionHash: req.actionHash, Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
+	if loc.boardID != "" && ticketID != "" {
+		t, err := c.ticketForJob(ctx, ticketID)
+		if err != nil {
+			return fail(err)
+		}
+		if t.Criteria != nil {
+			rec.ACRevision, rec.BriefRevision = t.Criteria.AC, t.Criteria.Brief
+			if k.name == "build" || k.name == "review" || k.name == "qa" {
+				if t.Criteria.Request != "" || t.Criteria.Disposition == "deferred" || t.Criteria.Disposition == "replaced" {
+					return fail(errors.New("work held for criteria revision"))
+				}
+			}
+		}
+	}
 	if k.ids {
 		rec.Tickets = ids
 	}
@@ -564,6 +582,23 @@ var jobStatuses = map[string][]ticket.Status{
 // handed the same job, one runs it.
 func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 	if want, ok := jobStatuses[k.name]; ok {
+		loc, err := c.location()
+		if err != nil {
+			return err
+		}
+		if loc.boardID != "" {
+			co, err := c.coord()
+			if err != nil {
+				return err
+			}
+			m, err := co.s.read("recovery-holds", id)
+			if err == nil {
+				return fmt.Errorf("%w: %s: %s", ticket.ErrPaused, id, m.body)
+			}
+			if !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
 		t, err := c.ticketForJob(ctx, id)
 		if err != nil {
 			return err
@@ -950,6 +985,9 @@ type againOpts struct {
 // and its bot may both run the same do: line.
 func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.needActor("job"); err != nil {
 		return fail(err)
 	}
@@ -1024,7 +1062,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
-		Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
 	// Once: of agains at once one makes the mark; a later one finds it
 	// naming the run it made. A start that fails takes it back.
 	co, err := c.coord()
@@ -1140,6 +1178,9 @@ type resumeOpts struct {
 // run died; with opus, on Opus at high effort.
 func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.needActor("resume"); err != nil {
 		return fail(err)
 	}
@@ -1162,6 +1203,18 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		return fail(fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r)))
 	case o.died && r.State != runs.Died && !r.LauncherStopped():
 		return fail(fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State))
+	}
+	if o.opus && r.Profile != "" {
+		if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(filepath.Join(filepath.Dir(dir), "notify"), "senior-engineer") {
+			return fail(usagef("resume --opus requires a junior build and a served senior engineer"))
+		}
+		if info, e := os.Stat(r.Dir); e != nil || !info.IsDir() {
+			return fail(errors.New("saved build worktree unavailable"))
+		}
+		k, _ := findJob("build")
+		cc := *c
+		cc.env.Dir = r.Dir
+		return cc.startAs(ctx, dir, "senior-engineer", jobReq{kind: k, ids: []string{r.Ticket}, chainOf: r.ID, hops: r.Hops + 1, checkpoint: r.ID})
 	}
 	session := r.SessionID
 	if session == "" {
@@ -1238,7 +1291,7 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
 		if errors.Is(err, ticket.ErrStatusConflict) {

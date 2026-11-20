@@ -204,6 +204,12 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	r.State, r.PID, r.Stamp = Running, cmd.Process.Pid, Stamp(cmd.Process.Pid)
 	if o.OnStart != nil {
 		r.LaunchID = o.OnStart(r)
+		if r.BoardID != "" && r.LaunchID == 0 {
+			killGroup(r.PID, syscall.SIGKILL)
+			cmd.Wait()
+			r.PID = 0
+			return fail(errors.New("board did not accept the native launch"))
+		}
 	}
 	if err := Save(dir, r); err != nil {
 		killGroup(r.PID, syscall.SIGKILL)

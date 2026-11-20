@@ -376,14 +376,15 @@ type Claim struct {
 
 // Ticket is one unit of work.
 type Ticket struct {
-	ID        ID     `json:"id"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	Type      Type   `json:"type"`
-	Status    Status `json:"status"`
-	Role      string `json:"role"`
-	Priority  int    `json:"priority"`
-	CreatedBy string `json:"created_by"`
+	Criteria  *Criteria `json:"criteria,omitempty"`
+	ID        ID        `json:"id"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	Type      Type      `json:"type"`
+	Status    Status    `json:"status"`
+	Role      string    `json:"role"`
+	Priority  int       `json:"priority"`
+	CreatedBy string    `json:"created_by"`
 	// Owner asked for the work. On scout tickets the owner sets done.
 	Owner string `json:"owner"`
 	// Tries counts send-backs from review and QA.
@@ -539,15 +540,16 @@ type Event struct {
 // backlog, todo (default) or blocked; a ticket created blocked returns to
 // todo. Owner defaults to the actor.
 type CreateRequest struct {
-	Title     string   `json:"title"`
-	Body      string   `json:"body"`
-	Type      Type     `json:"type"`
-	Role      string   `json:"role"`
-	Priority  *int     `json:"priority,omitempty"`
-	Status    Status   `json:"status"`
-	Owner     string   `json:"owner"`
-	DependsOn []ID     `json:"depends_on,omitempty"`
-	Areas     []string `json:"areas,omitempty"`
+	BriefRevision int      `json:"brief_revision,omitempty"`
+	Title         string   `json:"title"`
+	Body          string   `json:"body"`
+	Type          Type     `json:"type"`
+	Role          string   `json:"role"`
+	Priority      *int     `json:"priority,omitempty"`
+	Status        Status   `json:"status"`
+	Owner         string   `json:"owner"`
+	DependsOn     []ID     `json:"depends_on,omitempty"`
+	Areas         []string `json:"areas,omitempty"`
 	// SplitFrom names the ticket this one splits or rewrites. The new
 	// ticket starts with its tries, so a rewrite can't reset the count
 	// that sends repeated send-backs up.

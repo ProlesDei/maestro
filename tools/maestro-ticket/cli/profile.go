@@ -60,6 +60,7 @@ func runProfile(ctx context.Context, c *call) error {
 	job := c.fs.String("job", "", "eligible job for a binding")
 	model := c.fs.String("model", "", "approved model for the job")
 	effort := c.fs.String("effort", "", "approved reasoning effort for the job")
+	reserve := c.fs.Float64("reserve-percent", -1, "allowance points kept for the owner in each window")
 	estimate := c.fs.Float64("estimate-percent", 0, "estimated allowance points per job in each window")
 	role := c.fs.String("role", "", "eligible launcher for this job")
 	window := c.fs.String("window", "", "manually observed window name")
@@ -92,10 +93,24 @@ func runProfile(ctx context.Context, c *call) error {
 		if st.identity != p.Identity {
 			return errors.New("profile sample: login changed")
 		}
-		if *window != "" || *reset != "" || *used != -1 {
-			return c.recordUsage(alias, *window, *reset, *used)
+		if st.Plan != p.Plan {
+			return errors.New("profile sample: subscription changed")
 		}
-		return c.copyNativeUsage(st)
+		marker := filepath.Join(filepath.Dir(path), "account-"+alias+".login")
+		if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if *window != "" || *reset != "" || *used != -1 {
+			err = c.recordUsage(alias, *window, *reset, *used)
+		} else {
+			err = c.copyNativeUsage(st)
+		}
+		if err == nil {
+			if loc, e := c.location(); e == nil && loc.boardID != "" && codeRole(filepath.Join(loc.localDir, "notify"), "planner") {
+				c.refill(ctx, filepath.Join(loc.localDir, "runs"))
+			}
+		}
+		return err
 	}
 	bind := len(c.args) == 2 && c.args[0] == "bind"
 	if bind {
@@ -120,7 +135,7 @@ func runProfile(ctx context.Context, c *call) error {
 		return err
 	}
 	if bind {
-		if err = c.bindProfile(st, *dir, *job, *model, *effort, *role, *estimate); err != nil {
+		if err = c.bindProfile(st, *dir, *job, *model, *effort, *role, *estimate, *reserve); err != nil {
 			return err
 		}
 	}
