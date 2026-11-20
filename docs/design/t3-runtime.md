@@ -1,7 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v8, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. Nothing here is built.
-**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
+**Status:** draft v9, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. Nothing here is built.
+**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 14.3: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
@@ -11,11 +11,12 @@
 4. The chief of staff is one or more **desk** threads in T3 Code. The owner talks only to desks, from the T3 app on the phone over Tailscale (5.5). Desks sit behind a wall: no worker session can type into one, and a desk reaches the board only through `maestro-ticket cos <verb>`.
 5. Several desks can run at once. Each owns its goals by a 24-hour lease, and all read one small desk state, so each knows what the others do. **The first desk opened has duty**; when it closes or its lease lapses, the next-oldest live desk takes it, atomically (5.4). The duty desk gets what no desk owns and alone changes board-wide settings.
 6. Code tells, Claude decides. Code sorts each inbox item as *owner*, *desk* or *fyi*. Only *owner* and *desk* items wake a desk, and a reminder about a card is a push from code, not a model turn (5.2).
-7. The runs get cheaper: Sonnet 5.5 for four jobs, each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that review and build query, re-indexed on every merge (section 14).
+7. The runs get cheaper: Sonnet 5.5 for four jobs, each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that code queries for the runs (point 12, section 14).
 8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
 9. One push channel: T3 Connect, linked **publish-only**, so no tunnel and no cloudflared. Access is Tailscale only. If the relay is down, the failure is shown wherever the owner looks next, and a daily heartbeat push makes silence noticeable. There is no second channel (5.5).
 10. Cleanup is code. A nightly janitor, also started when free space or inodes fall under 20%, frees what is safe before claims are refused at 10%. Each run gets its own TMPDIR and a 4 GB memory cap, so one heavy build fails alone (6.4).
 11. QA tests in parallel: one headless Chromium and one copy of the app per QA run, `qa_slots` of them (4 on a 32 GB PC, guess), in the run's memory scope, which is stopped at the run's end. A shim caps browsers and refuses `close-all` (6.5).
+12. Code queries the code graph; runs read a pack. Before build, review and QA, code writes a capped pack: changed symbols, their callers, the blast radius, and the pages a change reaches. It is at most 2,000 tokens, and 400-1,400 on real PRs **[box]**. Each repo's index is rebuilt on every merge in about 3 seconds, with an overlay for each PR. Runs load no MCP server by default, and `rules set graph off` turns it all off (14.3).
 
 ```mermaid
 flowchart LR
@@ -111,7 +112,7 @@ flowchart TD
   END --> D["Needs a person<br/>usage_limit, disk_full, died twice,<br/>goal done, cause, a fault line,<br/>a card, a design card, a QA question"]
   A --> RUN["Next Claude run, as that role"]
   B --> FILL["Builds for the next tickets"]
-  B --> IDX["merged: re-index the code graph<br/>local CPU, 0 tokens (14.3)"]
+  B --> IDX["merged: graph reindex, coalesced<br/>local CPU, about 3 s, 0 tokens (14.3)"]
   C --> LOCK{"Look lock free?"}
   LOCK -- yes --> JUDGE["look --judge<br/>a Claude judge session"]
   LOCK -- no --> DIRTY["planner-dirty is set; return"]
@@ -121,11 +122,11 @@ flowchart TD
 
 | Line | Code does |
 |---|---|
-| `build`, `review`, `qa`, `live`, `design <id>` | Starts it as that role. Today `chainLine` takes only the first three **[code]** `tools/maestro-ticket/cli/chain.go:29`. QA starts only into a free QA slot (3.3). |
+| `build`, `review`, `qa`, `live`, `design <id>` | Starts it as that role. Today `chainLine` takes only the first three **[code]** `tools/maestro-ticket/cli/chain.go:29`. QA starts only into a free QA slot (3.3). A build starts with its graph pack; review and QA build theirs in their prep scripts (14.3). |
 | `review <id> --approved <sha> --drop …` from a judge | Starts that review |
 | `do: resume <run> --died`, `--go-on`, `job again <run>` | Runs it, as now **[code]** `tools/maestro-ticket/cli/chain.go:169` |
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Runs it. Fixed shapes too; the grammar still allows no rules write. |
-| `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304`. `merged` also re-indexes the graph (14.3). |
+| `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304`. `merged` also runs `graph reindex <repo>` under `graph.lock`, dirty first, so a burst of merges makes one or two indexes, not one each (14.3). |
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | One `look --judge`, under the look lock (3.2). A stop someone asked for is not a no-verdict strike (3.3). |
 | `usage_limit`, `goal <slug> done` | Into the inbox as **fyi**: no wake; the next desk turn and `desk brief` show it (5.2) |
 | `disk_full` | **fyi** if the latest janitor pass left free space above the margin, else **desk** (6.4) |
@@ -247,7 +248,7 @@ sequenceDiagram
 | `plan` (goal on stdin), `rule <id>`, `resume <run-id>` | `job plan`, `job rule`, `resume`, as `planner` |
 | `look` | `look --judge --report`, as `planner`. It also restarts a quiet board after a reboot or an outage. |
 | `rules show` | as `chief-of-staff` |
-| `rules set limit <n>`, `rules set qa_slots <n>`, `rules set model <job> <model>`, `rules add`, `rules drop <n>`, `stop`, `start` | **the duty desk only**, checked under the duty lock (5.4), as `chief-of-staff`, which `rulesWriters` already allows **[code]** `tools/maestro-ticket/cli/rules.go:48`. Another desk gets `refused: duty desk is <name>`, and sends it a note. |
+| `rules set limit <n>`, `rules set qa_slots <n>`, `rules set model <job> <model>`, `rules set graph off\|pack\|live` (14.3), `rules add`, `rules drop <n>`, `stop`, `start` | **the duty desk only**, checked under the duty lock (5.4), as `chief-of-staff`, which `rulesWriters` already allows **[code]** `tools/maestro-ticket/cli/rules.go:48`. Another desk gets `refused: duty desk is <name>`, and sends it a note. |
 | `ask` (question on stdin) | a `/maestro-chief-of-staff` run on the worker side; its answer comes back through the inbox, to the desk that asked |
 | `list`, `get`, `events`, `goals`, `flow`, `eta`, `costs` | as today's commands, as `chief-of-staff` |
 
@@ -436,7 +437,7 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
    ```
    With interop off and no drives mounted, a worker can't run `t3.exe`, `cmd.exe` or `powershell.exe`, or read `C:`.
 2. Users: `paul` (the owner, in `sudo`), `maestro` and `maestro-cos` (neither in `sudo`), homes at mode 0700. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo -f /etc/sudoers.d/maestro`.
-3. Build `maestro-ticket` as `paul` and install it as `/usr/local/bin/maestro-ticket`, `root:root`, mode 0755. **Neither side may be able to write the binary:** the wake rule runs it as `maestro-cos`, so a worker that could replace it could run anything on the desk side. The same goes for `@playwright/cli` in `/opt/pw` and the `playwright-cli` shim in `/usr/local/bin` (6.5).
+3. Build `maestro-ticket` as `paul` and install it as `/usr/local/bin/maestro-ticket`, `root:root`, mode 0755. **Neither side may be able to write the binary:** the wake rule runs it as `maestro-cos`, so a worker that could replace it could run anything on the desk side. The same goes for `@playwright/cli` in `/opt/pw` and the `playwright-cli` shim in `/usr/local/bin` (6.5), and for `codebase-memory-mcp` in `/usr/local/bin` (14.3).
 4. systemd units, each `Restart=on-failure`:
    - `maestro-t3-cos.service`: `User=maestro-cos`, `t3 serve --host 127.0.0.1 --port 3773 --no-browser`, `MemoryMax=3G` (5.5);
    - `maestro-boot.service` (oneshot, `User=maestro`): a code-only `look` after a boot, with no `--judge`, so dead runs and free slots are seen without a model turn, and `desk brief` shows `rebooted at …`;
@@ -506,6 +507,7 @@ Today nothing frees disk on its own. On low disk, `claim` and `slot` refuse (`lo
 | Build caches | each tool's own prune, once its cache passes a cap (5 GB for Go, 2 GB for the rest, guess): `go clean -cache`, `pnpm store prune`, `uv cache prune`, `pip cache purge`, `npm cache clean --force` | — |
 | `/var/backups/maestro` (17.4) | over 14 nights old | the newest 14 |
 | Browsers (6.5) | a playwright daemon or Chromium in no live run scope, over 20 minutes old; a session's `.err` or `.session` file with no live daemon, a day old | anything in a live run's scope |
+| Graph overlays (14.3) | `<repo>~T-<n>` once its ticket is done or cancelled, or untouched for 3 days: `delete_project`, about 20 MB each **[box]** | each repo's main index; an overlay a live run's prep made |
 
 - **Idempotent.** One janitor at a time, under `flock` on `janitor.lock`. It checks each item again just before removing it. An item already gone counts as removed by someone else. It never deletes a `*.lock`. A second run frees nothing new.
 - **Logs.** It writes one journal line per class, such as `janitor: tmp 4.1 GB 180k files (212 dirs); worktrees 0.2 GB (3); kept T-572 dirty`, and one file, `<store>/janitor.json`, with `at`, `freed_bytes`, `freed_inodes`, the free space and inodes after, and `failed`.
@@ -603,6 +605,7 @@ QA checks every screen in a browser of its own, and several QA runs go at once. 
 **3. The app under test.** Parallel browsers help only if each run has its own app.
 - **Agency-ops does.** Each QA run copies the demo clients to its own `mktemp -d` and starts the dashboard on a free port **[box]** (agency-ops' `.maestro/project/project-setup.md:59-60`). It serves `website/` on port 0 (`:67`). Its test data is fixtures and per-run mongo-memory-server copies (6.4). N runs means N instances, so nothing changes.
 - **Every project needs the same.** It must start twice at once with no fixed port, `.env` or container name `INSTALL.md:64`. It needs its own data and accounts, with shared accounts read-only `test-a-pr.md:31`. The install asks for two at once; on the desktop `qa_slots` copies run, so S11 starts that many.
+- **Which pages to open.** QA's pack (14.3) lists the pages a change reaches, found by walking imports up to `app/**/page.tsx`, or says `no page reached`. QA opens those pages first, then any others its criteria name. It doesn't skip a page because the pack leaves it out: the graph misses framework wiring **[box]**.
 - **A project with one shared instance gains nothing.** BDS's `bds-dev` has one checkout; one coordinator leases it and loads one conflict-free wave of branches at a time **[box]** `~/t3work/breakdown/repo-harness/skills/dev-host/SKILL.md:9,21`. BDS stays on `grok-bot-vm` (17.3, question 6). If a project like that comes to Maestro, its `## QA` wraps load-and-test in `maestro-ticket slot --name <host> --max 1` **[code]** `cli/cli.go:146`, so its QA runs queue on the host while other projects' runs go on.
 
 **4. Resources.**
@@ -671,14 +674,16 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 
 | File | Change |
 |---|---|
-| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"** (14.3). |
+| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"**, code builds the packs, and runs load no MCP server unless `rules set graph live` (14.3). |
 | `AGENTS.md` | "What we're building": the outer layer is the desks plus code; Grok is one supported runtime |
 | `README.md`, `docs/team.mermaid`, `docs/bot-anatomy.mermaid` | redraw for served roles, desks and the wall |
 | `bot-profiles/chief-of-staff/persona.md` | rewrite for desks: the `cos` and `desk` verbs, duty, the handoff note, the card shape, the 12-line reply. Procedures move to the skill. |
 | `bot-profiles/planner/persona.md` | becomes the spec the code relay follows, and the Grok persona if a team keeps one |
 | `bot-profiles/team-rules.md`, `routine.md` | Grok bots only; desks get their own short rules |
 | `skills/maestro-chief-of-staff`, `skills/maestro-planner` | stop calling their caller "the bot"; the CoS skill holds the long procedures |
-| `skills/maestro-code-review`, `skills/maestro-software-engineer`, `skills/maestro-code-review/passes.md` | the graph lines (14.3); subagents in the foreground with a model named (14.1); the light route's bar to tier ≤ 1 |
+| `skills/maestro-code-review`, `skills/maestro-software-engineer`, `skills/maestro-code-review/passes.md` | the graph lines (14.3): Phase B step 3 and the engineer's step 2 read `graph.md` before any `git grep`; Phase C step 4 takes callers' code from it; passes 8 and 9 read it beside `code.md`; `risk=` feeds the tier rule. Subagents in the foreground with a model named (14.1); the light route's bar to tier ≤ 1 |
+| `skills/maestro-code-review/scripts/review-prep.sh`, `skills/maestro-qa-lead/scripts/qa-prep.sh`, `skills/maestro-qa-lead/SKILL.md`, `skills/maestro-planner/references/plan.md` | the prep scripts index the overlay and write `graph.md`, with `risk=` and, for QA, `graph_conflict=` and `pages=`; QA opens the pack's pages first; the planner runs `graph size` for each drafted ticket (14.3) |
+| `INSTALL.md` step 7, `scripts/install.sh` | the pinned v0.12.1 binary and its sha256; never its `install` or `update`; watchers and UI off in its config; `check` warns on a different version or a watcher left on (14.3) |
 | `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | ask for a runtime (Grok or T3); print the sudoers lines; build the desks' `CLAUDE.md`, hooks and the pager's three lines; idempotent |
 | `docs/desktop-setup.md` (new) | 6.2 and 16.2: the distro, `wsl.conf`, `.wslconfig`, Tailscale, the startup task, the power plan, the units; the no-native-agents rule (6.3) |
 | `templates/project-setup.md` | a `## Runtime` section and a `## Env` section |
@@ -703,7 +708,7 @@ flowchart LR
 
 | Step | Needs | Rollback |
 |---|---|---|
-| 0. Token knobs and fixes | S0, S7 | `rules set model <job> opus`; revert the skill lines |
+| 0. Token knobs and fixes | S0, S7, S12 | `rules set model <job> opus`; `rules set graph off`; revert the skill lines |
 | 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
 | 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
 | 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, S11, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
@@ -724,7 +729,8 @@ flowchart LR
 | S10 | Cleanup (6.4): per-run TMPDIR, `janitor` with `--dry-run` and `--if-low`, the timer, `headroom`'s kick, the desk-class `disk_full`, per-run memory scopes, the `tmp_bytes`, `tmp_files` and `mem_peak` stats, and the brief's `disk:` line | `--dry-run` lists and removes nothing; a second pass frees nothing; a dirty worktree, an unacked run's TMPDIR and a live run's cwd survive; filling the disk past the 20% line (`fallocate`) starts the janitor within 5 minutes, and it frees space before any claim is refused; with nothing left to free, one **desk** `disk_full` item; a run that allocates 5 GB is killed alone at 4G, its scope shows `oom_kill`, and the other runs and T3 keep going |
 | S11 | Browsers (6.5): Node, Playwright's libraries and fonts, `@playwright/cli` in `/opt/pw` and the shim; `PLAYWRIGHT_CLI_SESSION` set, and `DISPLAY` and `WAYLAND_DISPLAY` dropped, by the environment builder; each run's scope stopped at its end; `oom_kills`; the janitor's browser class; `qa_slots` from the PC's RAM | `qa_slots` QA runs on one board at once each open their own session and their own app on their own port, and all finish; `close-all`, `kill-all` and `-s=default` are refused; a command with no `-s` lands in the run's session; the open past the cap waits, then gets `browser cap`; after a run killed mid-test ends, none of its Chromium, daemon or servers is left; `--headed` from a run fails; a stale `.err` and a daemon outside any scope for 20 minutes are reaped, and a live run's are kept; a CJK and emoji page's screenshot shows no empty boxes |
 | S6 | The rewrite (section 9) | review |
-| S7 | `rules set model <job>`; review subagents in the foreground with a model named; 5-minute cache for build and QA; graph wiring and re-index on merge; `again` for a cold resume (section 14) | each eval set in 14.2 passes before its job moves to Sonnet |
+| S7 | `rules set model <job>`; review subagents in the foreground with a model named; 5-minute cache for build and QA; `again` for a cold resume (section 14; the graph is S12) | each eval set in 14.2 passes before its job moves to Sonnet |
+| S12 | The graph (14.3): `maestro-ticket graph pack, size, impact, callers, reindex, status`, a stdio client of `codebase-memory-mcp`; the main checkout per repo and `graph.json`; `reindex` on `merged` under `graph.lock`; overlays from the prep scripts; `risk=`, `graph_conflict=`, `pages=`; `--strict-mcp-config` in `job`; `rules set graph`; the stats columns; the janitor's overlay class and the stale check; the brief's `graph:` line | a pack never passes its job's cap, and a 61-file PR's pack ends with `… more`; a function only an array registers shows `0 graph callers` with its `git grep` hit; ten `merged` lines in a minute make at most two indexes; after a merge, `graph status` shows the new sha within 15 minutes; an overlay goes once its ticket is done; with `graph off`, no pack is written and no run starts the server; with `pack`, a run's process list holds no `codebase-memory-mcp`; G passes before `pack` is the default |
 | S8 | `desk` command: open, close, claim, release, beat, note, remember, brief, ring, page; the duty check; the three hooks | two desks claim one goal and one wins; a desk silent for 24 h loses its goals to the duty desk; the first desk opened has duty; closing it gives duty to the next-oldest live desk, and a lapsed lease does too at the next desk event; 5 desks racing 1,000 duty checks leave one holder per epoch in `duty.log`; a `rules set` that holds the lock finishes before a takeover, and the old holder's next one is refused; a failed ring send moves duty at once; `brief` shows `duty:` and stays under 40 lines with 5 desks; `ring` wakes only the owning desk |
 
 | Claim | Label | Probe |
@@ -757,6 +763,12 @@ flowchart LR
 | The playwright daemon stays in its run's `--user` scope after it detaches, and stopping the scope ends it | [docs] cgroup v2; in WSL (guess) | 16.3 step 5c |
 | Playwright's Ubuntu 24.04 libraries install in WSL, and its fonts draw CJK and emoji | the list **[code]**; the result (guess) | 16.3 step 5c |
 | `qa_slots` × 3G fits half the slice | **[I]** from 6.4's estimate | a week of QA runs' `mem_peak` and `oom_kills` |
+| An index takes about 3 s, and again after a merge under 4 s, on the desktop | **[box]** on the VM (14.3 table); desktop (guess) | 16.3 step 5d |
+| Packs stay at 400-1,400 tokens for most PRs, and the cap cuts the rest | **[box]**: a prototype on 4 merged PRs | a week of `pack_tokens` by job |
+| Packs remove 40% of build and review explore turns, 25% of QA's, 15% of plan's | (guess); the explore spend is **[box]** | eval G, then the two-week even/odd guard (14.3) |
+| `compare_graphs` between the main index and an overlay gives a usable `new calls:` line | (guess): the tool is there **[box]**; its output on a PR wasn't read | one merged PR's overlay against main; keep the line only if it is under 200 tokens |
+| A run with `--strict-mcp-config` and the repo's other servers keeps them and drops only the graph | the flags **[box]**; the behaviour (guess) | S12: one run's tool list and process list |
+| The page walk finds every page QA tests | **[box]** on one file (4 pages); recall (guess) | eval G's 10 screen PRs |
 
 ## 12. Later: what the audits found for scale
 
@@ -841,22 +853,119 @@ Each Sonnet move waits on its own set. The sets live in `docs/evals/` as fixed i
 | S | status-only rule | 20 status-only rulings with their Opus calls | ≥ 90% the same call; no ticket closed that Opus kept open | ~$2 (guess) |
 | B | wider junior builds | 10 recent senior tickets the new junior tag would cover, rebuilt by a junior Sonnet run in a scratch worktree and reviewed as usual | ≤ 2 of 10 sent back, and no blocker the Opus build didn't have | ~$20 (guess) |
 | L | tier 0-1 review | 20 tier-1 diffs with their full-review findings | every blocker found | ~$5 (guess) |
+| G | graph packs on (`rules set graph pack`, 14.3) | 20 recent reviews of tiers 1-2 with their blockers, re-run with the pack; 10 merged PRs that changed screens, with the pages QA tested (from their evidence) | every blocker still found, no new wrong blocker, turns a review down 15% or more (guess); the pack's pages hold every page QA tested on at least 9 of 10 | ~$10 (guess) |
 
-A job that fails its set stays on Opus. A job already moved whose live guard slips for a week goes back with `rules set model <job> opus`, and the duty desk's brief says so.
+G gates no model move: it gates whether packs go on. A job that fails its set stays on Opus. A job already moved whose live guard slips for a week goes back with `rules set model <job> opus`, and the duty desk's brief says so.
 
-### 14.3 The code graph, used for real
+### 14.3 The code graph: code queries it, runs read a pack
 
-Today `codebase-memory-mcp` starts in every agency-ops session and is never called: 0 organic calls in 2,136 sessions, and an empty index **[box]** (`token-plan-report.md` §4).
-- **Index once.** Index the main checkout, not worktrees or `/tmp` copies. Set `CBM_ALLOWED_ROOT` to its absolute path, so a worktree or `/tmp` session can query it (today `'.'` refuses `/tmp`). On the desktop that is `/home/maestro/src/blitzlink-agency-ops`, on ext4, indexed fresh (17.2).
-- **Re-index on merge** (decided 2026-11-19). On a `merged` line the relay runs an incremental `index_repository` in the supervisor (3.1): local CPU, no tokens. **This reverses T-136's "no hooks/refresh"**; decisions.md records the reversal (section 9). It is still no session hook: it runs in the supervisor.
-- **Who queries it:**
-  - Review's code pack (`maestro-code-review` Phase C step 4) gets callers and changed functions from `trace_path` and `get_code_snippet`.
-  - `passes.md:3` changes "search for the name" to `search_graph`, then `get_code_snippet`.
-  - The red team and skeptic subagents query the graph instead of re-exploring.
-  - The senior engineer's Files and Hazards plan step gets callers from `trace_path`.
-  - Plan, judge, QA and the desks don't query it.
-- **Fallback.** Each skill line is conditional: without the tools it greps, so BDS is unaffected.
-- **Measure.** Stats count MCP calls per run. Compare reads per review on 20 reviews with the graph and 20 without. About $50-90/week if it removes a tenth of build and review turns (guess).
+Today `codebase-memory-mcp` starts in every agency-ops session and is never called: 0 organic calls in 2,136 sessions, and an empty index **[box]** (`token-plan-report.md` §4). v9 turns that around. **Code queries the graph before a run starts, and the run reads a small, capped pack.** By default no run loads the MCP server at all.
+
+**What the tool is** **[box]**, v0.12.1, the version agency-ops' `.mcp.json` pins. Maestro installs none: `install.sh` checks only that `.mcp.json` registers one and that it is on `PATH` **[code]** `scripts/install.sh:448-456`.
+- **It runs from code, with no model.** Each of its 17 tools is also a command: `codebase-memory-mcp cli <tool> --flag value`, or JSON on stdin, with `--json` for the raw MCP result. Its stdio server also answers a plain JSON-RPC client: a 40-line script ran 21 queries in one 1.2 s session.
+- **Two tool profiles.** `--tool-profile=scout` exposes 8 read-only tools, and `analysis` exposes 13. Neither can index or delete.
+- **Leave out `install` and `update`.** `install` writes configs for 45 clients, with the hooks INSTALL.md step 7 leaves out (`--help`).
+
+| Tool | Returns | Maestro uses it for |
+|---|---|---|
+| `index_repository` | indexes a path under a name, `full`, `moderate` or `fast`; unchanged files are skipped | the main index and the overlays (3 below) |
+| `detect_changes` | a git diff against a base: changed files, the symbols in its hunks, inbound impact to a depth, modules. `scope=tests` is marked experimental | a pack's changed symbols and blast radius |
+| `trace_path` | callers and callees to a depth; `include_tests` marks test callers; also `data_flow`, `cross_service`, `topology` modes | callers; untested functions where tests are indexed |
+| `get_code_snippet` | one symbol's source, bounded; large containers come back as outlines | caller code in a pack |
+| `query_graph` | read-only Cypher | QA's page walk; `graph size` |
+| `compare_graphs` | the nodes and edges one snapshot adds or drops against another | a pack's `new calls:` line (probe, 11) |
+| `search_graph`, `search_code`, `get_file_outline`, `get_architecture`, `get_graph_schema` | symbols by BM25, regex or degree; graph-ranked text search; a file's declarations; languages, packages, entry points, cycles; label and edge counts | queries in `live` mode (5 below); not in packs |
+| `list_projects`, `index_status`, `check_index_coverage`, `delete_project` | projects and sizes; counts and `indexed_at`; per-path freshness; delete | `graph status`, the janitor |
+| `manage_adr`, `ingest_traces` | an ADR kept with the index; runtime call traces | unused: decisions live in `docs/decisions.md`, and no traces are collected |
+
+**Measured** **[box]**, `grok-bot-vm`, 2026-11-20: scratch clones in `/tmp` with their own cache dir, deleted after; load 3-7 on 8 CPUs.
+
+| Repo | Files, lines | Full index | Again, no change | After one merge | Nodes, edges | Index size | Peak RSS |
+|---|---|---|---|---|---|---|---|
+| agency-ops | 579, 63k | 2.6 s | 1.3 s | 2.3-3.3 s | 7,054, 17,280 | 22 MB | 127 MB |
+| blitzlink | 1,765, 314k | 5.3 s | 1.3 s | — | 17,788, 55,533 | 52 MB | 198 MB |
+| maestro | 303, 64k | 2.6 s | — | — | 4,874, 26,231 | 19 MB | — |
+
+- **Overlays.** A PR's head, indexed under a name of its own, took 2.4-3.6 s. The same name, moved to a new worktree at the same commit, took 1.5 s. `fast` and `moderate` keep only 1,254 of agency-ops' 7,054 nodes; `full` costs a second more, so packs use it.
+- **Latency.** A one-shot `cli` call takes about 1 s, since it starts a daemon. A stdio session takes 0.9 s to start, then tens of milliseconds a query.
+- **Output sizes.**
+  - PR #398, 4 files: its blast radius is 0.8 KB, and 3.0 KB with its 16 changed symbols.
+  - One function's callers and callees: 0.3-0.4 KB. A 21-line function's source: 1.1 KB. `get_architecture`: 4.3 KB.
+  - Every tool cuts at `max_output_tokens`, 3,200 by default, counted at 4 bytes a token.
+- **A prototype pack.** It held changed symbols with their callers, the blast radius and the callers' code. For 4 merged PRs of 1-24 files it came to **about 400-1,400 tokens**, built in 1.1-2.8 s. Maestro's 61-file PR #95 has 757 changed symbols and a blast radius of 472, so a pack must rank and cut.
+- **What the graph misses.**
+  - **Framework wiring.** Two of PR #398's functions have no inbound edges, even counting `USAGE`: a Payload hook registered in an array (`beforeOperation: [giveNewUploadAFreeName]`) and a plugin in `plugins`. `git grep -w` finds both.
+  - **Dead code.** 28 functions outside entry points have no inbound edges. 27 of them are named elsewhere in the code (JSX components, hooks), so 96% are false.
+  - **Short names.** `trace_path fail` found Go functions named `fail`, not the shell one meant. A qualified name is exact.
+  - **Pages.** Its `Route` nodes are only URLs that code calls (14 in agency-ops), not Next.js pages. Walking `IMPORTS` up from a changed file to `app/**/page.tsx` does work, once a folder import (`@/components/home/hero`) is mapped to its `index.tsx`: `media/loader.ts` reaches 4 pages in 21 queries and 1.2 s.
+  - **Tests.** `detect_changes scope=tests` answered `run_all`. In Go, `trace_path include_tests` marks test callers: 4 of `moveStale`'s 5 callers are in test files. Agency-ops has almost no test files.
+  - **Allowed root.** `CBM_ALLOWED_ROOT` limits indexing only; queries and snippets work outside it.
+- **What a session pays for the server today.**
+  - Claude Code defers its tool schemas. Each session holds the 17 tool names and the server's 309-character instructions: about 1 KB, or 250-300 tokens (50 of 50 recent agency-ops sessions).
+  - Loaded whole, the schemas are 22 KB, about 5.6k tokens; `scout`'s 8 are 10 KB.
+  - Each session starts its own server process, at 2-13 MB.
+
+**1. The pack: code does the querying, 0 tokens.** `maestro-ticket graph pack <id> --job <job>` writes `graph.md` and prints one line, such as `graph: pack 610 tok · 11 changed · blast 9 · 2 pages · index current`. It runs where Maestro already does fixed steps in code: `review-prep.sh` and `qa-prep.sh` call it once they have made the worktree, and `job build` calls it before the session starts. No session spends a turn on it.
+
+| Job | The pack holds | Cap | What it replaces |
+|---|---|---|---|
+| Plan; a rule that splits or plans | No pack, since there is no diff. Per drafted ticket, one line from `graph size --areas <paths> [--symbols <names>]`: files and symbols, callers outside the areas, high-risk paths reached, and open tickets that reach the same symbols | 100 tokens a ticket | splits, deps and tiers sized by eye; an overlap means a dep or one ticket |
+| Junior, senior build | From the main index, for the ticket's `areas` and the symbols it names: each symbol's direct callers (`file:line`), the high-fan-in ones as hazards, and the tests that call them. On a kickback, from the overlay | 1,500 | step 2 of `maestro-software-engineer`, "every caller, reader and writer", found by grep |
+| Review | From the overlay: each changed function's callers (hop 1 listed, hop 2 counted); the blast radius, ranked by fan-in; the callers' code outside the diff, for `code.md`; changed functions that no test calls; high-risk paths reached | 2,000 | Phase B step 3, blast radius; the callers half of Phase C step 4's code pack |
+| Red team, skeptic | the same `$C/graph.md`, read beside `code.md` | 0 more | re-exploring; pass 8 already lists each file it read beyond the pack |
+| QA | the pages a change reaches and the API routes it serves, or `no page reached` | 300 | guessing which screens to open (6.5) |
+| Judge, design, finish, `cos ask`, desks | nothing | 0 | the judge rules on findings that already cite their code; design is screens; desks never load the repo (5.1) |
+
+- **The cap is hard.** Code ranks rows by fan-in, cuts at the cap and ends with `… 41 more: maestro-ticket graph impact T-n`. A pack over its cap means a large PR.
+- **It never says "no callers".** For the wiring the graph misses, a row reads `0 graph callers · git grep: Media.ts:54`.
+- **It holds no changed code.** `diff.patch` has that.
+- **It is data.** Code on the worker side wrote it, from the PR's own code. It is read the way `code.md` is.
+- **Agents may still ask.** They ask through the same verb, `maestro-ticket graph callers <qualified name>` or `graph impact <id>`, each capped at 1,000 tokens, not through MCP (5 below).
+
+**2. Checks code runs, 0 tokens.**
+- **A tier floor.** `review-prep.sh` prints `risk=<path>` when the blast radius reaches a path `## Review` names as high-risk, and the tier rule reads it. The graph can only raise a tier: "nothing a file says lowers it" (`maestro-code-review/SKILL.md:37`).
+- **A merge check.** After `qa-prep.sh` merges today's main into the worktree, it lists two things: callers of the PR's changed symbols that main changed since the review's base, and callers in the PR of symbols that main changed. If either is non-empty, it prints `graph_conflict=<n>` with the names. QA runs the checks on the merged tree, as now, and tests those callers too. Text can merge cleanly while the code no longer fits.
+- **Plan overlap.** `graph size` names the other open tickets whose areas reach the same symbols.
+
+**3. Fresh on every branch.**
+- **The main index** is one per repo, built from a checkout no one works in: `~maestro/graph/<repo>`, a locked, detached `git worktree` at `origin/<main>`. The dev checkout's dirty state never reaches it.
+- **On `merged`** (3.1), code runs `graph reindex <repo>`: fetch, check out the new main, `index_repository` (1.3-3.3 s), then write `graph.json` with the sha, the time, the seconds taken and the node count. It runs under `graph.lock`, dirty first as the look lock does (3.2), so ten merges in a minute make two indexes.
+- **An overlay per ticket.** `review-prep.sh` and `qa-prep.sh` index their worktree as `<repo>~T-<n>`: 2.4-3.6 s the first time, 1.5 s when a new worktree reuses the name. Review sees the PR's code, and the main index stays main.
+- **Cleanup** is a janitor class (6.4). An overlay goes when its ticket is done or cancelled, or after 3 days untouched, through `delete_project`. Each is about 20 MB.
+- **A stale check.** The janitor's 5-minute timer also runs `graph status`, which compares the main index's sha with `origin/<main>`. 15 minutes behind: reindex. Two failures: one fyi item. A pack built from a stale index says so in its first line.
+- **No watchers.** The tool's defaults are on **[box]**: `auto_watch` and `watcher_enabled` true, and the UI on. Maestro sets `auto_watch`, `watcher_enabled`, `auto_index` and `ui_enabled` false. Code owns every index, and still runs no session hook, as T-136 wanted.
+- **`desk brief`** gets one line, read the way the `disk:` line is: `graph: agency-ops @22fc904 current · 3 overlays 61 MB · 41 packs today, median 610 tok`.
+
+**4. Several repos.**
+- **Names.** Each repo Maestro builds has one main index, named for the repo's folder, with overlays `<repo>~T-<n>`.
+- **Which index a ticket uses.** A ticket's board lives in one repo's store, so `graph` takes the repo from the store, never from ticket text.
+- **The cache dir** comes from `CBM_CACHE_DIR` in the repo's `.mcp.json`, else `~maestro/.cache/cbm`, so code and any live session read the same index.
+- **`CBM_ALLOWED_ROOT=/home/maestro`** is set only for the process that indexes.
+- **A repo with `code-graph: none`** gets no packs: `graph: off`.
+- **Sizes.** agency-ops: 2.6 s and 22 MB. Maestro's own repo: 2.6 s and 19 MB; it has no `.mcp.json`, and packs need none. blitzlink: 5.3 s and 52 MB, if it comes to Maestro. BDS stays on the VM (17.3).
+- **Cross-repo links** (`mode=cross-repo-intelligence`) aren't used, since no ticket spans two repos (guess).
+
+**5. Token discipline.**
+- **Hard caps** per job, in code, as the table above sets.
+- **No MCP server in runs by default.** `job` adds `--strict-mcp-config --mcp-config <file>` to the `claude -p` command **[code]** `cli/job.go:108`. Both flags are in Claude Code 2.1.319 **[box]**. The file is the repo's `.mcp.json` without the graph server, so other servers stay. That saves the 250-300 tokens and the server process in every session.
+- **`rules set graph off|pack|live`**, a standing value like `qa_slots`, set by the duty desk only:
+  - `off` is the kill switch: no packs and no server;
+  - `pack` is packs with no server, the default once eval set G passes;
+  - `live` is packs, plus the server with `--tool-profile=scout` for senior builds and tier-2 reviews only.
+- **Conditional skill lines.** "If `graph.md` is there, read it before you search; else `git grep`." A repo with no graph is unaffected.
+- **What gets measured.** Each run's stats get `graph` (`off`, `pack` or `live`), `pack_tokens` and `graph_calls`. An explore turn is a turn whose every tool call is a search or a read; 6 below counts them that way.
+- **Eval set G** (14.2) gates `pack`.
+- **The live guard.** For two weeks, even ticket numbers get packs and odd ones don't. Per job, compare turns, explore turns, tokens, cost, and QA kickbacks after a review GO. Packs stay on if turns and cost fall and kickbacks don't rise. Otherwise, `rules set graph off`.
+
+**6. What it saves.** **[I]** from measured spend; the share of turns a pack replaces is (guess).
+- **Measured** **[box]**: agency-ops' session logs for the 7 days to 2026-11-20 (2,650 files), priced at Opus list ($3,218 in all, so read the shares, not the dollars):
+  - Turns whose every tool call was a search or a read: build $46, review $31, review subagents $38, QA $27, plan $28. That is $170, 5.4% of those jobs.
+  - Counting every turn that starts with a search or a read: $332, 10.6%.
+  - Review sessions also wrote `code.md` by hand 525 times, at a median of 3.1k characters.
+- **Saved.** Suppose packs remove 40% of build and review explore turns, 25% of QA's and 15% of plan's (guess). That is $42-86 a week in section 14's terms. Code writing `code.md`'s callers saves about $5 of output, and leaving the server out of runs saves about $10 (about 275 tokens a session, written once and read on about 35 turns).
+- **Spent.** A pack is read again on every turn: about $0.012 for an 800-token pack in a review, so about $21 a week across review, its subagents, build and QA.
+- **Net: about $35-80 a week** **[I]**, and about 1,500 fewer turns a week (2-4 run-hours, guess).
+- **The larger gain is quality, all done by code:** callers a review would have missed, conflicts caught at merge, and the pages QA should open. G and the live guard decide whether it stays.
 
 ### 14.4 Cache and resume
 
@@ -911,7 +1020,7 @@ powercfg /change monitor-timeout-ac 15     # the screen may still turn off
 ```
 Windows Update still reboots the PC. Set active hours, and let the startup path (Tailscale's unattended service, the keepalive task, systemd) bring everything back. The 09:00 heartbeat confirms it each day.
 
-### 16.3 The probe: about 50 minutes, on the desktop
+### 16.3 The probe: about 55 minutes, on the desktop
 
 It uses a throwaway distro, `MaestroProbe`, and leaves nothing behind. Run step 8 last, because it reboots. Text after `#` is a note. `<you>` is the Linux user the probe distro asks you to make; `<pc>.<tailnet>` is the PC's tailnet name. Claude Code runs only inside the probe distro, never natively (6.3).
 
@@ -1006,6 +1115,15 @@ kill %1; cd ~
 ```
 Open `\\wsl.localhost\MaestroProbe\tmp\pw\fonts.png` on Windows: every script drawn, no empty boxes?
 
+**5d. The code graph (3 min).** This feeds 14.3. Get `codebase-memory-mcp` v0.12.1 for Linux from its GitHub release, and check that `sha256sum` gives `77745491f0a9c346d6da23eed4d92b5feaa31a27a883c9faa4fa9f47c8183705`, the VM's binary **[box]**. Don't run its `install`. In `MaestroProbe`, against the maestro clone from step 3:
+```
+export CBM_CACHE_DIR=/tmp/cbm CBM_RUNTIME_DIR=/tmp/cbm CBM_ALLOWED_ROOT=$HOME; C=./codebase-memory-mcp
+$C config set auto_watch false; $C config set watcher_enabled false; $C config set ui_enabled false
+time $C cli --quiet index_repository --repo-path ~/m-ext4 --name m >/dev/null       # VM: 2.6 s
+time $C cli --quiet index_repository --repo-path ~/m-ext4 --name m >/dev/null       # VM: 1.3 s
+$C cli detect_changes --project m --base-branch HEAD~5 | head -20; rm -rf /tmp/cbm
+```
+
 **6. Networking: WSL → Windows → tailnet (3 min).** In `MaestroProbe`: `python3 -m http.server 3773 --bind 127.0.0.1 --directory /tmp &`. PowerShell:
 ```
 curl.exe -sI http://127.0.0.1:3773 | Select -First 1      # want: HTTP/1.0 200 (NAT localhost forwarding)
@@ -1055,6 +1173,7 @@ Remove-Item -Recurse -Force C:\probe
 | 5 | idle distro stopped? clock skew | — (the keepalive task covers a stop) |
 | 5b | inodes per GB; the scope killed alone; `--set-sparse` refused without the unsafe flag?; vhdx size before and after `fstrim` | — (no shrink, or the unsafe flag: no sparse, the owner compacts by hand, 6.4) |
 | 5c | `install-deps` passed; open time and RSS at 1, 4 and 8; shm used; the browser in the scope and gone with it; the fonts | — (sets `qa_slots` with step 0's RAM, 6.5; a browser that outlives its scope means the janitor's browser class does the reaping) |
+| 5d | the sha256 matched; index and re-index seconds; `detect_changes` printed changed files | — (over 10 s for the re-index: reindex from the janitor's timer, not inline on `merged`) |
 | 6 | localhost forwarding in NAT, else mirrored; phone reaches it | **both modes fail**: then B |
 | 7 | `t3 thread` there; no cloudflared; push on a locked phone; what it shows; push without Tailscale | **T3 misbehaves in WSL** while the Windows app works: then B. If the push fails in both, the pager plan (5.5) is wrong: stop and rethink |
 | 8 | sleeps seen; phone reached the PC after a reboot with no login; clock | **the distro won't start without a login**: B doesn't fix that either. Use auto-login with a locked screen, and say so |
@@ -1082,7 +1201,7 @@ While steps 0-2 (section 10) run on the VM, build the desktop per 6.2. Point it 
 | **Runs and supervisors** | On the VM, `maestro-ticket stop`: no new starts. Let the running runs end and ack them. A resume can't cross boxes, since transcripts and worktrees stay on the VM, so a run that can't finish is stopped and restarted on the desktop as `job again` from its Handoff/WIP note. Per-run supervisors end with their runs. On the desktop, the code relay starts with S1-S2 in place. |
 | **The board** | If S5 already ran on the VM, the board is on the free cluster and nothing moves. Else `maestro-ticket migrate` to it first, on the VM. Then add the desktop's IP to the allowlist and remove the VM's after the rollback window. |
 | **The store folder** | Copy `board.json`, `rules.md`, `rules.log` and `backups/` from the VM's store folder **[code]** `cli/rules.go:28-31`. Don't copy `runs/`, `slots/`, `notify/`, `handouts/`, `checks/`, `bundles/` or `dep-cache/` **[code]** (`besideStore`): per box, and their runs are over. Archive the VM's `runs/` for stats history. |
-| **`codebase-memory-mcp`** | Install it fresh in the distro as `maestro`, set `CBM_ALLOWED_ROOT=/home/maestro/src/blitzlink-agency-ops`, index once; from then on it re-indexes on each merge (14.3). The VM's index is empty **[box]**, so nothing is copied. |
+| **`codebase-memory-mcp`** | As root, the pinned v0.12.1 binary in `/usr/local/bin`, `root:root`, mode 0755, with its sha256 checked against the VM's (16.3 step 5d). Never its `install` or `update`. As `maestro`, its config has watchers and the UI off. Then `graph reindex` for each repo: seconds each (14.3). The VM's index is empty **[box]**, so nothing is copied. |
 | **Secrets and env** | Made new, not copied. **GitHub:** a new fine-grained token in `~maestro/.config/maestro/env`; revoke the VM's after 14 days. **Atlas:** the same database user; `maestro-ticket store --uri-file -` reads stdin, so nothing echoes. **Claude:** log in as `maestro` and `maestro-cos`; no API key in either environment (8). **T3 Connect:** a new publish-only link. **Tailscale:** the Windows client's own login; no `TS_AUTHKEY`. **Windows Credential Manager:** unused by the distro (interop off); it holds only the Atlas admin key for the IP script (7). Env files are written in an editor, never with `echo` in a shell that logs. |
 | **Switch on** | `notify set <role> --code` for each code role, `systemctl enable --now` for the units, a code-only `look`, open the first desk, which takes duty. Grok's webhooks stay unset. |
 | **Check** | the S4 and S9 checks; a goal from the phone; a push; `desk brief` shows `duty:` |
@@ -1103,7 +1222,7 @@ Each night a timer in the distro writes a tarball to `/var/backups/maestro/` (ow
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6, v7 and v8 changed
+## 18. What v6, v7, v8 and v9 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -1135,6 +1254,17 @@ v8, 2026-11-20, asked for by the owner: QA tests in the browser, several runs at
 | `close-all` and the `default` session barred in prose | Every run shares one session list as `maestro` | `PLAYWRIGHT_CLI_SESSION=<run>`; a root-owned shim refuses them (6.5) |
 | Install as on the VM | Playwright's dependency list fails on the VM's Debian 13 | Ubuntu 24.04: Node 24, `install-deps chromium`, `fonts-noto-cjk`, full Chromium only; probe step 5c (6.2, 16.3) |
 
+v9, 2026-11-20, asked for by the owner: put the code graph to work, with token efficiency in mind.
+
+| v8 said | Found on the VM **[box]** | v9 |
+|---|---|---|
+| Review, build and subagents query the graph through MCP | Every tool also runs as a CLI command or through a scripted stdio client, with no model. A full index takes 2.6 s (agency-ops) to 5.3 s (blitzlink). | Code builds a pack before each run; caps 2,000 tokens for review, 1,500 for build, 300 for QA, nothing for judge, design and desks (14.3) |
+| Re-index the main checkout on merge | Re-indexing after a merge takes 2.3-3.3 s; a PR's own index takes 2.4-3.6 s, about 20 MB | A clean checkout per repo indexed on `merged` under a lock; an overlay per ticket from the prep scripts; a janitor class for overlays; a stale check; the brief's `graph:` line (14.3, 6.4) |
+| The server loads in every session | Its 17 deferred tool names and instructions cost about 250-300 tokens a session; loaded whole, the schemas are 5.6k | `--strict-mcp-config` with no graph server by default; `rules set graph off\|pack\|live`; `scout` profile for `live` (14.3) |
+| — | The graph misses framework-registered hooks; 96% of its "no callers" functions are named elsewhere; short names collide; its routes aren't pages | Packs say `0 graph callers` and add `git grep` hits; qualified names only; no dead-code check; pages found by an import walk (14.3) |
+| About $50-90/week (guess) | Explore-only turns cost 5.4-10.6% of build, review, QA and plan spend | About $35-80/week net **[I]**, gated by eval G and a two-week even/odd guard (14.2, 14.3) |
+| — | — | Code checks: a tier floor from risk paths, a merge check of callers that main changed, plan overlap from `graph size` (14.3) |
+
 ## 19. Open questions
 
 ### 19.1 Still open
@@ -1146,6 +1276,8 @@ v8, 2026-11-20, asked for by the owner: QA tests in the browser, several runs at
 13. **Tier-2 review subagents.** v6 reads "tier-2 review stays on Opus" as including its red-team and skeptic subagents, which run only at tier 2. If you meant only the main review session, those two moves (~$20/week, and ~$110 if a red-team eval passes) come back from v5 with their own sets.
 14. **Signed-in browsing.** Recommended: out of scope. Worker runs stay logged out. No Maestro role uses a signed-in browser today **[code]**, and the VM's own Chrome profile stays on the VM (6.5). If a desk needs a site with no API, then one persistent Playwright MCP profile on the chief-of-staff side only. Does any task you hand Grok today need a signed-in browser, and which sites?
 15. **`qa_slots` on the desktop.** 3 at `memory=24GB`, 4 at 32GB, 8 at 56GB (6.5, **[I]**). Set it once 16.3 step 0 gives the RAM; it changes a live rule, so you set it.
+16. **The graph's live guard.** For two weeks, packs go on even ticket numbers and off on odd ones, on live runs, to measure with and without (14.3). It changes how live runs start, so it needs your yes. If not, eval G alone decides, with less certainty.
+17. **`live` mode.** Recommended: start at `pack`, with no server in any run. `live` adds the server, read-only, for senior builds and tier-2 reviews. Turn it on only if G shows those runs still grep for callers the pack lacks.
 
 ### 19.2 Decisions log
 
@@ -1155,7 +1287,7 @@ All by the owner on 2026-11-19, 19:46-19:51 PT, numbered as in v5's §19:
 |---|---|---|
 | 1 | Model policy: the Sonnet 5.5 moves in §14.1 go ahead, each after its own eval set passes; this replaces "always Opus 5.5 high" for those jobs. Plans, tier-2 review, QA, design and desks stay on Opus. | 0, 9, 14.1, 14.2 |
 | 2 | Effort: high on every job. A later effort A/B is allowed, as future work. | 14.1 |
-| 3 | Graph re-index on merge: yes. Reverses T-136's "no hooks/refresh". | 3.1, 9, 14.3, 17.2 |
+| 3 | Graph re-index on merge: yes. Reverses T-136's "no hooks/refresh". | 3.1, 6.4, 9, 14.3, 17.2 |
 | 4 | 5-minute cache for build and QA only: yes. | 14.4 |
 | 5 | Duty desk: the first desk opened has duty; goal claims are 24-hour leases; on close or lapse, the next-oldest live desk takes duty, atomically. | 0, 5.2-5.4, 11, 17.2 |
 | 6 | Grok Ultra, BDS, BDS PO: not answered; decide after the rehearsal. | 17.1, 17.3, 19.1 |
