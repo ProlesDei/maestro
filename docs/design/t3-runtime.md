@@ -1,7 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v7, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. Nothing here is built.
-**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
+**Status:** draft v8, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. Nothing here is built.
+**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
@@ -15,6 +15,7 @@
 8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
 9. One push channel: T3 Connect, linked **publish-only**, so no tunnel and no cloudflared. Access is Tailscale only. If the relay is down, the failure is shown wherever the owner looks next, and a daily heartbeat push makes silence noticeable. There is no second channel (5.5).
 10. Cleanup is code. A nightly janitor, also started when free space or inodes fall under 20%, frees what is safe before claims are refused at 10%. Each run gets its own TMPDIR and a 4 GB memory cap, so one heavy build fails alone (6.4).
+11. QA tests in parallel: one headless Chromium and one copy of the app per QA run, `qa_slots` of them (4 on a 32 GB PC, guess), in the run's memory scope, which is stopped at the run's end. A shim caps browsers and refuses `close-all` (6.5).
 
 ```mermaid
 flowchart LR
@@ -435,13 +436,14 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
    ```
    With interop off and no drives mounted, a worker can't run `t3.exe`, `cmd.exe` or `powershell.exe`, or read `C:`.
 2. Users: `paul` (the owner, in `sudo`), `maestro` and `maestro-cos` (neither in `sudo`), homes at mode 0700. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo -f /etc/sudoers.d/maestro`.
-3. Build `maestro-ticket` as `paul` and install it as `/usr/local/bin/maestro-ticket`, `root:root`, mode 0755. **Neither side may be able to write the binary:** the wake rule runs it as `maestro-cos`, so a worker that could replace it could run anything on the desk side.
+3. Build `maestro-ticket` as `paul` and install it as `/usr/local/bin/maestro-ticket`, `root:root`, mode 0755. **Neither side may be able to write the binary:** the wake rule runs it as `maestro-cos`, so a worker that could replace it could run anything on the desk side. The same goes for `@playwright/cli` in `/opt/pw` and the `playwright-cli` shim in `/usr/local/bin` (6.5).
 4. systemd units, each `Restart=on-failure`:
    - `maestro-t3-cos.service`: `User=maestro-cos`, `t3 serve --host 127.0.0.1 --port 3773 --no-browser`, `MemoryMax=3G` (5.5);
    - `maestro-boot.service` (oneshot, `User=maestro`): a code-only `look` after a boot, with no `--judge`, so dead runs and free slots are seen without a model turn, and `desk brief` shows `rebooted at …`;
    - timers for the relay check, the heartbeat, the T3 resource check (5.5) and the nightly backup (17.4);
    - `maestro-janitor.timer` (`User=maestro`): `janitor` at 03:30, and `janitor --if-low` every 5 minutes; `fstrim.timer` if the disk is sparse; `loginctl enable-linger maestro` for the runs' memory scopes (6.4);
    - `systemd-timesyncd`.
+5. Node 24, Chromium's libraries and fonts through Playwright's `install-deps chromium`, and `fonts-noto-cjk` (6.5).
 
 **As `maestro-cos`:**
 1. Install T3 Code, pinned to 0.1.10 or later (0.1.2 added `t3 thread`; 0.1.10 is the latest stable on 2026-11-19 **[docs]**), and Claude Code. Log in to the owner's plan.
@@ -450,7 +452,7 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
 4. Make `~/desk/` and `~/pager/` and add them as T3 projects. Every desk starts in `~/desk`, never in the repo (5.1).
 5. Pair the phone (`t3 pair`). Run `t3 connect link --publish-only --headless`, then `t3 connect publish` (5.5).
 
-**As `maestro`:** clone the repo to `~/src/` on the distro's disk, write the Atlas URI with `maestro-ticket store --uri-file -`, put `GH_TOKEN` and the rest in `~/.config/maestro/env` (mode 0600), and log in to Claude Code.
+**As `maestro`:** clone the repo to `~/src/` on the distro's disk, write the Atlas URI with `maestro-ticket store --uri-file -`, put `GH_TOKEN` and the rest in `~/.config/maestro/env` (mode 0600), log in to Claude Code, and run `playwright-cli install-browser chromium --no-shell` (6.5).
 
 ### 6.3 What replaces the VM's holes, and what is new
 
@@ -503,6 +505,7 @@ Today nothing frees disk on its own. On low disk, `claim` and `slot` refuse (`lo
 | Transcripts | Claude Code's own cleanup, with `cleanupPeriodDays: 14` in `~maestro/.claude/settings.json` **[docs]**. The janitor doesn't touch them. A 14-day-old run resumes as `job again` anyway (14.4), and 14 days covers the weekly token report. | — |
 | Build caches | each tool's own prune, once its cache passes a cap (5 GB for Go, 2 GB for the rest, guess): `go clean -cache`, `pnpm store prune`, `uv cache prune`, `pip cache purge`, `npm cache clean --force` | — |
 | `/var/backups/maestro` (17.4) | over 14 nights old | the newest 14 |
+| Browsers (6.5) | a playwright daemon or Chromium in no live run scope, over 20 minutes old; a session's `.err` or `.session` file with no live daemon, a day old | anything in a live run's scope |
 
 - **Idempotent.** One janitor at a time, under `flock` on `janitor.lock`. It checks each item again just before removing it. An item already gone counts as removed by someone else. It never deletes a `*.lock`. A second run frees nothing new.
 - **Logs.** It writes one journal line per class, such as `janitor: tmp 4.1 GB 180k files (212 dirs); worktrees 0.2 GB (3); kept T-572 dirty`, and one file, `<store>/janitor.json`, with `at`, `freed_bytes`, `freed_inodes`, the free space and inodes after, and `failed`.
@@ -542,6 +545,88 @@ The kernel killed small chrome processes three times (oom_score_adj 300), and th
 disk: 212 GB free (41%) · inodes 88% free · janitor 03:30 freed 6.1 GB, 180k files · runs OOM-capped this week: 1
 ```
 When a stage-2 pass fails: `DISK LOW: 9% free · janitor freed 0.4 GB · disk_full in inbox`.
+
+### 6.5 Browsers
+
+QA checks every screen in a browser of its own, and several QA runs go at once. What exists **[code]**:
+- **The rules.** `skills/maestro-qa-lead/references/browser.md:9-14`: use `playwright-cli`; name the session `<run>` on every command; headless, in Playwright's Chromium, with an in-memory profile and a 15-minute idle timeout; run every command from the evidence folder; close only your own session. With no browser, the test is `blocked`.
+- **How many.** `qa`, `live` and `qa-ask` each run inside `slot --name qa --max <qa_slots, else 6>`, so the slot holds the whole run `cli/job.go:112-114,480`. Agency-ops sets `qa_slots` to 4 **[box]** (`board.json`).
+- **The checks.** `install.sh` opens one headless page and closes only that session `scripts/install.sh:458-484`. `screens.sh` opens a session of its own and serves local files on 127.0.0.1, port 0 `skills/maestro-qa-lead/scripts/screens.sh:8-9,35-36`.
+- **The app.** Each QA run keeps its state private: its own data dir or database, a free port, its own browser profile and test accounts it makes; shared accounts are read-only `references/test-a-pr.md:31`. The install asks every project to start the app twice at once from fresh worktrees `INSTALL.md:64`.
+
+**Measured on the VM** **[box]**, 2026-11-20: playwright-cli 0.1.24, its Chromium 1254, a 2,000-row page with CJK, Arabic and emoji text, `DISPLAY` unset, and the VM busy (load 12 on 8 CPUs):
+
+| Sessions at once | Open, wall | Screenshot each, wall | PSS, all | PSS per session |
+|---|---|---|---|---|
+| 1 | 1.5 s | 0.4 s | 0.50 GB | 0.50 GB |
+| 2 | 1.6 s | 0.5 s | 0.80 GB | 0.40 GB |
+| 4 | 2.2 s | 0.7 s | 1.34 GB | 0.34 GB |
+| 6 | 2.2 s | 0.8 s | 1.89 GB | 0.31 GB |
+
+- **Ten processes a session.** playwright-cli's daemon (node, 110 MB, one per session), then Chromium's browser (109 MB), renderer (159 MB), utility (46 MB), zygote (34 MB) and GPU (31 MB) processes.
+- **CPU.** Four sessions' opens and screenshots took 4.4 CPU-seconds in all. Idle sessions use next to none.
+- **A real app's page weighs more:** 0.5-0.8 GB a session (guess). That is still small next to the app under test (a `next build` at 1.8 GB, 6.4).
+- **No GUI.** Each Chromium ran with `--headless --ozone-platform=headless` and opened with no `DISPLAY` **[box]**, so WSLg isn't needed.
+- **No `/dev/shm`.** Playwright passes `--disable-dev-shm-usage`, and `/dev/shm` stayed at 0 MB with six sessions open **[box]**. Its size in WSL doesn't matter.
+- **No TCP port.** The browser talks over `--remote-debugging-pipe`. Each daemon listens on a socket of its own, `$XDG_RUNTIME_DIR/playwright/cli/<hash>-<session>.sock`, and the profile is a temp folder, `$TMPDIR/playwright_chromiumdev_profile-*` **[box]**. Browsers never clash on ports; only the app under test needs one.
+
+**What runs leave on the VM** **[box]**:
+- **63 zero-byte `<session>.err` files** in `~/.cache/ms-playwright/daemon/*/`, from Nov 11-20. playwright-cli never removes them, and `install.sh` deletes only its own **[code]** `scripts/install.sh:477-481`. Their names show browsers aren't only QA's: 27 design, 11 QA, 7 engineer and 5 review-subagent sessions.
+- **Six `/tmp/playwright_chromiumdev_profile-*` folders** (5 MB) from sessions killed mid-run.
+- **Five `python3 -m http.server 0` processes** QA runs started and never stopped. They are 23-32 hours old and have been reparented to init. The daemon detaches the same way **[box]**, so a run that dies keeps its browser for up to 15 minutes.
+
+**1. How many at once.** QA browsers at once are QA runs at once, `qa_slots`, with up to two sessions a run: its own and `screens.sh`'s (guess). Design, build and review runs open browsers outside `qa_slots`, under the run limit.
+- **Memory.** Set `qa_slots` so that `qa_slots` × 3G, a QA run's estimate in 6.4 **[I]**, is at most half of `maestro-runs.slice`, leaving the other half for builds:
+  - `memory=24GB`: a 19G slice and **3** QA slots;
+  - `memory=32GB`: 27G and **4**, agency-ops' value today;
+  - `memory=56GB` on a 64 GB PC: 51G and **8**.
+  The PC's RAM is unknown until 16.3 step 0. After a week, QA runs' `mem_peak` resets it, as 6.4 does for the cap.
+- **CPU.** `qa_slots` at most half the logical CPUs (guess). Browsers barely use CPU; the app's build does.
+- **A cap on Chromiums.** The cap is `2 × qa_slots` sessions on the worker side, held by the shim below, so design and build runs can't pile on top.
+
+**2. Each run's browser is its own.**
+
+| What | Today | v8 |
+|---|---|---|
+| Session | `<run>` on every command, by the skill's word `browser.md:10` | also `PLAYWRIGHT_CLI_SESSION=<run id>` from the environment builder (8). playwright-cli reads it when `-s` is missing **[box]** (`cli-client/registry.js`), so a slip lands in the run's own session, not `default` |
+| Profile | in-memory: a temp folder per session **[box]** | under the run's TMPDIR (6.4 #1), so a killed run's goes with it |
+| Ports | the browser uses none **[box]**; the app takes a free one `test-a-pr.md:31` | same |
+| Files | commands run from the evidence folder `browser.md:12`; `.playwright-cli/` lands there | same; downloads and artifacts land in the TMPDIR |
+| Other runs' browsers | every run is `maestro` and shares one session list, so `list`, `close-all` and `kill-all` reach every run's browser; only the skill forbids it `browser.md:13` | the shim refuses `close-all`, `kill-all` and `-s=default` |
+| Desks | — | `maestro-cos` has its own cache and runtime folder, so no worker can list or close a desk's browser |
+
+**The shim.** `/usr/local/bin/playwright-cli` is a short bash script in `scripts/`, `root:root` and mode 0755 like the binary (6.2 step 3). It runs the real tool from `/opt/pw`, which is also root-owned.
+- It refuses `close-all`, `kill-all` and the `default` session.
+- On `open`, under `flock`, it counts the worker side's live `cliDaemon.js` processes. At the cap, it waits up to 10 minutes, printing `browser cap <n>: waiting`. Then it fails with `browser cap`, which `browser.md:14` treats as no browser.
+- It reads the cap from `rules show --json`'s `qa_slots` **[code]** `cli/rules.go:526`.
+
+**3. The app under test.** Parallel browsers help only if each run has its own app.
+- **Agency-ops does.** Each QA run copies the demo clients to its own `mktemp -d` and starts the dashboard on a free port **[box]** (agency-ops' `.maestro/project/project-setup.md:59-60`). It serves `website/` on port 0 (`:67`). Its test data is fixtures and per-run mongo-memory-server copies (6.4). N runs means N instances, so nothing changes.
+- **Every project needs the same.** It must start twice at once with no fixed port, `.env` or container name `INSTALL.md:64`. It needs its own data and accounts, with shared accounts read-only `test-a-pr.md:31`. The install asks for two at once; on the desktop `qa_slots` copies run, so S11 starts that many.
+- **A project with one shared instance gains nothing.** BDS's `bds-dev` has one checkout; one coordinator leases it and loads one conflict-free wave of branches at a time **[box]** `~/t3work/breakdown/repo-harness/skills/dev-host/SKILL.md:9,21`. BDS stays on `grok-bot-vm` (17.3, question 6). If a project like that comes to Maestro, its `## QA` wraps load-and-test in `maestro-ticket slot --name <host> --max 1` **[code]** `cli/cli.go:146`, so its QA runs queue on the host while other projects' runs go on.
+
+**4. Resources.**
+- **The run's scope holds its browser.** The daemon detaches, but a child stays in its parent's cgroup whatever its parent becomes **[docs]** (cgroup v2). So 6.4's `MemoryMax=4G` counts the browser. Whether a `--user` scope in WSL holds it is (guess); 16.3 step 5c checks.
+- **The run's end stops its scope.** After it records `mem_peak`, the supervisor runs `systemctl --user stop run-<id>.scope`. That ends every process the run left: its browser, and its servers and mongod, which today outlive it by a day **[box]**. A `resume` runs in a new scope and opens its browser again, as `browser.md:11` already says.
+- **A tab dies first.** Chromium gives renderers `oom_score_adj` 300 (6.4), so at the 4G cap the kernel kills a tab, not the build. The supervisor counts `oom_kill` from `memory.events` on every run's end, not only a killed run's, and stores it as `oom_kills` beside `mem_peak`. If a reopened tab crashes again, the QA run treats it as no browser (`browser.md:14`: `test: blocked`). A blocked run whose scope saw an `oom_kill` routes as `why: oom` (6.4).
+- **The janitor's browser class** (6.4 table):
+  - a `cliDaemon.js` or Chromium of `maestro` that is in no live `run-*.scope` (`/proc/<pid>/cgroup`) and is over 20 minutes old (past the idle timeout) gets `TERM`, then `KILL` after 10 seconds;
+  - `ms-playwright/daemon/*/*.err` and `*.session` files whose session has no live daemon, a day after they last changed;
+  - stray profiles: the TMPDIR rule removes them, or the 3-day `/tmp` rule.
+- **The environment builder (8) drops `DISPLAY` and `WAYLAND_DISPLAY`,** so a run never opens a window on the owner's screen through WSLg. Whether a run could still reach WSLg's socket is (guess); S11 checks that `--headed` fails.
+
+**5. Installing it in WSL** (6.2):
+- **Node 24.** `playwright-cli` needs Node 20 or later **[code]** `INSTALL.md:87`, and Ubuntu 24.04's apt has 18 (guess).
+- **Chromium's libraries and fonts,** as root, through the bundled Playwright: `node /opt/pw/lib/node_modules/@playwright/cli/node_modules/playwright-core/cli.js install-deps chromium`. For Ubuntu 24.04 its list holds the libraries and `fonts-noto-color-emoji`, `fonts-ipafont-gothic`, `fonts-wqy-zenhei`, `fonts-tlwg-loma-otf`, `fonts-liberation`, `fonts-freefont-ttf` and `fonts-unifont` **[code]** (playwright-core 1.66, read on the VM). Add `fonts-noto-cjk` for Korean and full CJK (guess).
+- **The VM is Debian 13,** where that list fails: `fonts-unifont`, `xfonts-scalable` and `fonts-ipafont-gothic` aren't found **[box]**. Ubuntu 24.04 is on Playwright's list, one more reason for 6.2's distro.
+- **The browser,** as `maestro`: `playwright-cli install-browser chromium --no-shell`. Sessions ran the full Chromium, not the 283 MB headless shell **[box]**.
+- **The check.** `install.sh`'s check (`:458-484`) is unchanged; it opens a page through the shim.
+
+**6. Signed-in browsing: out of scope, recommended.** Worker runs stay logged out: an in-memory profile with no saved logins (`browser.md:11`), because they read ticket text.
+- **What Maestro uses today.** No Maestro role uses a signed-in browser: no bot profile or skill names one **[code]** (`bot-profiles/`, `skills/`).
+- **What the VM has.** A persistent Chrome profile, `~/chrome-profile`, with saved sign-ins, and a running `chrome-devtools-mcp` **[box]**. They sit outside Maestro's code, and which sites the profile holds wasn't read. Neither moves (17.3).
+- **If a desk later needs a site with no API:** one persistent Playwright MCP profile in `~maestro-cos/browser`, headless, on the chief-of-staff side only. The owner signs it in once, and the desk treats every page as pulled text (6.0).
+- **Owner's call.** Whether any Grok-browser task loses coverage is open question 14.
 
 ## 7. The board on Atlas
 
@@ -598,6 +683,7 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 | `docs/desktop-setup.md` (new) | 6.2 and 16.2: the distro, `wsl.conf`, `.wslconfig`, Tailscale, the startup task, the power plan, the units; the no-native-agents rule (6.3) |
 | `templates/project-setup.md` | a `## Runtime` section and a `## Env` section |
 | `docs/evals/` | the pinned eval sets (14.2) |
+| `skills/maestro-qa-lead/references/browser.md`, `INSTALL.md` step 7 | the shim's refusals and its `browser cap` wait; a tab that crashes again after a reopen counts as no browser; Node 24 and `install-deps` on Linux (6.5) |
 
 Outside this repo: the fleet model rule ("Claude is always Opus 5.5 at effort high", `t3work/OPS-RUNBOOK.md` line 84) gets an exception for the jobs 14.1 moves, once each passes its set. That is a live rule, so the owner makes the edit.
 
@@ -620,7 +706,7 @@ flowchart LR
 | 0. Token knobs and fixes | S0, S7 | `rules set model <job> opus`; revert the skill lines |
 | 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
 | 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
-| 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
+| 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, S11, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
 | 4. Several desks | S8 | close all but one desk |
 
 ## 11. Build order and probes
@@ -636,6 +722,7 @@ flowchart LR
 | S5 | Atlas free tier, the environment builder, account field | `doctor` shows `mongodb at <host>`; a run's environment holds no API key and holds `GH_TOKEN`; the free-tier rows of 7 measured |
 | S9 | Desktop services: units and timers (relay check, heartbeat, T3 resources, backup), the pager thread, `push-down`, the startup task (5.5, 6.2, 17.4) | a reboot with no one logged in brings the phone's T3 back within 5 minutes; a blocked relay sets `push-down`, every desk reply leads with it, held pages go out as one after; the heartbeat arrives at 09:00; a page with a slug off the pattern is refused |
 | S10 | Cleanup (6.4): per-run TMPDIR, `janitor` with `--dry-run` and `--if-low`, the timer, `headroom`'s kick, the desk-class `disk_full`, per-run memory scopes, the `tmp_bytes`, `tmp_files` and `mem_peak` stats, and the brief's `disk:` line | `--dry-run` lists and removes nothing; a second pass frees nothing; a dirty worktree, an unacked run's TMPDIR and a live run's cwd survive; filling the disk past the 20% line (`fallocate`) starts the janitor within 5 minutes, and it frees space before any claim is refused; with nothing left to free, one **desk** `disk_full` item; a run that allocates 5 GB is killed alone at 4G, its scope shows `oom_kill`, and the other runs and T3 keep going |
+| S11 | Browsers (6.5): Node, Playwright's libraries and fonts, `@playwright/cli` in `/opt/pw` and the shim; `PLAYWRIGHT_CLI_SESSION` set, and `DISPLAY` and `WAYLAND_DISPLAY` dropped, by the environment builder; each run's scope stopped at its end; `oom_kills`; the janitor's browser class; `qa_slots` from the PC's RAM | `qa_slots` QA runs on one board at once each open their own session and their own app on their own port, and all finish; `close-all`, `kill-all` and `-s=default` are refused; a command with no `-s` lands in the run's session; the open past the cap waits, then gets `browser cap`; after a run killed mid-test ends, none of its Chromium, daemon or servers is left; `--headed` from a run fails; a stale `.err` and a daemon outside any scope for 20 minutes are reaped, and a live run's are kept; a CJK and emoji page's screenshot shows no empty boxes |
 | S6 | The rewrite (section 9) | review |
 | S7 | `rules set model <job>`; review subagents in the foreground with a model named; 5-minute cache for build and QA; graph wiring and re-index on merge; `again` for a cold resume (section 14) | each eval set in 14.2 passes before its job moves to Sonnet |
 | S8 | `desk` command: open, close, claim, release, beat, note, remember, brief, ring, page; the duty check; the three hooks | two desks claim one goal and one wins; a desk silent for 24 h loses its goals to the duty desk; the first desk opened has duty; closing it gives duty to the next-oldest live desk, and a lapsed lease does too at the next desk event; 5 desks racing 1,000 duty checks leave one holder per epoch in `duty.log`; a `rules set` that holds the lock finishes before a takeover, and the old holder's next one is refused; a failed ring send moves duty at once; `brief` shows `duty:` and stays under 40 lines with 5 desks; `ring` wakes only the owning desk |
@@ -665,6 +752,11 @@ flowchart LR
 | 4G per run fits a build or QA run | **[I]** from the Nov 19 OOM table (6.4) | a week of `mem_peak`; the 99th percentile × 1.5 |
 | WSL's ext4 has more inodes per GB than the VM's one per 64 KB | (guess) | 16.3 step 5, `df -i` |
 | T3 prunes or vacuums archived threads (3.0 GB `statev2.sqlite` on the VM **[box]**) | (guess) | the T3 docs; watch its size over the rehearsal week |
+| Headless Chromium needs no WSLg, display or `/dev/shm` | **[box]** on the VM: opened with `DISPLAY` unset; `--disable-dev-shm-usage`; desktop (guess) | 16.3 step 5c |
+| A session takes 0.3-0.5 GB with 4-8 open | **[box]** on the VM (6.5 table); desktop (guess) | 16.3 step 5c; real pages in S11 |
+| The playwright daemon stays in its run's `--user` scope after it detaches, and stopping the scope ends it | [docs] cgroup v2; in WSL (guess) | 16.3 step 5c |
+| Playwright's Ubuntu 24.04 libraries install in WSL, and its fonts draw CJK and emoji | the list **[code]**; the result (guess) | 16.3 step 5c |
+| `qa_slots` × 3G fits half the slice | **[I]** from 6.4's estimate | a week of QA runs' `mem_peak` and `oom_kills` |
 
 ## 12. Later: what the audits found for scale
 
@@ -819,7 +911,7 @@ powercfg /change monitor-timeout-ac 15     # the screen may still turn off
 ```
 Windows Update still reboots the PC. Set active hours, and let the startup path (Tailscale's unattended service, the keepalive task, systemd) bring everything back. The 09:00 heartbeat confirms it each day.
 
-### 16.3 The probe: about 40 minutes, on the desktop
+### 16.3 The probe: about 50 minutes, on the desktop
 
 It uses a throwaway distro, `MaestroProbe`, and leaves nothing behind. Run step 8 last, because it reboots. Text after `#` is a note. `<you>` is the Linux user the probe distro asks you to make; `<pc>.<tailnet>` is the PC's tailnet name. Claude Code runs only inside the probe distro, never natively (6.3).
 
@@ -893,6 +985,27 @@ wsl -d MaestroProbe -- sh -c 'head -c 20G /dev/zero > ~/big; sync'; wsl --termin
 wsl -d MaestroProbe -- rm ~/big; wsl -d MaestroProbe -u root -- fstrim -v /; wsl --terminate MaestroProbe; Start-Sleep 10; (Get-Item $v).Length/1GB   # about 20 GB smaller?
 ```
 
+**5c. Parallel browsers (8 min).** These feed 6.5. In `MaestroProbe` (Node from NodeSource, a third-party script: read it first):
+```
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y -qq nodejs fonts-noto-cjk
+sudo npm i -g --prefix /opt/pw @playwright/cli; export PATH=/opt/pw/bin:$PATH
+sudo node /opt/pw/lib/node_modules/@playwright/cli/node_modules/playwright-core/cli.js install-deps chromium
+playwright-cli install-browser chromium --no-shell
+echo "DISPLAY=${DISPLAY:-unset}"; unset DISPLAY WAYLAND_DISPLAY; df -h /dev/shm
+mkdir -p /tmp/pw && cd /tmp/pw && printf '<meta charset=utf-8><h1>Probe 日本語 中文 한국어 العربية 😀🎉</h1>' > p.html
+python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &
+for n in 1 4 8; do t=$(date +%s%N)
+  for i in $(seq $n); do playwright-cli -s=p$n-$i open --browser=chromium --idle-timeout=120000 http://127.0.0.1:8765/p.html >/dev/null & done; wait
+  echo "n=$n: open $(( ($(date +%s%N)-t)/1000000 )) ms, $(ps -C chrome,node -o rss= | awk '{s+=$1} END {print int(s/1024)}') MB RSS, $(free -m | awk 'NR==2{print $7}') MB available, shm $(df -m /dev/shm | awk 'NR==2{print $3}') MB"
+  for i in $(seq $n); do playwright-cli -s=p$n-$i close >/dev/null; done; done
+playwright-cli -s=f open --browser=chromium http://127.0.0.1:8765/p.html >/dev/null; playwright-cli -s=f screenshot --filename=fonts.png >/dev/null; playwright-cli -s=f close
+systemd-run --user --scope --unit=pwprobe -p MemoryMax=2G playwright-cli -s=sc open --browser=chromium http://127.0.0.1:8765/p.html >/dev/null
+systemctl --user status pwprobe.scope | grep -c chrome            # want: above 0, the browser is still in the scope
+systemctl --user stop pwprobe.scope; sleep 2; pgrep -c chrome || echo "browser ended with its scope"
+kill %1; cd ~
+```
+Open `\\wsl.localhost\MaestroProbe\tmp\pw\fonts.png` on Windows: every script drawn, no empty boxes?
+
 **6. Networking: WSL → Windows → tailnet (3 min).** In `MaestroProbe`: `python3 -m http.server 3773 --bind 127.0.0.1 --directory /tmp &`. PowerShell:
 ```
 curl.exe -sI http://127.0.0.1:3773 | Select -First 1      # want: HTTP/1.0 200 (NAT localhost forwarding)
@@ -941,6 +1054,7 @@ Remove-Item -Recurse -Force C:\probe
 | 4 | which writes inotify saw | — |
 | 5 | idle distro stopped? clock skew | — (the keepalive task covers a stop) |
 | 5b | inodes per GB; the scope killed alone; `--set-sparse` refused without the unsafe flag?; vhdx size before and after `fstrim` | — (no shrink, or the unsafe flag: no sparse, the owner compacts by hand, 6.4) |
+| 5c | `install-deps` passed; open time and RSS at 1, 4 and 8; shm used; the browser in the scope and gone with it; the fonts | — (sets `qa_slots` with step 0's RAM, 6.5; a browser that outlives its scope means the janitor's browser class does the reaping) |
 | 6 | localhost forwarding in NAT, else mirrored; phone reaches it | **both modes fail**: then B |
 | 7 | `t3 thread` there; no cloudflared; push on a locked phone; what it shows; push without Tailscale | **T3 misbehaves in WSL** while the Windows app works: then B. If the push fails in both, the pager plan (5.5) is wrong: stop and rethink |
 | 8 | sleeps seen; phone reached the PC after a reboot with no login; clock | **the distro won't start without a login**: B doesn't fix that either. Use auto-login with a locked screen, and say so |
@@ -989,7 +1103,7 @@ Each night a timer in the distro writes a tarball to `/var/backups/maestro/` (ow
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6 and v7 changed
+## 18. What v6, v7 and v8 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -1011,6 +1125,16 @@ v7, 2026-11-20, approved by the owner for PR #105:
 | `MemoryMax` on T3 only | Nov 19 OOM: two `next build` at 1.6-1.8 GB; the kernel killed chrome instead | Each run in a scope, 4G cap **[I]**, a slice total; `mem_peak` sets the cap after a week (6.4) |
 | `.wslconfig` sets memory | A vhdx shows 1 TB and only grows **[docs]** | `defaultVhdSize`; sparse plus `fstrim` only if 16.3 step 5b passes (6.2, 6.4) |
 
+v8, 2026-11-20, asked for by the owner: QA tests in the browser, several runs at once, on the desktop.
+
+| v7 said | Found on the VM **[box]** | v8 |
+|---|---|---|
+| Nothing on browsers; `browser.md` as it is | One headless session 0.5 GB PSS, six at once 1.9 GB; no display, no `/dev/shm`, no TCP port | `qa_slots` set from the PC's RAM, half the slice for QA; a cap of `2 × qa_slots` sessions (6.5) |
+| Each run in a memory scope | The browser daemon and QA's servers detach; five servers had outlived their runs by a day | The scope holds the browser and is stopped at the run's end; `oom_kills` stored (6.5) |
+| The janitor's classes | 63 stale session `.err` files, six orphan profiles | A browser class (6.4, 6.5) |
+| `close-all` and the `default` session barred in prose | Every run shares one session list as `maestro` | `PLAYWRIGHT_CLI_SESSION=<run>`; a root-owned shim refuses them (6.5) |
+| Install as on the VM | Playwright's dependency list fails on the VM's Debian 13 | Ubuntu 24.04: Node 24, `install-deps chromium`, `fonts-noto-cjk`, full Chromium only; probe step 5c (6.2, 16.3) |
+
 ## 19. Open questions
 
 ### 19.1 Still open
@@ -1020,6 +1144,8 @@ v7, 2026-11-20, approved by the owner for PR #105:
 11. **The VM's T3 Connect link.** Unlink it and drop the cloudflared chain on the VM? Default: yes, after the 14-day rollback window (17.3).
 12. **If the free tier doesn't fit** (7): a paid Atlas tier, which costs money, or fewer runs at once? Asked only if P0 or the rehearsal fails a row of 7's table.
 13. **Tier-2 review subagents.** v6 reads "tier-2 review stays on Opus" as including its red-team and skeptic subagents, which run only at tier 2. If you meant only the main review session, those two moves (~$20/week, and ~$110 if a red-team eval passes) come back from v5 with their own sets.
+14. **Signed-in browsing.** Recommended: out of scope. Worker runs stay logged out. No Maestro role uses a signed-in browser today **[code]**, and the VM's own Chrome profile stays on the VM (6.5). If a desk needs a site with no API, then one persistent Playwright MCP profile on the chief-of-staff side only. Does any task you hand Grok today need a signed-in browser, and which sites?
+15. **`qa_slots` on the desktop.** 3 at `memory=24GB`, 4 at 32GB, 8 at 56GB (6.5, **[I]**). Set it once 16.3 step 0 gives the RAM; it changes a live rule, so you set it.
 
 ### 19.2 Decisions log
 
