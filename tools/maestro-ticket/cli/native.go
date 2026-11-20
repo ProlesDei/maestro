@@ -30,6 +30,21 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
+	if id := c.env.Getenv(runs.RunIDEnv); runs.ValidID(id) {
+		dir, err := c.besideStore("runs")
+		if err != nil {
+			return err
+		}
+		record, err := runs.Load(dir, id)
+		if err != nil {
+			return err
+		}
+		if record.BoardID != "" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, record.StartedAt.Add(record.LimitDuration()))
+			defer cancel()
+		}
+	}
 	p, m, err := c.jobProfile(*alias, *job)
 	if err != nil {
 		return err

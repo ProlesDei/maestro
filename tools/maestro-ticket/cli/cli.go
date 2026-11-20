@@ -107,6 +107,7 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  recover     reconcile the runtime board with local workers and saved runs
   profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
               (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
@@ -235,6 +236,8 @@ var commands = []command{
 	{"flow", runFlow},
 	{"alerts", runAlerts},
 	{"look", runLook},
+	{"recover", runRecover},
+	{"track-worker", runTrackWorker},
 	{"eta", runETA},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},

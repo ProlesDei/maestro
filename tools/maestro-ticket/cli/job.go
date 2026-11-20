@@ -174,6 +174,11 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 	}
 	cmd := exec.CommandContext(ctx, "bash", script, "--route", target)
 	cmd.Dir = strings.TrimSpace(root)
+	store, _, err := c.storePath()
+	if err != nil {
+		return route{}, err
+	}
+	cmd.Env = append(os.Environ(), "MAESTRO_TICKET_STORE="+store)
 	// A gh the script started keeps stdout open after ctx kills bash.
 	cmd.WaitDelay = 5 * time.Second
 	var stderr strings.Builder
@@ -210,21 +215,22 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 
 // jobReq is one job to start, as runJob parses it or look builds it.
 type jobReq struct {
-	checkpoint    string
-	profile       string
-	kind          jobKind
-	ids           []string // ticket ids, as T-<n>
-	ticket        string   // a text job's ticket
-	text          string   // the bot's text, for a text job
-	approved      string   // review
-	drop, dropWhy string   // review
-	full          bool     // review
-	model, effort string   // overrides
-	limit         time.Duration
-	slots         int  // QA runs at once; 0 for the default
-	inherit       bool // a start no bot typed: it takes the launcher's last overrides
-	chainOf       string
-	hops          int // a chained start: the run whose end starts it, and its hops
+	actionID, actionHash string
+	checkpoint           string
+	profile              string
+	kind                 jobKind
+	ids                  []string // ticket ids, as T-<n>
+	ticket               string   // a text job's ticket
+	text                 string   // the bot's text, for a text job
+	approved             string   // review
+	drop, dropWhy        string   // review
+	full                 bool     // review
+	model, effort        string   // overrides
+	limit                time.Duration
+	slots                int  // QA runs at once; 0 for the default
+	inherit              bool // a start no bot typed: it takes the launcher's last overrides
+	chainOf              string
+	hops                 int // a chained start: the run whose end starts it, and its hops
 }
 
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
@@ -507,7 +513,7 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
 		}
 	}
-	rec := runs.Record{Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
+	rec := runs.Record{ActionID: req.actionID, ActionHash: req.actionHash, Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
 	if k.ids {
 		rec.Tickets = ids
 	}

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -97,6 +99,13 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 			} else {
 				left = []send{}
 			}
+			// A recent handout alone cannot acknowledge a runtime handoff.
+			// Let its action receipt settle the race with another sender.
+			for _, sd := range rt.Send {
+				if codeRole(notify, sd.Bot) && !slices.Contains(sends, sd) {
+					sends = append(sends, sd)
+				}
+			}
 			for _, sd := range sends {
 				if c.handOn(ctx, dir, notify, r, sd) {
 					chained = append(chained, sd.Bot+": "+sd.Line)
@@ -108,6 +117,10 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 		// A freed slot or a merge woke the planner only to look: the end
 		// looks itself, and wakes it only for what that look leaves
 		// (owner's ruling, Nov 17 2026).
+		// A code planner resolves a delivery dispute by judging its current board rows.
+		if !unsure && codeRole(notify, "planner") && slices.ContainsFunc(left, func(sd send) bool { return sd.Bot == "planner" && strings.HasPrefix(sd.Line, "kickback ") }) && c.refill(ctx, dir) {
+			left = slices.DeleteFunc(left, func(sd send) bool { return sd.Bot == "planner" && strings.HasPrefix(sd.Line, "kickback ") })
+		}
 		if !unsure && slices.ContainsFunc(left, refillLine) && served(notify, "planner") && c.refill(ctx, dir) {
 			left = slices.DeleteFunc(left, refillLine)
 		}
@@ -267,9 +280,63 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 		return false
 	}
 	req.chainOf, req.hops = r.ID, r.Hops+1
-	_, err := c.startAs(ctx, dir, sd.Bot, req)
-	var a alreadyGoing
-	return err == nil || errors.As(err, &a)
+	if !codeRole(notify, sd.Bot) {
+		_, err := c.startAs(ctx, dir, sd.Bot, req)
+		var a alreadyGoing
+		return err == nil || errors.As(err, &a)
+	}
+	co, err := c.coord()
+	if err != nil {
+		return false
+	}
+	req.actionID = strings.Join([]string{r.ID, sd.Bot, req.kind.name, req.ids[0]}, ".")
+	if req.kind.name == "qa" {
+		d, err := c.detailForJob(ctx, req.ids[0])
+		if err != nil {
+			return false
+		}
+		if review, head, _ := recoveryProof(d); head != "" {
+			req.actionID = qaReceiptID(req.ids[0], review)
+		} else {
+			return false
+		}
+	}
+	req.actionHash = fmt.Sprintf("%x", sha256.Sum256([]byte(sd.Line)))
+	if m, err := co.s.read("receipts", req.actionID); err == nil {
+		hash, id, ok := strings.Cut(m.body, " ")
+		return ok && hash == req.actionHash && runs.ValidID(id)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	child, err := c.startAs(ctx, dir, sd.Bot, req)
+	if err != nil {
+		var going alreadyGoing
+		if !errors.As(err, &going) || !runs.ValidID(going.run) {
+			return false
+		}
+		child, err = runs.Load(dir, going.run)
+		if err != nil {
+			return false
+		}
+	}
+	return child.ActionID == req.actionID && child.ActionHash == req.actionHash && child.PID != 0 && saveActionReceipt(co, child) == nil
+}
+
+// Receipts outlive pruned run records. A reused ID must identify the same action and run.
+func saveActionReceipt(co coord, r runs.Record) error {
+	body := r.ActionHash + " " + r.ID
+	err := co.s.create("receipts", r.ActionID, body)
+	if !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	m, err := co.s.read("receipts", r.ActionID)
+	if err != nil {
+		return err
+	}
+	if m.body != body {
+		return errors.New("handoff receipt conflicts with an earlier action")
+	}
+	return nil
 }
 
 // startAs starts req as bot, so the run rings bot and its end chains as

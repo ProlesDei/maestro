@@ -230,7 +230,13 @@ func runLook(ctx context.Context, c *call) error {
 	var out lookOut
 	err = c.withLook(ctx, func(ctx context.Context) error {
 		c.runCache = nil
-		c.ringOrphans(ctx, rdir, "")
+		loc, err := c.location()
+		if err != nil {
+			return err
+		}
+		if loc.boardID == "" {
+			c.ringOrphans(ctx, rdir, "")
+		}
 		out = lookOut{}
 		paused := ""
 		if p, ok := co.readPause(time.Now()); ok {
@@ -472,11 +478,22 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			out.Errors = append(out.Errors, err.Error())
 		}
 	}
+	var recovery recoveryReport
+	loc, err := c.location()
+	if err != nil {
+		return out, err
+	}
+	if loc.boardID != "" {
+		recovery, err = c.reconcile(ctx, s, o.runs, loc.boardID)
+		if err != nil {
+			return out, err
+		}
+	}
 	rep, errs := c.collectAlerts(ctx, s, now, o.stall)
 	for _, e := range errs {
 		keep(e)
 	}
-	out.Alerts = alertLines(rep, now)
+	out.Alerts = append(alertLines(rep, now), recovery.Findings...)
 	// A died run's bot learns of it through pickup, which resumes it; a
 	// missed date goes to the chief of staff, who tells the owner.
 	for _, e := range rep.ETAMissed {
@@ -733,7 +750,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 			sentUp = append(sentUp, id.String())
 			continue
 		}
-		if t.LiveClaim() != nil || liveRun[id.String()] {
+		if t.LiveClaim() != nil || liveRun[id.String()] || recovery.Held[id.String()] != "" {
 			n.busy++
 			if t.Status == ticket.StatusBlocked {
 				n.blocked++
@@ -789,7 +806,7 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 					build(eng, t)
 				case t.Tries == 2 && eng == "junior-engineer":
 					build("senior-engineer", t)
-				case t.Tries == 2:
+				case t.Tries == 2 || loc.boardID != "":
 					start("plan", id, id.String())
 				case o.refill:
 					out.rest++

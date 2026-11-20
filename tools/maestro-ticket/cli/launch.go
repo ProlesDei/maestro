@@ -387,6 +387,11 @@ func runSupervise(ctx context.Context, c *call) error {
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
 			c.actor = r.Launcher
+			if r.ActionID != "" {
+				if err := saveActionReceipt(co, r); err != nil {
+					fmt.Fprintln(c.env.Stderr, "handoff receipt:", err)
+				}
+			}
 			return c.startLaunch(ctx, runTicket(r), r)
 		},
 		OnEnd: func(r runs.Record) {
@@ -401,6 +406,28 @@ func runSupervise(ctx context.Context, c *call) error {
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chainLimit)
 			defer cancel()
 			c.chain(cctx, dir, r)
+		},
+		CodeWake: func(r runs.Record) error {
+			if r.Job == "" || runs.Acked(dir, r.ID) {
+				return nil
+			}
+			// Reuse the saved route. Computing a limit from this later clock
+			// could postpone a reset indefinitely.
+			var rt routed
+			if len(r.Routed) > 0 && json.Unmarshal(r.Routed, &rt) == nil {
+				for _, line := range rt.Do {
+					cc := *c
+					cc.actor = r.Launcher
+					cc.runCache = nil
+					if on, gone := cc.runDo(ctx, dir, notify, r, line); on || gone {
+						if len(rt.Do) == 1 && len(rt.Send) == 0 && rt.Reply == "" {
+							_, err := runs.Ack(dir, r.ID, chainBy, time.Now())
+							return err
+						}
+					}
+				}
+			}
+			return nil
 		},
 		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.

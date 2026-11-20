@@ -120,7 +120,10 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 	if err != nil {
 		return r, err
 	}
-	if r.Job == "" || loc.boardID == "" {
+	if loc.boardID != "" && r.Job == "" {
+		return r, usagef("launch: use job on a subscription-paced runtime board")
+	}
+	if loc.boardID == "" {
 		return runs.Create(dir, r, prompt)
 	}
 	unlock, err := lockBoard(root)
@@ -200,6 +203,7 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 			return r, err
 		}
 	}
+	r.BoardID = loc.boardID
 	r.Profile, r.Harness, r.Estimate = chosen, p.Harness, b.Estimate
 	return runs.Create(dir, r, prompt)
 }
