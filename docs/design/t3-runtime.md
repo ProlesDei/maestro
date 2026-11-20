@@ -1,11 +1,11 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v10, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). v10 specifies repeat kickbacks (4.3). The proposed runtime is still unbuilt. The team works on this spec from here.
+**Status:** draft v11, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). v10 specifies repeat kickbacks (4.3). v11 starts a fresh Atlas board for new work (7, 10). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
 
-1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`. Setting a bot's webhook again brings it back, so a team can still run Maestro on Grok.
+1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`. The existing Grok board stays with the owner for closeout. New goals start on T3.
 2. Each role gets a **server**: a webhook (a Grok bot, as today), a command (the chief of staff's wake), or code (the planner's routing and the five worker roles). Every place that now asks "does this bot have a webhook?" asks "is this role served?" instead.
 3. Agent sessions plan, judge and rule. Section 8 maps each role to a harness, model and account. Code takes only the relaying that Grok bots did: start the next step, dispatch ready work, take a look, pass on what needs a person (section 3).
 4. The owner specs features with one or more T3 chief-of-staff sessions. Each session uses Astra or Opus. Chiefs share accepted direction, work with the planner on outcomes, and settle delegated product calls. Section 5 defines their authority and handoffs.
@@ -61,7 +61,7 @@ flowchart LR
 - the refill and ack gates **[code]** `tools/maestro-ticket/cli/chain.go:110-120`;
 - the ring itself **[code]** `tools/maestro-ticket/runs/supervise.go:473`.
 
-The servers mix, so the move off Grok goes one role at a time (section 10).
+Section 10 describes this installation’s fresh start. Teams with a connected webhook server can still configure one.
 
 ## 3. The planner owns delivery
 
@@ -111,7 +111,7 @@ flowchart TD
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route review and QA kickbacks by section 4.3. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
 | `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Planner owns triage and groups related causes. Send goal outcomes, material deviations and unresolved product or owner decisions to the goal inbox (5.2). |
 
-Persist one handoff ID per action. Replay returns the recorded run or inbox item, including during a switch back to a webhook. Ack after all actions have durable receipts. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
+Persist one handoff ID per action. Replay returns the recorded run or inbox item, including after a runtime restart. Ack after all actions have durable receipts. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
 
 It never forwards a full `--report`. The planner's persona sends a report only when a goal finishes, the line stops, a block needs it or the chief of staff asks, and the relay keeps to that.
 
@@ -355,10 +355,9 @@ A team on one Linux box with no T3 can skip the wall. Then the same commands run
 
 `maestro-ticket` already runs on MongoDB, `mongodb+srv://` URIs included **[code]** `tools/maestro-ticket/README.md:24`.
 
-1. Make an Atlas cluster in a region near the machine. Let only the machine's IP reach it, and provision the separate collection-scoped roles in 5.4.
-2. As `maestro`, write the URI with `maestro-ticket store --uri-file -`. It lands in `store.uri`, mode 0600, and only the host ever prints.
-3. Move today's board with `maestro-ticket migrate`.
-4. The chief service holds its own memory credential. It reaches worker board operations through `cos` verbs; the worker URI stays on the worker side.
+1. Use a fresh database in Atlas for this board. Provision the collection-scoped roles in 5.4. Grok cannot connect to the database; the owner handles remaining Grok work there independently.
+2. S5 provides an empty-board initialization path for a fresh T3 store. It accepts the worker URI through a protected file or stdin, creates the board schema and an independent board identity, and records the connection only after verification. A repeat against the same board must preserve its data. A populated or mismatched target must never be cleared. Today bare `store` only selects a board, and `migrate --to mongodb` requires a local SQLite board. Neither command imports Grok work.
+3. Before the first goal, verify `doctor` identifies the intended Atlas host and the board has zero tickets, claims, runs and pending handoffs. Keep chief and worker credentials separate as in 5.4.
 
 On MongoDB, the store's folder still holds this machine's own state: `runs/`, `slots/`, `notify/` **[code]** `tools/maestro-ticket/README.md:24`. On one machine that costs nothing.
 
@@ -399,22 +398,13 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 | `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | configure runtime, profiles, role models, effort and reserves; print the sudoers lines; build both private instruction bundles |
 | `templates/project-setup.md` | a `## Runtime` section |
 
-## 10. The move off Grok, one role at a time
+## 10. Start new work on T3
 
-The servers mix, so each step moves one group of roles and can go back by setting the old webhook again.
+The existing board lives in Grok Bot and cannot connect to Atlas. The owner closes its remaining items there. T3 starts independently with a new store, chief sessions and goal inbox. Old tickets, conversations, decisions, credentials and webhooks stay with the old setup. There is no import, dual-write period or cross-board handoff.
 
-```mermaid
-flowchart LR
-  M0["Now<br/>all seven on Grok"] --> M1["Step 1<br/>workers on code;<br/>Grok planner and chief of staff"]
-  M1 --> M2["Step 2<br/>planner relay on code;<br/>Grok chief of staff"]
-  M2 --> M3["Step 3<br/>chief of staff in T3;<br/>Grok off"]
-```
+Run the section 11 trials on scratch data. Once the runtime is ready and the empty production board passes section 7, submit one new goal through a T3 chief and follow it through merge. Add further new goals there. If the new runtime fails, pause its dispatch, preserve its board, and recover it in place. The old board's closeout can proceed throughout.
 
-| Step | Needs | Rollback |
-|---|---|---|
-| 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
-| 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
-| 3. Chief of staff in T3 | S4, S5 | `notify set chief-of-staff --url-file` |
+Use a distinct store and run directory. Where both boards use the same GitHub repository, scope ticket-to-branch and PR lookup to the new board so a reused local ticket number cannot attach to an old PR. Include an old and a new ticket with the same number in the S5 trial.
 
 ## 11. Build order and probes
 
@@ -425,7 +415,7 @@ flowchart LR
 | S2 | Code relay, look lock and recovery discovery (3.3) | recovery discovery (3.3) and kickback routing (4.3); one start after replay; concurrent starts account for projected spend once; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
 | S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the brief-change and AC revision trials (4.1–4.2) and the memory trials (5.4); an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
-| S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
+| S5 | Fresh Atlas board setup (7), board-scoped PR lookup (10), subscription billing checks | Verify empty first start, safe repeat after adding a ticket, rejection of a mismatched target, distinct old/new PR lookup, and subscription billing. |
 | S6 | The rewrite (section 9) | review |
 
 Use a scratch board and a thin trial driver in P0. Start a billing brief with Astra and an onboarding brief with Opus at the same time. The planner must receive both accepted revisions. Give it a ticket-ordering issue and expect zero chief wakes. Give the billing chief a trade-off covered by owner direction and expect one recorded ruling and zero owner questions. Then exceed that authority: expect exactly one owner question and one ruling delivered to the planner, visible to both chief sessions.
