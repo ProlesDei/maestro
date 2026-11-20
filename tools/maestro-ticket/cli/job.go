@@ -577,27 +577,35 @@ var jobStatuses = map[string][]ticket.Status{
 	"design": {ticket.StatusTodo, ticket.StatusInProgress},
 }
 
+func (c *call) checkRecoveryHold(id string) error {
+	if id == "" {
+		return nil
+	}
+	loc, err := c.location()
+	if err != nil || loc.boardID == "" {
+		return err
+	}
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	m, err := co.s.read("recovery-holds", id)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %s: %s", ticket.ErrPaused, id, m.body)
+}
+
 // jobFits refuses a job on a ticket in a status it can't work, and a
 // second run of one job on one ticket while the first goes: of two bots
 // handed the same job, one runs it.
 func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 	if want, ok := jobStatuses[k.name]; ok {
-		loc, err := c.location()
-		if err != nil {
+		if err := c.checkRecoveryHold(id); err != nil {
 			return err
-		}
-		if loc.boardID != "" {
-			co, err := c.coord()
-			if err != nil {
-				return err
-			}
-			m, err := co.s.read("recovery-holds", id)
-			if err == nil {
-				return fmt.Errorf("%w: %s: %s", ticket.ErrPaused, id, m.body)
-			}
-			if !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
 		}
 		t, err := c.ticketForJob(ctx, id)
 		if err != nil {
@@ -1096,6 +1104,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	}
 	commitMark, abortMark, err := co.takeMark(r.ID+".again", func(id string) string { return id }, func(id string, _ mark) error {
 		if nr, err := runs.Get(dir, id, time.Now()); err == nil && nr.Ended() {
+			// A finalized child that never acquired a PID or launch receipt
+			// could not have received the saved turn. Replace only that child.
+			if admissionWait(r) && nr.AgainOf == r.ID && nr.PID == 0 && nr.LaunchID == 0 && nr.EndedAt != nil && (nr.State == runs.Died || nr.State == runs.Failed) {
+				return nil
+			}
 			return alreadyGoing{run: id, ran: true}
 		}
 		return alreadyGoing{run: id}

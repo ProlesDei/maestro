@@ -277,6 +277,9 @@ var startSupervisor = func(sup *exec.Cmd) error {
 // mark, if set, writes the run's id in its marks before it can run. A
 // rec.Dir set runs it there: a retry or resume runs where its run did.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
+	if err := c.checkRecoveryHold(rec.Ticket); err != nil {
+		return runs.Record{}, err
+	}
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -553,6 +556,17 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 			r, release, died, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
 			if !ok {
 				return
+			}
+			// A retry whose supervisor never started owns no turn or ticket claim.
+			// Its parent keeps the unsent input and can replace its finalized mark.
+			if r.PID == 0 && r.LaunchID == 0 && r.AgainOf != "" && r.EndedAt != nil {
+				if parent, e := runs.Load(dir, r.AgainOf); e == nil && admissionWait(parent) {
+					if e := runs.Save(dir, r); e == nil {
+						_, _ = runs.Ack(dir, r.ID, chainBy, time.Now())
+					}
+					release()
+					return
+				}
 			}
 			// Each works as the run's own supervisor would: as its
 			// launcher, on its own copy of the call.

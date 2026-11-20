@@ -149,7 +149,7 @@ func admissionWait(r runs.Record) bool {
 		return false
 	}
 	msg := strings.TrimSpace(r.Error)
-	return strings.HasPrefix(msg, "maestro-ticket: worker admission:") || strings.HasPrefix(msg, "maestro-ticket: worker: projected usage exceeds allowance until ") || msg == "maestro-ticket: worker: subscription login could not be verified; refresh the bound account"
+	return msg == "maestro-ticket: worker: reset passed; refresh usage" || msg == "maestro-ticket: worker: missing usage reading or job estimate" || strings.HasPrefix(msg, "maestro-ticket: worker admission:") || strings.HasPrefix(msg, "maestro-ticket: worker: projected usage exceeds allowance until ") || msg == "maestro-ticket: worker: subscription login could not be verified; refresh the bound account"
 }
 
 func routeOutcome(r runs.Record) (outcome, reset string) {
