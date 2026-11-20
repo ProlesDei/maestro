@@ -1015,7 +1015,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 			var going alreadyGoing
 			if errors.As(err, &going) {
 				other, e := runs.Get(dir, going.run, time.Now())
-				if e != nil || other.AgainOf != r.ID || other.BoardID != r.BoardID || other.Job != r.Job || other.Ticket != r.Ticket || other.Launcher != r.Launcher || other.PID == 0 {
+				if e != nil || other.AgainOf != r.ID || other.BoardID != r.BoardID || other.Job != r.Job || other.Ticket != r.Ticket || other.Launcher != r.Launcher || !workerReceipt(other) {
 					return runs.Record{}, fmt.Errorf("%w: waiting to replay the original turn", ticket.ErrClaimed)
 				}
 			}
@@ -1136,6 +1136,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		abortMark()
 		return fail(err)
 	}
+	if admissionWait(r) && !workerReceipt(nr) {
+		// The launcher recorded the child's .in and .again before starting its supervisor.
+		// Keep those marks and the parent's pending action until recovery verifies a worker.
+		return fail(fmt.Errorf("%w: waiting for the retry supervisor to record its worker", ticket.ErrClaimed))
+	}
 	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
 		// The rerun holds the ticket, as look's start would, so no look
@@ -1143,6 +1148,10 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		co.recordHandouts([]send{{"planner-job", r.Ticket}})
 	}
 	return nr, nil
+}
+
+func workerReceipt(r runs.Record) bool {
+	return r.PID > 0 && (r.BoardID == "" || r.LaunchID != 0 && r.Stamp != "")
 }
 
 // stillRunning says why a live run can't go again yet, and the way out.
