@@ -56,7 +56,7 @@ while [ $# -gt 0 ]; do
 	*) pages+=("$1"); shift ;;
 	esac
 done
-[ -n "$shoot$motion" ] && [ "$shoot$motion" != 11 ] ||
+[[ -n "$shoot$motion" && "$shoot$motion" != 11 ]] ||
 	die 2 "usage: screens.sh --shoot|--motion --out <dir> --widths 375,1280 [--dark] [--ms <n>] [--run <name>] <page>..."
 [ -n "$out" ] || die 2 "give --out <dir>"
 [ ${#pages[@]} -gt 0 ] || die 2 "give at least one page"
@@ -65,7 +65,7 @@ done
 if [ -n "$motion" ]; then
 	[ -z "$dark" ] || die 2 "--dark is for --shoot"
 	ms=${ms:-1000}
-	[[ $ms =~ ^[1-9][0-9]{2,3}$ ]] && [ "$ms" -ge 200 ] && [ "$ms" -le 4000 ] || die 2 "--ms must be a number from 200 to 4000"
+	[[ $ms =~ ^[1-9][0-9]{2,3}$ && "$ms" -ge 200 && "$ms" -le 4000 ]] || die 2 "--ms must be a number from 200 to 4000"
 else
 	[ -z "$ms" ] || die 2 "--ms is for --motion"
 fi

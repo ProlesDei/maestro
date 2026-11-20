@@ -229,10 +229,10 @@ harness_of() {
 	local p=$1/skills r
 	real='' why=''
 	if [ ! -d "$target/$p" ]; then
-		[ ! -L "$target/$p" ] && [ ! -e "$target/$p" ] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
+		[[ ! -L "$target/$p" && ! -e "$target/$p" ]] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
 		p=$1
 		if [ ! -d "$target/$p" ]; then
-			[ ! -L "$target/$p" ] && [ ! -e "$target/$p" ] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
+			[[ ! -L "$target/$p" && ! -e "$target/$p" ]] || { why="$target/$p isn't a folder, or is a symlink to none"; return 1; }
 			real=$1
 			return 0
 		fi

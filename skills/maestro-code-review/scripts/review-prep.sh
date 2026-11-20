@@ -209,7 +209,7 @@ if [ -n "$route" ]; then
 	files=$(jq -r '.files[] | "\(.changeType)\t\(.path)"' <<<"$pv")
 	n=$(printf '%s\n' "$files" | grep -c . || true)
 	# gh lists at most 100 files; a PR that big is no light review anyway.
-	[ "$n" -gt 0 ] && [ "$n" -lt 100 ] || full "$n files"
+	[[ "$n" -gt 0 && "$n" -lt 100 ]] || full "$n files"
 	while IFS=$'\t' read -r t f; do
 		# A rename lists only its new path, so what it moved stays unseen.
 		case $t in ADDED | MODIFIED | DELETED) ;; *) full "$f is ${t,,}" ;; esac

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
+
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
@@ -148,23 +150,34 @@ func (c *call) openStore(ctx context.Context, loc storeLoc) (ticket.Store, error
 // uriHost is the part of a MongoDB URI safe to print: its hosts, with no
 // user or password.
 func uriHost(uri string) string {
+	host, _ := uriParts(uri)
+	return host
+}
+
+func uriParts(uri string) (host, password string) {
 	u, err := url.Parse(uri)
-	if err != nil || u.Host == "" {
-		// url's error quotes the URI whole.
-		return "an unreadable URI"
+	if err == nil && u.Host != "" {
+		password, _ = u.User.Password()
+		return u.Host, password
 	}
-	return u.Host
+	// Some Go versions reject comma-separated hosts with ports. The MongoDB
+	// parser accepts them. Only SRV parsing would need a DNS lookup.
+	if strings.HasPrefix(uri, "mongodb://") {
+		if cs, err := connstring.Parse(uri); err == nil && len(cs.RawHosts) > 0 {
+			return strings.Join(cs.RawHosts, ","), cs.Password
+		}
+	}
+	return "an unreadable URI", ""
 }
 
 // redactURI takes uri, and its password alone, out of err's text, keeping
 // what err wraps for errors.Is.
 func redactURI(err error, uri string) error {
 	msg := err.Error()
-	out := strings.ReplaceAll(msg, uri, uriHost(uri))
-	if u, perr := url.Parse(uri); perr == nil {
-		if pw, ok := u.User.Password(); ok && pw != "" {
-			out = strings.ReplaceAll(out, pw, "***")
-		}
+	host, password := uriParts(uri)
+	out := strings.ReplaceAll(msg, uri, host)
+	if password != "" {
+		out = strings.ReplaceAll(out, password, "***")
 	}
 	if out == msg {
 		return err
