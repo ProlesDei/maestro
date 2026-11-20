@@ -1,22 +1,23 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v9, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. Nothing here is built.
+**Status:** draft v10, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. **v10 makes the runs harness-neutral** (8.1): one small adapter per harness, Claude's first, and a harness per slot behind the same evals as a model move, with one command back to Claude. It also **scripts QA** (14.6): Opus writes a ticket's test script once, and Sonnet runs it at tiers 0-1, handing any surprise to Opus. Nothing here is built.
 **Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 14.3: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
 1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`; setting a bot's webhook again brings it back.
 2. Each role gets a **server**: a webhook (a Grok bot), a command (the chief of staff's wake), or code (the planner's routing and the five worker roles). Every "does this bot have a webhook?" becomes "is this role served?".
-3. All thinking stays in Claude. Planning, judging and rulings run as Claude sessions, as today. Code takes only the relaying Grok bots did (section 3).
+3. All thinking stays in Claude. Planning, judging and rulings run as Claude sessions, as today. Code takes only the relaying Grok bots did (section 3). Claude is the default, not a hard-wired part: point 13.
 4. The chief of staff is one or more **desk** threads in T3 Code. The owner talks only to desks, from the T3 app on the phone over Tailscale (5.5). Desks sit behind a wall: no worker session can type into one, and a desk reaches the board only through `maestro-ticket cos <verb>`.
 5. Several desks can run at once. Each owns its goals by a 24-hour lease, and all read one small desk state, so each knows what the others do. **The first desk opened has duty**; when it closes or its lease lapses, the next-oldest live desk takes it, atomically (5.4). The duty desk gets what no desk owns and alone changes board-wide settings.
 6. Code tells, Claude decides. Code sorts each inbox item as *owner*, *desk* or *fyi*. Only *owner* and *desk* items wake a desk, and a reminder about a card is a push from code, not a model turn (5.2).
-7. The runs get cheaper: Sonnet 5.5 for four jobs, each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that code queries for the runs (point 12, section 14).
+7. The runs get cheaper: Sonnet 5.5 for four jobs, and for scripted QA at tiers 0-1 (14.6), each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that code queries for the runs (point 12, section 14).
 8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
 9. One push channel: T3 Connect, linked **publish-only**, so no tunnel and no cloudflared. Access is Tailscale only. If the relay is down, the failure is shown wherever the owner looks next, and a daily heartbeat push makes silence noticeable. There is no second channel (5.5).
 10. Cleanup is code. A nightly janitor, also started when free space or inodes fall under 20%, frees what is safe before claims are refused at 10%. Each run gets its own TMPDIR and a 4 GB memory cap, so one heavy build fails alone (6.4).
 11. QA tests in parallel: one headless Chromium and one copy of the app per QA run, `qa_slots` of them (4 on a 32 GB PC, guess), in the run's memory scope, which is stopped at the run's end. A shim caps browsers and refuses `close-all` (6.5).
 12. Code queries the code graph; runs read a pack. Before build, review and QA, code writes a capped pack: changed symbols, their callers, the blast radius, and the pages a change reaches. It is at most 2,000 tokens, and 400-1,400 on real PRs **[box]**. Each repo's index is rebuilt on every merge in about 3 seconds, with an overlay for each PR. Runs load no MCP server by default, and `rules set graph off` turns it all off (14.3).
+13. Any harness can fill a slot. Every Claude assumption in `maestro-ticket` (the `claude -p` flags, session ids, the stop hook, the stream and cost parsing, the usage-limit words) moves behind one adapter per harness. Claude's adapter is built first, with no change in behaviour. Later, `rules set harness <slot> grok|codex|…` moves one role at a time, behind the same eval gate as a model move, and `rules set harness all claude` puts every slot back. Skills, the board, the verbs, the packs, the evidence and the wall stay harness-neutral (8.1).
 
 ```mermaid
 flowchart LR
@@ -82,6 +83,8 @@ The calls that shaped v3-v5. The answers of 19:46-19:51 are in the decisions log
 - the ring itself **[code]** `tools/maestro-ticket/runs/supervise.go:473`.
 
 The servers mix, so the move off Grok goes one role at a time (section 10).
+
+A served role's runs also have a **harness**, Claude Code for every role today. A **server** says what starts the work: a webhook, a command or code. A **harness** says which agent program does it: `rules set harness <slot>` (8.1). The two are independent. A code-served build can run on any harness with an adapter, and a desk is a T3 thread on whichever engine T3 offers. Moving a slot off Claude needs its eval set (14.2), the same as a model move.
 
 ## 3. The planner: Claude thinks, code relays
 
@@ -668,13 +671,109 @@ One Max 20x plan runs every desk and every worker run, on one login.
 - **Ready for a Team plan.** Each run records an account name, `default` for now (12.2).
 - **The plan's terms.** Plan limits assume "ordinary, individual usage" **[docs]**. Maestro already runs `claude -p` on the plan, so this design adds no new risk and removes none. Whether a Team seat gives as much as Max 20x, and may run scripted `claude -p`, needs Anthropic's answer before any switch.
 
+### 8.1 Harnesses: Claude first, others slot in
+
+The owner's ask (2026-11-20): "I know we're going to be using Claude, but this should be built so we can easily switch, modular in design, so we can slot different harnesses (maybe Muse or Antigravity) into different parts of this system." A **harness** is the agent program a run or a desk talks through: Claude Code today. Maestro already half-supports more: `install.sh` takes `harnesses: claude codex grok` and copies the same skill bytes into `.claude/skills` or `.agents/skills` **[code]** `scripts/install.sh:12-14,179-184`, and four skills carry Codex's `agents/openai.yaml` **[code]**. But every run is still a `claude -p` command, read by Claude-shaped parsers.
+
+**1. Where Claude is assumed today** **[code]**, under `tools/maestro-ticket/` unless named:
+
+| What | Where | What it assumes |
+|---|---|---|
+| The command | `cli/job.go:101-110` | `claude -p --session-id <uuid> --model --effort --permission-mode bypassPermissions --output-format json`, with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and, on lean jobs, `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` |
+| Model names | `cli/job.go:26-32`, the job table `:57-81`, the tier and route switch `:357-414` | `opus`, `sonnet` and effort `high` are Claude Code's aliases |
+| The prompt | `cli/job.go:360` | a skill is invoked as a slash command, `/maestro-software-engineer T-12` |
+| The session id | `cli/job.go:130-138`; `again` `:970-981`; `resume` `:1132-1140` | the caller picks the id (`--session-id`) before the run starts, so a run that dies with no reply can still be resumed |
+| Resume | `cli/job.go:1277-1308`; `sessionOf` `cli/route.go:1176-1178` | `--resume <id>` goes right after `-p`; `--opus` swaps `--model` and `--effort` in the argv |
+| The stop hook | `cli/stopcheck.go:44-69`, its input `:88-96` | a `--settings` JSON with `hooks.Stop`, the shape Claude Code reads; stdin holds `session_id`, `transcript_path`, `last_assistant_message` |
+| Streaming | `runs/supervise.go:363-375` | swaps the exact pair `--output-format json` for `stream-json --verbose` |
+| Stream parsing | `streamfilter/streamfilter.go:1-3,100-146`; tool codes `streamfilter/codes.go:14-21,123` | Claude's line types (`init`, `assistant`, `user`, `result`), `claude_code_version`, `cache_creation_input_tokens`, Claude Code's tool names, `mcp__` tool prefixes |
+| The reply | `runs/runs.go:608-640`; `log-run` `cli/runs.go:21-45,108-145` | `result`, `session_id`, `is_error`, `total_cost_usd` and `modelUsage` from Claude's JSON |
+| Usage limit and outage | `cli/route.go:68-80,111`; the stop check `cli/stopcheck.go:171` | Claude Code's own words ("Claude AI usage limit reached", "5-hour limit reached", `limit reached\|<epoch>`, `API Error: 5xx`) |
+| The pause | `cli/coord.go:33` | one `paused.json`: one plan's limit is the whole team's |
+| Stats | `cli/statsrun.go:50-60,104-109`; `stats/schema.go:54,64` | model ids `claude-(opus\|sonnet\|haiku)-…` (Bedrock and Vertex forms too), the lean flag read from `CLAUDE_CODE_PROMPT_CACHE_TTL`, columns `claude_ms` and `v_claude` |
+| Slots and scans | `cli/slot.go:117,134`; `cli/job.go:116-127`; `runs/scan.go:15-30` | `argv[0]` is `claude`: only then a slot wait earns credit, a held line holds, and `runs` flags a session started outside `launch` |
+| MCP | `--strict-mcp-config --mcp-config` in `job` (14.3) | Claude Code's flags |
+| Auth | the environment builder (8) | drops `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` |
+| Paths | `cli/job.go:165`; `scripts/install.sh:238-240,445-447,492-497` | review-prep lives under `.claude/skills`; install requires `claude` in `harnesses:` and on `PATH`; it checks `.claude/settings.json` for graph hooks |
+| Skills | `skills/maestro-prune/SKILL.md:46`, `skills/maestro-figure-it-out/SKILL.md:29` | say "`claude -p`" for a run with no one to answer |
+
+Already neutral: the supervisor's time limit, kill and process group (`runs/supervise.go`, `cli/proc_unix.go:22`, whose comment already names Codex and Grok Build), `MAESTRO_RUN_ID` (`runs/supervise.go:21,190`), the board and every `maestro-ticket` verb, the evidence folders, the packs (14.3), and the skills' text bar the two lines above. `review-prep.sh` already reads `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and the other harnesses' folders as rules files **[code]** `skills/maestro-code-review/scripts/review-prep.sh:87,122`. `maestro-recall` already lists each harness's transcripts **[code]** `skills/maestro-recall/SKILL.md:25`.
+
+**2. The harnesses.** Only what an adapter needs. Grok Build is on the VM; the others were read from their docs, briefly.
+
+| Harness | Headless | Resume | Output | Hooks | Skills, rules | Cost, limits |
+|---|---|---|---|---|---|---|
+| **Claude Code** | `claude -p` | `--resume <id>`; the caller picks the id | `json`, `stream-json` | `Stop` and the rest, through `--settings` | `.claude/skills`, `CLAUDE.md` | `total_cost_usd`, `modelUsage`; limit words in the reply **[code]** |
+| **Grok Build** 1.0.77 **[box]** | `grok -p`, `--output-format plain\|json\|streaming-json\|streaming-messages-json` | `-r <id>`; `-s <uuid>` lets the caller pick the id | `json` holds `text`, `stopReason`, `sessionId`, `usage`, `modelUsage.*.costUSD` and `total_cost_usd` **[docs]** (`~/.grok/docs/user-guide/14-headless-mode.md`): Claude's cost fields, but `text` and `sessionId` in place of `result` and `session_id` | `Stop` can block; it also reads hooks from `.claude/settings.json` **[docs]** (`10-hooks.md:69-72,102`). Project hooks need folder trust, even headless | `.grok/`, `.claude/` and `.agents/skills`; `AGENTS.md` and `CLAUDE.md` both **[docs]** | `grok usage` prints the plan's limit **[box]**; the limit's words (guess) |
+| **Codex CLI** | `codex exec`, `--json` gives JSONL events (`thread.started`, `turn.completed`, `turn.failed`, `item.*`) **[docs]** | `codex exec resume <id>` **[docs]**; the id comes from the stream, not the caller (guess) | JSONL | `hooks.json` or `[hooks]` in `.codex/`; project hooks load only when trusted **[docs]**; a blocking stop event (guess) | `.agents/skills` **[code]** (install); `AGENTS.md` | tokens per turn **[docs]**; USD (guess: not on a ChatGPT plan) |
+| **Gemini CLI** | `gemini -p`, `--output-format json\|stream-json` (`init`, `message`, `tool_use`, `tool_result`, `error`, `result`) **[docs]** | `--resume` in `-p` mode varies by version (third-party) | NDJSON | hooks exist (third-party); headless behaviour unknown | `GEMINI.md` (guess) | (guess) |
+| **Antigravity CLI** (`agy`) | `agy -p`, `--output-format text\|json\|stream-json`; `--print-timeout` defaults to **5 minutes** **[docs]** | `--conversation <id>`, `-c` **[docs]** | result: `conversation_id`, `status`, `response`, `usage` with tokens; **no cost** **[docs]** | none documented **[docs]** | settings in `~/.gemini/antigravity-cli/settings.json` **[docs]**; rules and skills (guess) | tokens only; quota errors not documented. Reported to **hang in non-TTY `-p`**, as a subprocess is (GitHub issue #318) |
+| **Muse Code** (Meta, beta since 2026-08-05) | `muse exec --json`, JSONL (third-party, tried only on a stub model) | none documented; crash-resume exists (third-party) | JSONL | lifecycle hooks (third-party) | `.agents/skills`, `.claude/skills`, `AGENTS.md`; MCP since 1.1.1 (third-party) | unknown; one model, Muse Spark |
+| **Cursor CLI** | `cursor-agent -p --output-format json\|stream-json` **[docs]** | `--resume <chat id>` (docs and third-party disagree) | NDJSON | `.cursor/hooks.json`; some events don't fire headless (forum) | `.cursor/rules`, `AGENTS.md` (guess) | (guess) |
+| **T3 Code** 0.1.0 threads | — | — | — | — | — | engines `claudeAgent`, `codex`, `cursor`, `grok`, `opencode`, `pi` **[box]** (its settings bundle); `t3 --help` shows no thread verbs |
+
+Every one has a headless mode, but two aren't ready for unattended runs: **Antigravity** (no cost field, no documented hooks, a reported non-TTY hang, and a 5-minute default timeout that a 2-hour run must raise), and **Muse** (no documented resume, its headless mode untested on a live model by the one review found). **Grok Build** is closest to Claude: same cost fields, same hook shape, a caller-chosen session id. **Codex** is next: a clean event stream and resume, but its own session ids and no USD.
+
+**3. The adapter.** One small Go interface per harness, in a new `tools/maestro-ticket/harness/` package. Each method moves code that exists today; nothing new is invented:
+
+| Method | Does | Claude's, moved from |
+|---|---|---|
+| `Start(run)` | argv and env words for a new run: prompt (skill, ids, text), model, effort, cwd, session, lean, hooked | `claudeCommand`, `job.go:101-110,360` |
+| `Resume(cmd, session, model, effort)` | the same run resumed, maybe on another model | `resumeCommand`, `job.go:1277-1308` |
+| `Session()` | a caller-chosen id, or none (then read from the stream) | `newSessionID`, `job.go:130` |
+| `Stream(cmd)` | the streaming form of the command | `StreamArgv`, `supervise.go:363-375` |
+| `Events(line)` | one output line → Maestro's steps, tool codes, usage by model, context peak | `streamfilter` |
+| `Reply(out)` | text, session id, is-error, tokens by model, cost and where it came from (`result`, `stream`, or `list` = tokens × that vendor's list price) | `ParseOutput`, `lastResult` |
+| `Ended(reply)` | `usage_limit` and its reset, `api_down`, or nothing | the regexes in `route.go:68-80` |
+| `Family(model id)` | the stats family | `statsrun.go:50-60` |
+| `Hooks(exe, store)` | the words that wire stop-check in, or none | `stopSettings`, `withStopHook` |
+| `Paths()` | its skills folder, rules file, settings and hooks file, MCP config, transcripts | `install.sh:179-184`, `maestro-recall` |
+| `Env()` | the keys the environment builder drops (Claude: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`; Codex: `OPENAI_API_KEY`, guess) | 8 |
+
+Stop, the time limit, cwd and the run's memory scope stay in the supervisor: they are process facts, the same for every harness. A run record gets a `harness` field; empty reads as `claude`, so every record today still resumes. A harness with no blocking stop hook gets the same stop-check **after** the run exits: the supervisor reads the reply, and a job that ended with no note is resumed once with the block text. That costs a resume where Claude's in-session block costs a turn.
+
+**4. A harness per slot.** `rules set harness <slot> claude|grok|codex|…`, beside `rules set model <slot>` (14.1), built the same way: a standing value the duty desk sets and `job` reads before its tier and route switch. The slots are the job kinds, split where 14.1 already splits them:
+
+| Slot | Today | Needs before a move |
+|---|---|---|
+| `plan`, `rule` that splits, rewrites or plans | Claude Opus | a plan eval set (none yet) |
+| `build.junior`, `build.senior` | Claude Sonnet, Opus | B; senior: a set (none yet) |
+| `review.light`, `review.full` | Claude Sonnet, Opus | L; full: a set (none yet) |
+| `qa.scripted`, `qa.explore`, `live`, `qa-ask` | Claude (14.6) | QS; the rest: a set (none yet) |
+| `design` | Claude Opus | a set (none yet) |
+| `judge` | Claude, Sonnet after J | J |
+| status-only `rule`, `finish` | Claude, Sonnet after S; Sonnet | S; finish: a set (none yet) |
+| desks, the pager | T3 Claude threads | item 6 below |
+
+- **The same gate as a model move** (14.2). `maestro-ticket eval <set> --harness <h> --model <m>` reruns the slot's set. A slot with no set stays on Claude until one is built. A harness move also needs its adapter's fixtures to pass: ten recorded outputs (a done run, a question, a usage limit, an API error, a death) parsed to the right outcome, session and cost.
+- **Subagents stay in their run's harness.** The red team and skeptic are subagents of a review session, so they can't move alone. Moving one means making it its own job first. Not proposed.
+- **Models belong to a harness.** `rules set harness review.light codex` is refused unless `rules set model review.light` names one of Codex's models, so a slot never runs `--model sonnet` on Codex.
+- **Each harness's limit pauses only its own slots.** `paused.json` becomes `paused-<harness>.json` **[code]** `cli/coord.go:33`, as 12.2 does for accounts. A Claude limit then stops no Codex slot, and the reverse.
+- **The kill switch.** `rules set harness all claude` puts every slot back on Claude and its default model, in one command, logged in `rules.log`. Code also flips one slot back by itself, with a desk item, when two of its runs in a row end with a reply its adapter can't parse.
+- **Costs stay comparable.** A harness that prints no USD is priced as tokens × its vendor's list price, with `cost_src=list`, so `costs --by actor` still adds up. A subscription's real cost is its fee, which 14 doesn't count for Claude either.
+
+**5. What stays neutral, what is per-harness.**
+- **Neutral, always:** skills as plain markdown, the same bytes in every harness's folder (`install.sh`'s copy); the board and every `maestro-ticket` verb, which any harness with a shell can run; the packs (14.3) and the QA script (14.6), which are files; evidence formats and replies; the wall (6), which is Linux users and sudoers, not hooks. Two skill lines change, from "`claude -p`" to "a headless run" (9). Rules files are already shared in Maestro's own repo: `CLAUDE.md` is the single line `@AGENTS.md` **[code]** `CLAUDE.md:1`, which Claude Code imports **[docs]**. Grok reads both files, and Codex and Muse read `AGENTS.md`. In a team's repo, install leaves both files alone **[code]** `INSTALL.md:9`, so a team with only a `CLAUDE.md` needs an `AGENTS.md` before a harness that reads only that one gets a slot; `check` warns.
+- **Per harness, in its adapter:** the command and its flags; settings; hooks (stop-check; a desk's `SessionStart`, `beat` and `SessionEnd`); MCP wiring (`--strict-mcp-config` for Claude, `config.toml` for Codex, `grok mcp`, Muse's `settings.json`); auth, its login and the keys to drop; the parsing of output, costs and limits; the skill's prompt form (`/name` for Claude and Grok; else "Follow `<path>/SKILL.md`", which any harness reads).
+
+**6. Desks on another engine.** T3 0.1.0 already offers six engines for a thread **[box]**, so a desk could be a Codex or Grok thread with no Maestro change to the thread itself. What breaks:
+- **The desk's hooks.** `SessionStart` runs `desk brief`, others run `beat` and `desk close` (5.4), from `~maestro-cos/.claude/settings.json`. Grok reads that file **[docs]**; Codex needs its own `hooks.json` **[docs]**; Cursor's headless hooks miss events (forum). Whether T3 runs an engine's hooks at all inside a thread is (guess), so each engine needs the S8 checks again.
+- **The persona.** `~maestro-cos/.claude/CLAUDE.md` becomes an `AGENTS.md` beside it. Reload after compaction, the context cap (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, Claude only) and the session-to-thread id map are Claude probes (11); each engine needs its own.
+- **What it would buy.** A desk on another plan keeps the front door open when Claude's limit pauses everything (8). The pager thread is the cheapest first try: three lines, no judgment.
+- **Not proposed now.** Desks are owner-facing and stay on Opus (14.1).
+
+**7. Build now, later.** Laziness, as the owner asked: build the seam and one adapter, and nothing a second harness would only maybe need.
+- **Now (S13):** the `harness` package and the Claude adapter, made by moving the code in item 1 behind the interface, and the record's `harness` field. No behaviour change: a golden test shows every job's argv, and every recorded reply's parse, byte for byte as before. The two skill lines and the `AGENTS.md` import.
+- **With the second adapter, not before:** `rules set harness`, the per-harness pause, `cost_src=list`, the post-exit stop check, `eval --harness`, the fixtures, and `install.sh` dropping "must include `claude`". Grok Build first: it is on the VM, and its output and hooks are nearest Claude's. Codex next.
+- **Not planned:** Antigravity and Muse until the gaps in item 2 close; per-subagent harnesses; desks on another engine.
+
 ## 9. The rewrite
 
 The owner asked for a full rewrite of how Maestro runs. Every file below changes in step S6.
 
 | File | Change |
 |---|---|
-| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"**, code builds the packs, and runs load no MCP server unless `rules set graph live` (14.3). |
+| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"**, code builds the packs, and runs load no MCP server unless `rules set graph live` (14.3). A harness per slot, Claude by default, each move behind the slot's eval set, with `rules set harness all claude` as the way back (8.1). A Sonnet QA pass at tiers 0-1 merges only with every script step passed and evidenced; a surprise goes to Opus (14.6). |
 | `AGENTS.md` | "What we're building": the outer layer is the desks plus code; Grok is one supported runtime |
 | `README.md`, `docs/team.mermaid`, `docs/bot-anatomy.mermaid` | redraw for served roles, desks and the wall |
 | `bot-profiles/chief-of-staff/persona.md` | rewrite for desks: the `cos` and `desk` verbs, duty, the handoff note, the card shape, the 12-line reply. Procedures move to the skill. |
@@ -683,6 +782,9 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 | `skills/maestro-chief-of-staff`, `skills/maestro-planner` | stop calling their caller "the bot"; the CoS skill holds the long procedures |
 | `skills/maestro-code-review`, `skills/maestro-software-engineer`, `skills/maestro-code-review/passes.md` | the graph lines (14.3): Phase B step 3 and the engineer's step 2 read `graph.md` before any `git grep`; Phase C step 4 takes callers' code from it; passes 8 and 9 read it beside `code.md`; `risk=` feeds the tier rule. Subagents in the foreground with a model named (14.1); the light route's bar to tier ≤ 1 |
 | `skills/maestro-code-review/scripts/review-prep.sh`, `skills/maestro-qa-lead/scripts/qa-prep.sh`, `skills/maestro-qa-lead/SKILL.md`, `skills/maestro-planner/references/plan.md` | the prep scripts index the overlay and write `graph.md`, with `risk=` and, for QA, `graph_conflict=` and `pages=`; QA opens the pack's pages first; the planner runs `graph size` for each drafted ticket (14.3) |
+| `skills/maestro-qa-lead/references/test-a-pr.md`, `skills/maestro-qa-lead/SKILL.md`, `skills/maestro-qa-lead/scripts/qa-prep.sh` | scripted QA (14.6). Phase B: on the `script` route, run `$C/script.md` step by step, write `results.md`, and never add, drop or rewrite a step; the surprise rule and its `test: blocked` reply; a Sonnet fail only at 3 out of 3; at tier 2, the script first, then the tier's angles; with no fresh script, plan as today. `qa-prep.sh` builds `script.md` from the body, the amend at `H` and the pack's pages, and prints `script=fresh\|stale\|none` and `script_gap=` |
+| `skills/maestro-planner/references/plan.md`, `skills/maestro-create-ticket/SKILL.md`, `skills/maestro-code-review/SKILL.md` | a `## QA script` section on every ship ticket, in the shape and caps of 14.6, checked by `create --lint`; a ruling that rewrites a criterion rewrites its steps. A full review's GO posts `QA script amend: at <H>` when the diff reaches what the script misses; a light review adds `script_gap=yes` instead |
+| `skills/maestro-prune/SKILL.md:46`, `skills/maestro-figure-it-out/SKILL.md:29` | "`claude -p`" becomes "a headless run" (8.1) |
 | `INSTALL.md` step 7, `scripts/install.sh` | the pinned v0.12.1 binary and its sha256; never its `install` or `update`; watchers and UI off in its config; `check` warns on a different version or a watcher left on (14.3) |
 | `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | ask for a runtime (Grok or T3); print the sudoers lines; build the desks' `CLAUDE.md`, hooks and the pager's three lines; idempotent |
 | `docs/desktop-setup.md` (new) | 6.2 and 16.2: the distro, `wsl.conf`, `.wslconfig`, Tailscale, the startup task, the power plan, the units; the no-native-agents rule (6.3) |
@@ -708,11 +810,13 @@ flowchart LR
 
 | Step | Needs | Rollback |
 |---|---|---|
-| 0. Token knobs and fixes | S0, S7, S12 | `rules set model <job> opus`; `rules set graph off`; revert the skill lines |
+| 0. Token knobs and fixes | S0, S7, S12, S13, S14 | `rules set model <job> opus` (for scripted QA, `rules set model qa opus`); `rules set graph off`; revert the skill lines. S13 changes no behaviour, so it needs none |
 | 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
 | 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
 | 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, S11, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
 | 4. Several desks | S8 | close all but one desk |
+
+A harness move (8.1) is not a step. Each one comes after step 3, one slot at a time, once a second adapter exists and the slot's set passes on it. The way back is `rules set harness all claude`.
 
 ## 11. Build order and probes
 
@@ -732,6 +836,8 @@ flowchart LR
 | S7 | `rules set model <job>`; review subagents in the foreground with a model named; 5-minute cache for build and QA; `again` for a cold resume (section 14; the graph is S12) | each eval set in 14.2 passes before its job moves to Sonnet |
 | S12 | The graph (14.3): `maestro-ticket graph pack, size, impact, callers, reindex, status`, a stdio client of `codebase-memory-mcp`; the main checkout per repo and `graph.json`; `reindex` on `merged` under `graph.lock`; overlays from the prep scripts; `risk=`, `graph_conflict=`, `pages=`; `--strict-mcp-config` in `job`; `rules set graph`; the stats columns; the janitor's overlay class and the stale check; the brief's `graph:` line | a pack never passes its job's cap, and a 61-file PR's pack ends with `… more`; a function only an array registers shows `0 graph callers` with its `git grep` hit; ten `merged` lines in a minute make at most two indexes; after a merge, `graph status` shows the new sha within 15 minutes; an overlay goes once its ticket is done; with `graph off`, no pack is written and no run starts the server; with `pack`, a run's process list holds no `codebase-memory-mcp`; G passes before `pack` is the default |
 | S8 | `desk` command: open, close, claim, release, beat, note, remember, brief, ring, page; the duty check; the three hooks | two desks claim one goal and one wins; a desk silent for 24 h loses its goals to the duty desk; the first desk opened has duty; closing it gives duty to the next-oldest live desk, and a lapsed lease does too at the next desk event; 5 desks racing 1,000 duty checks leave one holder per epoch in `duty.log`; a `rules set` that holds the lock finishes before a takeover, and the old holder's next one is refused; a failed ring send moves duty at once; `brief` shows `duty:` and stays under 40 lines with 5 desks; `ring` wakes only the owning desk |
+| S13 | The harness seam (8.1): the `harness` package and the Claude adapter, by moving `claudeCommand`, `resumeCommand`, `newSessionID`, `StreamArgv`, `streamfilter`, `ParseOutput`, `lastResult`, the limit and outage regexes, the model-id regexes, `stopSettings` and the `claude` argv checks behind it; the record's `harness` field; the two skill lines | no behaviour change: a golden test shows each job's argv, `resume`, `resume --opus` and `again` byte for byte as before, and each recorded reply (done, question, usage limit with its reset, API error, death) parsed to the same outcome, session, cost and tokens; a record with no `harness` resumes as `claude`; nothing outside `harness/` names `claude` but the record's default |
+| S14 | Scripted QA (14.6): the `## QA script` section and its lint; `QA script amend:`; `script_gap=`; `qa-prep.sh`'s `script.md` and `script=`; the `script` route in `job qa`; the surprise reply and its `resume --opus` with a QA text; the stop check's step rule; the 1-in-10 second look; eval QS | a Sonnet run on a script with one step it can't follow replies `surprise`, posts no verdict, and is resumed on Opus once; a `QA: pass` with a step missing from `results.md` is blocked; a stale script, a `script_gap=yes` or tier 2 routes to Opus; the pack's pages appear as steps; QS passes before the route is on |
 
 | Claim | Label | Probe |
 |---|---|---|
@@ -769,6 +875,13 @@ flowchart LR
 | `compare_graphs` between the main index and an overlay gives a usable `new calls:` line | (guess): the tool is there **[box]**; its output on a PR wasn't read | one merged PR's overlay against main; keep the line only if it is under 200 tokens |
 | A run with `--strict-mcp-config` and the repo's other servers keeps them and drops only the graph | the flags **[box]**; the behaviour (guess) | S12: one run's tool list and process list |
 | The page walk finds every page QA tests | **[box]** on one file (4 pages); recall (guess) | eval G's 10 screen PRs |
+| Grok Build's `-p --output-format json` gives `text`, `sessionId` and `total_cost_usd`, and its `Stop` hook from `--settings` or `.claude/settings.json` blocks a headless run | the docs on the VM **[docs]**; behaviour (guess) | one `grok -p` run with the stop-check hook and no note; read the JSON and the block |
+| Grok Build's usage-limit reply can be told from other errors | (guess) | `grok usage` near the limit; one run past it on a test account |
+| `codex exec --json` gives a session id early enough that a run that dies can be resumed | (guess) | kill a `codex exec` run after its first event; `codex exec resume <id>` |
+| `agy -p` runs as a subprocess with no TTY, and `--print-timeout` can be set to 2 hours | [docs] for the flag; the hang is reported (issue #318) | one `agy -p` from `maestro-ticket launch`; only if Antigravity is wanted |
+| T3 runs an engine's own hooks inside a thread (for a desk on Codex or Grok) | (guess) | a Grok thread in T3 with a `SessionStart` hook that writes a file |
+| A Sonnet QA flags what no step covers | (guess) | eval QS: the known catches the script didn't cover |
+| Surprises stay near 1 in 6 Sonnet QA runs | (guess) | QS's clean heads, then a week of `surprise` replies |
 
 ## 12. Later: what the audits found for scale
 
@@ -821,9 +934,9 @@ The runs spent $2,392 at list price over the 7 days to 2026-11-19, 98% of it on 
 
 ### 14.1 Model and effort per job
 
-**Decided 2026-11-19:** the Sonnet 5.5 moves below go ahead, **each only after it passes its own eval set** (14.2). For those jobs this replaces the fleet rule "always Opus 5.5 high". Plans, tier-2 review, QA, design and desks stay on Opus. **Effort stays high on every job**, as the owner ruled on Nov 14 **[code]** `job.go:26-31`.
+**Decided 2026-11-19:** the Sonnet 5.5 moves below go ahead, **each only after it passes its own eval set** (14.2). For those jobs this replaces the fleet rule "always Opus 5.5 high". Plans, tier-2 review, QA, design and desks stay on Opus. QA at tier 0–1 moves too, but scripted (14.6): the owner approved that in principle on 2026-11-20, behind its own set, QS. **Effort stays high on every job**, as the owner ruled on Nov 14 **[code]** `job.go:26-31`.
 
-A new standing value, `rules set model <job> opus|sonnet`, built like `qa_slots`, lets the duty desk move one job at a time, and back with one command. `job.go` reads it before its tier and route switch, for fixed-model jobs only **[code]** `tools/maestro-ticket/cli/job.go:57-81`.
+A new standing value, `rules set model <job> opus|sonnet`, built like `qa_slots`, lets the duty desk move one job at a time, and back with one command. `job.go` reads it before its tier and route switch, for fixed-model jobs only **[code]** `tools/maestro-ticket/cli/job.go:57-81`. Its twin, `rules set harness <slot>` (8.1), picks the harness; every slot stays on Claude until a set says otherwise.
 
 | Job | Model | Saved / week | Eval set, then the live guard |
 |---|---|---|---|
@@ -831,21 +944,22 @@ A new standing value, `rules set model <job> opus|sonnet`, built like `qa_slots`
 | Status-only rule | **Sonnet**, after S | ~$12 | Live: cancelled tickets per goal stay flat |
 | Junior build, on more tickets: the planner tags clear one-area work junior | **Sonnet** (junior builds already are), after B | ~$50 | Live: escalation already in code, sent back twice → senior on Opus **[code]** `job.go:364-379`; `resume --opus`. Junior sent-back rate ≤ 25% a week. |
 | Review, tier 0-1 (the light route's bar moves from docs-only to tier ≤ 1) | **Sonnet**, after L | ~$15 | Live: `--light` stops if the tier rises; QA kickbacks on light-reviewed tickets ≤ those on full reviews |
+| QA, tier 0-1, running an Opus-written script (14.6) | **Sonnet**, after QS | ~$0-20 net | Live: an Opus second look at 1 in 10 Sonnet passes for four weeks; reverts and live-run failures after Sonnet-QA merges no higher than after Opus's. A surprise goes to Opus (`resume --opus`) |
 | Finish | Sonnet (today) | 0 | — |
 | Plan, and a rule that splits, rewrites or plans | Opus | 0 | Cancelled tickets ($468/wk) start in plans |
 | Senior build | Opus | 0 | — |
 | Review, tier 2, its red-team and skeptic subagents included | Opus | 0 | The security gate. Both subagents run only at tier 2 **[code]** `skills/maestro-code-review/SKILL.md:41,59` |
-| QA, live | Opus | 0 | — |
+| QA tier 2, live, `qa-ask` | Opus; at tier 2 it runs the script first, then explores | 0 | QA merges, so a false pass ships |
 | Design | Opus | 0 | Taste |
 | Desks, `cos ask` | Opus | 0 | Owner-facing |
 
-About **$107/week** once all four pass **[I]** (the measured output and write spend per job, halved; `token-plan-report.md` §3). Review subagents also move to the **foreground**, and a review may not end before its verdict: 227 of 399 review subagent calls ran in the background, and reviews ended with no verdict while they waited, worth about $100/week **[I]** (§2, B1). Standing rule 13 (no review subagents) never reached a review session, since standing rules go only into plan and rule prompts **[code]** `job.go:430-433`. It goes, and the skill text holds the policy.
+About **$107/week** once all four pass **[I]** (the measured output and write spend per job, halved; `token-plan-report.md` §3), and about $0-20 more for scripted QA (14.6). Review subagents also move to the **foreground**, and a review may not end before its verdict: 227 of 399 review subagent calls ran in the background, and reviews ended with no verdict while they waited, worth about $100/week **[I]** (§2, B1). Standing rule 13 (no review subagents) never reached a review session, since standing rules go only into plan and rule prompts **[code]** `job.go:430-433`. It goes, and the skill text holds the policy.
 
 **Future work, not built:** an effort A/B, one job at a time on its eval set, effort the only variable. It needs the owner's go first.
 
 ### 14.2 Pinned evals
 
-Each Sonnet move waits on its own set. The sets live in `docs/evals/` as fixed inputs with the Opus answer recorded. `maestro-ticket eval <set> --model sonnet` reruns a set on demand, and the duty desk reruns every set when a skill or model changes.
+Each Sonnet move waits on its own set, and so does each harness move (8.1): the same set, rerun with `--harness`. The sets live in `docs/evals/` as fixed inputs with the Opus answer recorded. `maestro-ticket eval <set> --model sonnet` reruns a set on demand, and the duty desk reruns every set when a skill or model changes.
 
 | Set | For | Inputs | Pass | Cost to run once |
 |---|---|---|---|---|
@@ -853,6 +967,7 @@ Each Sonnet move waits on its own set. The sets live in `docs/evals/` as fixed i
 | S | status-only rule | 20 status-only rulings with their Opus calls | ≥ 90% the same call; no ticket closed that Opus kept open | ~$2 (guess) |
 | B | wider junior builds | 10 recent senior tickets the new junior tag would cover, rebuilt by a junior Sonnet run in a scratch worktree and reviewed as usual | ≤ 2 of 10 sent back, and no blocker the Opus build didn't have | ~$20 (guess) |
 | L | tier 0-1 review | 20 tier-1 diffs with their full-review findings | every blocker found | ~$5 (guess) |
+| QS | scripted QA at tier 0-1 (14.6) | 15 past tier 0-1 tickets that QA kicked back, each a known catch at a known head, and 10 that passed and stayed clean (no revert, no live-run failure). For each, Opus writes the script from the ticket as planned, never seeing the catch; Sonnet runs it at the head QA tested | no known-bad head passes: each is a fail or a surprise; at least 8 of 10 clean heads pass with no surprise; no false fail. The share of catches the script itself covered is recorded, as the measure of what scripting misses | ~$25 (guess) |
 | G | graph packs on (`rules set graph pack`, 14.3) | 20 recent reviews of tiers 1-2 with their blockers, re-run with the pack; 10 merged PRs that changed screens, with the pages QA tested (from their evidence) | every blocker still found, no new wrong blocker, turns a review down 15% or more (guess); the pack's pages hold every page QA tested on at least 9 of 10 | ~$10 (guess) |
 
 G gates no model move: it gates whether packs go on. A job that fails its set stays on Opus. A job already moved whose live guard slips for a week goes back with `rules set model <job> opus`, and the duty desk's brief says so.
@@ -976,6 +1091,64 @@ Today `codebase-memory-mcp` starts in every agency-ops session and is never call
 ### 14.5 Rules stay few
 
 The desks inherit the rule budget from closed PR #103: a rule needs a `Lifts when` clause, a warning past 20 rules or 8 KB, and the reason in `rules.log`. `job retro` runs weekly, not after every 10 changes (at 40 changes a day that would fire four times a day **[I]**). Nothing is scheduled: the duty desk's `desk brief` shows `retro due` after 7 days, and the desk runs it.
+
+### 14.6 Scripted QA on Sonnet
+
+The owner's idea, approved in principle on 2026-11-20. **Today** each QA run, on Opus, writes its own `plan.md` from the criteria, the tier and the critical flows, then runs it **[code]** `skills/maestro-qa-lead/references/test-a-pr.md:16-27`. Deciding what to check and checking it happen in one Opus session. **The change:** Opus decides once, as a script; at tiers 0-1, Sonnet does the checking.
+
+**1. Who writes the script, and when.**
+- **The planner, at plan time, by default.** It already writes each criterion with "its input and what must show" **[code]** `skills/maestro-create-ticket/SKILL.md:16,20`, and its session is already warm, so a script costs only its output tokens. It goes in a `## QA script` section of the ticket body, under the criteria. Every ship ticket gets one: QA's tier comes from the changed files, which the planner can't see yet.
+- **The reviewer at GO, on a full (Opus) review only.** It knows the diff. When the diff reaches something the script misses, it posts `QA script amend: at <H>` with the extra steps. A light review is Sonnet at tiers 0-1 once L passes (14.1), so it writes no steps. Instead its GO carries `script_gap=yes` and names the gap, and QA then runs on Opus, unscripted, as today.
+- **Code adds the pages.** `qa-prep.sh` writes `$C/script.md`: the body's script, any amend at `H`, then one step for each page in the pack's `pages=` (14.3) the script doesn't open: "open it; it renders; no console error". No model writes that part.
+- **A ruling that rewrites a criterion rewrites its steps** (`job rule` is Opus). A script older than the latest edit to the criteria is stale, and a stale script means Opus QA.
+- **Why no `job script` at GO.** A fresh Opus session pays for its system prompt and skills as cache writes, about $0.20-0.30 a ticket (guess). That is more than tier 0-1 saves per ticket.
+
+**2. The script's shape.** Markdown, so any harness can read it (8.1). At most 40 steps and 6 KB, which `create --lint` checks:
+
+```text
+## QA script
+S1 (c1) where: /clients, as a fresh admin | do: add a client named "Ünïcode 李" | expect: it shows first in the list, its name unchanged
+S2 (c1, empty) where: /clients/new | do: submit with no name | expect: "Name is required" under the field; nothing saved
+S3 (flow: sign-in) where: / | do: sign in, then sign out | expect: as on main
+```
+
+Each step names its criterion (or `flow:` for a critical flow, `edge:` for an edge case), where to go, what to do, and the expected result a person can see. The tier's angles in Phase B's table become steps: at tier 1, one empty and one wrong input per criterion, every changed screen, and one feature next to the change. No step covers a case under `Not handled:`.
+
+**3. Sonnet runs it.** A tier 0-1 ticket with a fresh script and no `script_gap` goes to Sonnet: `job qa` gets a `script` route, beside `tier` and `route` **[code]** `cli/job.go:57-81`. The session does Phases A and C as today. Then it runs each step in order, in its own browser (6.5), with evidence, and writes `$C/results.md`: one line per step, `pass` or `fail`, with the evidence path. It never adds, drops or rewrites a step.
+
+**4. On a surprise, escalate; never guess.** A Sonnet QA stops before any verdict, and replies `test: blocked: <id> at <H>` with `Answer: surprise: <step>: <what>`, when:
+- a step can't be followed as written: the page, the control or the setup isn't there;
+- something looks wrong that no step covers: a crash, a broken screen, data shown to the wrong user, an error main doesn't have;
+- it isn't sure a result matches the expected one;
+- a step fails, but not 3 times out of 3 from a fresh start (Phase D step 4).
+
+The route then resumes it once with `resume --opus`, as it already does for a junior build's question **[code]** `cli/route.go:628-631`, with a QA text in place of `opusText` (`cli/job.go:1060-1062`). Opus judges, explores as far as it needs to, and posts the verdict. The resumed run gets a new scope, so it starts the app and the browser again (6.5). And on a new model the whole context is written to the cache again: about $0.50 at 90k (guess).
+- **What Sonnet may post itself.** A fail, only when a step's expected result failed 3 times out of 3 from a fresh start, with evidence. A pass, only when every step passed with evidence, the checks are green and nothing surprised it.
+- **Code checks the pass.** The stop check gets one more rule **[code]** `cli/stopcheck.go:100-106`: on a Sonnet `qa` run, `QA: pass` needs a `pass` line in `results.md` for every step id in `script.md`, or the stop is blocked.
+
+**5. By tier.**
+
+| Tier | QA |
+|---|---|
+| 0-1, with a fresh script, no gap, after QS | Sonnet runs the script; a surprise goes to Opus |
+| 0-1, any other case | Opus, as today, with the script as its plan |
+| 2 | Opus runs the script first, as the floor, then explores the tier's angles on top. Costs the same as today |
+| `live`, `qa-ask` | Opus, unscripted |
+
+**6. The risk: a script catches only what was scripted.** An Opus QA that explores finds what no one thought to check. A Sonnet run that follows steps finds what the author thought of, plus whatever it trips over. Three guards:
+- The surprise rule makes "something is wrong and no step asked" an escalation, never a pass. QS measures whether Sonnet notices.
+- Tier 2 keeps Opus exploring. That is where data, auth, money and migrations are.
+- For the first four weeks, 1 in 10 Sonnet passes gets an Opus `qa-ask` second look after the merge, about $1.50 each (guess). A real miss puts the slot back: `rules set model qa opus`.
+
+Retests are where scripts do best: a `mode=retest` run reruns the failed steps and the ones the delta touches (Phase B step 3), with the same words each time.
+
+**7. Savings.** QA spent $383 a week: $103 on output and $150 on cache writes **[box]** (`token-plan-report.md` §3). Tiers 0-1 are a small part of it: 7% of tiered review spend **[box]**, and about 10-20% of QA's (guess), so $40-75.
+- Sonnet halves that share's output and cache writes: about $13-25.
+- Not writing `plan.md`, and fewer turns spent deciding what to check: a few dollars (guess).
+- Costs: the planner's scripts, 1-3k Opus output tokens on every ship ticket: about $3-10. Surprises resumed on Opus, at 1 in 6 (guess): about $3-5. The second looks: about $3-7 a week, for four weeks only.
+- **Net: about $0-20 a week** **[I]**, once the four weeks are over. That is small, and could be nothing.
+
+The larger gains aren't dollars. The script can be read before QA spends anything, retests rerun the same words, and each step's pass rate shows flakes. The money is at tier 2, most of the $383: Sonnet could run tier 2's script before Opus explores. That is later, not proposed here, and needs its own eval on top of QS.
 
 ## 15. What the v4 review changed
 
@@ -1222,7 +1395,7 @@ Each night a timer in the distro writes a tarball to `/var/backups/maestro/` (ow
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6, v7, v8 and v9 changed
+## 18. What v6, v7, v8, v9 and v10 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -1265,6 +1438,16 @@ v9, 2026-11-20, asked for by the owner: put the code graph to work, with token e
 | About $50-90/week (guess) | Explore-only turns cost 5.4-10.6% of build, review, QA and plan spend | About $35-80/week net **[I]**, gated by eval G and a two-week even/odd guard (14.2, 14.3) |
 | — | — | Code checks: a tier floor from risk paths, a merge check of callers that main changed, plan overlap from `graph size` (14.3) |
 
+v10, 2026-11-20, asked for by the owner: build it so harnesses can be swapped per part, and script QA so Sonnet can run it.
+
+| v9 said | Found | v10 |
+|---|---|---|
+| Every run is `claude -p`; `install.sh` lists `claude codex grok` | Claude is assumed in about 15 places in `maestro-ticket`: the flags, caller-chosen session ids, `--resume` surgery, the `--settings` stop hook, `stream-json` parsing, `total_cost_usd`, Claude's limit words, one pause, model-id regexes, `argv[0] == "claude"` **[code]** | One adapter interface per harness; the Claude adapter first, by moving that code, with a golden test for no change (8.1, S13) |
+| — | Grok Build 1.0.77 on the VM has `-p`, a caller-chosen `-s <uuid>`, `-r`, Claude's cost fields and Claude's hook shape, but `text` and `sessionId` in place of `result` and `session_id` **[box]**. Codex has `exec --json` and `exec resume` **[docs]**. Antigravity has `-p` but no cost, no documented hooks, a 5-minute default timeout and a reported non-TTY hang **[docs]**. Muse has `exec --json`, untested live, and no documented resume (third-party). T3 0.1.0 offers six thread engines **[box]** | Grok Build is the second adapter, then Codex; Antigravity and Muse wait (8.1) |
+| `rules set model <job>` | Roles need a harness too, and a limit on one vendor's plan shouldn't stop another's slots | `rules set harness <slot>`, the same eval gate, a pause per harness, `cost_src=list`, `rules set harness all claude`, an automatic flip back after two unparsed replies; all built with the second adapter, not now (8.1) |
+| Desks are Claude threads with Claude hooks | Their hooks and persona are Claude Code's files; Grok reads them, Codex doesn't **[docs]** | A desk on another engine is possible but not proposed; the pager is the first try (8.1) |
+| QA, every tier: Opus writes `plan.md` and runs it | Tiers 0-1 are a small share of QA spend; a script costs 1-3k output tokens in a session that is already warm | The planner writes a `## QA script` for every ship ticket; a full review may amend it at GO; code adds the pack's pages; Sonnet runs it at tiers 0-1 after QS; a surprise goes to Opus; tier 2 runs the script, then explores; about $0-20/week net **[I]** (14.6) |
+
 ## 19. Open questions
 
 ### 19.1 Still open
@@ -1278,6 +1461,11 @@ v9, 2026-11-20, asked for by the owner: put the code graph to work, with token e
 15. **`qa_slots` on the desktop.** 3 at `memory=24GB`, 4 at 32GB, 8 at 56GB (6.5, **[I]**). Set it once 16.3 step 0 gives the RAM; it changes a live rule, so you set it.
 16. **The graph's live guard.** For two weeks, packs go on even ticket numbers and off on odd ones, on live runs, to measure with and without (14.3). It changes how live runs start, so it needs your yes. If not, eval G alone decides, with less certainty.
 17. **`live` mode.** Recommended: start at `pack`, with no server in any run. `live` adds the server, read-only, for senior builds and tier-2 reviews. Turn it on only if G shows those runs still grep for callers the pack lacks.
+18. **The second harness.** Recommended: Grok Build, then Codex, and only when a slot has a reason to move: cost, a limit, or a model that does that job better. Until then S13 builds the seam and the Claude adapter only. Which slot would you try first? The cheapest test is `judge` or a status-only `rule`: each has a set (J, S), and a desk overturns a bad call.
+19. **Antigravity and Muse.** You named both. Neither is ready for unattended runs today (8.1, item 2). Keep them on the list, or drop them until they publish resume, hooks and costs?
+20. **Who writes the QA script.** Recommended: the planner at plan time, with an Opus full review amending it at GO and code adding the pages. Tier 0-1 reviews are moving to Sonnet, so the reviewer can't be the usual author at those tiers. A separate Opus `job script` at GO would cost more than the tier 0-1 saving (14.6).
+21. **Scripted QA's worth.** The saving is about $0-20/week **[I]**. Tiers 0-1 are a small share of QA spend. The stronger case is a QA plan that can be read before QA runs, the same steps on every retest, and the way it opens to Sonnet at tier 2 later. Build it for those reasons, or wait for the tier-2 version?
+22. **QS needs past catches.** It wants 15 tier 0-1 QA kickbacks with known heads. QA kicked back 14 tickets on content in the report's window **[box]** (`token-plan-report.md` §1), at every tier. If the board holds too few at tiers 0-1, QS takes longer to build, or takes tier-2 catches whose failing step is a plain criterion.
 
 ### 19.2 Decisions log
 
@@ -1298,3 +1486,5 @@ All by the owner on 2026-11-19, 19:46-19:51 PT, numbered as in v5's §19:
 | 11 | VM T3 Connect unlink: not answered; default after the 14-day window. | 17.3, 19.1 |
 
 Earlier on 2026-11-19 (18:01 PT): the main machine is the desktop PC, and pushes go through T3 Connect (section 1).
+
+On 2026-11-20 the owner asked for harnesses that can be swapped per part (8.1), and approved scripted QA on Sonnet in principle (14.1, 14.2, 14.6).
