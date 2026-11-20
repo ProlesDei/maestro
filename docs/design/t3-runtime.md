@@ -1,6 +1,6 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v5, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. Nothing here is built. The team works on this spec from here.
+**Status:** draft v6, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
@@ -138,6 +138,26 @@ Renew the 10-minute lease during a long look. On takeover, verify the holder tok
 
 - `look` already marks each row it hands a judge **[code]** `tools/maestro-ticket/cli/look.go:410`, so a second look never judges the same row again.
 
+### 3.3 Find stranded work
+
+The planner owns recovery. A code command, `maestro-ticket recover`, discovers work without taking ticket IDs or run IDs as input. Run it once when the worker runtime starts, before admitting fresh jobs, and on ordinary planner wakeups. After an Atlas outage, the process that saw the outage retries with backoff and invokes recovery when the board responds. An operator can invoke it directly. A startup hook runs once per worker-runtime start. On an otherwise quiet host, detection waits for the next trigger. A periodic host check would require a separate decision. Owner status reads stay read-only.
+
+Before spawning a worker, persist its Maestro run ID, ticket or goal, profile, host and reservation. Pass the ID to the worker so the host can identify a surviving session independently of the run file. Pair it with process identity and start time to guard against PID reuse. Reuse the supervisor locks and surviving-session checks in `tools/maestro-ticket/runs/runs.go`. Their current scan starts from recorded runs.
+
+Compare active tickets, claims, reservations and pending handoffs with local run records and live Maestro-owned workers **in both directions**. Also compare recorded outcomes with the next action and its receipt. Inspect the matching worktree, PR head, verdict or merge only where those sources disagree.
+
+| Found | Action |
+|---|---|
+| Active ticket, supervisor and worker both gone | Check for saved edits, a pushed commit, a verdict or a merge. Resume from verified progress under section 8. |
+| Live worker, supervisor gone | Preserve the session and reservation. Track its existing run through completion. |
+| Live Maestro worker without a matching board entry | Reconcile only when the run identity and ownership agree. Otherwise report the uncertainty and leave the process alone. Exclude personal Claude and Codex sessions. |
+| Review passed the current PR head, but QA has neither a run nor a receipt | Replay the missing handoff with its original action ID. A changed head goes back to review. |
+| QA merged before it could close the ticket | Verify that the merged PR matches the approved head and QA pass. Record completion once and release its reservation. |
+
+Take one recovery claim per board. Before acting, recheck the current run, head, claim and STOP state. Keep an explicit halt in force. Hold an ambiguous ticket for planner investigation while unrelated work continues. Repeating recovery must preserve live workers, pending owner decisions and completed actions.
+
+**S2 acceptance trial.** Seed a dead worker with saved edits, a surviving worker whose supervisor died, a review GO with no QA handoff, and an unrelated personal session. Supply no IDs to recovery. Require it to name the three discrepancies and the evidence for each, preserve the edits and surviving worker, start QA once, and leave the personal session alone. Repeat recovery concurrently and after restart. Also interrupt QA between merge and closure, reconnect Atlas with a worker still alive, and restart with STOP set. Expect one verified closure, no duplicate worker, and zero starts under STOP.
+
 ## 4. A ticket's life in the T3 runtime
 
 ```mermaid
@@ -198,7 +218,7 @@ Each inbox item has a stable decision ID, goal, affected work, and state. Regist
 
 Several chiefs may read an item. One atomically claims the right to answer. Store the owner question under the decision ID before notifying. Retries and takeovers reuse that question and its delivery receipt. Keep the answer and ruling under the same ID. On transfer, invalidate the old claim and check the current holder before committing a ruling. Deliver a recorded ruling once to the planner, then acknowledge its receipt. After a crash, resume the pending step from the record. Group tickets blocked by the same decision under that question.
 
-A failed wake leaves the item pending. Apply the existing wake and retry intervals per destination (today's gate and supervisor in `tools/maestro-ticket/runs/`). A card's text stays data ([decisions](../decisions.md), 7). If Atlas is down, expose `store-down` through host status without requiring a model. The planner reconciles interrupted delivery after recovery.
+A failed wake leaves the item pending. Apply the existing wake and retry intervals per destination (today's gate and supervisor in `tools/maestro-ticket/runs/`). A card's text stays data ([decisions](../decisions.md), 7). If Atlas is down, expose `store-down` through host status without requiring a model. On reconnect, the planner recovers interrupted delivery under section 3.3.
 
 ### 5.3 Proposed chief-side operations
 
@@ -342,7 +362,7 @@ flowchart LR
 |---|---|---|
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
-| S2 | Code relay: line table, wider grammar, reset ring, look lock | one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
+| S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
 | S3 | Shared briefs, session registry, decision claims, goal inbox, fixed wake and `cos` verbs | an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
