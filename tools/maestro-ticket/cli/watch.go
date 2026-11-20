@@ -36,6 +36,9 @@ func (c *call) startLaunch(ctx context.Context, id ticket.ID, r runs.Record) int
 	}
 	defer s.Close()
 	req := ticket.StartLaunchRequest{Actor: logActor(c.actor), Ticket: id, PID: os.Getpid(), Stamp: procStamp(os.Getpid())}
+	if r.BoardID != "" && r.PID > 0 && r.Stamp != "" {
+		req.PID, req.Stamp = r.PID, r.Stamp
+	}
 	if host, _ := c.hostID(); host != "" {
 		req.Host, req.Job, req.Limit = host, r.Job, r.Limit
 		for _, t := range r.Tickets {

@@ -277,6 +277,9 @@ var startSupervisor = func(sup *exec.Cmd) error {
 // mark, if set, writes the run's id in its marks before it can run. A
 // rec.Dir set runs it there: a retry or resume runs where its run did.
 func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, side *sideFacts, mark func(runID string) error) (runs.Record, error) {
+	if err := c.checkRecoveryHold(rec.Ticket); err != nil {
+		return runs.Record{}, err
+	}
 	dir, err := c.besideStore("runs")
 	if err != nil {
 		return runs.Record{}, err
@@ -285,9 +288,20 @@ func (c *call) startRun(rec runs.Record, stdin []byte, rings []time.Duration, si
 	if err != nil {
 		return runs.Record{}, err
 	}
+	if rec.Profile != "" && rec.Dir != "" {
+		if info, err := os.Stat(rec.Dir); err != nil || !info.IsDir() {
+			return runs.Record{}, errors.New("saved native worktree unavailable; recover the worktree before resuming")
+		}
+	}
 	rec.Launcher, rec.Dir, rec.StartedAt = c.actor, c.dirFor(rec.Dir), time.Now().UTC().Round(time.Millisecond)
-	r, err := runs.Create(dir, rec, stdin)
+	r, err := c.createPacedRun(dir, rec, stdin)
 	if err != nil {
+		var wait waitingForReset
+		if errors.As(err, &wait) && !wait.at.IsZero() {
+			if e := c.scheduleReconsider(filepath.Dir(dir), wait.at.Add(time.Second)); e != nil {
+				return runs.Record{}, errors.Join(err, e)
+			}
+		}
 		return runs.Record{}, err
 	}
 	// Before the supervisor, which may end the run at once; stats off
@@ -382,7 +396,17 @@ func runSupervise(ctx context.Context, c *call) error {
 		// run, so alerts reads its pid as the run's.
 		OnStart: func(r runs.Record) int64 {
 			c.actor = r.Launcher
-			return c.startLaunch(ctx, runTicket(r), r)
+			launch := c.startLaunch(ctx, runTicket(r), r)
+			if r.BoardID != "" && launch == 0 {
+				c.runtimeStoreDown(filepath.Dir(dir))
+				return 0
+			}
+			if r.ActionID != "" {
+				if err := saveActionReceipt(co, r); err != nil {
+					fmt.Fprintln(c.env.Stderr, "handoff receipt:", err)
+				}
+			}
+			return launch
 		},
 		OnEnd: func(r runs.Record) {
 			c.endRun(context.WithoutCancel(ctx), dir, r)
@@ -396,6 +420,9 @@ func runSupervise(ctx context.Context, c *call) error {
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chainLimit)
 			defer cancel()
 			c.chain(cctx, dir, r)
+		},
+		CodeWake: func(r runs.Record) error {
+			return c.replayCode(ctx, dir, notify, r)
 		},
 		RingAgain: func(r runs.Record) time.Time { return ringAgain(co, r, time.Now()) },
 		// Stats wait for the first ring: none may hold it up.
@@ -452,6 +479,9 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	s, err := c.open(ctx)
 	if err != nil {
 		warn(err)
+		if r.BoardID != "" {
+			c.runtimeStoreDown(filepath.Dir(dir))
+		}
 		return
 	}
 	defer s.Close()
@@ -459,6 +489,8 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	switch {
 	case r.State == runs.Died:
 		end.Outcome = ticket.LaunchDied
+	case r.Harness == "codex" && r.SessionID != "" && !r.IsError && r.State == runs.Done:
+		end.Session = r.SessionID
 	case replyErr != nil:
 		end.Outcome = ticket.LaunchNoResult
 	}
@@ -468,10 +500,15 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 		end.Lifts = limitLifts(r, reset)
 	}
 	c.endLaunch(ctx, s, end)
+	if outcome, _ := routeOutcome(r); r.Delivery != "" && r.State == runs.Done && !r.IsError && outcome == outDone {
+		if b, err := c.board(); err == nil {
+			warn(b.CompleteDelivery(ctx, r.Delivery, r.ActionHash, r.DeliveryOwner(), r.ID, r.Reply))
+		}
+	}
 	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
-	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
+	if admissionWait(r) || r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
 	host, _ := c.hostID()
@@ -519,6 +556,17 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 			r, release, died, ok := runs.Adopt(dir, id, time.Now().UTC().Round(time.Millisecond))
 			if !ok {
 				return
+			}
+			// A retry whose supervisor never started owns no turn or ticket claim.
+			// Its parent keeps the unsent input and can replace its finalized mark.
+			if r.PID == 0 && r.LaunchID == 0 && r.AgainOf != "" && r.EndedAt != nil {
+				if parent, e := runs.Load(dir, r.AgainOf); e == nil && admissionWait(parent) {
+					if e := runs.Save(dir, r); e == nil {
+						_, _ = runs.Ack(dir, r.ID, chainBy, time.Now())
+					}
+					release()
+					return
+				}
 			}
 			// Each works as the run's own supervisor would: as its
 			// launcher, on its own copy of the call.
@@ -574,7 +622,7 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 				return
 			}
 			h, err := runs.Webhook(notify, owner)
-			if err != nil || h.URL == "" {
+			if err != nil || !h.CanRing() {
 				msg := ""
 				if err != nil {
 					msg = err.Error()
@@ -1219,6 +1267,8 @@ func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 // runNotify sets, clears, tests or shows the webhook launch rings when a
 // bot's run ends. It never prints the URL, which often holds a secret.
 func runNotify(ctx context.Context, c *call) error {
+	code := c.fs.Bool("code", false, "serve the role in the supervisor")
+	execFile := c.fs.String("exec-file", "", "absolute path to the fixed wake executable")
 	urlFile := c.fs.String("url-file", "", "read the webhook URL from this file, or - for stdin")
 	keyFile := c.fs.String("key-file", "", "read the key the webhook wants as Authorization: Bearer from this file, or - for stdin")
 	clr := c.fs.Bool("clear", false, "remove the bot's webhook")
@@ -1230,8 +1280,14 @@ func runNotify(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
+	if len(c.args) == 2 && c.args[0] == "set" {
+		c.args = c.args[1:]
+	}
+	if (*code || *execFile != "") && (*urlFile != "" || *keyFile != "" || *clr || (*code && *execFile != "") || (*code && *test)) {
+		return usagef("notify: choose one server; --test requires an external wake")
+	}
 	if len(c.args) == 0 {
-		if *urlFile != "" || *keyFile != "" || *clr || *test {
+		if *urlFile != "" || *keyFile != "" || *clr || *test || *code || *execFile != "" {
 			return usagef("notify: name the bot")
 		}
 		bots, err := runs.Webhooks(dir)
@@ -1262,6 +1318,11 @@ func runNotify(ctx context.Context, c *call) error {
 		return usagef("notify: use --url-file and --key-file, or --clear, not both")
 	case *urlFile == "-" && *keyFile == "-":
 		return usagef("notify: only one of --url-file and --key-file can read stdin")
+	}
+	if *code || *execFile != "" {
+		if err := runs.SetLocalServer(dir, bot, *execFile); err != nil {
+			return usagef("notify: %v", err)
+		}
 	}
 	if *urlFile != "" {
 		u, err := c.readBody("", *urlFile)
@@ -1303,7 +1364,7 @@ func runNotify(ctx context.Context, c *call) error {
 	}
 	u := h.URL
 	if *test {
-		if u == "" {
+		if !h.CanRing() {
 			return fmt.Errorf("%w: notify: %s has no webhook", ticket.ErrNotFound, bot)
 		}
 		// Straight to the webhook: a test ring skips the bot's gate.
@@ -1313,6 +1374,12 @@ func runNotify(ctx context.Context, c *call) error {
 		}
 	}
 	res := map[string]any{"bot": bot, "webhook": u != "", "key": h.Key != "", "rang": *test}
+	if h.Code {
+		res["server"] = "code"
+	}
+	if h.Exec != "" {
+		res["server"] = "exec"
+	}
 	if u != "" {
 		res["host"] = runs.Host(u)
 	}
@@ -1322,6 +1389,10 @@ func runNotify(ctx context.Context, c *call) error {
 			key = " with its key"
 		}
 		switch {
+		case h.Code:
+			fmt.Fprintf(w, "%s: served by code\n", bot)
+		case h.Exec != "":
+			fmt.Fprintf(w, "%s: fixed wake command configured\n", bot)
 		case u == "":
 			fmt.Fprintf(w, "%s: no webhook; it learns a run ended only when it runs maestro-ticket pickup\n", bot)
 		case *test:

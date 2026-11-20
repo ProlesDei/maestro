@@ -169,15 +169,16 @@ class() {
 }
 
 # The PR number, and the ticket its target names.
+prefix=$(maestro-ticket branch) || die 1 "cannot resolve the board branch prefix"
 ticket="" pr=""
 case $target in
-T-[0-9]* | maestro/T-[0-9]*)
-	ticket=${target#maestro/}
+T-[0-9]* | "$prefix"T-[0-9]*)
+	ticket=${target#"$prefix"}
 	[[ $ticket =~ ^T-[0-9]+$ ]] || die 2 "$target is no ticket id or maestro/T-<n> branch"
 	# {owner}: keeps out fork PRs, which anyone can open on any branch name.
-	pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:maestro/$ticket&state=all&per_page=1" --jq '.[0].number // empty') ||
-		die 1 "gh couldn't list the PRs of maestro/$ticket"
-	[ -n "$pr" ] || die 3 "no PR from maestro/$ticket"
+	pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$prefix$ticket&state=all&per_page=1" --jq '.[0].number // empty') ||
+		die 1 "gh couldn't list the PRs of $prefix$ticket"
+	[ -n "$pr" ] || die 3 "no PR from $prefix$ticket"
 	;;
 '#'[0-9]* | [0-9]*)
 	pr=${target#'#'}
@@ -186,10 +187,18 @@ T-[0-9]* | maestro/T-[0-9]*)
 *) die 2 "want a PR number, maestro/T-<n> or T-<n>, not $target" ;;
 esac
 
+check_board() {
+	local branch=$1 fork=$2
+	if [ "$fork" = false ] && [[ $branch =~ ^maestro/([0-9a-f-]+/)?T-[0-9]+$ ]] && [[ $branch != "$prefix"T-* ]]; then
+		die 1 "PR $pr belongs to another Maestro board"
+	fi
+}
+
 if [ -n "$route" ]; then
 	# One read of the PR: its files, and its changed lines, which size the
 	# review's time limit.
-	pv=$(gh pr view "$pr" --json files,additions,deletions) || die 3 "gh found no PR $pr"
+	pv=$(gh pr view "$pr" --json files,additions,deletions,headRefName,isCrossRepository) || die 3 "gh found no PR $pr"
+	check_board "$(jq -r .headRefName <<<"$pv")" "$(jq -r .isCrossRepository <<<"$pv")"
 	echo "pr=$pr"
 	echo "lines=$(jq -r '(.additions // 0) + (.deletions // 0)' <<<"$pv")"
 	full() { echo route=full; echo "why=$1"; exit 0; }
@@ -200,7 +209,7 @@ if [ -n "$route" ]; then
 	files=$(jq -r '.files[] | "\(.changeType)\t\(.path)"' <<<"$pv")
 	n=$(printf '%s\n' "$files" | grep -c . || true)
 	# gh lists at most 100 files; a PR that big is no light review anyway.
-	[ "$n" -gt 0 ] && [ "$n" -lt 100 ] || full "$n files"
+	[[ "$n" -gt 0 && "$n" -lt 100 ]] || full "$n files"
 	while IFS=$'\t' read -r t f; do
 		# A rename lists only its new path, so what it moved stays unseen.
 		case $t in ADDED | MODIFIED | DELETED) ;; *) full "$f is ${t,,}" ;; esac
@@ -218,9 +227,10 @@ H=$(jq -r .headRefOid <<<"$view")
 branch=$(jq -r .headRefName <<<"$view")
 fork=$(jq -r .isCrossRepository <<<"$view")
 [[ $H =~ ^[0-9a-f]{40}$ ]] || die 1 "PR $pr has no head sha"
-# Only a branch in this repo named maestro/T-<n> has a ticket.
-if [ "$fork" = false ] && [[ $branch =~ ^maestro/(T-[0-9]+)$ ]]; then
-	[ -z "$ticket" ] || [ "$ticket" = "${BASH_REMATCH[1]}" ] || die 1 "PR $pr is on $branch, not maestro/$ticket"
+check_board "$branch" "$fork"
+suffix=${branch#"$prefix"}
+if [ "$fork" = false ] && [[ $branch == "$prefix"* ]] && [[ $suffix =~ ^(T-[0-9]+)$ ]]; then
+	[ -z "$ticket" ] || [ "$ticket" = "${BASH_REMATCH[1]}" ] || die 1 "PR $pr is on $branch, not $prefix$ticket"
 	ticket=${BASH_REMATCH[1]}
 else
 	ticket=

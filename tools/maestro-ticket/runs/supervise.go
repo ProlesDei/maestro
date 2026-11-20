@@ -62,6 +62,8 @@ type Options struct {
 	// to log the run's cost, free a ticket it left claimed, and start the
 	// fixed next step. It may save the record; the rings read it after.
 	OnEnd func(Record)
+	// CodeWake handles an unacknowledged run for a role served by code.
+	CodeWake func(Record) error
 	// RingAgain, when set, names a time to ring once more while the run
 	// isn't acked, such as the end of the usage limit that stopped it, so
 	// its bot learns its run can go on; zero for none, 24h out at most.
@@ -191,7 +193,10 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	// Its own process group, so a stop reaches all it started; on Linux it
 	// also dies if this supervisor dies. That signal follows the thread
 	// that started it, so keep this goroutine on one thread.
-	cmd.SysProcAttr = procAttr()
+	if r.BoardID != "" {
+		cmd.Env = append(cmd.Env, BoardEnv+"="+r.BoardID)
+	}
+	cmd.SysProcAttr = procAttr(r.BoardID != "")
 	runtime.LockOSThread()
 	if err := cmd.Start(); err != nil {
 		return fail(err)
@@ -199,6 +204,12 @@ func run(ctx context.Context, dir string, r Record, o Options) Record {
 	r.State, r.PID, r.Stamp = Running, cmd.Process.Pid, Stamp(cmd.Process.Pid)
 	if o.OnStart != nil {
 		r.LaunchID = o.OnStart(r)
+		if r.BoardID != "" && r.LaunchID == 0 {
+			killGroup(r.PID, syscall.SIGKILL)
+			cmd.Wait()
+			r.PID = 0
+			return fail(errors.New("board did not accept the native launch"))
+		}
 	}
 	if err := Save(dir, r); err != nil {
 		killGroup(r.PID, syscall.SIGKILL)
@@ -470,7 +481,7 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 		after(err)
 		return
 	}
-	if h.URL == "" {
+	if !h.CanRing() && !(h.Code && o.CodeWake != nil) {
 		return
 	}
 	gateDir := cmp.Or(o.Gate, dir)
@@ -502,6 +513,11 @@ func ring(ctx context.Context, dir string, r Record, o Options) {
 	// time that listed this run counts as its own; false once no ring can
 	// follow.
 	point := func(since time.Time) bool {
+		if h.Code && o.CodeWake != nil {
+			err := o.CodeWake(r)
+			after(err)
+			return err == nil
+		}
 		for range maxHeld {
 			g, err := RingBot(ctx, dir, gateDir, bot, []string{r.ID}, h, o.Now(), digest)
 			if ctx.Err() != nil {

@@ -24,30 +24,31 @@ const latestKeep = 64
 // larger one. Latest is the latest comment's first latestKeep characters,
 // nil with no comment; LatestCut says the comment is longer.
 type ticketDoc struct {
-	ID            int64         `bson:"_id"`
-	Title         string        `bson:"title"`
-	Body          string        `bson:"body"`
-	Type          string        `bson:"type"`
-	Status        string        `bson:"status"`
-	Role          string        `bson:"role"`
-	Priority      int           `bson:"priority"`
-	CreatedBy     string        `bson:"created_by"`
-	Owner         string        `bson:"owner"`
-	Tries         int           `bson:"tries"`
-	LeaseExpiries int           `bson:"lease_expiries"`
-	BlockedFrom   string        `bson:"blocked_from"`
-	Parked        string        `bson:"parked"`
-	Goal          string        `bson:"goal"`
-	Tier          string        `bson:"tier"`
-	Version       int64         `bson:"version"`
-	Lease         *leaseDoc     `bson:"lease"`
-	Token         int64         `bson:"token"`
-	Deps          []int64       `bson:"deps"`
-	Areas         []string      `bson:"areas"`
-	Latest        *string       `bson:"latest"`
-	LatestCut     bool          `bson:"latest_cut"`
-	CreatedAt     bson.DateTime `bson:"created_at"`
-	UpdatedAt     bson.DateTime `bson:"updated_at"`
+	Criteria      *ticket.Criteria `bson:"criteria,omitempty"`
+	ID            int64            `bson:"_id"`
+	Title         string           `bson:"title"`
+	Body          string           `bson:"body"`
+	Type          string           `bson:"type"`
+	Status        string           `bson:"status"`
+	Role          string           `bson:"role"`
+	Priority      int              `bson:"priority"`
+	CreatedBy     string           `bson:"created_by"`
+	Owner         string           `bson:"owner"`
+	Tries         int              `bson:"tries"`
+	LeaseExpiries int              `bson:"lease_expiries"`
+	BlockedFrom   string           `bson:"blocked_from"`
+	Parked        string           `bson:"parked"`
+	Goal          string           `bson:"goal"`
+	Tier          string           `bson:"tier"`
+	Version       int64            `bson:"version"`
+	Lease         *leaseDoc        `bson:"lease"`
+	Token         int64            `bson:"token"`
+	Deps          []int64          `bson:"deps"`
+	Areas         []string         `bson:"areas"`
+	Latest        *string          `bson:"latest"`
+	LatestCut     bool             `bson:"latest_cut"`
+	CreatedAt     bson.DateTime    `bson:"created_at"`
+	UpdatedAt     bson.DateTime    `bson:"updated_at"`
 }
 
 type leaseDoc struct {
@@ -88,7 +89,7 @@ func byID(id ticket.ID) bson.D { return bson.D{{Key: "_id", Value: int64(id)}} }
 
 // toTicket builds a ticket from its document at now.
 func toTicket(d ticketDoc, now int64, revivals int) ticket.Ticket {
-	t := ticket.Ticket{
+	t := ticket.Ticket{Criteria: d.Criteria,
 		ID: ticket.ID(d.ID), Title: d.Title, Body: d.Body, Type: ticket.Type(d.Type), Status: ticket.Status(d.Status),
 		Role: d.Role, Priority: d.Priority, CreatedBy: d.CreatedBy, Owner: d.Owner, Tries: d.Tries,
 		LeaseExpiries: d.LeaseExpiries, BlockedFrom: ticket.Status(d.BlockedFrom), Parked: ticket.Parked(d.Parked),
@@ -445,6 +446,12 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 				BlockedFrom: blockedFrom, Parked: string(req.Parked), Goal: goal, Tier: tier, Version: 1,
 				Deps: deps, Areas: nonNil(req.Areas), CreatedAt: dt(tx.now), UpdatedAt: dt(tx.now),
 			}
+			if s.boardID != "" && goal != "" {
+				doc.Criteria, err = tx.newCriteria(goal, req.BriefRevision)
+				if err != nil {
+					return ticket.Ticket{}, err
+				}
+			}
 			if err := tx.coll(cTickets).insert(doc); err != nil {
 				return ticket.Ticket{}, err
 			}
@@ -588,6 +595,9 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			if err := t.CheckFence(req.Holder, req.Token); err != nil {
 				return t, err
 			}
+			if t.Criteria != nil && req.Goal != nil && *req.Goal != t.Goal {
+				return t, errors.New("replace a goal ticket through a planner disposition")
+			}
 			tries, link, fromGoal := t.Tries, req.SplitFrom != 0, ""
 			if link {
 				var again bool
@@ -645,6 +655,9 @@ func (s *Store) Update(ctx context.Context, req ticket.UpdateRequest) (ticket.Ti
 			} else if link && goal == "" && fromGoal != "" {
 				goal = fromGoal // a re-file serves the goal its ticket served
 				data["goal"] = goal
+			}
+			if s.boardID != "" && goal != t.Goal {
+				return t, errors.New("create a replacement under the accepted goal revision")
 			}
 			if link {
 				data["split_from"] = req.SplitFrom
@@ -1292,6 +1305,10 @@ func (s *Store) Transition(ctx context.Context, req ticket.TransitionRequest) (t
 }
 
 func (tx *txn) applyTransition(req ticket.TransitionRequest) (ticket.Ticket, error) {
+	return tx.moveTicket(req, false)
+}
+
+func (tx *txn) moveTicket(req ticket.TransitionRequest, clarification bool) (ticket.Ticket, error) {
 	t, err := tx.loadForWrite(req.ID)
 	if err != nil {
 		return t, err
@@ -1307,6 +1324,9 @@ func (tx *txn) applyTransition(req ticket.TransitionRequest) (ticket.Ticket, err
 	}
 	if !t.CanMove(req.To) {
 		return t, fmt.Errorf("%w: %s ticket %s -> %s (allowed: %v)", ticket.ErrInvalidTransition, t.Type, t.Status, req.To, t.NextStatuses())
+	}
+	if err := tx.finishCriteria(t, req); err != nil {
+		return t, err
 	}
 	if err := t.CheckGate(req.To, req.Actor, req.ActorRole); err != nil {
 		return t, err
@@ -1364,7 +1384,7 @@ func (tx *txn) applyTransition(req ticket.TransitionRequest) (ticket.Ticket, err
 		parked = t.Parked
 	}
 	tries := t.Tries
-	if t.Type == ticket.TypeShip && ticket.IsSendBack(t.Status, req.To) {
+	if !clarification && t.Type == ticket.TypeShip && ticket.IsSendBack(t.Status, req.To) {
 		tries++
 	}
 	release := t.Claim != nil && (req.Release || req.To.Terminal())
@@ -1419,32 +1439,36 @@ func (s *Store) Comment(ctx context.Context, req ticket.CommentRequest) (ticket.
 	err := s.write(ctx, func(tx *txn) error {
 		var err error
 		out, err = idempotent(tx, req.IdempotencyKey, "comment", req, func() (ticket.Comment, error) {
-			t, err := tx.loadForWrite(req.ID)
-			if err != nil {
-				return ticket.Comment{}, err
-			}
-			if err := t.CheckFence(req.Holder, req.Token); err != nil {
-				return ticket.Comment{}, err
-			}
-			c := commentDoc{ID: tx.next(&tx.w.Comments), TicketID: int64(req.ID), Author: req.Actor, Body: req.Body, CreatedAt: dt(tx.now)}
-			if err := tx.coll(cComments).insert(c); err != nil {
-				return ticket.Comment{}, err
-			}
-			latest, cut := latestOf(req.Body)
-			_, err = tx.coll(cTickets).update(byID(req.ID), bson.D{{Key: "$set", Value: bson.D{
-				{Key: "latest", Value: latest}, {Key: "latest_cut", Value: cut},
-			}}})
-			if err != nil {
-				return ticket.Comment{}, err
-			}
-			if err := tx.appendEvent(req.ID, ticket.EventCommented, req.Actor, map[string]any{"comment_id": c.ID}); err != nil {
-				return ticket.Comment{}, err
-			}
-			return toComment(c), nil
+			return tx.addComment(req)
 		}, nil)
 		return err
 	})
 	return out, err
+}
+
+func (tx *txn) addComment(req ticket.CommentRequest) (ticket.Comment, error) {
+	t, err := tx.loadForWrite(req.ID)
+	if err != nil {
+		return ticket.Comment{}, err
+	}
+	if err := t.CheckFence(req.Holder, req.Token); err != nil {
+		return ticket.Comment{}, err
+	}
+	c := commentDoc{ID: tx.next(&tx.w.Comments), TicketID: int64(req.ID), Author: req.Actor, Body: req.Body, CreatedAt: dt(tx.now)}
+	if err := tx.coll(cComments).insert(c); err != nil {
+		return ticket.Comment{}, err
+	}
+	latest, cut := latestOf(req.Body)
+	_, err = tx.coll(cTickets).update(byID(req.ID), bson.D{{Key: "$set", Value: bson.D{
+		{Key: "latest", Value: latest}, {Key: "latest_cut", Value: cut},
+	}}})
+	if err != nil {
+		return ticket.Comment{}, err
+	}
+	if err := tx.appendEvent(req.ID, ticket.EventCommented, req.Actor, map[string]any{"comment_id": c.ID}); err != nil {
+		return ticket.Comment{}, err
+	}
+	return toComment(c), nil
 }
 
 func toEvent(e eventDoc) ticket.Event {

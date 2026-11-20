@@ -52,6 +52,7 @@ jq -r "$q" "$f"
 EOF
 cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = branch ]; then echo "${BOARD_PREFIX:-maestro/}${2-}"; exit 0; fi
 [ "$1 $3" = "get --json" ] || exit 9
 [ -z "${MT_FAIL-}" ] || exit 1
 cat "$FX/ticket-$2.json"
@@ -123,20 +124,20 @@ case $R in "$TMPDIR"/*/"$run") ;; *) fail "worktree at $R" ;; esac
 [ -f "$R/go.mod" ] || fail "the worktree lacks main's change"
 grep -qx three "$R/src/a.go" || fail "the worktree lacks the PR's change"
 [ -z "$(git -C "$R" status --porcelain)" ] || fail "the worktree isn't clean"
-[ "$E" = "$ev/T-7/$run" ] && [ -d "$E" ] || fail "evidence folder $E"
+[[ "$E" = "$ev/T-7/$run" && -d "$E" ]] || fail "evidence folder $E"
 grep -q '^+three' "$C/diff.patch" || fail "diff.patch lacks the change"
 grep -q 'go.mod' "$C/diff.patch" && fail "diff.patch holds main's change"
 grep -qxF "$(printf '2\t0\tsrc/a.go\tcode')" "$C/files.txt" || fail "files.txt: $(cat "$C/files.txt")"
 for f in pr.json stat.txt log.txt; do [ -s "$C/$f" ] || fail "no $C/$f"; done
 cmp -s "$tmp/out" "$C/prep.txt" || fail "prep.txt differs from the output"
 # The merge stays in the worktree: no ref moved.
-[ "$(git rev-parse origin/maestro/T-7)" = "$H" ] && [ "$(git ls-remote origin maestro/T-7 | cut -f1)" = "$H" ] ||
+[[ "$(git rev-parse origin/maestro/T-7)" = "$H" && "$(git ls-remote origin maestro/T-7 | cut -f1)" = "$H" ]] ||
 	fail "the PR branch moved"
 # A second run shares no name, worktree or folder with the first.
 qa maestro/T-7
-[ "$(val run)" != "$run" ] && [ "$(val R)" != "$R" ] && [ "$(val E)" != "$E" ] && [ "$(val C)" != "$C" ] ||
+[[ "$(val run)" != "$run" && "$(val R)" != "$R" && "$(val E)" != "$E" && "$(val C)" != "$C" ]] ||
 	fail "two runs share a name or a folder"
-[ -d "$E" ] && [ -d "$(val E)" ] || fail "one run's evidence folder is gone"
+[[ -d "$E" && -d "$(val E)" ]] || fail "one run's evidence folder is gone"
 
 # With no git identity the merge still commits.
 git config user.useConfigOnly true
@@ -227,7 +228,7 @@ qa 14
 for l in ticket=none stop=none "H=$P" "review_go=$P" qa_last=fail "qa_last_at=$P" "K=$P" delta_files=0 \
 	delta_classes=none mode=retest merged=yes; do has "$l"; done
 [[ $(val run) =~ ^qa-pr-14-[a-z]{6}$ ]] || fail "no-ticket run named $(val run)"
-[ "$(val E)" = "$ev/pr-14/$(val run)" ] && [ -d "$(val E)" ] || fail "no-ticket evidence folder $(val E)"
+[[ "$(val E)" = "$ev/pr-14/$(val run)" && -d "$(val E)" ]] || fail "no-ticket evidence folder $(val E)"
 
 # Main moved on in a way the PR can't merge: merged=conflict, exit 0,
 # and the worktree back at H with no merge left open.

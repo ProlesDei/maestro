@@ -93,9 +93,11 @@ func lockBoard(dir string) (unlock func(), err error) {
 }
 
 // writeWhole replaces p with b through a temporary file in its folder.
-func writeWhole(p string, b []byte) error {
+func writeWhole(p string, b []byte) error { return writeWholeMode(p, b, 0644) }
+
+func writeWholeMode(p string, b []byte, mode os.FileMode) error {
 	tmp := p + ".tmp" + newSessionID()[:8]
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
@@ -245,6 +247,21 @@ func (c *call) boardQASlots() int {
 // standingRules is rules.md's lines, as a plan, rule or judge prompt
 // carries them, and whether the file is there.
 func (c *call) standingRules() (string, bool) {
+	if loc, err := c.location(); err == nil && loc.boardID != "" {
+		b, err := c.board()
+		if err != nil {
+			return "", false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), markTimeout)
+		defer cancel()
+		rules, err := b.RuntimeRules(ctx)
+		if err != nil {
+			return "", false
+		}
+		if rules != "" {
+			return rules, true
+		}
+	}
 	dir, err := c.standingDir()
 	if err != nil {
 		return "", false
@@ -257,6 +274,13 @@ func (c *call) standingRules() (string, bool) {
 // --limit, from its old block, seeds board.json until rules set limit
 // takes over; anyone else's is a one-off that writes nothing.
 func (c *call) lookLimit(flag int) (int, []string, error) {
+	loc, err := c.location()
+	if err != nil {
+		return 0, nil, err
+	}
+	if loc.boardID != "" {
+		return -1, nil, nil
+	}
 	dir, err := c.standingDir()
 	if err != nil {
 		return 0, nil, err

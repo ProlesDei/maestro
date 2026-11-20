@@ -47,6 +47,7 @@ cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 case $1 in
+branch) echo "maestro/${2-}" ;;
 get) cat "$FX/ticket.json" ;;
 comment)
 	n=$(( $(cat "$FX/n" 2>/dev/null || echo 0) + 1 )); echo $n >"$FX/n"

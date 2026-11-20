@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -107,9 +108,16 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
+  wake        [store-down] (fixed chief wake from the worker OS user)
+  criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
+  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  status      read runtime board, account holds, usage samples and active jobs
+  recover     reconcile the runtime board with local workers and saved runs
+  profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
+              (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
-  job         <job> [<id>...] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
+  job         <job> [<id>...] [--profile ALIAS] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
               run: the prompt, model, effort, limit and session id set for it; text jobs read the
               ask on stdin, with --ticket T for the ticket it is about. build <id>, review <id> [--approved SHA] [--drop IDS --drop-file F|-]
               [--full], qa <id>, live <id>, qa-ask, plan, rule <id>, finish <id>, judge <id>..., cos,
@@ -122,7 +130,7 @@ Commands:
               by you; its launcher or the planner)
   stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
-  notify      [<bot-id>] [--url-file F|-] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
+  notify      [set] [<bot-id>] [--url-file F|- | --exec-file PATH | --code] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
@@ -139,6 +147,8 @@ Commands:
   export      [--out PATH|-]
   render      [--out PATH]     (default: Backlog.md next to the store)
   doctor
+  branch      [T-n]   (branch name or prefix for this board)
+  store       init --uri-file F|-   (initialize or verify an independent MongoDB board)
   store       [--uri-file F|- | --clear]   (writes store.uri, which puts the board on MongoDB, once
               the URI connects, or removes it; prints the store, with only the URI's host)
   migrate     --to mongodb [--uri-file F|-] | --to sqlite [--abort [--force]]   (moves the board between stores and
@@ -231,10 +241,20 @@ var commands = []command{
 	{"flow", runFlow},
 	{"alerts", runAlerts},
 	{"look", runLook},
+	{"recover", runRecover},
+	{"reconsider", runReconsider},
+	{"status", runRuntimeStatus},
+	{"cos", runCos},
+	{"wake", runWake},
+	{"criteria", runCriteria},
+	{"track-worker", runTrackWorker},
 	{"eta", runETA},
 	{"claim", runClaim},
 	{"heartbeat", runHeartbeat},
 	{"keepalive", runKeepalive},
+	{"branch", runBranch},
+	{"profile", runProfile},
+	{"native-worker", runNativeWorker},
 	{"launch", runLaunch},
 	{"job", runJob},
 	{"resume", runResume},
@@ -661,6 +681,8 @@ func checkBody(s string) error {
 }
 
 func runCreate(ctx context.Context, c *call) error {
+	defaultRevision, _ := strconv.Atoi(c.env.Getenv("MAESTRO_BRIEF_REVISION"))
+	briefRev := c.fs.Int("brief-revision", defaultRevision, "accepted revision of a runtime goal")
 	title := c.fs.String("title", "", "one-line title (required)")
 	body := c.fs.String("body", "", "ticket body")
 	bodyFile := c.fs.String("body-file", "", "read the body from a file, or - for stdin")
@@ -717,7 +739,7 @@ func runCreate(ctx context.Context, c *call) error {
 			}
 		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
-			Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
+			BriefRevision: *briefRev, Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
 			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from,
 			Parked: pk, Goal: strings.TrimSpace(*goal), Tier: strings.TrimSpace(*tier), Actor: c.actor, IdempotencyKey: c.idemKey,
 		})

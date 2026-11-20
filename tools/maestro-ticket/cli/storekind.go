@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/x/mongo/driver/connstring"
+
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/sqlitestore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
@@ -39,11 +41,13 @@ type storeLoc struct {
 	localDir   string
 	sqlitePath string
 	source     string
+	boardID    string
 	uri        string
 }
 
 // storeOptions are what a store's open takes from the call.
 type storeOptions struct {
+	BoardID  string
 	Now      func() time.Time // clock for the store; nil means the database's
 	StopFile string           // the kill switch's path, in the local folder
 	Host     string           // this machine's id, for a shared store
@@ -52,7 +56,7 @@ type storeOptions struct {
 // openMongo opens a MongoDB store. Its error must not hold the URI.
 // Tests swap it for a fake.
 var openMongo = func(ctx context.Context, uri string, opts storeOptions) (ticket.Store, error) {
-	s, err := mongostore.Open(ctx, uri, mongostore.Options{Now: opts.Now, StopFile: opts.StopFile, Host: opts.Host})
+	s, err := mongostore.Open(ctx, uri, mongostore.Options{BoardID: opts.BoardID, Now: opts.Now, StopFile: opts.StopFile, Host: opts.Host})
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +80,16 @@ func (c *call) resolveLoc() (storeLoc, error) {
 		return storeLoc{}, err
 	}
 	loc := storeLoc{kind: kindSQLite, localDir: filepath.Dir(path), sqlitePath: path, source: source}
+	pin, err := readBoardPin(loc.localDir)
+	if err != nil {
+		return storeLoc{}, err
+	}
 	name := filepath.Join(loc.localDir, uriFile)
 	b, err := os.ReadFile(name)
 	if errors.Is(err, fs.ErrNotExist) {
+		if pin.ID != "" {
+			return storeLoc{}, errors.New("board initialization incomplete: repeat store init with the original URI file")
+		}
 		return loc, nil
 	}
 	if err != nil {
@@ -90,6 +101,13 @@ func (c *call) resolveLoc() (storeLoc, error) {
 	}
 	if !strings.HasPrefix(uri, "mongodb://") && !strings.HasPrefix(uri, "mongodb+srv://") {
 		return storeLoc{}, fmt.Errorf("%w: %s holds no mongodb:// or mongodb+srv:// URI", ticket.ErrInvalid, name)
+	}
+	if pin.ID != "" {
+		db, err := mongostore.ExplicitDatabase(uri)
+		if err != nil || db != pin.Database || uriHost(uri) != pin.Host {
+			return storeLoc{}, errors.New("configured URI differs from the registered board target")
+		}
+		loc.boardID = pin.ID
 	}
 	loc.kind, loc.uri = kindMongoDB, uri
 	return loc, nil
@@ -109,7 +127,7 @@ func (loc storeLoc) missing() bool {
 // returns a nil Store, never a nil pointer in one, so callers can test
 // s != nil.
 func (c *call) openStore(ctx context.Context, loc storeLoc) (ticket.Store, error) {
-	opts := storeOptions{Now: c.env.Now, StopFile: filepath.Join(loc.localDir, sqlitestore.StopFile)}
+	opts := storeOptions{BoardID: loc.boardID, Now: c.env.Now, StopFile: filepath.Join(loc.localDir, sqlitestore.StopFile)}
 	if loc.kind == kindMongoDB {
 		// Only for doctor's note of which build each machine runs: with
 		// no id, the store just records none.
@@ -132,23 +150,34 @@ func (c *call) openStore(ctx context.Context, loc storeLoc) (ticket.Store, error
 // uriHost is the part of a MongoDB URI safe to print: its hosts, with no
 // user or password.
 func uriHost(uri string) string {
+	host, _ := uriParts(uri)
+	return host
+}
+
+func uriParts(uri string) (host, password string) {
 	u, err := url.Parse(uri)
-	if err != nil || u.Host == "" {
-		// url's error quotes the URI whole.
-		return "an unreadable URI"
+	if err == nil && u.Host != "" {
+		password, _ = u.User.Password()
+		return u.Host, password
 	}
-	return u.Host
+	// Some Go versions reject comma-separated hosts with ports. The MongoDB
+	// parser accepts them. Only SRV parsing would need a DNS lookup.
+	if strings.HasPrefix(uri, "mongodb://") {
+		if cs, err := connstring.Parse(uri); err == nil && len(cs.RawHosts) > 0 {
+			return strings.Join(cs.RawHosts, ","), cs.Password
+		}
+	}
+	return "an unreadable URI", ""
 }
 
 // redactURI takes uri, and its password alone, out of err's text, keeping
 // what err wraps for errors.Is.
 func redactURI(err error, uri string) error {
 	msg := err.Error()
-	out := strings.ReplaceAll(msg, uri, uriHost(uri))
-	if u, perr := url.Parse(uri); perr == nil {
-		if pw, ok := u.User.Password(); ok && pw != "" {
-			out = strings.ReplaceAll(out, pw, "***")
-		}
+	host, password := uriParts(uri)
+	out := strings.ReplaceAll(msg, uri, host)
+	if password != "" {
+		out = strings.ReplaceAll(out, password, "***")
 	}
 	if out == msg {
 		return err

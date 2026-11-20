@@ -19,3 +19,7 @@ func runAlive(string) bool    { return false }
 func Untracked([]string) ([]Session, error) {
 	return nil, errors.New("finding untracked sessions needs Linux")
 }
+
+func NativeProcesses(string) ([]NativeProcess, error) {
+	return nil, errors.New("native worker discovery needs Linux")
+}

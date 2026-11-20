@@ -140,7 +140,7 @@ main=
 	/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); on=(tolower(h)=="main branch"); next}
 	on && $0 != "" && !/^#/ {sub(/^[-* ]+/, ""); gsub(/^[`* ]+|[`* ]+$/, ""); print; exit}' "$setup")
 main=${main:-main}
-branch=maestro/$id
+branch=$(maestro-ticket branch "$id")
 
 tmp=$(mktemp -d)
 wt=

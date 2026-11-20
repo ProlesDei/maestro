@@ -13,10 +13,10 @@ const Supported = false
 
 var errUnix = errors.New("launch needs a unix system")
 
-func lockFile(*os.File) error         { return errUnix }
-func tryLock(*os.File) (bool, error)  { return false, errUnix }
-func holdLock(*os.File) (bool, error) { return false, errUnix }
-func killGroup(int, syscall.Signal)   {}
-func groupAlive(int) bool             { return false }
-func procAttr() *syscall.SysProcAttr  { return nil }
-func Detach() *syscall.SysProcAttr    { return nil }
+func lockFile(*os.File) error            { return errUnix }
+func tryLock(*os.File) (bool, error)     { return false, errUnix }
+func holdLock(*os.File) (bool, error)    { return false, errUnix }
+func killGroup(int, syscall.Signal)      {}
+func groupAlive(int) bool                { return false }
+func procAttr(bool) *syscall.SysProcAttr { return nil }
+func Detach() *syscall.SysProcAttr       { return nil }

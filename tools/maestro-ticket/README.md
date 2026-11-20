@@ -245,3 +245,17 @@ Each send and start is a handout file in `handouts/` next to the store, one per 
 ## Adding a driver
 
 Implement `ticket.Store` (for example on Postgres: `SELECT ... FOR UPDATE SKIP LOCKED` for `ClaimNext`; serialize event inserts, or assign `seq` at commit, so events become visible in seq order). Run `storetest.Run` on it from one test, as `TestConformance` in `sqlitestore` does, then open it in `cli.(*call).openStore`. Nothing else in the CLI changes.
+
+## T3 boards
+
+A new board uses `store init`, a pinned board ID and branches from `maestro-ticket branch T-n`. Binding profiles, sampling usage, reserving owner capacity and configuring the two OS users are part of [T3 runtime setup](../../INSTALL.md#t3-runtime). The planner considers every ready ticket on a wake. Only eligible accounts with room in every reported window admit work.
+
+For versioned goal tickets, `criteria status T-n` returns the brief revision, AC revision, disposition, checkpoint and current proof. Native workers receive their starting revisions in `MAESTRO_BRIEF_REVISION` and `MAESTRO_AC_REVISION`. A claim and its fencing token bind a handoff or verdict to those revisions.
+
+| Command | JSON on stdin |
+|---|---|
+| `criteria request T-n` | `request`, `criterion`, `evidence`, `proposal`, `checkpoint`, `holder` and numeric `token` |
+| `criteria assess T-n` | `request` if pending, `ac`, latest `brief`, `evidence`, `disposition` and revised `body` for changed criteria |
+| `criteria merge T-n` | Full approved `head`, starting `ac` and `brief`, `holder` and numeric `token`. The installed QA merge script supplies these. |
+
+Give each mutation a stable `--idempotency-key`. `recover` checks native process ownership, pending deliveries, the current PR and saved proof. A confirmed merge can close the ticket after QA dies. A confirmed closed, unmerged PR can release its merge reservation. An ambiguous GitHub result keeps the goal’s merge reservation open for investigation.

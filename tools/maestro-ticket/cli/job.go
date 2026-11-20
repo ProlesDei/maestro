@@ -174,6 +174,11 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 	}
 	cmd := exec.CommandContext(ctx, "bash", script, "--route", target)
 	cmd.Dir = strings.TrimSpace(root)
+	store, _, err := c.storePath()
+	if err != nil {
+		return route{}, err
+	}
+	cmd.Env = append(os.Environ(), "MAESTRO_TICKET_STORE="+store)
 	// A gh the script started keeps stdout open after ctx kills bash.
 	cmd.WaitDelay = 5 * time.Second
 	var stderr strings.Builder
@@ -210,25 +215,30 @@ func (c *call) reviewRoute(ctx context.Context, target string) (route, error) {
 
 // jobReq is one job to start, as runJob parses it or look builds it.
 type jobReq struct {
-	kind          jobKind
-	ids           []string // ticket ids, as T-<n>
-	ticket        string   // a text job's ticket
-	text          string   // the bot's text, for a text job
-	approved      string   // review
-	drop, dropWhy string   // review
-	full          bool     // review
-	model, effort string   // overrides
-	limit         time.Duration
-	slots         int  // QA runs at once; 0 for the default
-	inherit       bool // a start no bot typed: it takes the launcher's last overrides
-	chainOf       string
-	hops          int // a chained start: the run whose end starts it, and its hops
+	briefRevision                  int
+	actionID, actionHash, delivery string
+	checkpoint                     string
+	profile                        string
+	kind                           jobKind
+	ids                            []string // ticket ids, as T-<n>
+	ticket                         string   // a text job's ticket
+	text                           string   // the bot's text, for a text job
+	approved                       string   // review
+	drop, dropWhy                  string   // review
+	full                           bool     // review
+	model, effort                  string   // overrides
+	limit                          time.Duration
+	slots                          int  // QA runs at once; 0 for the default
+	inherit                        bool // a start no bot typed: it takes the launcher's last overrides
+	chainOf                        string
+	hops                           int // a chained start: the run whose end starts it, and its hops
 }
 
 // runJob starts one bot job as a Claude Code run: it builds the prompt,
 // picks the model, effort and time limit, gives the run a session id,
 // and launches it as launch does. A bot spends one step on it.
 func runJob(ctx context.Context, c *call) error {
+	profile := c.fs.String("profile", "", "registered native subscription profile")
 	model := c.fs.String("model", "", "override the job's model (opus or sonnet as a rule)")
 	effort := c.fs.String("effort", "", "override the effort (default high)")
 	limit := c.fs.Duration("limit", 0, "override the time limit (default 2h; a review's is sized to its diff)")
@@ -254,7 +264,7 @@ func runJob(ctx context.Context, c *call) error {
 	if !ok {
 		return usagef("job: unknown job %q: want %s", c.args[0], jobNames())
 	}
-	req := jobReq{kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit, slots: *slots}
+	req := jobReq{profile: *profile, kind: k, ids: c.args[1:], approved: *approved, drop: *drop, full: *full, model: *model, effort: *effort, limit: *limit, slots: *slots}
 	if *slots != 0 && k.slot == "" {
 		return usagef("job %s: --slots is for qa, live and qa-ask", k.name)
 	}
@@ -313,6 +323,9 @@ func runJob(ctx context.Context, c *call) error {
 func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, string, error) {
 	k, ids := req.kind, slices.Clone(req.ids)
 	fail := func(err error) (runs.Record, string, string, error) { return runs.Record{}, "", "", err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.mayStart(); err != nil {
 		return fail(err)
 	}
@@ -419,6 +432,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		}
 	}
 	prompt := strings.Join(words, " ")
+	if req.checkpoint != "" {
+		prompt += "\nContinue the unfinished build from run " + req.checkpoint + " in its saved worktree. Inspect its ticket, worktree and run result before editing. Preserve pending changes."
+	}
 	switch {
 	case k.name == "rule":
 		prompt += ": " + req.text
@@ -432,7 +448,11 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 			prompt += "\nStanding rules:\n" + rules
 		}
 	}
-	if req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
+	loc, err := c.location()
+	if err != nil {
+		return fail(err)
+	}
+	if loc.boardID == "" && req.profile == "" && req.inherit && req.model == "" && req.effort == "" && req.limit == 0 {
 		// What was picked for this ticket, its tier's model or a review's
 		// model and size, stands: a carried flag replaces only a fixed
 		// default.
@@ -472,16 +492,45 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	if runLimit < time.Second || runLimit > 24*time.Hour {
 		return fail(usagef("job: --limit %s: want 1s to 24h", runLimit))
 	}
-	cmd, err := c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
-	if err != nil {
-		return fail(err)
+	var cmd []string
+	var harness string
+	if req.profile != "" {
+		p, binding, err := c.jobProfile(req.profile, k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if req.model != "" && req.model != binding.Model || req.effort != "" && req.effort != binding.Effort {
+			return fail(usagef("job: model or effort differs from the profile binding"))
+		}
+		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "bound subscription profile"
+		cmd, err = c.nativeCommand(req.profile, k.name, binding, harness)
+		if err != nil {
+			return fail(err)
+		}
+	} else {
+		var err error
+		cmd, err = c.stopHook(claudeCommand(newSessionID(), m, e, k.lean), k.name)
+		if err != nil {
+			return fail(err)
+		}
+		if k.slot != "" {
+			cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
+		}
 	}
-	if k.slot != "" {
-		cmd = inSlot(cmd, k.slot, cmp.Or(req.slots, c.boardQASlots(), defaultQASlots))
-	}
-	rec := runs.Record{
-		Ticket: ticketID, Limit: short(runLimit), Job: k.name,
-		Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides,
+	rec := runs.Record{BriefRevision: req.briefRevision, Delivery: req.delivery, ActionID: req.actionID, ActionHash: req.actionHash, Ticket: ticketID, Limit: short(runLimit), Job: k.name, Command: withEnv(cmd), ChainOf: req.chainOf, Hops: req.hops, Overrides: overrides, Profile: req.profile, Harness: harness}
+	if loc.boardID != "" && ticketID != "" {
+		t, err := c.ticketForJob(ctx, ticketID)
+		if err != nil {
+			return fail(err)
+		}
+		if t.Criteria != nil {
+			rec.ACRevision, rec.BriefRevision = t.Criteria.AC, t.Criteria.Brief
+			if k.name == "build" || k.name == "review" || k.name == "qa" {
+				if t.Criteria.Request != "" || t.Criteria.Disposition == "deferred" || t.Criteria.Disposition == "replaced" {
+					return fail(errors.New("work held for criteria revision"))
+				}
+			}
+		}
 	}
 	if k.ids {
 		rec.Tickets = ids
@@ -507,6 +556,9 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 		abort()
 		return fail(err)
 	}
+	if r.Profile != "" {
+		m, why = flagValue(r.Command, "--model"), "subscription "+r.Profile
+	}
 	return r, m, why, nil
 }
 
@@ -525,11 +577,36 @@ var jobStatuses = map[string][]ticket.Status{
 	"design": {ticket.StatusTodo, ticket.StatusInProgress},
 }
 
+func (c *call) checkRecoveryHold(id string) error {
+	if id == "" {
+		return nil
+	}
+	loc, err := c.location()
+	if err != nil || loc.boardID == "" {
+		return err
+	}
+	co, err := c.coord()
+	if err != nil {
+		return err
+	}
+	m, err := co.s.read("recovery-holds", id)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %s: %s", ticket.ErrPaused, id, m.body)
+}
+
 // jobFits refuses a job on a ticket in a status it can't work, and a
 // second run of one job on one ticket while the first goes: of two bots
 // handed the same job, one runs it.
 func (c *call) jobFits(ctx context.Context, k jobKind, id string) error {
 	if want, ok := jobStatuses[k.name]; ok {
+		if err := c.checkRecoveryHold(id); err != nil {
+			return err
+		}
 		t, err := c.ticketForJob(ctx, id)
 		if err != nil {
 			return err
@@ -916,6 +993,9 @@ type againOpts struct {
 // and its bot may both run the same do: line.
 func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.needActor("job"); err != nil {
 		return fail(err)
 	}
@@ -930,6 +1010,18 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if admissionWait(r) {
+		fail = func(err error) (runs.Record, error) {
+			var going alreadyGoing
+			if errors.As(err, &going) {
+				other, e := runs.Get(dir, going.run, time.Now())
+				if e != nil || other.AgainOf != r.ID || other.BoardID != r.BoardID || other.Job != r.Job || other.Ticket != r.Ticket || other.Launcher != r.Launcher || !workerReceipt(other) {
+					return runs.Record{}, fmt.Errorf("%w: waiting to replay the original turn", ticket.ErrClaimed)
+				}
+			}
+			return runs.Record{}, err
+		}
+	}
 	switch {
 	case r.Launcher != c.actor:
 		return fail(fmt.Errorf("%w: job again: run %s is %s's", ticket.ErrForbidden, r.ID, dash(r.Launcher)))
@@ -942,7 +1034,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	// the session began with.
 	first := r
 	for range 50 {
-		if first.ResumeOf == "" {
+		if first.ResumeOf == "" || admissionWait(r) {
 			break
 		}
 		p, err := runs.Get(dir, first.ResumeOf, time.Now())
@@ -958,9 +1050,18 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	if err := c.mayStart(); err != nil {
 		return fail(err)
 	}
+	if r.Dir, _, err = c.buildCheckout(r); err != nil {
+		return fail(err)
+	}
 	k, _ := findJob(r.Job)
 	if r.Ticket != "" {
-		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
+		var err error
+		if admissionWait(r) && flagValue(r.Command, "--resume") != "" {
+			err = c.resumeFits(ctx, r)
+		} else {
+			err = c.jobFits(ctx, k, r.Ticket)
+		}
+		if err != nil {
 			if errors.Is(err, ticket.ErrStatusConflict) {
 				err = movedOn{run: r.ID, err: err}
 			}
@@ -975,7 +1076,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		switch {
 		case cmd[i] == "--session-id":
 			cmd[i+1] = newSessionID()
-		case cmd[i] == "--model" && (o.full || flagValue(r.Command, "--model") == modelOpus):
+		case r.Profile == "" && cmd[i] == "--model" && (o.full || flagValue(r.Command, "--model") == modelOpus):
 			cmd[i+1] = modelOpus // a session moved to Opus stays there
 		}
 	}
@@ -990,7 +1091,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
-		AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Overrides: slices.Clone(r.Overrides), PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+	if admissionWait(r) && r.BoardID != "" && !r.PinnedProfile && flagValue(r.Command, "--resume") == "" {
+		rec.Profile, rec.Harness, rec.Command = "", "", nil
+	}
+
 	// Once: of agains at once one makes the mark; a later one finds it
 	// naming the run it made. A start that fails takes it back.
 	co, err := c.coord()
@@ -999,6 +1104,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	}
 	commitMark, abortMark, err := co.takeMark(r.ID+".again", func(id string) string { return id }, func(id string, _ mark) error {
 		if nr, err := runs.Get(dir, id, time.Now()); err == nil && nr.Ended() {
+			// A finalized child that never acquired a PID or launch receipt
+			// could not have received the saved turn. Replace only that child.
+			if admissionWait(r) && nr.AgainOf == r.ID && nr.PID == 0 && nr.LaunchID == 0 && nr.EndedAt != nil && (nr.State == runs.Died || nr.State == runs.Failed) {
+				return nil
+			}
 			return alreadyGoing{run: id, ran: true}
 		}
 		return alreadyGoing{run: id}
@@ -1026,6 +1136,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		abortMark()
 		return fail(err)
 	}
+	if admissionWait(r) && !workerReceipt(nr) {
+		// The launcher recorded the child's .in and .again before starting its supervisor.
+		// Keep those marks and the parent's pending action until recovery verifies a worker.
+		return fail(fmt.Errorf("%w: waiting for the retry supervisor to record its worker", ticket.ErrClaimed))
+	}
 	runs.Ack(dir, r.ID, c.actor, time.Now()) // the new run carries on its work
 	if (r.Job == "plan" || r.Job == "rule" || r.Job == "finish") && r.Ticket != "" {
 		// The rerun holds the ticket, as look's start would, so no look
@@ -1033,6 +1148,10 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		co.recordHandouts([]send{{"planner-job", r.Ticket}})
 	}
 	return nr, nil
+}
+
+func workerReceipt(r runs.Record) bool {
+	return r.PID > 0 && (r.BoardID == "" || r.LaunchID != 0 && r.Stamp != "")
 }
 
 // stillRunning says why a live run can't go again yet, and the way out.
@@ -1106,6 +1225,9 @@ type resumeOpts struct {
 // run died; with opus, on Opus at high effort.
 func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	fail := func(err error) (runs.Record, error) { return runs.Record{}, err }
+	if err := c.ensureRuntimeReady(ctx); err != nil {
+		return fail(err)
+	}
 	if err := c.needActor("resume"); err != nil {
 		return fail(err)
 	}
@@ -1128,6 +1250,25 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		return fail(fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r)))
 	case o.died && r.State != runs.Died && !r.LauncherStopped():
 		return fail(fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State))
+	}
+	if r.Dir, _, err = c.buildCheckout(r); err != nil {
+		return fail(err)
+	}
+	// Older saved routes used --go-on after a refusal. The unsent input is still the exact turn to deliver.
+	if o.goOn && admissionWait(r) {
+		return c.again(ctx, againOpts{run: r.ID})
+	}
+	if o.opus && r.Profile != "" {
+		if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(filepath.Join(filepath.Dir(dir), "notify"), "senior-engineer") {
+			return fail(usagef("resume --opus requires a junior build and a served senior engineer"))
+		}
+		if info, e := os.Stat(r.Dir); e != nil || !info.IsDir() {
+			return fail(errors.New("saved build worktree unavailable"))
+		}
+		k, _ := findJob("build")
+		cc := *c
+		cc.env.Dir = r.Dir
+		return cc.startAs(ctx, dir, "senior-engineer", jobReq{kind: k, ids: []string{r.Ticket}, chainOf: r.ID, hops: r.Hops + 1, checkpoint: r.ID})
 	}
 	session := r.SessionID
 	if session == "" {
@@ -1204,7 +1345,7 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
 		if errors.Is(err, ticket.ErrStatusConflict) {
@@ -1254,7 +1395,7 @@ func thisSlotBinary(cmd []string) []string {
 		return cmd
 	}
 	for i := 0; i+1 < len(cmd); i++ {
-		if cmd[i+1] == "slot" && filepath.Base(cmd[i]) == filepath.Base(exe) {
+		if (cmd[i+1] == "slot" || cmd[i+1] == "native-worker") && filepath.Base(cmd[i]) == filepath.Base(exe) {
 			cmd[i] = exe
 		}
 	}

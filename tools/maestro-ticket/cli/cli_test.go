@@ -363,6 +363,24 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func TestBuildCheckoutUsesThisBoardsBranch(t *testing.T) {
+	repo := t.TempDir()
+	git(t, repo, "init", "-q")
+	git(t, repo, "commit", "--allow-empty", "-qm", "scratch")
+	root := t.TempDir()
+	git(t, repo, "worktree", "add", "-qb", "maestro/old/T-1", filepath.Join(root, "old"))
+	want := filepath.Join(root, "current build")
+	git(t, repo, "worktree", "add", "-qb", "maestro/new/T-1", want)
+	if err := os.WriteFile(filepath.Join(want, "pending"), []byte("unfinished"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := call{}
+	got, found, err := c.buildCheckout(runs.Record{Job: "build", Ticket: "T-1", BoardID: "new", Dir: repo})
+	if err != nil || !found || got != want || git(t, got, "status", "--porcelain") != "?? pending" {
+		t.Fatalf("located %q %t %v", got, found, err)
+	}
+}
+
 func TestGitDefaultsSharedAcrossWorktrees(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

@@ -160,6 +160,8 @@ type posted struct {
 func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (noteKind, error)) error {
 	body := c.fs.String("body", "", "the note")
 	bodyFile := c.fs.String("body-file", "", "read the note from a file, or - for stdin")
+	ac := c.fs.Int("ac-revision", 0, "criteria revision used for this verdict")
+	brief := c.fs.Int("brief-revision", 0, "accepted brief used for this verdict")
 	holder := c.fs.String("holder", "", "your <bot-id>/<session-id>, from your claim")
 	token := c.fs.Int64("token", 0, "lease token from your claim")
 	return c.withStore(ctx, func(s ticket.Store) error {
@@ -193,9 +195,9 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 		if d.Status != k.from && !replay {
 			return fmt.Errorf("%w: %s is %s, and this note goes on a ticket in %s: post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
 		}
-		cm, err := s.Comment(ctx, ticket.CommentRequest{
+		cm, err := c.postProof(ctx, s, d, k, ticket.CommentRequest{
 			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,
-		})
+		}, *ac, *brief)
 		if err != nil {
 			return err
 		}

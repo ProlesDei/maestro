@@ -204,8 +204,8 @@ has "cut=moving-375"
 ! grep -q "^cut=a-375" "$tmp/out" || fail "a clip that settled was called cut"
 has "ok=1"
 ! ls "$tmp/m2"/still-* "$tmp/m2"/a+gone-* >/dev/null 2>&1 || fail "an old clip or strip was left"
-[ -s "$tmp/m2/a-375.png" ] && [ -s "$tmp/m2/sheet-375.png" ] || fail "the clear took a shot or sheet"
-[ -s "$tmp/m2/a-cart-375-motion.png" ] && [ -s "$tmp/m2/other-375-motion.png" ] || fail "the clear took another page's clip"
+[[ -s "$tmp/m2/a-375.png" && -s "$tmp/m2/sheet-375.png" ]] || fail "the clear took a shot or sheet"
+[[ -s "$tmp/m2/a-cart-375-motion.png" && -s "$tmp/m2/other-375-motion.png" ]] || fail "the clear took another page's clip"
 if run --motion --out "$tmp/m3" --widths 375,1280 --ms 200 "$tmp/pages/still.html"; then fail "passed when nothing moved"; else rc=$?; [ $rc = 1 ] || fail "exit $rc when nothing moved"; fi
 grep -q "nothing moved in still-1280,still-375" "$tmp/out" || fail "no word on the still clips"
 

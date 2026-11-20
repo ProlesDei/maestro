@@ -68,11 +68,23 @@ const startGrace = 5 * time.Minute
 
 // Record is one run.
 type Record struct {
-	ID       string   `json:"id"`
-	Launcher string   `json:"launcher"`
-	Ticket   string   `json:"ticket,omitempty"`
-	Limit    string   `json:"limit"`
-	Command  []string `json:"command"`
+	ACRevision    int      `json:"ac_revision,omitempty"`
+	BriefRevision int      `json:"brief_revision,omitempty"`
+	DeliveryRun   string   `json:"delivery_run,omitempty"`
+	Delivery      string   `json:"delivery,omitempty"`
+	BoardID       string   `json:"board_id,omitempty"`
+	ActionID      string   `json:"action_id,omitempty"`
+	ActionHash    string   `json:"action_hash,omitempty"`
+	PinnedProfile bool     `json:"pinned_profile,omitempty"`
+	Unspent       bool     `json:"-"` // The native wrapper refused the run before starting its provider.
+	Estimate      float64  `json:"estimate_percent,omitempty"`
+	Profile       string   `json:"profile,omitempty"`
+	Harness       string   `json:"harness,omitempty"`
+	ID            string   `json:"id"`
+	Launcher      string   `json:"launcher"`
+	Ticket        string   `json:"ticket,omitempty"`
+	Limit         string   `json:"limit"`
+	Command       []string `json:"command"`
 	// Job is the kind of work maestro-ticket job started (build, review,
 	// qa, ...), which pickup reads to say what the result means; empty for
 	// a plain launch.
@@ -219,6 +231,28 @@ func ValidID(s string) bool { return idPattern.MatchString(s) }
 
 func path(dir, id, ext string) string { return filepath.Join(dir, id+ext) }
 
+const BoardEnv = "MAESTRO_RUNTIME_BOARD"
+
+type NativeProcess struct {
+	ID    string
+	PID   int
+	Stamp string
+}
+
+// NeedsTracker only reports a native worker whose original supervisor released its lock.
+func NeedsTracker(dir string, r Record) bool {
+	if r.Ended() || !sessionLeft(r) {
+		return false
+	}
+	f, err := os.OpenFile(path(dir, r.ID, ".lock"), os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	ok, _ := tryLock(f)
+	return ok
+}
+
 // Create reserves a new run id in dir, saves stdin as its .in file and
 // writes its first record, in state starting.
 func Create(dir string, r Record, stdin []byte) (Record, error) {
@@ -297,6 +331,10 @@ func Get(dir, id string, now time.Time) (Record, error) {
 		if !r.Ended() {
 			r.State = Died
 		}
+	}
+	if r.Profile != "" {
+		_, e := os.Stat(path(dir, id, ".unspent"))
+		r.Unspent = e == nil
 	}
 	if b, err := os.ReadFile(path(dir, id, ".acked")); err == nil {
 		var a ack
@@ -545,6 +583,15 @@ func Adopt(dir, id string, now time.Time) (r Record, release func(), died, ok bo
 		}
 		r.State, r.EndedAt = Died, &now
 		r.Error = "its supervisor went away with no result: the machine restarted, or it was killed"
+		if r.BoardID != "" {
+			out, _ := ReadTail(path(dir, id, ".out"), OutputWindow)
+			r.Reply, r.SessionID, r.IsError = ParseOutput(out)
+			// A final native result survives even if the original supervisor
+			// never recorded its exit status. A session ID alone proves no result.
+			if r.SessionID != "" && r.Reply != "" && !r.IsError && !sessionLeft(r) {
+				r.State, r.Error = Done, ""
+			}
+		}
 		r.Host = hostname() // ours from here on: a failed ring is tried again
 		died = true
 	}
@@ -578,7 +625,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".unspent", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}
@@ -679,4 +726,15 @@ func tail(s string, n int) string {
 		s = s[1:]
 	}
 	return "…" + s
+}
+
+// DeliveryOwner is the first run the planner returned for this delivery.
+func (r Record) DeliveryOwner() string {
+	if r.Delivery == "" {
+		return ""
+	}
+	if r.DeliveryRun != "" {
+		return r.DeliveryRun
+	}
+	return r.ID
 }

@@ -144,7 +144,19 @@ func apiDown(r runs.Record) bool {
 // pause for the whole team, and its session goes on as it lifts. A retry
 // spent inside the outage would only fail again and block its ticket.
 // Stats keep outcomeOf's failed.
+func admissionWait(r runs.Record) bool {
+	if r.Profile == "" || r.State != runs.Failed {
+		return false
+	}
+	msg := strings.TrimSpace(r.Error)
+	return msg == "maestro-ticket: worker: reset passed; refresh usage" || msg == "maestro-ticket: worker: missing usage reading or job estimate" || strings.HasPrefix(msg, "maestro-ticket: worker admission:") || strings.HasPrefix(msg, "maestro-ticket: worker: projected usage exceeds allowance until ") || msg == "maestro-ticket: worker: subscription login could not be verified; refresh the bound account"
+}
+
 func routeOutcome(r runs.Record) (outcome, reset string) {
+	if admissionWait(r) {
+		_, until, _ := strings.Cut(r.Error, " until ")
+		return outUsageLimit, strings.TrimSpace(until)
+	}
 	if !apiDown(r) {
 		return outcomeOf(r)
 	}
@@ -301,6 +313,13 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 	}
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
 	id := r.Ticket
+	if admissionWait(r) {
+		// Eligibility and the meter already hold the affected account or role. The
+		// refused wrapper never touched the ticket or acquired an engineer claim.
+		out.Do = []string{"maestro-ticket job again " + r.ID}
+
+		return out, nil
+	}
 	// A judge run that gave no answer frees its rows for the next look,
 	// unless it died: then its resume works them.
 	// A usage limit doesn't free them either: the run goes on once it lifts.
@@ -343,7 +362,16 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			if apiDown(r) {
 				why = "API outage"
 			}
-			if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
+			if r.Profile != "" {
+				if err := c.holdSubscription(r, until, apiDown(r)); err != nil {
+					return out, err
+				}
+				scope := r.Profile
+				if apiDown(r) {
+					scope = r.Harness
+				}
+				out.Wrote = append(out.Wrote, "paused "+scope+" until "+until.Format(time.RFC3339))
+			} else if co.setPause(pause{Until: until, Why: strings.TrimSpace(why + " " + resetSuffix(out.Reset))}, time.Now()) {
 				out.Wrote = append(out.Wrote, "paused every job until "+until.Format(time.RFC3339))
 				planner(strings.Join(strings.Fields("usage_limit "+id+" "+resetSuffix(out.Reset)), " "))
 			}

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,6 +33,30 @@ func keyPath(dir, bot string) string     { return filepath.Join(dir, bot+".key")
 // Authorization: Bearer. Neither is ever printed or logged.
 type Hook struct {
 	URL, Key string
+	Exec     string
+	Code     bool
+}
+
+// Served includes roles handled directly by the supervisor.
+func (h Hook) Served() bool { return h.Code || h.CanRing() }
+
+func (h Hook) CanRing() bool { return h.URL != "" || h.Exec != "" }
+
+// SetLocalServer stores the serving mode in the same atomic file as the
+// legacy URL. No reader can see two active modes during a replacement.
+func SetLocalServer(dir, bot, executable string) error {
+	value := "code"
+	if executable != "" {
+		if !filepath.IsAbs(executable) || strings.ContainsAny(executable, "\n\r\x00") {
+			return errors.New("wake command needs an absolute executable path")
+		}
+		info, err := os.Stat(executable)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return errors.New("wake command must name an executable file")
+		}
+		value = "exec " + executable
+	}
+	return writeSecret(dir, bot, webhookPath(dir, bot), value)
 }
 
 // CheckURL refuses anything but an http or https URL with a host.
@@ -113,7 +138,17 @@ func Webhook(dir, bot string) (Hook, error) {
 	if err != nil {
 		return Hook{}, err
 	}
-	h := Hook{URL: strings.TrimSpace(string(b))}
+	v := strings.TrimSuffix(string(b), "\n")
+	if v == "code" {
+		return Hook{Code: true}, nil
+	}
+	if path, ok := strings.CutPrefix(v, "exec "); ok {
+		if !filepath.IsAbs(path) || strings.ContainsAny(path, "\r\n\x00") {
+			return Hook{}, errors.New("invalid wake command")
+		}
+		return Hook{Exec: path}, nil
+	}
+	h := Hook{URL: strings.TrimSpace(v)}
 	if err := CheckURL(h.URL); err != nil {
 		return Hook{}, fmt.Errorf("webhook for %s: %v", bot, err)
 	}
@@ -199,6 +234,16 @@ func Ring(ctx context.Context, h Hook, n Notification) error {
 	b, _ := json.Marshal(n)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	if h.Exec != "" {
+		// No shell, input, ticket text or provider environment reaches the wake.
+		cmd := exec.CommandContext(ctx, h.Exec)
+		cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
+		cmd.Dir = filepath.Dir(h.Exec)
+		return cmd.Run()
+	}
+	if h.Code {
+		return errors.New("code role has no external wake")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
 	if err != nil {
 		return errors.New("bad webhook URL")

@@ -177,3 +177,41 @@ func sharedFor(id string, procs []int) map[int]bool {
 	spared.Unlock()
 	return pids
 }
+
+// Read only the board and run tags of a native worker. Other sessions cannot match.
+func nativeProcess(pid int, board string) string {
+	args := procList(pid, "cmdline")
+	if len(args) < 2 || args[1] != "native-worker" {
+		return ""
+	}
+	env := procList(pid, "environ")
+	if !slices.Contains(env, BoardEnv+"="+board) {
+		return ""
+	}
+	for _, kv := range env {
+		if id, ok := strings.CutPrefix(kv, RunIDEnv+"="); ok && ValidID(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+func NativeProcesses(board string) ([]NativeProcess, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var found []NativeProcess
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		if id := nativeProcess(pid, board); id != "" {
+			if stamp := Stamp(pid); stamp != "" {
+				found = append(found, NativeProcess{ID: id, PID: pid, Stamp: stamp})
+			}
+		}
+	}
+	return found, nil
+}

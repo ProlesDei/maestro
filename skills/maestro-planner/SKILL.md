@@ -7,6 +7,8 @@ disable-model-invocation: true
 
 # Work for the planner
 
+On T3, plan from the accepted brief revision in the delivery. For each affected open ticket, send `maestro-ticket criteria assess <id> --idempotency-key <key>` its AC and brief revisions, current request ID, rationale in `evidence`, and a disposition of `fits`, `changed`, `deferred` or `replaced`. Supply the revised body for a change. Preserve saved work. Report material deviations, outcomes and unresolved product choices to the goal chief.
+
 The planner bot runs outside the repo and can't read its code, so it runs you with `/maestro-planner <request>` in a headless session whenever a plan needs the repo. You hand back one reply it can act on. You read code, run things to learn facts and write tickets; you never change code. Follow the **maestro-working-principles** skill.
 
 ## How you think

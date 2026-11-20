@@ -55,19 +55,27 @@ func builds(t *testing.T, dir string) map[string]string {
 // A look starts a build itself, as the engineer, when that engineer has a
 // webhook; one with none gets the line, as before.
 func TestLookStartsWorkerJobs(t *testing.T) {
-	sup := fakeSupervisor(t)
-	h := newRefillHarness(t, "2", 2)
-	h.hook("junior-engineer")
-	code, out, errs := h.run("", "look")
-	if code != 0 {
-		t.Fatalf("look: %d %q %q", code, out, errs)
-	}
-	if !regexp.MustCompile(`(?m)^started: R-[a-z2-7]{8} build T-1 as junior-engineer$`).MatchString(out) ||
-		!strings.Contains(out, "send senior-engineer: build T-2") || strings.Contains(out, "send junior-engineer") {
-		t.Fatalf("look:\n%s", out)
-	}
-	if got := builds(t, filepath.Join(h.dir, "runs")); sup.count() != 1 || got["T-1"] != "junior-engineer" {
-		t.Fatalf("builds %v, %d started", got, sup.count())
+	for _, mode := range []string{"webhook", "code"} {
+		t.Run(mode, func(t *testing.T) {
+			sup := fakeSupervisor(t)
+			h := newRefillHarness(t, "2", 2)
+			if mode == "code" {
+				h.ok(nil, "notify", "set", "junior-engineer", "--code")
+			} else {
+				h.hook("junior-engineer")
+			}
+			code, out, errs := h.run("", "look")
+			if code != 0 {
+				t.Fatalf("look: %d %q %q", code, out, errs)
+			}
+			if !regexp.MustCompile(`(?m)^started: R-[a-z2-7]{8} build T-1 as junior-engineer$`).MatchString(out) ||
+				!strings.Contains(out, "send senior-engineer: build T-2") || strings.Contains(out, "send junior-engineer") {
+				t.Fatalf("look:\n%s", out)
+			}
+			if got := builds(t, filepath.Join(h.dir, "runs")); sup.count() != 1 || got["T-1"] != "junior-engineer" {
+				t.Fatalf("builds %v, %d started", got, sup.count())
+			}
+		})
 	}
 }
 

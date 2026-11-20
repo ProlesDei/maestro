@@ -513,6 +513,11 @@ func (c *call) halt(ctx context.Context, on bool) error {
 			out.Kept = true
 		}
 	}
+	if !on && !out.Kept && loc.boardID != "" && codeRole(filepath.Join(loc.localDir, "notify"), "planner") {
+		if err := c.scheduleReconsider(loc.localDir, time.Now()); err != nil {
+			return err
+		}
+	}
 	return c.out(out, func(w io.Writer) {
 		where := "this machine"
 		if out.Shared {

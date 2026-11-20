@@ -7,11 +7,9 @@ A team installs it into its own repo and gets:
 - `maestro-ticket`, a ticket store and CLI.
 - 19 `maestro-*` skills, and seven bot profiles.
 
-Nothing in Maestro runs on its own: no loop, scheduler, dispatcher or watcher. A person or Grok Bot starts each job, save two: a run that ends starts its ticket's fixed next step, and one that frees a build slot or merges takes the planner's look to fill it. The one ring is `maestro-ticket launch` telling a bot that a run it started ended ([decisions](docs/decisions.md), 1).
-
 ## Who drives it
 
-Grok Bot takes the place of the person who prompts the harness. It runs outside your repo, takes on one of the seven profiles in [bot-profiles/](bot-profiles/README.md), comes into the repo, and drives Claude Code with that role's skills and commands. The owner sets goals and makes the calls only a person should make; Grok Bot does the rest.
+T3 chief sessions work with the owner on goals. Code starts the planner and workers, routes fixed handoffs and recovers interrupted work. Fresh jobs draw on the eligible subscriptions with room through their reset windows. Owners can keep the Grok webhook runtime on a separate board. [Runtime setup](INSTALL.md#t3-runtime)
 
 ## How work moves
 
@@ -23,90 +21,40 @@ Grok Bot takes the place of the person who prompts the harness. It runs outside 
 6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
 7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
-Every role follows the [team rules](bot-profiles/team-rules.md). A bot only routes: its ring, `maestro-ticket look` and `pickup` print the lines it sends, `maestro-ticket job` starts each Claude session on Opus or Sonnet at high effort, and Claude does all the reading and deciding, since Grok Bot resends its whole chat at every model call.
+The planner sends product decisions to the goal’s chief and handles delivery questions itself. A review verdict covers the branch head and ticket criteria the reviewer read.
 
 <!-- Source: docs/team.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart TD
-    User([User])
-
-    subgraph Grok ["Grok Bot · outside the repo · plays one role at a time"]
-        CoS["<b>Chief of Staff</b><br/>The one role the user talks to<br/>One decision card at a time<br/>Sets direction, settles escalations<br/>Never touches code or tickets"]
-        Planner["<b>Planner</b><br/>maestro-ticket look · job plan<br/>Product owner and project manager<br/>Turns goals into tickets, tagged by tier<br/>Hands out builds; a judge session settles blocks"]
-        Sr["<b>Senior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Opus, high effort<br/>Senior-tier tickets, a junior's sent back twice"]
-        Jr["<b>Junior Engineer</b><br/>maestro-ticket job build &lt;id&gt;<br/>Sonnet, high effort<br/>Junior-tier tickets"]
-        Rev["<b>Reviewer</b><br/>job review &lt;id&gt; · /maestro-code-review<br/>Fresh session, apart from the author<br/>Passes scaled to risk, one verdict per head sha"]
-        QA["<b>QA Lead</b><br/>job qa &lt;id&gt; · /maestro-qa-lead<br/>Last check before production<br/>Tests the reviewed head in the running app"]
-        Des["<b>Designer</b><br/>job design &lt;id&gt; · /maestro-designer<br/>A goal's screens before they're built<br/>Directions in code, one pick, a spec"]
+    Owner([Owner])
+    subgraph Chief["Chief account"]
+        C["Chief of staff · Astra or Opus"]
+        Memory[("Private drafts, decisions and accepted briefs")]
+        C <--> Memory
     end
-
-    Tickets[("<b>Ticket system</b><br/>maestro-ticket<br/>backlog → todo → in_progress → in_review → done<br/>blocked · cancelled")]
-
-    Build["<b>Build session</b><br/>Claude Code, in the ticket's own worktree<br/>Claim · plan · build · project checks ·<br/>a real run per criterion · open PR · ticket to in_review"]
-
-    Done([Merged · ticket done])
-
-    %% User and Chief of Staff
-    User <-->|"goals, decisions, approvals"| CoS
-
-    %% The Chief of Staff leads through the Planner
-    CoS -->|"goals, answers"| Planner
-    Planner -.->|"board status, blocks it can't settle"| CoS
-
-    %% The Planner hands out builds, and what stalled
-    Planner -->|"senior-tier ticket:<br/>look starts its build"| Sr
-    Planner -->|"junior-tier ticket:<br/>look starts its build"| Jr
-    Planner -->|"a stalled review"| Rev
-    Planner -->|"a stalled test,<br/>a goal's live run"| QA
-    Planner -->|"a goal's screens:<br/>Design: ticket"| Des
-    Des -.->|"draft PR: pickup sends<br/>the owner's card up"| CoS
-    CoS -.->|"the owner's answer:<br/>approved or changes"| Planner
-
-    %% Planning
-    Planner -->|"writes tickets"| Tickets
-    Tickets -->|"todo"| Sr
-    Tickets -->|"routine todo"| Jr
-
-    %% Build
-    Sr --> Build
-    Jr --> Build
-    Build -.->|"a question it can't settle"| Sr
-    Build -.->|"a question it can't settle"| Jr
-    Jr -.->|"a stuck session goes on, on Opus;<br/>a second Kickback"| Sr
-    Sr -.->|"what the ticket can't settle"| Planner
-    QA -.->|"a block, a goal done"| Planner
-    Rev -.->|"a block to settle"| Planner
-    Planner -.->|"judge: Answer note, unblock"| Tickets
-
-    %% Review, then test
-    Build -->|"in_review: its end starts the review,<br/>and the next build in its slot"| Rev
-    Rev -->|"GO: its end starts QA"| QA
-    QA -->|"pass: gh pr merge, ticket done"| Done
-    Planner -.->|"PR merged outside QA: ticket done"| Done
-    Rev -.->|"NO-GO: Kickback note,<br/>back to in_progress: +1 try"| Sr
-    Rev -.->|"NO-GO"| Jr
-    QA -.->|"fail: Kickback note,<br/>back to in_progress: +1 try"| Sr
-    QA -.->|"fail"| Jr
-
-    %% Legend
-    subgraph Legend ["Legend"]
-        direction LR
-        L6["Role Grok Bot plays"] ~~~ L1["Claude Code session"] ~~~ L4[("Shared storage")] ~~~ L5["Solid line: work<br/>Dotted line: feedback,<br/>status or escalation"]
+    subgraph Worker["Worker account"]
+        P["Planner · plan and judge sessions"]
+        Router["Code relay · recover and look"]
+        D["Designer"]
+        J["Junior engineer"]
+        S["Senior engineer"]
+        R["Reviewer · fresh Claude or Codex session"]
+        Q["QA lead"]
+        Board[("Tickets, handoffs and receipts")]
+        Router <--> Board
+        P --> Board
+        Router --> D & J & S
+        J & S -->|"branch and criteria revision"| R
+        R -->|"GO at current head"| Q
+        R & Q -.->|"kickback"| Router
+        Q -->|"verified merge"| Board
+        Router -->|"delivery dispute"| P
     end
-
-    %% Styles
-    classDef session fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
-    classDef storage fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
-    classDef person fill:#f5f5f5,stroke:#555,color:#1a1a1a
-    classDef bot fill:#fff3c4,stroke:#b38f00,color:#1a1a1a
-    classDef note fill:#ffffff,stroke:#999,color:#1a1a1a,stroke-dasharray:3 3
-
-    class Build,L1 session
-    class Tickets,L4 storage
-    class User,Done person
-    class CoS,Planner,Sr,Jr,QA,Rev,Des,L6 bot
-    class L5 note
-    style Grok fill:none,stroke:#b38f00,stroke-dasharray:4 4
+    Owner <--> C
+    C -->|"accepted brief or ruling"| P
+    Router -.->|"fixed wake for pending goal items"| C
+    D -->|"design for owner approval"| Board
+    Grok["Grok Bot · webhook runtime"] --> Old[("Separate Grok board")]
 ```
 
 ## What we hold to
@@ -161,48 +109,18 @@ What a bot loads and what the installer leaves in your repo:
 
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
-flowchart TD
-    Runtime["<b>Grok Bot</b> · outside their repo<br/>Takes the place of the person at the keyboard<br/>Routes the work. Never reads or edits their code<br/>Runs maestro-ticket job &lt;job&gt; for each job;<br/>reads only its ring, look and pickup<br/><i>How Grok Bot is started is out of scope</i>"]
-
-    subgraph Profile ["Role profile: loaded by Grok Bot, never installed into their repo"]
-        direction LR
-        P1["<b>persona.md</b><br/>Who the bot is,<br/>what it runs"] ~~~ P2["<b>team-rules.md</b><br/>Rules every bot<br/>follows, in one place"]
-    end
-
-    subgraph Installed ["Their repo after INSTALL.md"]
-        direction LR
-        S1["<b>19 maestro-* skills</b><br/>.claude/skills · .agents/skills<br/>Committed or hidden from git: their pick"] ~~~ S2["<b>.maestro/project/project-setup.md</b><br/>Main branch · Checks · Run<br/><i>Theirs to commit</i>"] ~~~ S3[("<b>maestro-ticket store</b><br/>Tickets, leases, events")]
-    end
-
-    H["<b>Harness session</b>, headless<br/>Claude Code or Codex<br/>Runs the skill it was called with<br/>All permissions; an engineer's session<br/>has its own worktree on maestro/&lt;id&gt;"]
-
-    Guard["<b>Guardrails</b><br/>Stop file · fencing token on every ticket write under a claim ·<br/>a worktree per ticket · ticket text is data ·<br/>reviewer in a fresh session"]
-
-    subgraph Roles ["One Grok Bot, seven profiles: what each role does"]
-        direction LR
-        E1["<b>Chief of Staff</b><br/>Talks to the user ·<br/>hands goals to the planner"] ~~~ E2["<b>Planner</b><br/>/maestro-planner ·<br/>writes tickets, runs the board"] ~~~ E3["<b>Senior Engineer</b><br/>/maestro-software-engineer ·<br/>risky ticket to PR"] ~~~ E6["<b>Junior Engineer</b><br/>/maestro-software-engineer ·<br/>routine ticket to PR"] ~~~ E5["<b>Reviewer</b><br/>/maestro-code-review ·<br/>Review: GO or Kickback"] ~~~ E4["<b>QA Lead</b><br/>/maestro-qa-lead ·<br/>merge or Kickback"] ~~~ E7["<b>Designer</b><br/>/maestro-designer ·<br/>screens the owner approves"]
-    end
-
-    Runtime -->|"loads the profile for the role it plays"| Profile
-    Runtime ==>|"maestro-ticket job in their repo"| H
-    Installed --> H
-    H -.->|"ring and pickup: what to send, read by Grok Bot"| Runtime
-    Guard -.-> H
-    H ~~~ Roles
-
-    classDef runtime fill:#f5f5f5,stroke:#555,color:#1a1a1a
-    classDef profile fill:#e6dcf5,stroke:#6a4c9c,color:#1a1a1a
-    classDef harness fill:#bcd6f5,stroke:#2f5f9e,color:#1a1a1a
-    classDef ours fill:#c8e6c9,stroke:#2e7d32,color:#1a1a1a
-    classDef role fill:#ffffff,stroke:#6a4c9c,color:#1a1a1a
-    classDef note fill:#ffe0b2,stroke:#e65100,color:#1a1a1a
-
-    class Runtime runtime
-    class P1,P2 profile
-    class H harness
-    class S1,S2,S3 ours
-    class E1,E2,E3,E6,E4,E5,E7 role
-    class Guard note
+flowchart LR
+    Owner([Owner]) <--> Chief["T3 chief session"]
+    Chief <--> Private[("Private chief memory")]
+    Chief -->|"cos verb and published delivery ID"| Door["Fixed commands across OS users"]
+    Door --> Relay["Worker code relay"]
+    Relay -.->|"wake without worker text"| Door
+    Door -.->|"ring: run pickup"| Chief
+    Relay <--> Board[("Board, usage and receipts")]
+    Relay -->|"job with verified profile"| Harness["Claude Code or Codex"]
+    Repo["Team repo · role skills and project setup"] --> Harness
+    Harness -->|"commit, verdict and evidence"| Board
+    Hook["Grok webhook server"] -->|"job in its own installation"| Harness
 ```
 
 ## Tools

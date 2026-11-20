@@ -261,3 +261,33 @@ func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
 		t.Fatalf("the ring at the lift: %q", n.Lines)
 	}
 }
+
+func TestRuntimeHandoffGrammar(t *testing.T) {
+	dir := t.TempDir()
+	head := strings.Repeat("a", 40)
+	for _, test := range []struct {
+		role, line, source string
+		ok                 bool
+	}{
+		{"designer", "design T-1", "plan", true}, {"qa-lead", "live T-1", "plan", true},
+		{"senior-engineer", "build T-2", "review", true}, {"junior-engineer", "build T-1", "review", true},
+		{"reviewer", "review T-1", "build", true}, {"qa-lead", "qa T-1", "review", true},
+		{"reviewer", "review T-1 --approved " + head, "judge", true},
+		{"reviewer", "review T-1 --approved " + head, "build", false},
+		{"qa-lead", "build T-1", "plan", false}, {"designer", "design T-1 extra", "plan", false},
+	} {
+		if served(dir, test.role) {
+			t.Fatal("unserved role", test.role)
+		}
+		if err := runs.SetLocalServer(dir, test.role, ""); err != nil {
+			t.Fatal(err)
+		}
+		_, ok := stepRequest(dir, runs.Record{Job: test.source}, send{test.role, test.line})
+		if !served(dir, test.role) || ok != test.ok {
+			t.Errorf("%s %s: %t", test.role, test.line, ok)
+		}
+		if err := runs.SetWebhook(dir, test.role, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

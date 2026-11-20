@@ -266,3 +266,51 @@ func TestCodeSkew(t *testing.T) {
 		t.Fatalf("a dotted host: %v", err)
 	}
 }
+
+func TestLookLeaseRaceAndTakeover(t *testing.T) {
+	s := coordStore(t, Options{})
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	winners := make(chan string, 2)
+	for _, token := range []string{"first", "second"} {
+		wg.Go(func() {
+			won, err := s.AcquireLook(ctx, token)
+			if err != nil {
+				t.Error(err)
+			}
+			if won {
+				winners <- token
+			}
+		})
+	}
+	wg.Wait()
+	close(winners)
+	if len(winners) != 1 {
+		t.Fatalf("won %d leases", len(winners))
+	}
+	first := <-winners
+	if again, err := s.FinishLook(ctx, first); err != nil || !again {
+		t.Fatalf("lost concurrent wake: %v %v", again, err)
+	}
+	if err := s.RenewLook(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testDB(t, s).Collection(cMarks).UpdateOne(ctx, markID("runtime", "look"), bson.M{"$set": bson.M{"until": time.Unix(0, 0)}}); err != nil {
+		t.Fatal(err)
+	}
+	if won, err := s.AcquireLook(ctx, "replacement"); err != nil || !won {
+		t.Fatalf("takeover: %v %v", won, err)
+	}
+	if err := s.RenewLook(ctx, first); err == nil {
+		t.Fatal("stale owner renewed")
+	}
+	if _, err := s.FinishLook(ctx, first); err == nil {
+		t.Fatal("stale owner released")
+	}
+	if again, err := s.FinishLook(ctx, "replacement"); err != nil || again {
+		t.Fatalf("clean release: %v %v", again, err)
+	}
+	if won, err := s.AcquireLook(ctx, "third"); err != nil || !won {
+		t.Fatalf("wake after release: %v %v", won, err)
+	}
+}

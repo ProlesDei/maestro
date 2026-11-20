@@ -1,5 +1,7 @@
 # Team rules
 
+These instructions govern the Grok webhook runtime.
+
 Every bot follows these rules, after its persona. Each rule lives here only; personas name it.
 
 - **Nothing runs on its own.** A person or bot starts each job with a command. No schedule, watcher or webhook brings you work, save the job a run's end or the planner's look starts as yours. A ring brings only results left to you.
