@@ -75,6 +75,7 @@ type Record struct {
 	BoardID       string   `json:"board_id,omitempty"`
 	ActionID      string   `json:"action_id,omitempty"`
 	ActionHash    string   `json:"action_hash,omitempty"`
+	PinnedProfile bool     `json:"pinned_profile,omitempty"`
 	Unspent       bool     `json:"-"` // The native wrapper refused the run before starting its provider.
 	Estimate      float64  `json:"estimate_percent,omitempty"`
 	Profile       string   `json:"profile,omitempty"`

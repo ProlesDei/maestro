@@ -144,7 +144,15 @@ func apiDown(r runs.Record) bool {
 // pause for the whole team, and its session goes on as it lifts. A retry
 // spent inside the outage would only fail again and block its ticket.
 // Stats keep outcomeOf's failed.
+func admissionWait(r runs.Record) bool {
+	return r.Profile != "" && r.State == runs.Failed && strings.HasPrefix(strings.TrimSpace(r.Error), "maestro-ticket: worker admission:")
+}
+
 func routeOutcome(r runs.Record) (outcome, reset string) {
+	if admissionWait(r) {
+		_, until, _ := strings.Cut(r.Error, " until ")
+		return outUsageLimit, strings.TrimSpace(until)
+	}
 	if !apiDown(r) {
 		return outcomeOf(r)
 	}
@@ -301,6 +309,16 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 	}
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
 	id := r.Ticket
+	if admissionWait(r) {
+		// Eligibility and the meter already hold the affected account or role. The
+		// refused wrapper never touched the ticket or acquired an engineer claim.
+		next := "job again " + r.ID
+		if flagValue(r.Command, "--resume") != "" {
+			next = "resume " + r.ID + " --go-on"
+		}
+		out.Do = []string{"maestro-ticket " + next}
+		return out, nil
+	}
 	// A judge run that gave no answer frees its rows for the next look,
 	// unless it died: then its resume works them.
 	// A usage limit doesn't free them either: the run goes on once it lifts.

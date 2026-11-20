@@ -42,6 +42,15 @@ func readUsage(path string) (usageLedger, error) {
 	if json.Unmarshal(b, &state) != nil || state == nil {
 		return nil, errors.New("invalid subscription usage ledger")
 	}
+	for _, windows := range state {
+		for name, w := range windows {
+			// Older ledgers settled finished reservations through their last reading.
+			if w.Since.IsZero() {
+				w.Since = w.Read
+				windows[name] = w
+			}
+		}
+	}
 	return state, nil
 }
 
@@ -257,6 +266,9 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		if err != nil {
 			return r, err
 		}
+	}
+	if r.Profile != "" && r.AgainOf == "" && r.ResumeOf == "" {
+		r.PinnedProfile = true
 	}
 	r.BoardID = loc.boardID
 	r.Profile, r.Harness, r.Estimate = chosen, p.Harness, b.Estimate

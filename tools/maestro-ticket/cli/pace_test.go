@@ -3,7 +3,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -132,5 +134,31 @@ func TestLateMeterKeepsCompletedSpend(t *testing.T) {
 	windows = sample(end.Add(2*time.Minute), 98)
 	if room, reason := projectedRoom("max", jobModel{Estimate: 2}, 0, windows, reservations, end); reason != "" || room != 0 {
 		t.Fatalf("observed spend charged twice: %v %s", room, reason)
+	}
+}
+
+func TestPreviousLedgerStartsAtLastSample(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "usage.json")
+	now := time.Now().UTC()
+	old := usageLedger{"max": {"weekly": {Used: 10, Read: now, Reset: now.Add(time.Hour)}}}
+	data, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readUsage(path)
+	if err != nil || !got["max"]["weekly"].Since.Equal(now) {
+		t.Fatalf("legacy baseline: %v %v", got, err)
+	}
+}
+func TestPreflightRefusalRetriesWithoutTouchingTicket(t *testing.T) {
+	h := newRouteHarness(t)
+	r := runs.Record{ID: "R-aaaaaaaa", State: runs.Failed, Job: "build", Ticket: "T-18", Profile: "pro", Error: "maestro-ticket: worker admission: projected usage exceeds allowance until 2030-01-01T00:00:00Z"}
+	out := h.route(r)
+	if out.Outcome != outUsageLimit || len(out.Do) != 1 || out.Do[0] != "maestro-ticket job again R-aaaaaaaa" || len(out.Wrote) != 0 || out.Reset != "2030-01-01T00:00:00Z" {
+		t.Fatalf("wrong preflight route: %+v", out)
 	}
 }

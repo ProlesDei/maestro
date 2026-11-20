@@ -69,9 +69,9 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	if record.State != runs.Running || record.BoardID != loc.boardID || record.Profile != *alias || record.Job != *job || record.PID != os.Getpid() || record.Stamp != runs.Stamp(os.Getpid()) || (loc.boardID != "" && record.LaunchID == 0) {
 		return errors.New("worker: launch receipt does not match this process")
 	}
-	started := false
+	var provider *exec.Cmd
 	defer func() {
-		if !started {
+		if provider == nil || provider.Process == nil {
 			_ = writeWholeMode(filepath.Join(dir, id+".unspent"), []byte("no provider turn"), 0600)
 		}
 	}()
@@ -95,7 +95,7 @@ func runNativeWorker(ctx context.Context, c *call) error {
 				return e
 			}
 		}
-		return errors.New("worker: subscription login could not be verified; refresh the bound account")
+		return errors.New("worker admission: subscription login could not be verified; refresh the bound account")
 	}
 	var args []string
 	switch p.Harness {
@@ -124,6 +124,7 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		return errors.New("worker: unknown harness")
 	}
 	cmd := profileCommand(ctx, p.Harness, p.ConfigDir, args...)
+	provider = cmd
 	cmd.Dir = c.env.Dir
 	cmd.Stdin = c.env.Stdin
 	if p.Harness == "codex" && *resume == "" {
@@ -152,7 +153,7 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		}
 		list = slices.DeleteFunc(list, func(r runs.Record) bool { return r.ID == id })
 		if _, reason := projectedRoom(*alias, m, p.Reserve, ledger[*alias], list, time.Now().UTC()); reason != "" {
-			return fmt.Errorf("worker: %s", reason)
+			return fmt.Errorf("worker admission: %s", reason)
 		}
 	}
 	// Preserve the supervisor identity and the board chosen by the launcher.
@@ -167,10 +168,8 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		if k, _ := findJob(*job); k.lean {
 			cmd.Env = append(cmd.Env, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m")
 		}
-		started = true
 		return c.claudeResult(cmd, *alias)
 	}
-	started = true
 	err = codexResult(cmd, c.env.Stdout)
 	if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
 		if e = c.copyNativeUsage(after, ""); e != nil {

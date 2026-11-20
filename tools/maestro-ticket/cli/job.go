@@ -1065,7 +1065,11 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
-		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+	if admissionWait(r) && !r.PinnedProfile && r.ResumeOf == "" {
+		rec.Profile, rec.Harness, rec.Command = "", "", nil
+	}
+
 	// Once: of agains at once one makes the mark; a later one finds it
 	// naming the run it made. A start that fails takes it back.
 	co, err := c.coord()
@@ -1297,7 +1301,7 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	}
 	rec := runs.Record{
 		Ticket: r.Ticket, Tickets: r.Tickets, Limit: r.Limit, Job: r.Job, Command: cmd,
-		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, ResumeOf: r.ID, AfterDeath: o.died, Nudge: nudge, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir,
 	}
 	if err := c.resumeFits(ctx, r); err != nil {
 		if errors.Is(err, ticket.ErrStatusConflict) {
