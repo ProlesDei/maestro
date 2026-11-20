@@ -1,26 +1,26 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v3, 2026-11-19. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). Nothing here is built. The team works on this spec from here.
+**Status:** draft v4, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 adds subscription routing and a Codex chief of staff. Nothing here is built. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
 
 1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`. Setting a bot's webhook again brings it back, so a team can still run Maestro on Grok.
 2. Each role gets a **server**: a webhook (a Grok bot, as today), a command (the chief of staff's wake), or code (the planner's routing and the five worker roles). Every place that now asks "does this bot have a webhook?" asks "is this role served?" instead.
-3. All thinking stays in Claude. Planning, judging and rulings run as Claude sessions, as they do today. Code takes only the relaying that Grok bots did: start the next step, refill a slot, take a look, pass on what needs a person (section 3).
-4. One Claude thread in T3 Code plays the chief of staff. The owner talks to it from the T3 phone app. It runs behind a wall: no worker session can type into it, and it reaches the board through one command, `maestro-ticket cos <verb>`.
-5. One machine. The board lives on MongoDB Atlas. One Claude Max 20x plan runs it all.
+3. Agent sessions plan, judge and rule. Section 8 maps each role to a harness, model and account. Code takes only the relaying that Grok bots did: start the next step, refill a slot, take a look, pass on what needs a person (section 3).
+4. One Codex thread in T3 Code plays the chief of staff. The owner talks to it from the T3 phone app. It runs behind a wall: no worker session can type into it, and it reaches the board through one command, `maestro-ticket cos <verb>`.
+5. One machine. The board lives on MongoDB Atlas. Two Claude Max 20x accounts and one ChatGPT Pro account serve the roles in section 8.
 
 ```mermaid
 flowchart LR
   OWNER["Owner's phone<br/>T3 app"]
   subgraph COSSIDE["Chief-of-staff side"]
     T3["T3 Code"]
-    COS["Chief-of-staff thread<br/>Claude Opus"]
+    COS["Chief-of-staff thread<br/>Codex Astra"]
   end
   subgraph WORKSIDE["Worker side: user maestro"]
     SUP["Supervisors<br/>code roles, 0 tokens"]
-    RUNS["claude -p runs<br/>plan, judge, build,<br/>review, QA, design"]
+    RUNS["Claude Code / Codex runs<br/>plan, judge, build,<br/>review, QA, design"]
   end
   DB[("MongoDB Atlas<br/>the board + inbox")]
   GH["GitHub"]
@@ -36,9 +36,9 @@ flowchart LR
 
 ## 1. The owner's answers
 
-| Call | Answer (2026-11-19) | What it changes here |
+| Call | Current answer | What it changes here |
 |---|---|---|
-| Accounts | One personal Claude Max 20x plan; maybe a Team plan later, if a seat gives as much as Max 20x | No account picking now. Section 8 keeps one small step so a Team plan can slot in later. |
+| Accounts | Two Claude Max 20x plans and ChatGPT Pro; prefer Codex Astra at high or medium effort for chief of staff | Section 8 sets the initial assignments and capacity rules. |
 | Second user for the chief of staff | Yes. Today T3 runs in WSL on a Windows desktop; that may move to the native Windows app, or a container | Section 6 gives the wall three ways to build it. |
 | Planner as code | Asked what it means: isn't the planner the product manager? | Section 3 answers it. |
 | Several boxes | One machine | Phase 2 leaves the build. Section 12 keeps what the audits found, for later. |
@@ -51,7 +51,7 @@ flowchart LR
 |---|---|---|
 | Junior, senior engineer | Grok webhook | code |
 | Reviewer, QA lead, designer | Grok webhook | code |
-| Planner | Grok webhook | code for the routing; Claude for the thinking (section 3) |
+| Planner | Grok webhook | code for the routing; agent sessions for decisions (section 3) |
 | Chief of staff | Grok webhook | command: wake its T3 thread (section 5) |
 
 `maestro-ticket notify set <bot>` takes one of `--url-file` (today), `--exec-file` or `--code`. The chain, `look` and the supervisor read that server through one `served(bot)` check. Today each reads `hasHook`:
@@ -85,15 +85,15 @@ A run's supervisor routes the run once it ends **[code]** `tools/maestro-ticket/
 ```mermaid
 flowchart TD
   END["A run ends: its supervisor routes it<br/>matches line shapes, reads no ticket or reply"]
-  END --> A["Start the next step<br/>build, review, qa, live, design T-n<br/>review T-n --approved sha<br/>do: resume --died, --go-on, --opus,<br/>--escalate, --decide; job again"]
+  END --> A["Start the next step<br/>build, review, qa, live, design T-n<br/>review T-n --approved sha<br/>do: resume --died, --go-on, senior escalation,<br/>--escalate, --decide; job again"]
   END --> B["Refill<br/>slot free T-n, merged T-n"]
   END --> C["Look<br/>kickback, block, timed_out,<br/>failed, mismatch, live fail, a stop"]
   END --> D["Needs a person<br/>usage_limit, disk_full, died twice,<br/>goal done, cause, a fault line,<br/>a card, a design card, a QA question"]
-  A --> RUN["Next Claude run, as that role"]
+  A --> RUN["Next eligible run, as that role"]
   B --> FILL["Builds for the next tickets"]
-  C --> LOCK{"Look lock free?"}
-  LOCK -- yes --> JUDGE["look --judge<br/>a Claude judge session"]
-  LOCK -- no --> DIRTY["Set planner-dirty; return"]
+  C --> LOCK{"Acquire lock or mark dirty atomically"}
+  LOCK -- yes --> JUDGE["look --judge<br/>a judge session"]
+  LOCK -- no --> DIRTY["Dirty recorded; return"]
   D --> INBOX[("Inbox in the board")]
   INBOX --> WAKE["wake the chief of staff"]
 ```
@@ -103,12 +103,12 @@ flowchart TD
 | `build`, `review`, `qa`, `live`, `design <id>` | Starts it as that role. Today `chainLine` takes only the first three **[code]** `tools/maestro-ticket/cli/chain.go:29`. |
 | `review <id> --approved <sha> --drop …` from a judge | Starts that review |
 | `do: resume <run> --died`, `--go-on`, `job again <run>` | Runs it, as now **[code]** `tools/maestro-ticket/cli/chain.go:169` |
-| `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Runs it. These are fixed shapes too; the grammar still allows no rules write. |
+| `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Map the existing `--opus` line to a senior escalation under section 8. Keep the other fixed shapes; the grammar still allows no rules write. |
 | `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | One `look --judge`, under the look lock (3.2) |
 | `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Into the chief of staff's inbox (5.2) |
 
-Then it acks the run. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
+Persist one handoff ID per action. Replay returns the recorded run or inbox item, including during a switch back to a webhook. Ack after all actions have durable receipts. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
 
 It never forwards a full `--report`. The planner's persona sends a report only when a goal finishes, the line stops, a block needs it or the chief of staff asks, and the relay keeps to that.
 
@@ -122,25 +122,18 @@ sequenceDiagram
   participant B as Supervisor B
   participant C as Supervisor C
   participant M as Board marks
-  A->>M: take planner-look
-  M-->>A: taken
-  B->>M: take planner-look
-  M-->>B: refused
-  B->>M: set planner-dirty
-  C->>M: take planner-look
-  M-->>C: refused
-  C->>M: set planner-dirty
+  A->>M: atomically acquire or set dirty
+  M-->>A: acquired
+  B->>M: atomically acquire or set dirty
+  M-->>B: dirty recorded
   Note over A: look --judge
-  A->>M: release planner-look
-  A->>M: planner-dirty set?
-  M-->>A: yes
-  A->>M: clear planner-dirty, take planner-look
-  Note over A: one more look
-  A->>M: release, dirty clear, done
+  A->>M: atomically consume dirty and retain lock, or release if clean
+  M-->>A: run again
+  A->>M: after second look, release if clean
 ```
 
-- The mark expires after 10 minutes. A stale one is taken over, as handouts are (`moveStale`), so a supervisor that dies mid-look can't stop the relay for good.
-- Releasing before re-checking `planner-dirty` means a loser's mark is never missed.
+Renew the 10-minute lease during a long look. On takeover, verify the holder token before clearing or releasing the lock.
+
 - `look` already marks each row it hands a judge **[code]** `tools/maestro-ticket/cli/look.go:410`, so a second look never judges the same row again.
 
 ## 4. A ticket's life in the T3 runtime
@@ -174,8 +167,8 @@ A send-back from review or QA goes straight back to the engineer. A block goes t
 
 ### 5.1 The thread
 
-- One Claude thread in T3 Code, on Opus, in full access, so tool asks never reach the phone ([decisions](../decisions.md), 12).
-- Its persona, the team rules and the `cos` verbs sit in `CLAUDE.md` in the thread's own Claude config dir, built by `scripts/bot-bundle.sh`. Claude Code loads `CLAUDE.md` in every session and again after compaction, which a first message doesn't get (guess). Its memories go in a file that `CLAUDE.md` imports.
+- One Codex thread in T3 Code, on Astra, in full access, so tool asks never reach the phone ([decisions](../decisions.md), 12).
+- Its persona, the team rules and the `cos` verbs sit in `AGENTS.md` in the chief of staff’s private working directory, built by `scripts/bot-bundle.sh`. P0 checks that Codex follows those instructions on startup and after compaction. Keep its memory in the same private directory.
 - It reads what is short itself. Long reads (a PR, many tickets) go through `cos ask`, a separate run, so its own context stays small.
 
 ### 5.2 The inbox
@@ -201,7 +194,7 @@ sequenceDiagram
 - Code adds items. Only the chief of staff's `cos ack` removes them, so a failed or lost wake is rung again and an alert can't vanish.
 - A card's text stays data, as [decisions](../decisions.md), 7 says.
 - The wake goes through the existing gate: at most once each 4 minutes **[code]** `tools/maestro-ticket/runs/gate.go`, and again at 5, 10 and 40 minutes while anything waits unacked **[code]** `tools/maestro-ticket/runs/supervise.go:46`.
-- If Atlas is down, code can't write the inbox. Then the wake carries one fixed word, `store-down`. The chief of staff tells the owner, and runs `cos look` once Atlas is back.
+- If Atlas is down, code can't write the inbox. Then the wake carries one fixed word, `store-down`. The host exposes the fault through a status command readable without a model or Atlas. The chief of staff runs `cos look` once Atlas is back.
 
 ### 5.3 The `cos` verbs
 
@@ -231,12 +224,12 @@ So a worker session can wake the thread, at worst too often, but can't put words
 flowchart LR
   subgraph W["Worker side"]
     SUP["Supervisors + code relay"]
-    RUNS["claude -p runs<br/>full permissions"]
-    STORE["repo, Atlas URI,<br/>worker Claude login"]
+    RUNS["Claude Code / Codex runs<br/>full permissions"]
+    STORE["repo, Atlas URI,<br/>worker profile logins"]
   end
   subgraph C["Chief-of-staff side"]
     T3["T3 Code + thread"]
-    CMD["CLAUDE.md: persona,<br/>rules, cos verbs"]
+    CMD["AGENTS.md: persona,<br/>rules, cos verbs"]
   end
   SUP -->|"wake: no text"| T3
   T3 -->|"cos verb, fixed list"| SUP
@@ -254,10 +247,10 @@ The worker side must be Linux. The supervisor's process handling is Unix-only, w
 | Chief-of-staff side | user `maestro-cos` in the same distro, running `t3 serve`; the Windows T3 app and the phone connect to it | the Windows T3 app, as the Windows user | T3 on the host |
 | `wake` door | a sudoers rule: `maestro` may run only `maestro-ticket wake` as `maestro-cos` | a T3 webhook task bound to the thread, with a fixed prompt that ignores the body (needs T3 Connect) **[docs]** | the same webhook task |
 | `cos` door | a sudoers rule: `maestro-cos` may run only `maestro-ticket cos …` as `maestro` | `wsl.exe -d <distro> -u maestro maestro-ticket cos …` | `docker exec <container> maestro-ticket cos …` |
-| What else must hold | nothing | WSL interop off (`[interop] enabled=false`) and no Windows drives mounted (`[automount] enabled=false`) in the worker distro's `/etc/wsl.conf`; else a worker can run `t3.exe` or read the thread's files | the container gets no host socket or host folder beyond the repo |
+| What else must hold | worker cannot reach the host identity, private files or T3 listener | WSL interop off (`[interop] enabled=false`) and no Windows drives mounted (`[automount] enabled=false`) in the worker distro's `/etc/wsl.conf`; else a worker can run `t3.exe` or read the thread's files | the container gets no host socket or host folder beyond the repo |
 | Change from today | one more Linux user | moves T3 out of WSL | adds Docker |
 
-A is the default: it changes least from today's setup. B and C wait on a reason to move, such as a speed gain from the native app. In every option, keep the repo on the Linux filesystem, not under `/mnt/c`; WSL reads Windows drives far slower (guess, P0 measures it).
+P0 checks that workers cannot reach the host identity, private thread files or T3 listener through WSL interop. A is the default: it changes least from today's setup. B and C wait on a reason to move, such as a speed gain from the native app. In every option, keep the repo on the Linux filesystem, not under `/mnt/c`; WSL reads Windows drives far slower (guess, P0 measures it).
 
 A team on one Linux box with no T3 can skip the wall. Then the same commands run directly, without the guard.
 
@@ -265,9 +258,9 @@ A team on one Linux box with no T3 can skip the wall. Then the same commands run
 
 1. Make user `maestro-cos`. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo`.
 2. As `maestro-cos`: install T3 Code, pin a stable version (`t3 update <version>`) and run `t3 up --connect` **[docs]**.
-3. In T3, add one Claude provider instance with its own config dir, logged in to the owner's plan, in full-access mode.
-4. Put the chief of staff's `CLAUDE.md` bundle in that config dir.
-5. Start the thread in the repo. Save its id where `maestro-ticket wake` reads it.
+3. In T3, add a Codex provider instance with its own config dir, logged in to the owner’s ChatGPT Pro plan, in full-access mode.
+4. Put the chief of staff's `AGENTS.md` bundle in the private working directory.
+5. Start the thread in that directory. Keep its instructions and privileged helpers outside worker-writable paths. Save its id where `maestro-ticket wake` reads it.
 6. Turn on phone pushes. Background pushes need T3 Connect **[docs]**.
 
 ## 7. The board on Atlas
@@ -287,14 +280,23 @@ Risks:
 - **An outage stops every run.** The `store-down` wake (5.2) tells the owner, and `cos look` restarts the board after.
 - **Backups.** Atlas's backups come with paid tiers (guess). `maestro-ticket` keeps its own `backups/` folder too.
 
-## 8. One Claude plan
+## 8. Profiles, model choice and capacity
 
-One Max 20x plan runs the chief of staff and every worker run, on one login.
+The installation defines each profile by account alias, harness, approved models and effort levels, eligible roles, and concurrency cap. Each profile uses its owner's native login and its own config. Credentials stay out of commands, run records and logs. Use subscription billing by default. Strip inherited API credentials and reject a launch whose billing mode cannot be verified. API billing requires explicit configuration. See [Claude plan usage](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) and [Codex authentication](https://developers.openai.com/codex/auth).
 
-- **The chief of staff shares the limit.** When the plan hits its 5-hour or weekly limit, every run pauses, as today, and so does the thread. The T3 app shows the limit and its reset **[docs]**. Keep the swarm's run limit (`rules set limit`) low enough to leave the thread room. P0 measures what a wake costs.
-- **Strip stray API keys.** With `-p`, an `ANTHROPIC_API_KEY` in the environment wins over the plan login and bills the API **[docs]**. The run's environment drops `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.
-- **Ready for a Team plan.** Each run records an account name, `default` for now. A Team plan later adds more names, each with its own config dir, and the pause becomes one per account. The v2 design for that is kept in section 12.2.
-- **The plan's terms.** Plan limits assume "ordinary, individual usage" **[docs]**. Maestro already runs `claude -p` on the plan, so this design adds no new risk and removes none. Whether a Team seat gives as much as Max 20x, and whether a seat may run scripted `claude -p`, needs Anthropic's answer before the switch.
+| Profile | Starting assignment | Capacity rule |
+|---|---|---|
+| ChatGPT Pro / Codex | Chief of staff on Astra. Start at medium effort for routine turns and use high for hard rulings. Review is its first shared worker role. | Give owner turns priority. Keep worker review disabled outside the trial until measured headroom supports it. |
+| Claude Max A / Claude Code | Planning and judging. Qualify review as a second role. | Reserve capacity for decisions that unblock other tickets. |
+| Claude Max B / Claude Code | Builds, design, QA and review. Start with the existing Claude model settings. | Give long builds and short reviews separate cost estimates. |
+
+These are install defaults. An account may serve only workloads its owner authorizes under its plan. Keep both Claude profiles on their assigned workloads when one reaches a limit. For Codex reviews, sign in through a separate worker-side config. Keep the chief of staff’s config and thread private. P0 must prove both contexts work under the authorized login. Account-wide limits apply across those contexts.
+
+**Fresh starts.** First select models and effort levels approved for the role and tier. Senior escalation requests a senior-capable model. Within that set, select an eligible profile with room after active reservations, the expected job cost and protected capacity. Use reliable remaining allowance and reset times where available. With missing or stale readings, use conservative concurrency caps and keep protected profiles off optional work. Use observed usage by role, model and effort to tune estimates. Keep exported stats anonymous.
+
+Reserve capacity and claim the handoff together before launch. Concurrent supervisors must see the same reservation. Record the role, profile alias, harness, model, effort, provider session ID when available, worktree and handoff ID. Release the reservation at completion. After a crash, reconcile it against the recorded run before allowing another start.
+
+**Recovery.** Resume with the original profile, session and worktree. If a qualified role changes harness, start a fresh run from a durable handoff with the ticket, commit, worktree and unfinished step. Preserve pending edits. A reset notification checks that the old run still owns the step. Pause one profile for expired login or exhausted allowance, one provider for a provider outage, and all board-dependent work during a store outage. Show active and waiting jobs in `look`, with the profile, wait reason and reset time when known. Provide a model-free owner status path for quota, login and store failures.
 
 ## 9. The rewrite
 
@@ -302,14 +304,14 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 
 | File | Change |
 |---|---|
-| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: the thread runs in full access. 15: the thread is the one Claude session `launch` didn't start. 19 and 21: name served roles, not Grok bots. A new decision for the wall. |
+| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: the thread runs in full access. 15: the thread is the one agent session `launch` didn't start. 19 and 21: name served roles, not Grok bots. A new decision for the wall. |
 | `AGENTS.md` | "What we're building": the outer layer is the T3 thread plus code; Grok is one supported runtime |
 | `README.md`, `docs/team.mermaid`, `docs/bot-anatomy.mermaid` | redraw for served roles and the wall |
 | `bot-profiles/chief-of-staff/persona.md` | rewrite for the T3 thread and the `cos` verbs |
 | `bot-profiles/planner/persona.md` | becomes the spec the code relay follows, and the Grok persona if a team keeps one |
 | `bot-profiles/team-rules.md`, `routine.md` | Grok bots only; the thread gets its own short rules |
 | `skills/maestro-chief-of-staff`, `skills/maestro-planner` | stop calling their caller "the bot" |
-| `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | ask for a runtime (Grok or T3); print the sudoers lines; build the thread's `CLAUDE.md` |
+| `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | configure runtime, profiles, role models, effort and reserves; print the sudoers lines; build the thread's `AGENTS.md` |
 | `templates/project-setup.md` | a `## Runtime` section |
 
 ## 10. The move off Grok, one role at a time
@@ -334,12 +336,16 @@ flowchart LR
 | Step | Change | Check |
 |---|---|---|
 | P0 | Probes, below | each answers with a captured run |
-| S1 | `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
-| S2 | Code relay: line table, wider grammar, reset ring, look lock | a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
+| S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
+| S2 | Code relay: line table, wider grammar, reset ring, look lock | one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
 | S3 | Inbox, `wake`, `cos` verbs | an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
-| S4 | The wall, option A: user, sudoers lines, thread's `CLAUDE.md` | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
-| S5 | Atlas, API-key strip, account field | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
+| S4 | The wall, option A: user, sudoers lines, thread's `AGENTS.md` | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
+| S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
 | S6 | The rewrite (section 9) | review |
+
+Use a thin trial driver in P0. Repeat the routing and recovery checks against the production relay in S2. P0 starts with one shared role, review. Use a scratch board and one fixed PR head. Have Astra take the owner's goal and Claude build the change. Give Claude and Codex independent fresh reviews of that head. Each must load the role instructions, read the diff and record a verdict against the exact SHA. Capture the chosen model, effort, billing mode and session identity. Verify Astra medium and high on the installed Pro profile.
+
+For the routing trial, occupy the eligible Claude review capacity and submit a fresh review with measured Pro capacity available. Expect one Codex review and a responsive chief of staff. Replay the handoff after launch and confirm the same run ID. Exhaust the worker reserve and confirm the next review waits with a reason. Exercise profile login loss, provider outage and restart; verify pause scope, resume affinity and owner status without a model. Qualify builds and QA separately before adding Codex to either role.
 
 | Claim | Label | Probe |
 |---|---|---|
@@ -347,8 +353,8 @@ flowchart LR
 | `t3 thread send` exits non-zero when delivery fails | (guess) | stop T3, send, read the exit code |
 | A queued send survives a T3 restart | (guess) | queue one, restart, read the thread |
 | T3 pushes to the phone when the thread ends a turn | [docs] | wake it with the phone locked |
-| `CLAUDE.md` in the thread's config dir reloads after compaction | (guess) | compact the thread; ask it a rule from `CLAUDE.md` |
-| One wake costs what share of the 5-hour window | (guess) | ten wakes on a real board; read `/usage` |
+| `AGENTS.md` in the private directory reloads after compaction | (guess) | compact the thread; ask it a rule from `AGENTS.md` |
+| Owner turns leave enough headroom for optional reviews | (guess) | measure ten wakes on the Pro profile and record the available usage signals |
 | A `look` on Atlas runs fast enough | (guess) | time `look` on a 140-ticket board, Atlas against SQLite |
 | One run's connection count fits Atlas's tier | (guess) | count connections during 20 runs |
 | A repo under `/mnt/c` is much slower in WSL | (guess) | time `git status` and one build in both places |
@@ -369,19 +375,6 @@ Each box keeps this on its own disk today, so a second box can't join until it m
 
 Then: `resume` and `job again` hop to the run's own box, since transcripts and worktrees stay there. Planning jobs run only on the home box. A run's end refills its own box, then hops `refill` to the box with the most free slots, under one refill mark per box, which keeps SSH under sshd's default of 10 starts at once. Each hop is an SSH key with a forced command.
 
-### 12.2 Several accounts
-
-For a Team plan with several seats:
-- Each account gets its own config dir; `token_file` takes `claude setup-token` output, which lasts a year **[docs]**.
-- A new start takes the unpaused account with the fewest runs going, counted under a lock.
-- A resume uses the run's own account, since its transcript and unpushed work live there. A stopped run waits for its own account's reset.
-- The pause becomes one per account: `paused-<name>.json` in place of `paused.json` **[code]** `tools/maestro-ticket/cli/coord.go:33`. Every reader takes the account: `readPause` **[code]** `tools/maestro-ticket/cli/job.go:816`, the QA slot hold **[code]** `tools/maestro-ticket/cli/slot.go:140`, the waiting lines.
-- An API outage stays a team-wide pause **[code]** `tools/maestro-ticket/cli/route.go:140`, since another account hits the same outage.
-- The token goes only into the process's environment, never the run's `Command`, which `job` and `runs` print **[code]** `tools/maestro-ticket/runs/runs.go:75`.
-- Stats store the account as its place in the list, never its name ([decisions](../decisions.md), 24).
-
-The Usage Policy bars making several accounts to get around limits, and the Consumer Terms bar sharing a login **[docs]**. So more capacity comes from a Team plan, extra usage or API keys, never from several personal plans.
-
 ## 13. What the audits changed
 
 | v1 said | Found | Now |
@@ -390,9 +383,9 @@ The Usage Policy bars making several accounts to get around limits, and the Cons
 | The code planner handles the planner's rings | Worker runs' results, `design`, `live`, `--opus`, `--escalate` and design cards had no taker; nothing woke at a limit's reset | Full line table, reset ring (3.1) |
 | Forward lines, then ack | A failed send lost the alert for good | Lasting inbox, acked only by the chief of staff (5.2) |
 | The ring sends its body to the thread | Any session can type into the thread, which has a shell | The wall: `wake` with no text, `cos` verbs (section 6) |
-| One look at a time | The lock never expired, and the dirty check could miss a mark | Expiry; release before the re-check (3.2) |
+| One look at a time | The lock never expired, and the dirty check could miss a mark | Renewable lease and atomic dirty check (3.2) |
 | Forward `look --report` | A wake on every look: Grok's cost shape again | Report only when the persona says (3.1) |
-| Persona as the first message | Compaction wears it down | `CLAUDE.md` in the thread's config dir (5.1) |
-| A stopped run restarts on another account | Unpushed work lost; the ticket is held till the reset anyway | Stopped runs wait for their own account (12.2) |
-| Token in the run's command words | They print in the run record | Only in the process environment (12.2) |
+| Persona as the first message | Compaction wears it down | `AGENTS.md` in the private working directory (5.1) |
+| A stopped run restarts on another account | Unpushed work lost; the ticket is held till the reset anyway | Resume on the original profile (section 8) |
+| Token in the run's command words | They print in the run record | Native profile login (section 8) |
 | Boxes share limits, rules and runs through the board | Those live on each box's disk | Listed for later (12.1) |
