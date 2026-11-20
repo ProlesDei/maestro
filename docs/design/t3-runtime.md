@@ -1,7 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v11, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. **v10 makes the runs harness-neutral** (8.1): one small adapter per harness, Claude's first, and a harness per slot behind the same evals as a model move, with one command back to Claude. It also **scripts QA** (14.6): Opus writes a ticket's test script once, and Sonnet runs it at tiers 0-1, handing any surprise to Opus. **v11 adds logs and traces** (6.6): code writes every line, in one schema, through a writer no run can edit; raw streams are kept with their hashes; the harness's own tokens, cost and plan usage are logged as given; a nightly reconciler checks the logs against the board, git and the harness; and people read a `trace` timeline at no token cost. It starts from what the VM's records lose today. Nothing here is built.
-**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 6.6, 14.3: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
+**Status:** draft v12, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. **v10 makes the runs harness-neutral** (8.1): one small adapter per harness, Claude's first, and a harness per slot behind the same evals as a model move, with one command back to Claude. It also **scripts QA** (14.6): Opus writes a ticket's test script once, and Sonnet runs it at tiers 0-1, handing any surprise to Opus. **v11 adds logs and traces** (6.6): code writes every line, in one schema, through a writer no run can edit; raw streams are kept with their hashes; the harness's own tokens, cost and plan usage are logged as given; a nightly reconciler checks the logs against the board, git and the harness; and people read a `trace` timeline at no token cost. It starts from what the VM's records lose today. **v12 adds a retro that pays for itself** (14.7): code finds the week's waste in the logs at no token cost; only a repeated signature gets one capped Sonnet run, which names the earliest point it could have been caught and one change; the change lands as a check, a lint, a script step or a pack line before it is ever prose; and a ledger keeps a lesson only while it saves more than it cost, and switches the retro off when the retro doesn't. Nothing here is built.
+**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 6.6, 14.3, 14.7: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
@@ -19,6 +19,7 @@
 12. Code queries the code graph; runs read a pack. Before build, review and QA, code writes a capped pack: changed symbols, their callers, the blast radius, and the pages a change reaches. It is at most 2,000 tokens, and 400-1,400 on real PRs **[box]**. Each repo's index is rebuilt on every merge in about 3 seconds, with an overlay for each PR. Runs load no MCP server by default, and `rules set graph off` turns it all off (14.3).
 13. Any harness can fill a slot. Every Claude assumption in `maestro-ticket` (the `claude -p` flags, session ids, the stop hook, the stream and cost parsing, the usage-limit words) moves behind one adapter per harness. Claude's adapter is built first, with no change in behaviour. Later, `rules set harness <slot> grok|codex|…` moves one role at a time, behind the same eval gate as a model move, and `rules set harness all claude` puts every slot back. Skills, the board, the verbs, the packs, the evidence and the wall stay harness-neutral (8.1).
 14. Code writes every log line; models never do. Each hop, from a desk's wake to a run's last tool call, is one line in one schema, sent to `maestro-logd`, a writer under its own user that no run can edit. Lines carry the harness's own tokens, cost and plan usage, marked where the harness reports none, and the raw stream is kept beside them with its hash. A model's word, such as a verdict, is logged as a claim with its hash. A nightly reconciler checks the logs against the board, git and the harness. People read `maestro-ticket trace`; desks see one `logs:` line in `desk brief`; no log enters a context unasked, so logging costs no tokens (6.6).
+15. The retro pays for itself, or stops. Each night code reads the logs and flags waste by fixed triggers: two kickbacks, 3× the tier's cost, a diff outside the plan, a cancel after a build, a no-verdict strike, a killed run, a repeated failure. Last week those classes held $1,617 of $3,549 **[box]**. Only a signature that repeats gets a model: one Sonnet run, one turn, a pack code builds, $0.40 at most, and one change back. Changes land as checks, lints, script steps or pack lines, not prose, tried in shadow first. A ledger drops any lesson that doesn't pay back in 4 weeks, and turns the retro off when its cost passes what it saved (14.7).
 
 ```mermaid
 flowchart LR
@@ -255,6 +256,7 @@ sequenceDiagram
 | `look` | `look --judge --report`, as `planner`. It also restarts a quiet board after a reboot or an outage. |
 | `rules show` | as `chief-of-staff` |
 | `rules set limit <n>`, `rules set qa_slots <n>`, `rules set model <job> <model>`, `rules set graph off\|pack\|live` (14.3), `rules add`, `rules drop <n>`, `stop`, `start` | **the duty desk only**, checked under the duty lock (5.4), as `chief-of-staff`, which `rulesWriters` already allows **[code]** `tools/maestro-ticket/cli/rules.go:48`. Another desk gets `refused: duty desk is <name>`, and sends it a note. |
+| `retro` (one `job retro` per queued signature, under the week's cap), `lesson add <id>`, `lesson drop <id>`, `rules set retro on\|off` | **the duty desk only**, as for `rules add` (14.7) |
 | `ask` (question on stdin) | a `/maestro-chief-of-staff` run on the worker side; its answer comes back through the inbox, to the desk that asked |
 | `list`, `get`, `events`, `goals`, `flow`, `eta`, `costs` | as today's commands, as `chief-of-staff` |
 | `trace <id>` | a rendered timeline, capped at 1,500 tokens, with claims as hashes; never a raw stream (6.6) |
@@ -282,7 +284,7 @@ If the probe moves T3 to native Windows (option B, 6.1), the `desk` command need
 | `duty` | `desk`, `epoch`, `since`, `lease_until`, `why` | Written only under `duty.lock` (below). The lease is 24 hours, renewed by the duty desk's turns. |
 | `duty.log` | one line per epoch: time, epoch, from, to, why | append-only; `brief` shows the last change |
 | `notes/<name>/<time>` | a handoff note (format below) | `desk note` appends; `brief` shows each desk's latest note. Pruned after 14 days. |
-| `memory.md` | the desks' shared memories | `desk remember` appends one line under a lock; `job retro` (14.5) proposes cuts. Under 4 KB. |
+| `memory.md` | the desks' shared memories | `desk remember` appends one line under a lock; the retro ledger (14.7) proposes cuts. Under 4 KB. |
 
 **Duty: the first desk opened, then the next-oldest.**
 - **Who.** `desk open` makes the new desk the duty desk when no live desk holds duty. Duty stays put while its holder is open and its lease is current. When the duty desk **closes** or **its lease lapses**, duty goes to the live desk with the oldest `opened_at` (ties by name). If no desk is live, `duty` is empty and the next `desk open` takes it.
@@ -320,7 +322,7 @@ desks: ops (duty, here, opened 09:12Z) · billing (here, opened 11:40Z)
 board-wide verbs (rules, stop, start): ask ops
 ```
 
-The duty desk's own first line reads `you: ops · ON DUTY · epoch 4 · lease to 11-20 21:58Z`, with `retro due` (14.5) when it is.
+The duty desk's own first line reads `you: ops · ON DUTY · epoch 4 · lease to 11-20 21:58Z`, with `retro due` (14.7) when a signature is queued and the week's cap has room.
 
 **Waking the right desk.** `maestro-ticket wake` still carries no text. On the chief-of-staff side it runs `desk ring`, which:
 1. runs the duty check;
@@ -773,6 +775,7 @@ One kind per hop:
 | Evals | `eval.item` (set, harness, model, expected, got, pass), `eval.done` | `eval` |
 | The machine | `unit` (the unit, its result, its exit); `clock` (hourly: synced or not, the offset); `disk` (each `--if-low` pass that acts) | `ExecStopPost=`; a timer |
 | The logs | `reject` (a line that failed the schema, kept whole); `mismatch` (from the reconciler); `prune` | logd; the reconciler |
+| The retro | `retro.flag` (trigger, signature, $), `retro.run`, `lesson.shadow`, `lesson.hit`, `lesson.drop`, `retro.pause` | `retro detect`, `retro ledger`, the checks that carry lessons (14.7) |
 
 **6. Accuracy rules.**
 - **Append-only, whole lines.** logd owns each UTC day's file, `events-YYYY-MM-DD.jsonl`. It opens the file with `O_APPEND` and writes one line per `write`. It is the only writer, so lines can't interleave. Claims and payloads over 4 KB go to side files named by their hash.
@@ -1071,7 +1074,7 @@ A harness move (8.1) is not a step. Each one comes after step 3, one slot at a t
 | Step | Change | Check |
 |---|---|---|
 | P0 | Probes, below | each answers with a captured run |
-| S0 | From closed PRs #102 and #103: a stop someone asked for is no strike; QA only into free slots; `## Env`; rules need a lift clause, with a budget; `job retro` | a test for each; then drop standing rules 26, 32, 33 |
+| S0 | From closed PRs #102 and #103: a stop someone asked for is no strike; QA only into free slots; `## Env`; rules need a lift clause, with a budget; `job retro` (its Opus session is replaced in S16, 14.7) | a test for each; then drop standing rules 26, 32, 33 |
 | S1 | `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | each gate starts work for a code role and none for an unserved one |
 | S2 | Code relay: line table, wider grammar, reset ring, look lock (dirty before take), inbox classes | a unit test for each row of 3.1; two supervisors racing for the lock, the loser's dirty set between the holder's release and its check; a dead holder's lock taken over |
 | S3 | Inbox (classes, desk leases, `--sent`), `wake`, `cos` verbs, code reminders | an item survives a failed wake and is rung again; an owner item acked `--sent` rings no desk again; two desks' pickups never get one item; `cos` refuses a verb off the list |
@@ -1088,6 +1091,7 @@ A harness move (8.1) is not a step. Each one comes after step 3, one slot at a t
 | S14 | Scripted QA (14.6): the `## QA script` section and its lint; `QA script amend:`; `script_gap=`; `qa-prep.sh`'s `script.md` and `script=`; the `script` route in `job qa`; the surprise reply and its `resume --opus` with a QA text; the stop check's step rule; the 1-in-10 second look; eval QS | a Sonnet run on a script with one step it can't follow replies `surprise`, posts no verdict, and is resumed on Opus once; a `QA: pass` with a step missing from `results.md` is blocked; a stale script, a `script_gap=yes` or tier 2 routes to Opus; the pack's pages appear as steps; QS passes before the route is on |
 | S15a | Logs, on the VM (6.6): `stamp()`; the event structs, kinds and `maestro-ticket log`; `run.end` with `model`, `stop`, git and gh facts, `plan` and a killed run's cost from its transcript; the stdout pipe and tee, raw streams kept gzipped with `sha_raw` and `sha_kept`; `run` on board events from `MAESTRO_RUN_ID`; redaction in the binary; `trace`, `trace --verify`, `trace --db`; `reconcile` | a killed run's `run.end` carries the transcript's cost with `src: transcript`, and a run with no number carries `null`, never 0; every `ts` matches `^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`, the five old `Ack` calls included; a tool's `raw.off` points at the stream line it came from; a stream changed after the run's end fails `sha_kept`; a line that fails the schema lands in `rejects.jsonl`; `trace R-…` renders a 2-hour build in under 1 s; the reconciler, run on a copy of the VM's store, lists the 121 cost-less runs and nothing it can't explain; the redaction test of 6.6 item 10 finds no value anywhere |
 | S15b | `maestro-logd` on the desktop (6.6): user `maestro-log`, the socket and service, `SO_PEERCRED` and the exe check, `/var/log/maestro` and `maestro-logread`, `/etc/maestro/redact`, the spool, `clock` lines, `ExecStopPost=` on each unit, `maestro-reconcile.timer`, the brief's `logs:` line, `cos trace` | as `maestro`, a run can't open, rename or truncate a file under `/var/log/maestro`; a line written to the socket by `bash` or `claude` is kept as `writer: other`; with logd stopped, lines spool and come back `spooled: true`; a flood of 100k lines from one run is capped and the disk line holds; a power cut (`wsl --shutdown` mid-run) loses at most a second of lines, and the reconciler flags the run's missing `run.end`; `cos trace` stays under 1,500 tokens on a 40-run ticket; `desk brief` shows `logs:` |
+| S16 | Retro (14.7), after S15a: `retro detect`, `retro pack`, `retro ledger` over `trace --json`; `retro.json` triggers; `lessons.json` with the `pre`, `lint`, `limit`, `check`, `step`, `pack` and `rule` kinds and shadow mode; `job retro` on Sonnet, one turn, no tools, killed at its cap; `cos retro`, `cos lesson add\|drop`; `rules set retro on\|off` and the automatic pause; the brief's `retro:` line; eval RT | `detect` over a copy of the VM's Nov 13-20 store flags the 38 tickets sent back twice and puts the 42 conflicts in one `stale-base` signature; a pack never passes 6,000 tokens; a judge run past 4k output is killed and logged `none` with its cost; a reply off the format is a `none`; a shadow `pre` stops nothing and logs what it would have caught; a lesson with no payback after 4 weeks is dropped; with the trailing cost over the trailing savings, `retro` turns off and the brief says so; a signature with a live lesson starts no run; RT passes before the judge runs live |
 
 | Claim | Label | Probe |
 |---|---|---|
@@ -1138,6 +1142,10 @@ A harness move (8.1) is not a step. Each one comes after step 3, one slot at a t
 | `systemd-timesyncd` keeps the distro's clock in sync, including after the PC's clock changes | (guess): WSL also sets the clock from Windows **[docs]** | 16.3 step 5; a week of `clock` lines |
 | Events come to about 21 MB a day and gzip about 8× | **[I]** from the VM's rates and lines built from `run_steps` | a week of day files on the VM after S15a |
 | Raw streams come to about 200 MB a day, 50 MB gzipped | **[I]** from 9 live streams and a week of transcripts **[box]** | a week of `streams/` after S15a |
+| A one-turn Sonnet retro with no tools, on a 6k-token pack, costs $0.10-0.20 | (guess); a lean Opus judge run averages $0.55 **[box]** | five RT items; each run's `cost` |
+| The supervisor can stop a run as its stream's tokens pass a cap | (guess): Claude's stream carries usage per message **[box]** | S16: a pack built to overflow the cap |
+| A `merge-tree` check before review stops most `stale-base` kickbacks | 42 conflict kickbacks in a week, 5 after rule 38 **[box]**; the catch rate (guess) | S16: the check in shadow over the copied store, then a live week |
+| Signatures from finding words are stable enough to batch | 23 signatures with 3+ events in a week **[box]**; stability (guess) | RT, and two weeks of `retro.flag` lines |
 
 ## 12. Later: what the audits found for scale
 
@@ -1224,6 +1232,7 @@ Each Sonnet move waits on its own set, and so does each harness move (8.1): the 
 | B | wider junior builds | 10 recent senior tickets the new junior tag would cover, rebuilt by a junior Sonnet run in a scratch worktree and reviewed as usual | ≤ 2 of 10 sent back, and no blocker the Opus build didn't have | ~$20 (guess) |
 | L | tier 0-1 review | 20 tier-1 diffs with their full-review findings | every blocker found | ~$5 (guess) |
 | QS | scripted QA at tier 0-1 (14.6) | 15 past tier 0-1 tickets that QA kicked back, each a known catch at a known head, and 10 that passed and stayed clean (no revert, no live-run failure). For each, Opus writes the script from the ticket as planned, never seeing the catch; Sonnet runs it at the head QA tested | no known-bad head passes: each is a fail or a surprise; at least 8 of 10 clean heads pass with no surprise; no false fail. The share of catches the script itself covered is recorded, as the measure of what scripting misses | ~$25 (guess) |
+| RT | the retro judge (14.7), Sonnet and Haiku side by side | 12 signatures from Nov 13-20 whose fix the chief of staff later made by hand (rules 35, 38, 39 and 55; B1's foreground subagents; #102's stop rule), and 6 with no fix | the same earliest point on at least 9 of 12, each with a lesson kind that would have caught it, and no `rule` where a `pre` or `lint` fits; `none` on at least 4 of the 6; every reply parses; no run passes its cap | ~$3 (guess) |
 | G | graph packs on (`rules set graph pack`, 14.3) | 20 recent reviews of tiers 1-2 with their blockers, re-run with the pack; 10 merged PRs that changed screens, with the pages QA tested (from their evidence) | every blocker still found, no new wrong blocker, turns a review down 15% or more (guess); the pack's pages hold every page QA tested on at least 9 of 10 | ~$10 (guess) |
 
 G gates no model move: it gates whether packs go on. A job that fails its set stays on Opus. A job already moved whose live guard slips for a week goes back with `rules set model <job> opus`, and the duty desk's brief says so.
@@ -1346,7 +1355,7 @@ Today `codebase-memory-mcp` starts in every agency-ops session and is never call
 
 ### 14.5 Rules stay few
 
-The desks inherit the rule budget from closed PR #103: a rule needs a `Lifts when` clause, a warning past 20 rules or 8 KB, and the reason in `rules.log`. `job retro` runs weekly, not after every 10 changes (at 40 changes a day that would fire four times a day **[I]**). Nothing is scheduled: the duty desk's `desk brief` shows `retro due` after 7 days, and the desk runs it.
+The desks inherit the rule budget from closed PR #103: a rule needs a `Lifts when` clause, a warning past 20 rules or 8 KB, and the reason in `rules.log`. #103's weekly Opus `job retro` folds into 14.7: its rule pruning becomes code in the retro's ledger, which drops a rule once a `Lifts when` code can check holds, and `job retro` becomes the capped Sonnet judge. It never runs after every 10 changes (at 40 changes a day that would fire four times a day **[I]**). Nothing is scheduled: the duty desk's `desk brief` shows `retro due` when a signature is queued, and the desk runs it.
 
 ### 14.6 Scripted QA on Sonnet
 
@@ -1405,6 +1414,146 @@ Retests are where scripts do best: a `mode=retest` run reruns the failed steps a
 - **Net: about $0-20 a week** **[I]**, once the four weeks are over. That is small, and could be nothing.
 
 The larger gains aren't dollars. The script can be read before QA spends anything, retests rerun the same words, and each step's pass rate shows flakes. The money is at tier 2, most of the $383: Sonnet could run tier 2's script before Opus explores. That is later, not proposed here, and needs its own eval on top of QS.
+
+### 14.7 Retro: code finds the waste, a capped run names the fix
+
+The owner's ask (2026-11-20): "Does our plan factor in some sort of retro, where it self-reflects on the output and thinks how it can improve things? … The whole point of the retro is to save tokens, so there's no point in it burning tokens if it doesn't save more than it uses." Today nothing reflects on outcomes. `job retro` (S0, from closed PR #103) runs on Opus, reads `rules.log`, `costs`, `flow` and the kickback notes of five tickets, and proposes rules to turn into code. It never asks why a ticket cost what it did. That reflecting is done by hand, in prose. The chief of staff wrote rule 38 ("merge main before review"), rule 39 ("6 tries on the lane's head … cost $52") and rule 55 ("after 18 one-case tickets (about $128) kept turning up new cases") **[box]**. Those rules are retros, and every plan, rule and judge session pays to read them. They don't always hold: 5 merge-conflict kickbacks came after rule 38 was set.
+
+**1. Where the tokens went.** Agency-ops on the VM, the 7 days to 2026-11-20 15:03 UTC **[box]**. Run records were joined to the board's `runs` costs by session. 143 killed runs that have no session were priced from their transcripts' `cost-state`, matched by start time within 2 minutes **[I]**, and 40 stayed unpriced. Spend: **$3,549** at list over 2,199 runs. Each run is counted once, in the first row it fits.
+
+| Class | What | $ / week | Label |
+|---|---|---|---|
+| Cancelled after a build | 68 tickets cancelled after at least one build: 52 with no note, 7 rewritten or split, 6 folded into another | 629 (777 with their kickback and killed runs) | measured; the avoidable share is (guess) |
+| Kickback loops | 155 kickbacks (118 review, 37 QA) on 114 tickets, 38 of them sent back two or three times. Counted: the run that kicked back, plus every build, review and QA run after a ticket's first kickback. An extra round costs a median $5.63 (the first round: $5.11) | 527 | measured. Causes, read from the kickback's words **[I]**: 51 masking edge cases, 42 criteria missed or misread, 42 merge conflicts with main, 7 test gaps, 13 other |
+| Killed or failed | 217 runs: time limits (66 of them reviews at 45 minutes), stops by a launcher, low disk | 348. Of that, $274 isn't in `costs` today (6.6) | measured for 33 runs, matched by transcript **[I]** for 143 |
+| No verdict | 80 reviews and 18 QA runs ended `done` with no verdict comment; 16 no-verdict strikes | 113 | measured |
+| Beyond the plan | 26 of 254 merged tickets changed non-test files outside the areas their plan gave them. Their median cost was $14.60-18.05, against $7.21 for tickets that stayed within | about 120-260 over the tier median | counts measured; the excess **[I]**; overlaps the rows above |
+| Cost outliers | 12 merged tickets cost over 3× their tier's median | 263 over the median | measured; overlaps |
+| Re-explore turns | explore-only turns, 5.4-10.6% of build, review, QA and plan spend (14.3) | 149-293 | **[I]** from v9's **[box]** share. 14.3's packs target this, not the retro |
+| Re-hits | the third or later event with the same signature in the week (class, job, the folder of the plan's first area) | 831: **$588 with a fix already in flight** (rules 35, 38 and 55; B1's foreground subagents; #102's stops), **$242 with none** | measured; overlaps every row |
+
+Without overlap, $1,617 of the $3,549 (46%) sits in the first four rows. Not all of it is waste: a kickback's fix had to be built somewhere, and some cancellations were the owner's own calls. **The retro's pool is the last row's $242 a week:** repeated waste that no lesson covers yet. One more figure is the cost of prose. The standing rules are 25 KB, three times #103's 8 KB budget, and carrying them costs about $28 a week **[I]**. A KB of prompt text costs about $1.1 a week in plan, rule and judge prompts (559 sessions at about 14 turns) and about $5.2 a week in build, review and QA prompts (1,403 sessions at about 33 turns, with 1-hour cache writes) **[I]**, from **[box]** session counts and turns.
+
+```mermaid
+flowchart LR
+  LOGS[("6.6 events<br/>through trace --json")] --> DET["retro detect<br/>code, nightly, 0 tokens"]
+  DET -->|"flags, by signature"| Q[("queue")]
+  Q -->|"has a lesson"| LED
+  Q -->|"new, ≥3 events or ≥$15"| PACK["retro pack<br/>code, ≤6k tokens"]
+  PACK --> JUDGE["job retro<br/>Sonnet 5.5, one turn, no tools<br/>≤$0.40"]
+  JUDGE -->|"one lesson, or none"| SH["shadow, 7 days<br/>logs would-have-caught"]
+  SH -->|"caught one, stopped no clean ticket"| LIVE["live lesson<br/>pre, lint, limit, step, pack, check, rule"]
+  LIVE --> LED["retro ledger<br/>code, weekly"]
+  LED -->|"no payback in 4 weeks"| DROP["dropped"]
+  LED -->|"cost over savings"| OFF["rules set retro off"]
+```
+
+**2. Code finds: `maestro-ticket retro detect`.** It is code and reads only `trace --json` (6.6), never a stream or a transcript. It runs at 03:50, from `maestro-reconcile.timer` after the reconciler. The triggers are fixed, kept in `retro.json`:
+- a ticket sent back twice, by review or QA;
+- a ticket over 3× its tier's median cost over the trailing 4 weeks;
+- a merged diff that changes non-test files outside the plan's areas. "The plan's areas" means those on `board.created`, not the engineer's later edits: engineers widened the areas of 35 tickets last week **[box]**;
+- a ticket cancelled after a build;
+- a no-verdict strike;
+- a killed run whose `stop.cause` is `time_limit`, `oom` or `died` (a stop someone `asked` for doesn't count);
+- the third event of one signature in 14 days.
+
+Each flag is one `retro.flag` line holding the trigger, the ticket, the run, the dollars and a signature, `<class>:<job>:<area folder>`. The class comes from fixed patterns: `CONFLICT` or `merge-tree` in a finding means `stale-base`, a killed run takes its stop cause, and so on. Run over last week, it flags 129 of the 390 tickets that had spend ($1,736), in 23 signatures with three or more events **[box]**. A model run on every flag would cost more than it finds, so flags only queue.
+
+**3. Batch and dedupe.** A signature gets a model retro only when all four hold:
+- it has 3 or more events, or $15 or more, in 14 days;
+- no live or shadow lesson names it;
+- it had no retro in the last 14 days;
+- the week's cap has room.
+
+Its pack carries up to three of its events, the costliest first. Last week 11 of the 23 signatures already had a fix in flight. So the first week would run about 12 retros, and later weeks only new signatures, about 3-6 (guess). A signature that has a lesson gets no model run at all: the ledger says whether the lesson works.
+
+**4. The judge: `job retro`, one turn, capped.**
+- **Sonnet 5.5, effort high** (14.1).
+  - Code has already done the finding. What's left is reading a small pack and saying where the event could first have been caught: judgment over text, which Sonnet holds.
+  - Opus would double the output and write price for a job the pack keeps small.
+  - Haiku 5.5 lists at $0.10 in and $0.50 out per million **[docs]**, 20× under Sonnet. At about 12 runs a week that saves about $1-2 a week, and one wrong lesson costs more: a bad planner lint stalls good tickets. So Haiku runs eval RT (14.2) beside Sonnet, and takes the job only if it matches.
+- **The pack is built by code**, `maestro-ticket retro pack <signature>`. It is at most 6,000 tokens, counted as 14.3 counts, and is cut from the bottom with `… more`. It holds:
+  - the signature, with its counts, dollars and 4-week trend;
+  - for each of up to three events:
+    - the ticket's criteria and the plan's areas;
+    - each kickback's finding lines (severity, `file:line` and the first 300 characters), fenced as data (6.0);
+    - `git diff --stat` between rounds, and the hunks at the findings' lines, ±15 lines;
+    - the `trace --cap 600` timeline;
+    - a killed run's stop cause;
+  - the lessons and standing rules near it, by area, one line each;
+  - the menu of lesson kinds (5 below).
+
+  The pack holds no transcript, no raw stream, no whole diff and no skill. The run has no tools and `--max-turns 1`, and goes through the adapter (8.1), so any harness can take it.
+- **A hard cap.** The supervisor kills the run when its stream passes 20k tokens in, 4k out (thinking included) or $0.40. A killed retro counts as `none`, and its cost still counts. A run should cost about $0.10-0.20 (guess). For comparison, a lean Opus judge run averages $0.55 today **[box]**.
+- **One output, parsed by code:**
+  ```text
+  retro: <signature>
+  cause: plan|criterion|stale-base|test-gap|scope-split|env|limit|review-miss|flake
+  earliest: plan|build-start|pre-review|review|qa|merge
+  change: <kind> <where> | <text, at most 400 bytes>
+  lifts: <a condition code can check>
+  expect: <which trigger falls, and by how much>
+  ```
+  The other allowed reply is `retro: <signature> none: <one line>`. Anything else counts as `none`. The run proposes and changes nothing.
+
+**5. Lessons land in structure, not prose.** A lesson is a row in `lessons.json`, beside the store, and code reads it. The kinds, cheapest first:
+
+| Kind | Runs where | Tokens per run | Last week's case |
+|---|---|---|---|
+| `pre` | a code check before a job is handed out. A non-zero exit sends the ticket back with the output, and no run starts | 0 | `stale-base`: `git merge-tree --write-tree origin/main HEAD` before a review is handed out. 42 conflict kickbacks cost $156 **[box]**, and rule 38's prose let 5 through |
+| `lint` | `create --lint` and the plan's stop check: when areas match a glob, the ticket must hold a pattern, an area, a dependency or a split | 0 | rule 55 as code: a third open one-case ticket on `scripts/clientbrief/transcript_file.py` is refused, with "rewrite the lane" |
+| `limit` | a `rules set` value: a job's time limit, `qa_slots`, a tier floor | 0 | — |
+| `check` | a line under `## Checks` in the project's setup, run by the gates | 0 (the check's own run time) | — |
+| `step` | `qa-prep.sh` adds a script step when the diff touches a glob (14.6) | the step's few lines, on the QA runs it reaches | "a combining mark on a spelled-out number word stays masked", for `labeler_ai.py` |
+| `pack` | `graph pack` adds a line when a file under a glob changes (14.3) | at most 200, on the runs it reaches | — |
+| `rule` | a standing rule, through `rules add` (14.5) | about $1.1 a KB a week in plan, rule and judge prompts **[I]** | the last resort, when no kind above can say it |
+
+- **Each row** holds `id`, `signature`, `kind`, `match`, `body`, `lifts` and `from` (the retro run that proposed it).
+  - `lifts` is a condition code checks: `T-664 merges`, `0 events in 28 days`, or a date. "When the owner says" is allowed only on a `rule`.
+  - A lesson that needs Maestro code, not just a row, becomes a ticket, and the ticket's cost is charged to the lesson.
+- **Shadow first.** For 7 days, a new `pre`, `lint` or `check` stops nothing and logs `lesson.shadow`: "would have stopped this". It goes live only if it would have caught at least one event of its signature, and would have stopped no ticket that later merged clean on that round. Otherwise it is dropped.
+- **The budget.** Lessons count toward 14.5's 20 rules and 8 KB only by the bytes they put into a prompt. `pre`, `lint`, `limit` and `check` put in none.
+- **The duty desk applies them** with `cos lesson add <id>` and `cos lesson drop <id>`, under the duty lock, like `rules add`. A `rule` still goes through the rules flow.
+
+**6. The ledger proves it saves.** `maestro-ticket retro ledger` is code. It runs weekly, from the logs.
+- **A lesson's cost** has three parts:
+  - its retro run's cost, shared across the batch;
+  - its ticket's cost, if it needed code;
+  - its carry: the bytes it adds × the runs it reaches × the per-KB price in item 1.
+- **A lesson's saving** is counted two ways, and the ledger takes the smaller and shows both:
+  - **Direct.** Each `lesson.hit`, a `pre` that sent a ticket back or a `lint` that refused one, is worth the signature's median event cost over the 4 weeks before the lesson. Each false stop is subtracted: a stopped ticket that then merged unchanged, at its wait-and-retry cost.
+  - **Rate.** The signature's events per 100 runs of its job and area, the 4 weeks after against the 4 before, × that week's runs × the median event cost. A signature with fewer than 5 events before gets only the direct count.
+- **Payback.** After 4 weeks live, a lesson whose saving is under its cost is dropped, with its numbers in the `lesson.drop` line. So is one with no hit and no change in rate for 28 days. A lesson whose `lifts` holds is dropped at once.
+- **The retro as a whole.**
+  - A hard cap of $5 a week on `job retro` runs (12 runs at the $0.40 cap), and at most 2 lesson tickets a week.
+  - After a 4-week grace period, if the last 4 weeks' retro cost (runs plus lesson tickets) is more than the last 4 weeks' savings, code runs `rules set retro off`. It pages no one, and `desk brief` shows it.
+  - `detect` and `ledger` keep running at no token cost, so the brief still shows what the retro would have saved, and the duty desk can turn it back on.
+- **Break-even, on last week's numbers.**
+  - **Cost:**
+    - the judge, at most $5 a week. Expected $1.20-2.40: 12 runs at $0.10-0.20 (guess);
+    - one lesson ticket a week, at the senior median of $7.44 **[box]**;
+    - detect, pack and ledger: $0.
+
+    In all, about $9-12.50 a week. The Opus `job retro` it replaces cost about $1 a week **[I]** (`token-plan-report.md` §2).
+  - **Savings needed:** about two extra rounds a week avoided, at the $5.63 median **[box]**. That is 4-5% of the $242 pool that has no lesson.
+  - **One case:** the `stale-base` `pre` check. It costs about $0.20 for its retro and about $7.44 for its ticket. The class it targets cost $156 last week: $46 in the runs that kicked back and $110 in the rounds after **[box]**. It pays back once it stops about 2 of the 42 conflicts ($3.71 each), in its first month.
+  - **The ceiling.** If every re-hit with no lesson stopped, the saving would be $242 a week. A realistic catch is 10-25% (guess), so $24-60 a week, plus whatever the ledger's rule pruning (7 below) takes off the $28 a week of rule text.
+- **What prose missed.** Rule 38 was a lesson with nothing behind it. As a `pre`, its hits would be counted, and it would be dropped if it didn't pay.
+
+**7. Subtract before adding.**
+- **The Opus `job retro` of S0 goes**, and `job retro` becomes the judge above.
+  - Its rule pruning moves into the ledger. A rule whose `Lifts when` code can check is dropped when the condition holds: today that is 5 of the 51 clauses ("T-n merges", "T-n shows cancelled") **[box]**.
+  - The rest go in the brief by size and age, for the duty desk.
+- **`memory.md`** cuts (5.4) go to the same weekly ledger line.
+- **No new unit.** `detect` runs from `maestro-reconcile.timer` (6.6).
+- **No retro of a retro.** The ledger is the only check on lessons, and it is code.
+
+**8. How it fits.**
+- **The duty desk runs it.** `desk brief` gets one line: `retro: 3 queued · 2 lessons live, 1 shadow · 4 wk: $6.10 spent, $41 saved · on`. `retro due` means a signature is queued and the cap has room. The desk runs `cos retro`, one `job retro` per queued signature with the cap enforced in code, then `cos lesson add` for what it accepts.
+- **Harness-neutral** (8.1): the judge is a one-turn run with no tools, through the adapter, and the pack and the reply are plain text.
+- **It reads only through `trace`** (6.6). `detect`, `pack` and `ledger` call `trace --json`. The new kinds are `retro.flag`, `retro.run`, `lesson.shadow`, `lesson.hit`, `lesson.drop` and `retro.pause`.
+- **Model and harness moves** (14.1, 8.1): the ledger watches each moved job's kickbacks per 100 runs, as it would a lesson's signature, at no extra cost.
+- **Build:** S16, after S15a, so it can run on the VM.
 
 ## 15. What the v4 review changed
 
@@ -1656,7 +1805,7 @@ Raw streams are not copied (about 50 MB a day, **[I]**); their hashes are in the
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6 to v11 changed
+## 18. What v6 to v12 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -1721,6 +1870,15 @@ v11, 2026-11-20, asked for by the owner: log as much as possible, at no token co
 | — | Nothing is redacted but the Mongo URI and webhook URLs **[code]** | Redaction on write, by exact value and pattern, with a test and a nightly grep (6.6) |
 | — | — | `trace` for the owner; `cos trace` and `trace --cap` at 1,500 tokens for desks and runs; one `logs:` line in `desk brief`; about 21 MB of events and 50 MB of gzipped streams a day **[I]** (6.6, 17.4) |
 
+v12, 2026-11-20, asked for by the owner: a retro that reflects on outcomes, and saves more tokens than it spends.
+
+| v11 said | Found on the VM **[box]** | v12 |
+|---|---|---|
+| `job retro` (S0, #103): Opus, weekly, proposes rules to turn into code | Nothing asks why a ticket cost what it did. The chief of staff does it by hand, in prose (rules 38, 39, 55, with dollar figures); 5 conflict kickbacks came after rule 38 | `retro detect`, code over the logs, with fixed triggers; one capped Sonnet run per repeated signature; the Opus session goes (14.7, 14.5) |
+| — | Of $3,549 in 7 days: cancelled after a build $629, kickback loops $527 (155 kickbacks, a median $5.63 a round), killed runs $348 ($274 of it missing from `costs`), no verdict $113; $242 of repeat waste with no fix in flight | Waste by class with a $/week each, measured or marked (14.7 item 1) |
+| Standing rules within a budget | The rules are 25 KB, 3× the budget, about $28 a week to carry **[I]**; 5 of 51 lift clauses are checkable by code | Lessons as `pre`, `lint`, `limit`, `check`, `step` or `pack` rows before prose; shadow first; code drops a rule whose lift holds (14.7) |
+| — | — | A ledger per lesson (retro, ticket and carry cost against direct hits and rate change); a $5 weekly cap; `rules set retro off` when the trailing cost passes the savings; eval RT; S16 (14.2, 11) |
+
 ## 19. Open questions
 
 ### 19.1 Still open
@@ -1744,6 +1902,11 @@ v11, 2026-11-20, asked for by the owner: log as much as possible, at no token co
 25. **Retention.** Proposed: raw streams for 30 days (about 1.5 GB **[I]**) and events for 400 days (about 1 GB). Longer for streams?
 26. **Model text in the logs.** Proposed: each claim keeps up to 4 KB of redacted text, plus the hash of the whole. Hash only would leak less but say less.
 27. **Backfill on the VM.** The 121 cost-less runs' figures could be read from their transcripts into `stats.db` and the board's `runs` table, adding $227 to `costs`. That writes to a live store, so it needs your yes.
+28. **Shadow to live, by code?** Recommended: a `pre`, `lint` or `check` that caught one of its signature's events in shadow, and would have stopped no clean ticket, goes live without a desk turn, and the brief says so. The alternative is `cos lesson add` by the duty desk each time, which costs a desk turn per lesson.
+29. **The automatic pause.** When the retro's trailing 4-week cost passes its savings, code runs `rules set retro off`. That is code changing a live setting with no desk. Is that yes, or should it only page the duty desk?
+30. **A reason on every cancel.** Cancelled-after-build is the largest class ($629-777 a week) and 52 of its 68 tickets carry no note **[box]**, so the detector can't sign them. Recommended: `transition … cancelled` needs a reason from a fixed list (split, folded, superseded, owner's call, wrong plan), checked by code and costing no tokens. It changes the planner's verb, so it needs your yes.
+31. **Lesson tickets.** Recommended: at most 2 a week, tier 0-1 where they can be, each charged to its lesson in the ledger. More would speed lessons up and put the break-even at risk.
+32. **Haiku for the judge.** Haiku 5.5 is 20× cheaper than Sonnet, but the gap is about $1-2 a week at this volume. Recommended: let RT decide, and keep Sonnet if they tie.
 
 ### 19.2 Decisions log
 
@@ -1765,4 +1928,4 @@ All by the owner on 2026-11-19, 19:46-19:51 PT, numbered as in v5's §19:
 
 Earlier on 2026-11-19 (18:01 PT): the main machine is the desktop PC, and pushes go through T3 Connect (section 1).
 
-On 2026-11-20 the owner asked for harnesses that can be swapped per part (8.1), and approved scripted QA on Sonnet in principle (14.1, 14.2, 14.6). Later that day the owner asked for logging that costs no tokens and is extremely accurate (6.6).
+On 2026-11-20 the owner asked for harnesses that can be swapped per part (8.1), and approved scripted QA on Sonnet in principle (14.1, 14.2, 14.6). Later that day the owner asked for logging that costs no tokens and is extremely accurate (6.6), and then for a retro that reflects on outcomes and saves more tokens than it spends (14.7).
