@@ -1,6 +1,6 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v6, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). The proposed runtime is still unbuilt. The team works on this spec from here.
+**Status:** draft v7, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
@@ -208,7 +208,7 @@ flowchart TD
   I -->|"onboarding decision"| B
 ```
 
-Keep shared owner direction, explicit delegations and accepted briefs in versioned chief-side storage behind the wall. Publish only the goal's accepted revision and applicable rulings to the planner. Accept a change against the revision its author read. If another session published first, return the current revision and reconcile before sending a new brief. Key each planner handoff by goal and revision so a replay produces one plan.
+Keep shared owner direction, explicit delegations and accepted briefs in the chief memory collections (5.4). Publish only the goal's accepted revision and applicable rulings to the planner. Accept a change against the revision its author read. If another session published first, return the current revision and reconcile before sending a new brief. Key each planner handoff by goal and revision so a replay produces one plan.
 
 ### 5.2 Who decides and how an answer survives
 
@@ -216,7 +216,7 @@ The planner resolves execution choices inside the brief. If a product choice rem
 
 Each inbox item has a stable decision ID, goal, affected work, and state. Register chief sessions and their goals privately. Route a fixed wake to the assigned session. A goal without a live chief remains pending for pickup or reassignment. Route a team-wide fault to one designated available chief. Workers cannot choose a thread or supply prompt text.
 
-Several chiefs may read an item. One atomically claims the right to answer. Store the owner question under the decision ID before notifying. Retries and takeovers reuse that question and its delivery receipt. Keep the answer and ruling under the same ID. On transfer, invalidate the old claim and check the current holder before committing a ruling. Deliver a recorded ruling once to the planner, then acknowledge its receipt. After a crash, resume the pending step from the record. Group tickets blocked by the same decision under that question.
+Several chiefs may read an item. One atomically claims the right to answer. Store the owner question under the decision ID before notifying. Retries and takeovers reuse that question. If T3 delivery is uncertain, follow 5.4. Keep the answer and ruling under the same ID. On transfer, invalidate the old claim and check the current holder before committing a ruling. Deliver a recorded ruling once to the planner, then acknowledge its receipt. After a crash, resume the pending step from the record. Group tickets blocked by the same decision under that question.
 
 A failed wake leaves the item pending. Apply the existing wake and retry intervals per destination (today's gate and supervisor in `tools/maestro-ticket/runs/`). A card's text stays data ([decisions](../decisions.md), 7). If Atlas is down, expose `store-down` through host status without requiring a model. On reconnect, the planner recovers interrupted delivery under section 3.3.
 
@@ -232,6 +232,28 @@ A failed wake leaves the item pending. Apply the existing wake and retry interva
 | Standing rules, stop and start | Carry an authorized priority, limit or hold to the planner. The planner handles individual retries and recovery. |
 
 The chief-side service owns private state. Only allowlisted `cos` operations cross to the worker side. Bind each request to its registered session and check its goal and claim before writing.
+
+### 5.4 Shared memory and freshness
+
+Use the existing Atlas database. Give the chief service and the worker runtime distinct credentials with collection-scoped roles. The chief service owns the five collections below. Workers access board collections, including accepted planner handoffs and receipts. Remove any database-wide worker grant that would also cover chief memory. Protect the chief credential and backups from workers. The chief service enforces draft ownership among trusted chief sessions.
+
+| Collection | Identity and contents | Update trigger |
+|---|---|---|
+| `chief_sessions` | Session ID, T3 thread reference, harness, model, effort, goal, status, last versions read | Register on open. Refresh on resume or goal switch. Closing a session preserves its provenance. |
+| `chief_drafts` | Unique (session, goal), base brief revision, draft text | Save as the session edits. A stale base keeps its draft until the chief reconciles it. |
+| `goal_briefs` | Unique (goal, revision), parent revision, outcome, success criteria, scope, constraints, acceptance source, planner delivery | Publish against the expected current revision. Two writers proposing the next revision cannot both succeed. Keep accepted content immutable. |
+| `goal_decisions` | Stable question ID, goal, brief revision, claimant and generation, question, source references, answer, authority, rationale, delivery | Claim, ask, answer, deliver or reopen explicitly. Index goal and state for open questions, and delivery state for recovery. Derive open questions here. |
+| `owner_rules` | Rule ID and revision, preference or delegation, scope, exceptions, owner source, expiry or revocation | Append a revision when direction changes. Preserve earlier wording and the decision that relied on it. Only an explicit grant can authorize action. |
+
+**Read path.** On an owner turn, session resume or decision claim, fetch the latest accepted brief, outstanding decisions and deliveries, matching current rules and the session's draft. Fetch older evidence by reference as needed. A changed record does not wake every model.
+
+**Write path.** A refresh can race with another writer. At commit, require the expected brief revision, a current claim generation and an unanswered decision. When a ruling relies on delegated authority, also require the cited rule revision to remain current and unexpired. Serialize authorization with changes to its rule and brief: revocation and authorization must contend on the same current-version records. A read-only snapshot of the rule is insufficient. On conflict, reload and reconsider. Preserve the original answer or draft as evidence if its premise changed.
+
+**Delivery.** Publish the accepted brief and its pending delivery in one write. Likewise, save an answer, its source and pending ruling in one conditional write or transaction. Embed the delivery ID, state and receipt in the source document. The planner commits its receipt and accepted instruction together, then keys any downstream run to that delivery. Replays of the same ID and payload return the prior receipt; a different payload under the same ID is an error. Distinguish saved, planner-acknowledged and completed work in status. Startup, reconnect and planner wakes retry pending deliveries through the authorized service. While Atlas is down, chats can explore drafts; acknowledge a save only after the database confirms it.
+
+**Uncertain owner message.** Persist a question before notifying. Capture a stable T3 thread and message reference if available. If a send has no confirmed receipt or a crash may have interrupted reply capture, inspect the original thread before resending. When the answer cannot be tied to this question, keep the decision unresolved. Guarantee one accepted ruling and one planner action. Promise one visible notification only if P0 proves T3 can recover or deduplicate an uncertain send.
+
+**S3 acceptance.** Start with `chief_sessions` and `goal_decisions`: answer Astra, interrupt it, transfer the claim to Opus and verify one planner action. Lose the planner receipt and repeat. Add the other collections, race two brief publications, and verify the losing draft survives. Revoke a delegation in Astra while Opus holds its stale context: a subsequent approval under that rule must fail. Verify that a one-off answer changes no other goal and that worker credentials cannot read chief collections or their backups.
 
 ## 6. The wall
 
@@ -292,10 +314,10 @@ A team on one Linux box with no T3 can skip the wall. Then the same commands run
 
 `maestro-ticket` already runs on MongoDB, `mongodb+srv://` URIs included **[code]** `tools/maestro-ticket/README.md:24`.
 
-1. Make an Atlas cluster in a region near the machine. Let only the machine's IP reach it, and give Maestro a user with rights on one database only.
+1. Make an Atlas cluster in a region near the machine. Let only the machine's IP reach it, and provision the separate collection-scoped roles in 5.4.
 2. As `maestro`, write the URI with `maestro-ticket store --uri-file -`. It lands in `store.uri`, mode 0600, and only the host ever prints.
 3. Move today's board with `maestro-ticket migrate`.
-4. The chief-of-staff side never holds the URI. It reaches the board through `cos` verbs.
+4. The chief service holds its own memory credential. It reaches worker board operations through `cos` verbs; the worker URI stays on the worker side.
 
 On MongoDB, the store's folder still holds this machine's own state: `runs/`, `slots/`, `notify/` **[code]** `tools/maestro-ticket/README.md:24`. On one machine that costs nothing.
 
@@ -363,7 +385,7 @@ flowchart LR
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
 | S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
-| S3 | Shared briefs, session registry, decision claims, goal inbox, fixed wake and `cos` verbs | an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
+| S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the S3 acceptance cases in 5.4; an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
 | S6 | The rewrite (section 9) | review |
@@ -380,6 +402,7 @@ For the routing trial, occupy the eligible Claude review capacity and submit a f
 |---|---|---|
 | `t3 thread send` from a local script needs no token and queues on a busy thread | [docs] | send twice to a busy thread; read `t3 thread show` |
 | `t3 thread send` exits non-zero when delivery fails | (guess) | stop T3, send, read the exit code |
+| A successor can find a specific owner reply and resolve an uncertain send | (guess) | interrupt before recording the send receipt and again before saving the reply; inspect from the successor session by question ID and thread reference |
 | A queued send survives a T3 restart | (guess) | queue one, restart, read the thread |
 | T3 pushes to the phone when the thread ends a turn | [docs] | wake it with the phone locked |
 | Private harness instructions reload after compaction | (guess) | compact an Astra and an Opus session; check the same rule from their respective instruction bundles |
