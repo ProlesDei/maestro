@@ -1,6 +1,6 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v4, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 adds subscription routing and a Codex chief of staff. Nothing here is built. The team works on this spec from here.
+**Status:** draft v5, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. Nothing here is built. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
@@ -8,7 +8,8 @@
 1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`. Setting a bot's webhook again brings it back, so a team can still run Maestro on Grok.
 2. Each role gets a **server**: a webhook (a Grok bot, as today), a command (the chief of staff's wake), or code (the planner's routing and the five worker roles). Every place that now asks "does this bot have a webhook?" asks "is this role served?" instead.
 3. Agent sessions plan, judge and rule. Section 8 maps each role to a harness, model and account. Code takes only the relaying that Grok bots did: start the next step, refill a slot, take a look, pass on what needs a person (section 3).
-4. One Codex thread in T3 Code plays the chief of staff. The owner talks to it from the T3 phone app. It runs behind a wall: no worker session can type into it, and it reaches the board through one command, `maestro-ticket cos <verb>`.
+4. The owner specs features with one or more T3 chief-of-staff sessions. Each session uses Astra or Opus. Chiefs share accepted direction, work with the planner on outcomes, and settle delegated product calls. Section 5 defines their authority and handoffs.
+
 5. One machine. The board lives on MongoDB Atlas. Two Claude Max 20x accounts and one ChatGPT Pro account serve the roles in section 8.
 
 ```mermaid
@@ -16,7 +17,7 @@ flowchart LR
   OWNER["Owner's phone<br/>T3 app"]
   subgraph COSSIDE["Chief-of-staff side"]
     T3["T3 Code"]
-    COS["Chief-of-staff thread<br/>Codex Astra"]
+    COS["Chief-of-staff sessions<br/>Astra or Opus"]
   end
   subgraph WORKSIDE["Worker side: user maestro"]
     SUP["Supervisors<br/>code roles, 0 tokens"]
@@ -38,7 +39,7 @@ flowchart LR
 
 | Call | Current answer | What it changes here |
 |---|---|---|
-| Accounts | Two Claude Max 20x plans and ChatGPT Pro; prefer Codex Astra at high or medium effort for chief of staff | Section 8 sets the initial assignments and capacity rules. |
+| Accounts | Two Claude Max 20x plans and ChatGPT Pro; choose Astra or Opus and effort per chief session | Section 8 sets the initial assignments and capacity rules. |
 | Second user for the chief of staff | Yes. Today T3 runs in WSL on a Windows desktop; that may move to the native Windows app, or a container | Section 6 gives the wall three ways to build it. |
 | Planner as code | Asked what it means: isn't the planner the product manager? | Section 3 answers it. |
 | Several boxes | One machine | Phase 2 leaves the build. Section 12 keeps what the audits found, for later. |
@@ -52,7 +53,7 @@ flowchart LR
 | Junior, senior engineer | Grok webhook | code |
 | Reviewer, QA lead, designer | Grok webhook | code |
 | Planner | Grok webhook | code for the routing; agent sessions for decisions (section 3) |
-| Chief of staff | Grok webhook | command: wake its T3 thread (section 5) |
+| Chief of staff | Grok webhook | command: wake the assigned T3 session (section 5) |
 
 `maestro-ticket notify set <bot>` takes one of `--url-file` (today), `--exec-file` or `--code`. The chain, `look` and the supervisor read that server through one `served(bot)` check. Today each reads `hasHook`:
 - `handOn` **[code]** `tools/maestro-ticket/cli/chain.go:247`;
@@ -62,9 +63,9 @@ flowchart LR
 
 The servers mix, so the move off Grok goes one role at a time (section 10).
 
-## 3. The planner: Claude thinks, code relays
+## 3. The planner owns delivery
 
-The planner is still the product manager. What changes is who carries its messages. Decision 19 already bars the Grok planner from reading a ticket, a PR or a reply to judge it, so today every planning and judging call already runs in a Claude session. The Grok bot only wakes, runs `look`, passes lines on and acks. That relay is the part code takes.
+The planner turns an accepted brief into executable work. Its code relay handles known next steps. A planner session investigates a failure or rules on a dispute when the evidence needs judgment.
 
 | Planner's work | Who does it today | T3 runtime |
 |---|---|---|
@@ -74,7 +75,7 @@ The planner is still the product manager. What changes is who carries its messag
 | Ask the chief of staff before changing scope | Claude: the plan session leaves a card | same; the card goes to the inbox |
 | Pick what starts next, fill slots, route by tier | code: `look`, refill, the chain | same |
 | Wake on a message, run `look`, pass lines on, ack | Grok bot | **code** (3.1) |
-| Report progress, ETAs | Grok bot, from `look --report` | the chief of staff runs `cos look`; the plan session records each ETA it gives |
+| Report progress, ETAs | Grok bot, from `look --report` | planner verifies progress, records ETAs and reports material deviations to the goal’s chief |
 
 A standing planner thread in T3 could come later, if the owner wants a product manager that keeps its own memory between goals. It would wake on every planner line, so it costs more than code. That is a later call, not part of this build.
 
@@ -87,11 +88,12 @@ flowchart TD
   END["A run ends: its supervisor routes it<br/>matches line shapes, reads no ticket or reply"]
   END --> A["Start the next step<br/>build, review, qa, live, design T-n<br/>review T-n --approved sha<br/>do: resume --died, --go-on, senior escalation,<br/>--escalate, --decide; job again"]
   END --> B["Refill<br/>slot free T-n, merged T-n"]
-  END --> C["Look<br/>kickback, block, timed_out,<br/>failed, mismatch, live fail, a stop"]
-  END --> D["Needs a person<br/>usage_limit, disk_full, died twice,<br/>goal done, cause, a fault line,<br/>a card, a design card, a QA question"]
+  END --> C["Delivery event<br/>apply fixed next step or request a ruling"]
+  END --> D["Planner reports goal outcome,<br/>material deviation or unresolved product call"]
   A --> RUN["Next eligible run, as that role"]
   B --> FILL["Builds for the next tickets"]
-  C --> LOCK{"Acquire lock or mark dirty atomically"}
+  C -->|"known next step"| RUN
+  C -->|"needs planner judgment"| LOCK{"Acquire lock or mark dirty atomically"}
   LOCK -- yes --> JUDGE["look --judge<br/>a judge session"]
   LOCK -- no --> DIRTY["Dirty recorded; return"]
   D --> INBOX[("Inbox in the board")]
@@ -105,8 +107,8 @@ flowchart TD
 | `do: resume <run> --died`, `--go-on`, `job again <run>` | Runs it, as now **[code]** `tools/maestro-ticket/cli/chain.go:169` |
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Map the existing `--opus` line to a senior escalation under section 8. Keep the other fixed shapes; the grammar still allows no rules write. |
 | `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
-| `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | One `look --judge`, under the look lock (3.2) |
-| `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Into the chief of staff's inbox (5.2) |
+| `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route a concrete defect to its engineer. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
+| `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Planner owns triage and groups related causes. Send goal outcomes, material deviations and unresolved product or owner decisions to the goal inbox (5.2). |
 
 Persist one handoff ID per action. Replay returns the recorded run or inbox item, including during a switch back to a webhook. Ack after all actions have durable receipts. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
 
@@ -148,7 +150,8 @@ sequenceDiagram
   participant V as Review session
   participant Q as QA session
   O->>S: goal: add billing, high priority
-  S->>R: cos plan
+  O->>S: agree on outcome, scope and success criteria
+  S->>R: cos plan with accepted brief revision
   R->>P: job plan
   P-->>R: tickets written
   R->>E: refill: job build T-12
@@ -161,53 +164,54 @@ sequenceDiagram
   Note over R: no wake, no token
 ```
 
-A send-back from review or QA goes straight back to the engineer. A block goes to the judge. Only what needs a person reaches the chief of staff.
+A send-back from review or QA goes straight back to the engineer. The planner handles delivery blocks. The goal’s chief receives material deviations and unresolved product choices.
 
 ## 5. The chief of staff
 
-### 5.1 The thread
+### 5.1 Feature conversations and accepted briefs
 
-- One Codex thread in T3 Code, on Astra, in full access, so tool asks never reach the phone ([decisions](../decisions.md), 12).
-- Its persona, the team rules and the `cos` verbs sit in `AGENTS.md` in the chief of staff’s private working directory, built by `scripts/bot-bundle.sh`. P0 checks that Codex follows those instructions on startup and after compaction. Keep its memory in the same private directory.
-- It reads what is short itself. Long reads (a PR, many tickets) go through `cos ask`, a separate run, so its own context stays small.
+The owner opens a chief-of-staff session for a goal and selects its harness, model and supported effort. An Astra session can shape billing while an Opus session shapes onboarding. Several sessions may explore the same feature. Each keeps its conversation and draft private. Either model can take over a goal by reading the accepted brief, rulings and open questions.
 
-### 5.2 The inbox
+The chief works with the owner on the user problem, intended outcome, success criteria, scope, constraints and choices still open. Once they agree, the chief publishes a versioned brief. The planner checks feasibility and returns a delivery plan, dependencies and any material deviation. It owns ticket splits, assignments, retries, investigations and verified status. The chief checks progress against the outcome and challenges a plan that drifts.
 
 ```mermaid
-sequenceDiagram
-  participant R as Code relay
-  participant I as Inbox in the board
-  participant S as Chief of staff
-  actor O as Owner's phone
-  R->>I: add: died twice T-31
-  R->>S: wake, fixed text: ring, run pickup
-  S->>I: cos pickup
-  I-->>S: died twice T-31, with its card
-  S->>O: one decision card, push
-  O-->>S: answer: B
-  S->>R: cos rule T-31, answer on stdin
-  S->>I: cos ack
-  Note over R,S: no ack yet? the gate rings again at 5, 10 and 40 min
+flowchart TD
+  Owner["Owner"] <--> A["Billing session · Astra"]
+  Owner <--> B["Onboarding session · Opus"]
+  A <--> State[("Owner direction · accepted briefs · rulings")]
+  B <--> State
+  State -->|"goal + brief revision"| P["Planner owns delivery"]
+  P -->|"sequence and assign"| W["Engineer · review · QA"]
+  W -->|"evidence and defects"| P
+  P -->|"outcome, deviation or product decision"| I[("Goal inbox")]
+  I -->|"billing decision"| A
+  I -->|"onboarding decision"| B
 ```
 
-- The inbox is a space in the board's coord store, `inbox/chief-of-staff`. Each item is one line of a fixed shape, with a run or ticket id.
-- Code adds items. Only the chief of staff's `cos ack` removes them, so a failed or lost wake is rung again and an alert can't vanish.
-- A card's text stays data, as [decisions](../decisions.md), 7 says.
-- The wake goes through the existing gate: at most once each 4 minutes **[code]** `tools/maestro-ticket/runs/gate.go`, and again at 5, 10 and 40 minutes while anything waits unacked **[code]** `tools/maestro-ticket/runs/supervise.go:46`.
-- If Atlas is down, code can't write the inbox. Then the wake carries one fixed word, `store-down`. The host exposes the fault through a status command readable without a model or Atlas. The chief of staff runs `cos look` once Atlas is back.
+Keep shared owner direction, explicit delegations and accepted briefs in versioned chief-side storage behind the wall. Publish only the goal's accepted revision and applicable rulings to the planner. Accept a change against the revision its author read. If another session published first, return the current revision and reconcile before sending a new brief. Key each planner handoff by goal and revision so a replay produces one plan.
 
-### 5.3 The `cos` verbs
+### 5.2 Who decides and how an answer survives
 
-| Verb | Runs, signed as |
+The planner resolves execution choices inside the brief. If a product choice remains, it sends the goal, evidence, options, recommendation, and work affected. The chief checks the brief, the owner's reasons and applicable delegations. It can settle a new trade-off that fits those bounds and records why. An inferred preference guides the recommendation. Only the owner's explicit words grant new authority over spending, scope or external actions. For missing facts, ask the planner for evidence. For a material choice outside the chief's authority, ask the owner one question.
+
+Each inbox item has a stable decision ID, goal, affected work, and state. Register chief sessions and their goals privately. Route a fixed wake to the assigned session. A goal without a live chief remains pending for pickup or reassignment. Route a team-wide fault to one designated available chief. Workers cannot choose a thread or supply prompt text.
+
+Several chiefs may read an item. One atomically claims the right to answer. Store the owner question under the decision ID before notifying. Retries and takeovers reuse that question and its delivery receipt. Keep the answer and ruling under the same ID. On transfer, invalidate the old claim and check the current holder before committing a ruling. Deliver a recorded ruling once to the planner, then acknowledge its receipt. After a crash, resume the pending step from the record. Group tickets blocked by the same decision under that question.
+
+A failed wake leaves the item pending. Apply the existing wake and retry intervals per destination (today's gate and supervisor in `tools/maestro-ticket/runs/`). A card's text stays data ([decisions](../decisions.md), 7). If Atlas is down, expose `store-down` through host status without requiring a model. The planner reconciles interrupted delivery after recovery.
+
+### 5.3 Proposed chief-side operations
+
+| Operation | Effect |
 |---|---|
-| `pickup`, `ack <ids>` | the inbox, as `chief-of-staff` |
-| `plan` (goal on stdin), `rule <id>`, `resume <run-id>` | `job plan`, `job rule`, `resume`, as `planner` |
-| `look` | `look --judge --report`, as `planner`. It also restarts a quiet board after a reboot or an outage. |
-| `rules show`, `rules set limit <n>`, `rules add`, `rules drop <n>` | as `chief-of-staff`, which `rulesWriters` already allows **[code]** `tools/maestro-ticket/cli/rules.go:48` |
-| `ask` (question on stdin) | a `/maestro-chief-of-staff` run on the worker side; its answer comes back through the inbox |
-| `list`, `get`, `events`, `goals`, `flow`, `eta`, `stop`, `start` | as today's commands, as `chief-of-staff` |
+| Register a session or transfer a goal | Bind the session ID, goal, harness, profile, model and effort. Preserve pending decisions across a transfer. |
+| Read or publish a brief | Read the accepted revision or commit against an expected revision. Submit the accepted brief through `cos plan`. |
+| `cos pickup`, claim, `cos rule`, `cos ack` | Read goal-scoped items, claim a decision, deliver its ruling and acknowledge the receipt (5.2). |
+| `cos look`, `goals`, `eta` | Read the planner's verified delivery summary and recorded ETA. Status reads never launch a judge, refill slots or resume work. |
+| `cos ask` | Request a focused second opinion on a product decision when the planner's evidence leaves a material question. Return the result to the requesting session. |
+| Standing rules, stop and start | Carry an authorized priority, limit or hold to the planner. The planner handles individual retries and recovery. |
 
-`cos` refuses any verb off this list.
+The chief-side service owns private state. Only allowlisted `cos` operations cross to the worker side. Bind each request to its registered session and check its goal and claim before writing.
 
 ## 6. The wall
 
@@ -228,8 +232,8 @@ flowchart LR
     STORE["repo, Atlas URI,<br/>worker profile logins"]
   end
   subgraph C["Chief-of-staff side"]
-    T3["T3 Code + thread"]
-    CMD["AGENTS.md: persona,<br/>rules, cos verbs"]
+    T3["T3 Code + registered sessions"]
+    CMD["Private persona, direction<br/>and accepted briefs"]
   end
   SUP -->|"wake: no text"| T3
   T3 -->|"cos verb, fixed list"| SUP
@@ -245,7 +249,7 @@ The worker side must be Linux. The supervisor's process handling is Unix-only, w
 |---|---|---|---|
 | Worker side | user `maestro` in the WSL distro | user `maestro` in the WSL distro | a Linux container |
 | Chief-of-staff side | user `maestro-cos` in the same distro, running `t3 serve`; the Windows T3 app and the phone connect to it | the Windows T3 app, as the Windows user | T3 on the host |
-| `wake` door | a sudoers rule: `maestro` may run only `maestro-ticket wake` as `maestro-cos` | a T3 webhook task bound to the thread, with a fixed prompt that ignores the body (needs T3 Connect) **[docs]** | the same webhook task |
+| `wake` door | a sudoers rule: `maestro` may run only `maestro-ticket wake` as `maestro-cos` | a fixed wake to a private dispatcher that resolves the registered session (probe before choosing B) | the same webhook task |
 | `cos` door | a sudoers rule: `maestro-cos` may run only `maestro-ticket cos …` as `maestro` | `wsl.exe -d <distro> -u maestro maestro-ticket cos …` | `docker exec <container> maestro-ticket cos …` |
 | What else must hold | worker cannot reach the host identity, private files or T3 listener | WSL interop off (`[interop] enabled=false`) and no Windows drives mounted (`[automount] enabled=false`) in the worker distro's `/etc/wsl.conf`; else a worker can run `t3.exe` or read the thread's files | the container gets no host socket or host folder beyond the repo |
 | Change from today | one more Linux user | moves T3 out of WSL | adds Docker |
@@ -258,9 +262,10 @@ A team on one Linux box with no T3 can skip the wall. Then the same commands run
 
 1. Make user `maestro-cos`. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo`.
 2. As `maestro-cos`: install T3 Code, pin a stable version (`t3 update <version>`) and run `t3 up --connect` **[docs]**.
-3. In T3, add a Codex provider instance with its own config dir, logged in to the owner’s ChatGPT Pro plan, in full-access mode.
-4. Put the chief of staff's `AGENTS.md` bundle in the private working directory.
-5. Start the thread in that directory. Keep its instructions and privileged helpers outside worker-writable paths. Save its id where `maestro-ticket wake` reads it.
+3. Configure native Codex and Claude logins for authorized chief profiles. Keep their config outside worker-writable paths.
+4. Build private instructions from one chief persona for both harnesses (`AGENTS.md` for Codex and `CLAUDE.md` for Claude).
+5. Register each T3 session privately with its goal and chosen profile. Resolve wake destinations through this registry.
+
 6. Turn on phone pushes. Background pushes need T3 Connect **[docs]**.
 
 ## 7. The board on Atlas
@@ -277,7 +282,7 @@ On MongoDB, the store's folder still holds this machine's own state: `runs/`, `s
 Risks:
 - **Latency.** Each command, claim and heartbeat makes a round trip to Atlas, where SQLite made none. P0 times a `look` on a real board.
 - **Tier limits.** Atlas's free tier caps connections and operations (guess). 300 sessions, each with a keepalive, may need a paid tier. P0 counts the connections one run holds.
-- **An outage stops every run.** The `store-down` wake (5.2) tells the owner, and `cos look` restarts the board after.
+- **An outage stops every run.** The `store-down` wake (5.2) tells the owner, and the planner resumes delivery after recovery.
 - **Backups.** Atlas's backups come with paid tiers (guess). `maestro-ticket` keeps its own `backups/` folder too.
 
 ## 8. Profiles, model choice and capacity
@@ -286,11 +291,11 @@ The installation defines each profile by account alias, harness, approved models
 
 | Profile | Starting assignment | Capacity rule |
 |---|---|---|
-| ChatGPT Pro / Codex | Chief of staff on Astra. Start at medium effort for routine turns and use high for hard rulings. Review is its first shared worker role. | Give owner turns priority. Keep worker review disabled outside the trial until measured headroom supports it. |
-| Claude Max A / Claude Code | Planning and judging. Qualify review as a second role. | Reserve capacity for decisions that unblock other tickets. |
+| ChatGPT Pro / Codex | Astra chief sessions. Start at medium effort for routine turns and use high for hard rulings. Review is its first shared worker role. | Give owner turns priority. Keep worker review disabled outside the trial until measured headroom supports it. |
+| Claude Max A / Claude Code | Opus chief sessions, planning and exception rulings. Qualify review separately. | Reserve capacity for active chief sessions before optional worker jobs. |
 | Claude Max B / Claude Code | Builds, design, QA and review. Start with the existing Claude model settings. | Give long builds and short reviews separate cost estimates. |
 
-These are install defaults. An account may serve only workloads its owner authorizes under its plan. Keep both Claude profiles on their assigned workloads when one reaches a limit. For Codex reviews, sign in through a separate worker-side config. Keep the chief of staff’s config and thread private. P0 must prove both contexts work under the authorized login. Account-wide limits apply across those contexts.
+These are install defaults. An account may serve only workloads its owner authorizes under its plan. Keep both Claude profiles on their assigned workloads when one reaches a limit. Protect owner capacity on every profile serving an active chief. Count all its chief sessions and workers against the same account allowance. Separate private chief configs from worker configs on both harnesses. P0 checks each authorized login in both contexts. Account-wide limits apply across those contexts.
 
 **Fresh starts.** First select models and effort levels approved for the role and tier. Senior escalation requests a senior-capable model. Within that set, select an eligible profile with room after active reservations, the expected job cost and protected capacity. Use reliable remaining allowance and reset times where available. With missing or stale readings, use conservative concurrency caps and keep protected profiles off optional work. Use observed usage by role, model and effort to tune estimates. Keep exported stats anonymous.
 
@@ -304,14 +309,14 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 
 | File | Change |
 |---|---|
-| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: the thread runs in full access. 15: the thread is the one agent session `launch` didn't start. 19 and 21: name served roles, not Grok bots. A new decision for the wall. |
-| `AGENTS.md` | "What we're building": the outer layer is the T3 thread plus code; Grok is one supported runtime |
+| `docs/decisions.md` | 1: a ring may run a command; an unresolved delivery dispute can trigger a planner ruling under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: the thread runs in full access. 15: T3 starts registered chief sessions. 19 and 21: name served roles, not Grok bots. A new decision for the wall. |
+| `AGENTS.md` | "What we're building": the outer layer is T3 chief sessions plus code; Grok is one supported runtime |
 | `README.md`, `docs/team.mermaid`, `docs/bot-anatomy.mermaid` | redraw for served roles and the wall |
-| `bot-profiles/chief-of-staff/persona.md` | rewrite for the T3 thread and the `cos` verbs |
+| `bot-profiles/chief-of-staff/persona.md` | feature specs, outcome reviews, scoped delegation and goal-aware handoffs |
 | `bot-profiles/planner/persona.md` | becomes the spec the code relay follows, and the Grok persona if a team keeps one |
 | `bot-profiles/team-rules.md`, `routine.md` | Grok bots only; the thread gets its own short rules |
-| `skills/maestro-chief-of-staff`, `skills/maestro-planner` | stop calling their caller "the bot" |
-| `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | configure runtime, profiles, role models, effort and reserves; print the sudoers lines; build the thread's `AGENTS.md` |
+| `skills/maestro-chief-of-staff`, `skills/maestro-planner` | give the chief feature specs and delegated product decisions; give the planner board triage, delivery reporting, recovery and ticket investigations |
+| `INSTALL.md`, `scripts/install.sh`, `scripts/bot-bundle.sh` | configure runtime, profiles, role models, effort and reserves; print the sudoers lines; build both private instruction bundles |
 | `templates/project-setup.md` | a `## Runtime` section |
 
 ## 10. The move off Grok, one role at a time
@@ -338,12 +343,16 @@ flowchart LR
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
 | S2 | Code relay: line table, wider grammar, reset ring, look lock | one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
-| S3 | Inbox, `wake`, `cos` verbs | an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
-| S4 | The wall, option A: user, sudoers lines, thread's `AGENTS.md` | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
+| S3 | Shared briefs, session registry, decision claims, goal inbox, fixed wake and `cos` verbs | an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
+| S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
 | S6 | The rewrite (section 9) | review |
 
-Use a thin trial driver in P0. Repeat the routing and recovery checks against the production relay in S2. P0 starts with one shared role, review. Use a scratch board and one fixed PR head. Have Astra take the owner's goal and Claude build the change. Give Claude and Codex independent fresh reviews of that head. Each must load the role instructions, read the diff and record a verdict against the exact SHA. Capture the chosen model, effort, billing mode and session identity. Verify Astra medium and high on the installed Pro profile.
+Use a scratch board and a thin trial driver in P0. Start a billing brief with Astra and an onboarding brief with Opus at the same time. The planner must receive both accepted revisions. Give it a ticket-ordering issue and expect zero chief wakes. Give the billing chief a trade-off covered by owner direction and expect one recorded ruling and zero owner questions. Then exceed that authority: expect exactly one owner question and one ruling delivered to the planner, visible to both chief sessions.
+
+Race two chiefs on the same decision and on edits to the same brief. Expect one claim and a revision conflict. Transfer the claim after the owner answers, restart before ack, and replay. Expect the same question, answer and planner receipt. Read status during the trial and expect zero worker model starts. Repeat against S3–S4 with both chief profiles under worker load. Verify that a worker cannot address either private thread.
+
+Repeat the routing and recovery checks against the production relay in S2. Review is the first shared worker role. Use a scratch board and one fixed PR head. Have Astra take the owner's goal and Claude build the change. Give Claude and Codex independent fresh reviews of that head. Each must load the role instructions, read the diff and record a verdict against the exact SHA. Capture the chosen model, effort, billing mode and session identity. Verify Astra medium and high on the installed Pro profile.
 
 For the routing trial, occupy the eligible Claude review capacity and submit a fresh review with measured Pro capacity available. Expect one Codex review and a responsive chief of staff. Replay the handoff after launch and confirm the same run ID. Exhaust the worker reserve and confirm the next review waits with a reason. Exercise profile login loss, provider outage and restart; verify pause scope, resume affinity and owner status without a model. Qualify builds and QA separately before adding Codex to either role.
 
@@ -353,8 +362,8 @@ For the routing trial, occupy the eligible Claude review capacity and submit a f
 | `t3 thread send` exits non-zero when delivery fails | (guess) | stop T3, send, read the exit code |
 | A queued send survives a T3 restart | (guess) | queue one, restart, read the thread |
 | T3 pushes to the phone when the thread ends a turn | [docs] | wake it with the phone locked |
-| `AGENTS.md` in the private directory reloads after compaction | (guess) | compact the thread; ask it a rule from `AGENTS.md` |
-| Owner turns leave enough headroom for optional reviews | (guess) | measure ten wakes on the Pro profile and record the available usage signals |
+| Private harness instructions reload after compaction | (guess) | compact an Astra and an Opus session; check the same rule from their respective instruction bundles |
+| Owner turns leave enough headroom for optional reviews | (guess) | measure ten wakes on each active chief profile and record the available usage signals |
 | A `look` on Atlas runs fast enough | (guess) | time `look` on a 140-ticket board, Atlas against SQLite |
 | One run's connection count fits Atlas's tier | (guess) | count connections during 20 runs |
 | A repo under `/mnt/c` is much slower in WSL | (guess) | time `git status` and one build in both places |
@@ -385,7 +394,7 @@ Then: `resume` and `job again` hop to the run's own box, since transcripts and w
 | The ring sends its body to the thread | Any session can type into the thread, which has a shell | The wall: `wake` with no text, `cos` verbs (section 6) |
 | One look at a time | The lock never expired, and the dirty check could miss a mark | Renewable lease and atomic dirty check (3.2) |
 | Forward `look --report` | A wake on every look: Grok's cost shape again | Report only when the persona says (3.1) |
-| Persona as the first message | Compaction wears it down | `AGENTS.md` in the private working directory (5.1) |
+| Persona as the first message | Compaction wears it down | Private harness instructions (6.2) |
 | A stopped run restarts on another account | Unpushed work lost; the ticket is held till the reset anyway | Resume on the original profile (section 8) |
 | Token in the run's command words | They print in the run record | Native profile login (section 8) |
 | Boxes share limits, rules and runs through the board | Those live on each box's disk | Listed for later (12.1) |
