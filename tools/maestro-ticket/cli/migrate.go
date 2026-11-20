@@ -89,6 +89,12 @@ func runStoreURI(ctx context.Context, c *call) error {
 	if err := c.parse(); err != nil {
 		return err
 	}
+	if len(c.args) == 1 && c.args[0] == "init" {
+		if *clr || *file == "" {
+			return usagef("store init requires --uri-file FILE|-")
+		}
+		return c.initBoard(ctx, *file)
+	}
 	if err := c.noArgs(); err != nil {
 		return err
 	}
@@ -102,6 +108,15 @@ func runStoreURI(ctx context.Context, c *call) error {
 		return err
 	}
 	dir := filepath.Dir(path)
+	if *file != "" || *clr {
+		pin, err := readBoardPin(dir)
+		if err != nil {
+			return err
+		}
+		if pin.ID != "" {
+			return usagef("store: use store init --uri-file to verify this runtime board")
+		}
+	}
 	switch {
 	case *file != "":
 		uri, err := c.readURI(*file)
