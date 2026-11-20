@@ -1,7 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v6, 2026-11-19. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. Nothing here is built.
-**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19. Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
+**Status:** draft v7, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. Nothing here is built.
+**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
@@ -14,6 +14,7 @@
 7. The runs get cheaper: Sonnet 5.5 for four jobs, each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that review and build query, re-indexed on every merge (section 14).
 8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
 9. One push channel: T3 Connect, linked **publish-only**, so no tunnel and no cloudflared. Access is Tailscale only. If the relay is down, the failure is shown wherever the owner looks next, and a daily heartbeat push makes silence noticeable. There is no second channel (5.5).
+10. Cleanup is code. A nightly janitor, also started when free space or inodes fall under 20%, frees what is safe before claims are refused at 10%. Each run gets its own TMPDIR and a 4 GB memory cap, so one heavy build fails alone (6.4).
 
 ```mermaid
 flowchart LR
@@ -125,7 +126,8 @@ flowchart TD
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Runs it. Fixed shapes too; the grammar still allows no rules write. |
 | `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304`. `merged` also re-indexes the graph (14.3). |
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | One `look --judge`, under the look lock (3.2). A stop someone asked for is not a no-verdict strike (3.3). |
-| `usage_limit`, `disk_full`, `goal <slug> done` | Into the inbox as **fyi**: no wake; the next desk turn and `desk brief` show it (5.2) |
+| `usage_limit`, `goal <slug> done` | Into the inbox as **fyi**: no wake; the next desk turn and `desk brief` show it (5.2) |
+| `disk_full` | **fyi** if the latest janitor pass left free space above the margin, else **desk** (6.4) |
 | `died twice`, `cause …`, a fault line | Into the inbox as **desk** |
 | a card, a design card, a QA question, `store-down` | Into the inbox as **owner** |
 
@@ -226,7 +228,7 @@ sequenceDiagram
   S->>I: cos ack T-31
 ```
 
-- The inbox is a space in the board's coord store, `inbox/chief-of-staff`. Each item is one line of a fixed shape, with a run or ticket id, a goal slug when there is one, and a class: **owner** (only the owner can answer: cards, design cards, QA questions, `store-down`), **desk** (a desk can settle it: died twice, a cause, a fault line), **fyi** (no one need act: usage limit with its reset, disk full, goal done).
+- The inbox is a space in the board's coord store, `inbox/chief-of-staff`. Each item is one line of a fixed shape, with a run or ticket id, a goal slug when there is one, and a class: **owner** (only the owner can answer: cards, design cards, QA questions, `store-down`), **desk** (a desk can settle it: died twice, a cause, a fault line), **fyi** (no one need act: usage limit with its reset, a disk full the janitor has since freed, goal done). A disk full the janitor couldn't free is **desk** (6.4).
 - Code adds items. `cos pickup --desk <name>` returns the items for goals that desk owns, plus unowned ones if it has duty, and leases each to that desk for 2 hours. A second desk's pickup skips leased items, so two desks never act on one item. Only the holder's `cos ack` removes an item. A lease that runs out puts the item back for its owner or the duty desk.
 - **`cos ack <id> --sent`** marks an owner item as sent. It stops the wake rings for that item. From then on, code sends the owner a fixed-text reminder at 30 minutes, 2 hours and 8 hours through the pager thread (5.5), with no desk turn. Without it, the 5, 10 and 40 minute re-rings would wake an Opus thread three more times per card, at about 13 cards a week **[box]** (`tickets.db`, 13 card parks over 11 tickets in 7 days).
 - **fyi items wake no desk.** The next desk turn and every `desk brief` lead with them.
@@ -412,7 +414,7 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
 
 **On Windows, as the owner (admin):**
 1. `wsl --update`, then a fresh distro just for Maestro: `wsl --install Ubuntu-24.04 --name Maestro` (if `--name` is refused, `wsl --import` a clean Ubuntu). Don't reuse the distro the owner works in.
-2. In `%UserProfile%\.wslconfig`, set `[wsl2] memory=` to the PC's RAM minus about 8 GB. Leave networking on NAT; switch to `networkingMode=mirrored` only if 16.3 step 6 needs it.
+2. In `%UserProfile%\.wslconfig`, set `[wsl2] memory=` to the PC's RAM minus about 8 GB, and `defaultVhdSize=` to what C: can hold with room to spare. Add `[experimental] sparseVhd=true` only if 16.3 step 5 passed. Write this file before step 1: `defaultVhdSize` and `sparseVhd` apply only to a disk made after them **[docs]** (6.4). Leave networking on NAT; switch to `networkingMode=mirrored` only if 16.3 step 6 needs it.
 3. Tailscale for Windows, logged in, set to run unattended **[docs]**. Then `tailscale serve --bg 3773` (tailnet only).
 4. A Task Scheduler task, "Maestro keepalive": at startup, whether or not anyone is logged on, run `wsl.exe -d Maestro --exec /bin/sleep infinity`, since WSL may stop an idle distro even with units running (guess, 16.3 step 5).
 5. The power plan (16.2).
@@ -438,6 +440,7 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
    - `maestro-t3-cos.service`: `User=maestro-cos`, `t3 serve --host 127.0.0.1 --port 3773 --no-browser`, `MemoryMax=3G` (5.5);
    - `maestro-boot.service` (oneshot, `User=maestro`): a code-only `look` after a boot, with no `--judge`, so dead runs and free slots are seen without a model turn, and `desk brief` shows `rebooted at …`;
    - timers for the relay check, the heartbeat, the T3 resource check (5.5) and the nightly backup (17.4);
+   - `maestro-janitor.timer` (`User=maestro`): `janitor` at 03:30, and `janitor --if-low` every 5 minutes; `fstrim.timer` if the disk is sparse; `loginctl enable-linger maestro` for the runs' memory scopes (6.4);
    - `systemd-timesyncd`.
 
 **As `maestro-cos`:**
@@ -466,6 +469,79 @@ New on the desktop:
   If any of these is wanted later, move the distro first: `wsl --export Maestro`, then `wsl --import` it as a separate standard Windows account that only the startup task uses, and re-point the task. `docs/desktop-setup.md` states the rule. Nothing inside the distro can check it.
 - **The binary** (6.2 step 3).
 - **Interop stays off.** S4 checks, from a worker session, that `cmd.exe`, `powershell.exe`, `wsl.exe` and `/mnt/c` are all missing.
+
+### 6.4 Cleanup: disk and memory
+
+Today nothing frees disk on its own. On low disk, `claim` and `slot` refuse (`low_disk`) **[code]** `tools/maestro-ticket/cli/cli.go:188-192`, and a run's `disk_full` line goes to the inbox as fyi (3.1). Nothing caps a run's memory. The design: a janitor that frees disk before claims are refused, a scratch folder for each run, a memory cap for each run, and a disk that gives space back to Windows.
+
+**What fills the VM** **[box]**, 2026-11-20. Its files date from Nov 12. It has 128 GB, 2.05M inodes (one per 64 KB) and 15 GiB of RAM with no swap. Today 49 GB and 1.05M inodes are in use.
+
+| Where | Size | Inodes | Freed today by |
+|---|---|---|---|
+| `/tmp`: 410 `mktemp -d` folders runs left (venvs, uv caches, 200 MB mongo-memory-server copies), 60 of them worktrees git still lists; 4 `maestro-slot-*` from killed slots | 14 GB | 375k | nothing. `slot` removes its own TMPDIR unless it is killed **[code]** `cli/slot.go:165,172`. The `maestro-prune` skill, run by hand, removes `tmp.*` folders untouched for 7 days and asks first **[code]** `skills/maestro-prune/SKILL.md:25,35` |
+| `~/.claude/projects`: 2.8 GB of it is agency-ops runs, 2,551 sessions in 8 days | 4.2 GB | 13k | Claude Code, after 30 days (`cleanupPeriodDays`) **[docs]**. Nothing here is that old yet. |
+| T3's `statev2.sqlite` | 3.0 GB | — | nothing |
+| Build caches: go-build 2.0, npm 0.8, playwright 0.7, pnpm 0.4, pip 0.4, uv 0.2 GB | 4.5 GB | 50k | nothing |
+| The store's folder: `evidence/` 796 MB, `backups/` 160 MB, `runs/` 60 MB (14.5k files) | 1.1 GB | 22k | run files 7 days after their ack **[code]** `runs/runs.go:561-563`, `cli/launch.go:37,671`; checks after 14 days **[code]** `cli/check.go:34`; handouts after a day **[code]** `cli/look.go:123`; `## Cache` folders after 14 days **[code]** `cli/cache.go:35,485`. **Evidence: only the skill.** |
+| `.maestro/worktrees`: 14 worktrees, 3 of them for done or cancelled tickets (184 MB) | 577 MB | 30k | only the skill |
+
+**Spikes, not just the pile.** Each run's end records the store disk's free space and free inodes **[code]** `cli/statsrun.go:447`. On 2026-11-20, from 05:09 to 05:25 UTC, free space went from 61% to 8% and back to 61%, about 65 GB. Free inodes went from 48% to 15% **[box]** (`stats.db`). On Nov 19, inodes ran out first: from 01:00 to 11:30, 8-16% of inodes were free while 46-55% of the space was. In that window, 22 runs ended `disk_full`. The cause **[box]**: test cases made full `git clone --no-hardlinks` or `cp -r` copies of the 3 GB repo, about 6,300 files a case (run R-lj5twhqh, T-654). Agency-ops is now banning those copies in favour of `git clone --shared`. A nightly janitor fixes the pile. Spikes need each run's scratch in a folder of its own and the low-disk trigger below.
+
+**The desktop's disk is a different shape.** By default the vhdx's virtual size is 1 TB, and `df` inside shows that 1 TB even when C: has less free **[docs]**. So the percent margins measure nothing until the size is fixed. Set `defaultVhdSize` in `.wslconfig` before the distro is made **[docs]**, so the whole vhdx fits on C: with room to spare. How many inodes WSL's ext4 gets per GB is (guess); 16.3 step 5 reads `df -i`.
+
+**1. Each run gets its own TMPDIR.** The launcher sets `TMPDIR=~maestro/tmp/<run-id>` for the run and everything it starts, as `slot` already does for one check **[code]** `cli/slot.go:165-181`. A `slot` inside the run makes its folder under it, so a killed slot's leftovers go with the run. When a run ends, its supervisor records the folder's size and file count as two new stats columns, `tmp_bytes` and `tmp_files`, so the next spike shows its run. The folder stays while a resume might need it, and the janitor removes it.
+
+**2. The janitor.** `maestro-ticket janitor [--dry-run]` is code in the binary, 0 tokens, run as `maestro` by `maestro-janitor.timer` each night at 03:30. It puts the `maestro-prune` skill's **Safe** sort and its proofs into code. It also takes two of the skill's ask-first classes, on a narrower rule: temp folders `maestro` owns, and evidence of closed tickets. The skill asks first because a shared `/tmp` holds other projects' folders; on the desktop, nothing else runs as `maestro`. It reuses `runs.Prune` and `removeTree` **[code]** `cli/cache.go:529`.
+
+| Class | Removed when | Always kept |
+|---|---|---|
+| Worktrees, in `.maestro/worktrees` and any git lists under `~maestro/tmp` | the ticket is done or cancelled and the head is merged or on the remote (the skill's proof). `git worktree remove`, never `--force`, then `git worktree prune` | dirty, unpushed, a live claim, any process's cwd (`/proc/*/cwd`) |
+| A run's TMPDIR | its run was acked over 24 hours ago | unacked runs; any run a `resume` or `--go-on` ring still waits on; a live run's |
+| Other entries `maestro` owns in `/tmp` and `~maestro/tmp` | untouched for 3 days and open in no process | the rest |
+| Run files | as now: 7 days after the ack | unacked |
+| Evidence `<common>/evidence/<id>` | the ticket has been done or cancelled for 14 days | the rest |
+| Transcripts | Claude Code's own cleanup, with `cleanupPeriodDays: 14` in `~maestro/.claude/settings.json` **[docs]**. The janitor doesn't touch them. A 14-day-old run resumes as `job again` anyway (14.4), and 14 days covers the weekly token report. | — |
+| Build caches | each tool's own prune, once its cache passes a cap (5 GB for Go, 2 GB for the rest, guess): `go clean -cache`, `pnpm store prune`, `uv cache prune`, `pip cache purge`, `npm cache clean --force` | — |
+| `/var/backups/maestro` (17.4) | over 14 nights old | the newest 14 |
+
+- **Idempotent.** One janitor at a time, under `flock` on `janitor.lock`. It checks each item again just before removing it. An item already gone counts as removed by someone else. It never deletes a `*.lock`. A second run frees nothing new.
+- **Logs.** It writes one journal line per class, such as `janitor: tmp 4.1 GB 180k files (212 dirs); worktrees 0.2 GB (3); kept T-572 dirty`, and one file, `<store>/janitor.json`, with `at`, `freed_bytes`, `freed_inodes`, the free space and inodes after, and `failed`.
+- **`--dry-run`** prints each item, its class, its proof and its size, and removes nothing.
+- **The wall.** It runs as `maestro`, so it can't touch `maestro-cos`'s files. On that side, desk notes are already pruned (5.4). T3's database is only watched: `ts-ensure --t3-check` (5.5) adds its size to the warning mark. Whether T3 prunes archived threads is (guess); see 11.
+- A project's own shared folders, such as agency-ops' `.git/dep-share` (1.1 GB **[box]**), are the project's. The janitor leaves them.
+
+**3. Low disk: free first, refuse second.** The claim margin stays as it is: refuse under 10% free and under 10 GiB, or under 10% of inodes free and under 1Mi inodes **[code]** `envcheck/disk.go:17`, `cli/cli.go:188-191`. The janitor works on a higher line, **20% of space or inodes** (guess, twice the margin). That line means the vhdx's fixed size, not C:.
+- **Trigger.** `maestro-janitor.timer` also runs `janitor --if-low` every 5 minutes: one `statfs`, and it exits when free space and inodes are above the line. `headroom`, which every `claim` and `slot` calls **[code]** `cli/cli.go:570`, also starts `janitor --if-low` in the background when it sees free space under the line, so a spike is caught within seconds. The lock keeps one janitor running.
+- **Stage 1**, under 20%: the nightly pass, now.
+- **Stage 2**, still under 15%: it also removes acked runs' TMPDIRs without the 24-hour wait, the evidence of every done or cancelled ticket, and each tool cache whole (`go clean -cache`, `uv cache clean`, and so on).
+- **Failed**, still under the 10% margin: one `disk_full` item goes to the inbox as **desk**, not fyi. It carries the janitor's report: free space and inodes, what it freed, the five largest folders by `du`, and what it kept and why (a dirty worktree, an unacked run). A desk can stop runs, release a stuck ticket or send the owner a card.
+- **A run's own `disk_full` line** (3.1) becomes fyi only when the latest `janitor.json` shows space above the margin. Otherwise it is desk.
+- Inodes count everywhere space does: `headroom` already checks both **[code]** `envcheck/disk_unix.go:20-22`, and each line above applies to whichever is lower.
+
+**4. A memory cap on each run.** In the Nov 19 22:59 UTC OOM on the VM **[box]** (`dmesg`), 417 tasks held 14.1 GB of anonymous memory:
+
+| Process | Memory |
+|---|---|
+| Two `next build` | 1.6 GB and 1.8 GB |
+| Nine next-servers | 1.4 GB |
+| 42 node | 3.5 GB |
+| 12 claude | 2.1 GB, about 175 MB each |
+| Four mongod | 430 MB |
+
+The kernel killed small chrome processes three times (oom_score_adj 300), and the builds kept running. Nothing records a run's peak today.
+- The launcher starts each run in a transient scope: `systemd-run --user --scope --slice=maestro-runs.slice --unit=run-<id> -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=0`. It needs `loginctl enable-linger maestro` and cgroup v2, which is WSL's default **[docs]**. Whether a `--user` scope may set memory limits in WSL is (guess, 16.3 step 5).
+- **The caps** **[I]**. The largest single process seen was a 1.8 GB `next build`. A QA run with `next build`, a next-server, mongod, chrome and claude comes to about 3 GB. So `MemoryHigh=3G` throttles first and `MemoryMax=4G` kills. When each run ends, the supervisor records the scope's `memory.peak` in stats as `mem_peak`. After a week, the cap becomes the 99th-percentile peak × 1.5.
+- **The slice total.** `maestro-runs.slice` gets `MemoryMax` = the distro's memory − 3G for T3 (5.5) − 2G for supervisors and the system. For example, 19G under `.wslconfig memory=24GB`. Then 10 runs (the limit today **[box]** `board.json`) can't take down the distro: an OOM kill lands inside the slice, and T3 and the desks stay up.
+- **A run its cap kills** shows `oom_kill` in its scope's `memory.events`. The supervisor routes it as `failed` with `why: oom 4G`, which goes to the judge like any `failed`. Two on one ticket make a `died twice` desk item.
+- `.wslconfig`'s `autoMemoryReclaim` defaults to `dropCache`, which hands cached memory back to Windows **[docs]**. Keep it.
+
+**5. Give space back to Windows.** A vhdx only grows. Freed space goes back to Windows only if the disk is sparse. Set `[experimental] sparseVhd=true` in `.wslconfig` before the distro is made, which makes new VHDs sparse **[docs]**. For an existing disk, `wsl --manage Maestro --set-sparse true` (the WSL September 2023 update **[docs]**). After that, util-linux's `fstrim.timer` trims weekly. There are caveats. Users report that a sparse disk didn't shrink (Microsoft Q&A, 2024 **[docs]**, weak). Reports say newer builds refuse `--set-sparse` without `--allow-unsafe` because of a corruption risk (guess). `Optimize-VHD` refuses a sparse disk **[docs]**. So 16.3 step 5 tests it. If the disk shrinks with no unsafe flag, keep sparse and `fstrim`. Otherwise, use neither: since the vhdx size is fixed, its growth is bounded, and the owner compacts it on a quiet evening (`wsl --shutdown`, then `Optimize-VHD -Mode Full`, or `diskpart` `compact vdisk` on Windows Home).
+
+**What `desk brief` shows.** One line:
+```
+disk: 212 GB free (41%) · inodes 88% free · janitor 03:30 freed 6.1 GB, 180k files · runs OOM-capped this week: 1
+```
+When a stage-2 pass fails: `DISK LOW: 9% free · janitor freed 0.4 GB · disk_full in inbox`.
 
 ## 7. The board on Atlas
 
@@ -544,7 +620,7 @@ flowchart LR
 | 0. Token knobs and fixes | S0, S7 | `rules set model <job> opus`; revert the skill lines |
 | 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
 | 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
-| 3. Move to the desktop; one desk in T3 | S4, S5, S9, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
+| 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
 | 4. Several desks | S8 | close all but one desk |
 
 ## 11. Build order and probes
@@ -559,6 +635,7 @@ flowchart LR
 | S4 | The wall, option A in `Maestro`: `wsl.conf`, users, sudoers lines, a root-owned binary, desks' `CLAUDE.md` and hooks, cwd outside the repo (6.2) | a worker session can't send to a desk thread; finds no `cmd.exe`, `powershell.exe`, `wsl.exe` or `/mnt/c`; can't write `/usr/local/bin/maestro-ticket`; `sudo -l` shows one rule per user; a desk in `~maestro-cos/desk` loads no repo `CLAUDE.md`, settings or `.mcp.json`; with `maestro-cos` missing, `maestro-ticket` refuses runs; a goal from the phone starts a plan run |
 | S5 | Atlas free tier, the environment builder, account field | `doctor` shows `mongodb at <host>`; a run's environment holds no API key and holds `GH_TOKEN`; the free-tier rows of 7 measured |
 | S9 | Desktop services: units and timers (relay check, heartbeat, T3 resources, backup), the pager thread, `push-down`, the startup task (5.5, 6.2, 17.4) | a reboot with no one logged in brings the phone's T3 back within 5 minutes; a blocked relay sets `push-down`, every desk reply leads with it, held pages go out as one after; the heartbeat arrives at 09:00; a page with a slug off the pattern is refused |
+| S10 | Cleanup (6.4): per-run TMPDIR, `janitor` with `--dry-run` and `--if-low`, the timer, `headroom`'s kick, the desk-class `disk_full`, per-run memory scopes, the `tmp_bytes`, `tmp_files` and `mem_peak` stats, and the brief's `disk:` line | `--dry-run` lists and removes nothing; a second pass frees nothing; a dirty worktree, an unacked run's TMPDIR and a live run's cwd survive; filling the disk past the 20% line (`fallocate`) starts the janitor within 5 minutes, and it frees space before any claim is refused; with nothing left to free, one **desk** `disk_full` item; a run that allocates 5 GB is killed alone at 4G, its scope shows `oom_kill`, and the other runs and T3 keep going |
 | S6 | The rewrite (section 9) | review |
 | S7 | `rules set model <job>`; review subagents in the foreground with a model named; 5-minute cache for build and QA; graph wiring and re-index on merge; `again` for a cold resume (section 14) | each eval set in 14.2 passes before its job moves to Sonnet |
 | S8 | `desk` command: open, close, claim, release, beat, note, remember, brief, ring, page; the duty check; the three hooks | two desks claim one goal and one wins; a desk silent for 24 h loses its goals to the duty desk; the first desk opened has duty; closing it gives duty to the next-oldest live desk, and a lapsed lease does too at the next desk event; 5 desks racing 1,000 duty checks leave one holder per epoch in `duty.log`; a `rules set` that holds the lock finishes before a takeover, and the old holder's next one is refused; a failed ring send moves duty at once; `brief` shows `duty:` and stays under 40 lines with 5 desks; `ring` wakes only the owning desk |
@@ -583,6 +660,11 @@ flowchart LR
 | A repo on the distro's ext4 is much faster than under `/mnt/c` or on NTFS | [docs] | 16.3 step 3 |
 | The distro and its units come back after a reboot with no one logged in, and an idle distro isn't stopped | (guess) | 16.3 step 8 |
 | The desktop's home IP stays put long enough for an allowlist | (guess) | record the public IP daily for a week |
+| A sparse vhdx shrinks after `fstrim` with no `--allow-unsafe` | [docs], weak: reports it doesn't shrink | 16.3 step 5 |
+| A `--user` scope as `maestro` can set `MemoryMax` in WSL, and kills only that scope | (guess) | 16.3 step 5; then S10 |
+| 4G per run fits a build or QA run | **[I]** from the Nov 19 OOM table (6.4) | a week of `mem_peak`; the 99th percentile × 1.5 |
+| WSL's ext4 has more inodes per GB than the VM's one per 64 KB | (guess) | 16.3 step 5, `df -i` |
+| T3 prunes or vacuums archived threads (3.0 GB `statev2.sqlite` on the VM **[box]**) | (guess) | the T3 docs; watch its size over the rehearsal week |
 
 ## 12. Later: what the audits found for scale
 
@@ -737,7 +819,7 @@ powercfg /change monitor-timeout-ac 15     # the screen may still turn off
 ```
 Windows Update still reboots the PC. Set active hours, and let the startup path (Tailscale's unattended service, the keepalive task, systemd) bring everything back. The 09:00 heartbeat confirms it each day.
 
-### 16.3 The probe: about 30 minutes, on the desktop
+### 16.3 The probe: about 40 minutes, on the desktop
 
 It uses a throwaway distro, `MaestroProbe`, and leaves nothing behind. Run step 8 last, because it reboots. Text after `#` is a note. `<you>` is the Linux user the probe distro asks you to make; `<pc>.<tailnet>` is the PC's tailnet name. Claude Code runs only inside the probe distro, never natively (6.3).
 
@@ -803,6 +885,14 @@ Back in the distro, check which writes printed a line, then `kill %1`.
 wsl -d MaestroProbe -- date -u +%T; (Get-Date).ToUniversalTime().ToString("T")    # within 1 s?
 ```
 
+**5b. Disk give-back and memory caps (8 min).** These feed 6.4. In `MaestroProbe`: `df -h /; df -i /` (inodes per GB). Then `systemd-run --user --scope -p MemoryMax=200M python3 -c 'b=bytearray(400<<20)'`, which should be killed while the shell stays. PowerShell:
+```
+$v = (Get-ChildItem HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss | ? { $_.GetValue("DistributionName") -eq 'MaestroProbe' }).GetValue("BasePath") + "\ext4.vhdx"
+wsl --terminate MaestroProbe; wsl --manage MaestroProbe --set-sparse true     # refused without --allow-unsafe? then stop: no sparse
+wsl -d MaestroProbe -- sh -c 'head -c 20G /dev/zero > ~/big; sync'; wsl --terminate MaestroProbe; (Get-Item $v).Length/1GB
+wsl -d MaestroProbe -- rm ~/big; wsl -d MaestroProbe -u root -- fstrim -v /; wsl --terminate MaestroProbe; Start-Sleep 10; (Get-Item $v).Length/1GB   # about 20 GB smaller?
+```
+
 **6. Networking: WSL → Windows → tailnet (3 min).** In `MaestroProbe`: `python3 -m http.server 3773 --bind 127.0.0.1 --directory /tmp &`. PowerShell:
 ```
 curl.exe -sI http://127.0.0.1:3773 | Select -First 1      # want: HTTP/1.0 200 (NAT localhost forwarding)
@@ -850,6 +940,7 @@ Remove-Item -Recurse -Force C:\probe
 | 3 | `git status` ×5 and `go test` times: ext4, `/mnt/c`, NTFS; `launch` refused natively; `install_test` in WSL and Git Bash | — (decides only that files live on ext4) |
 | 4 | which writes inotify saw | — |
 | 5 | idle distro stopped? clock skew | — (the keepalive task covers a stop) |
+| 5b | inodes per GB; the scope killed alone; `--set-sparse` refused without the unsafe flag?; vhdx size before and after `fstrim` | — (no shrink, or the unsafe flag: no sparse, the owner compacts by hand, 6.4) |
 | 6 | localhost forwarding in NAT, else mirrored; phone reaches it | **both modes fail**: then B |
 | 7 | `t3 thread` there; no cloudflared; push on a locked phone; what it shows; push without Tailscale | **T3 misbehaves in WSL** while the Windows app works: then B. If the push fails in both, the pager plan (5.5) is wrong: stop and rethink |
 | 8 | sleeps seen; phone reached the PC after a reboot with no login; clock | **the distro won't start without a login**: B doesn't fix that either. Use auto-login with a locked screen, and say so |
@@ -898,7 +989,7 @@ Each night a timer in the distro writes a tarball to `/var/backups/maestro/` (ow
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6 changed
+## 18. What v6 and v7 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -911,6 +1002,14 @@ A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\v
 | A second channel kept as an option | Fail visible plus heartbeat is enough | Option removed (5.5) |
 | Native agents on the owner's account asked | None | Distro stays under the owner's account; the rule, what breaks it, and the fix (6.3) |
 | Option C, a container | — | Removed: not in play (6.1) |
+
+v7, 2026-11-20, approved by the owner for PR #105:
+
+| v6 said | Found on the VM **[box]** | v7 |
+|---|---|---|
+| Low disk: claims refuse, `disk_full` is fyi | Nothing frees disk: 14 GB of run leftovers in `/tmp`, 0.8 GB of evidence. Free space swung 61% → 8% → 61% in 15 minutes; inodes ran out first on Nov 19 | Per-run TMPDIR; nightly and `--if-low` janitor; `disk_full` is desk when freeing fails (6.4, 3.1, 5.2) |
+| `MemoryMax` on T3 only | Nov 19 OOM: two `next build` at 1.6-1.8 GB; the kernel killed chrome instead | Each run in a scope, 4G cap **[I]**, a slice total; `mem_peak` sets the cap after a week (6.4) |
+| `.wslconfig` sets memory | A vhdx shows 1 TB and only grows **[docs]** | `defaultVhdSize`; sparse plus `fstrim` only if 16.3 step 5b passes (6.2, 6.4) |
 
 ## 19. Open questions
 
