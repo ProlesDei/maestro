@@ -145,7 +145,11 @@ func apiDown(r runs.Record) bool {
 // spent inside the outage would only fail again and block its ticket.
 // Stats keep outcomeOf's failed.
 func admissionWait(r runs.Record) bool {
-	return r.Profile != "" && r.State == runs.Failed && strings.HasPrefix(strings.TrimSpace(r.Error), "maestro-ticket: worker admission:")
+	if r.Profile == "" || r.State != runs.Failed {
+		return false
+	}
+	msg := strings.TrimSpace(r.Error)
+	return strings.HasPrefix(msg, "maestro-ticket: worker admission:") || strings.HasPrefix(msg, "maestro-ticket: worker: projected usage exceeds allowance until ") || msg == "maestro-ticket: worker: subscription login could not be verified; refresh the bound account"
 }
 
 func routeOutcome(r runs.Record) (outcome, reset string) {

@@ -166,6 +166,13 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		return r, usagef("launch: use job on a subscription-paced runtime board")
 	}
 	if loc.boardID == "" {
+		if r.Profile != "" {
+			if _, e := os.Stat(filepath.Join(root, "account-"+r.Profile+".login")); e == nil {
+				return r, fmt.Errorf("%w: profile requires login verification", ticket.ErrPaused)
+			} else if !errors.Is(e, os.ErrNotExist) {
+				return r, e
+			}
+		}
 		return runs.Create(dir, r, prompt)
 	}
 	unlock, err := lockBoard(root)

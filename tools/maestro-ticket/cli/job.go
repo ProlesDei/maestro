@@ -1002,6 +1002,18 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if admissionWait(r) {
+		fail = func(err error) (runs.Record, error) {
+			var going alreadyGoing
+			if errors.As(err, &going) {
+				other, e := runs.Get(dir, going.run, time.Now())
+				if e != nil || other.AgainOf != r.ID || other.BoardID != r.BoardID || other.Job != r.Job || other.Ticket != r.Ticket || other.Launcher != r.Launcher || other.PID == 0 {
+					return runs.Record{}, fmt.Errorf("%w: waiting to replay the original turn", ticket.ErrClaimed)
+				}
+			}
+			return runs.Record{}, err
+		}
+	}
 	switch {
 	case r.Launcher != c.actor:
 		return fail(fmt.Errorf("%w: job again: run %s is %s's", ticket.ErrForbidden, r.ID, dash(r.Launcher)))
@@ -1035,7 +1047,13 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	}
 	k, _ := findJob(r.Job)
 	if r.Ticket != "" {
-		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
+		var err error
+		if admissionWait(r) && flagValue(r.Command, "--resume") != "" {
+			err = c.resumeFits(ctx, r)
+		} else {
+			err = c.jobFits(ctx, k, r.Ticket)
+		}
+		if err != nil {
 			if errors.Is(err, ticket.ErrStatusConflict) {
 				err = movedOn{run: r.ID, err: err}
 			}
@@ -1213,6 +1231,10 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 	}
 	if r.Dir, _, err = c.buildCheckout(r); err != nil {
 		return fail(err)
+	}
+	// Older saved routes used --go-on after a refusal. The unsent input is still the exact turn to deliver.
+	if o.goOn && admissionWait(r) {
+		return c.again(ctx, againOpts{run: r.ID})
 	}
 	if o.opus && r.Profile != "" {
 		if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(filepath.Join(filepath.Dir(dir), "notify"), "senior-engineer") {
