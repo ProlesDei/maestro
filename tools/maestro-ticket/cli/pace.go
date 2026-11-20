@@ -18,6 +18,7 @@ import (
 )
 
 type paceWindow struct {
+	Since  time.Time `json:"accounted_since,omitzero"`
 	Used   float64   `json:"used_percent"`
 	Reset  time.Time `json:"resets_at"`
 	Read   time.Time `json:"read_at"`
@@ -45,6 +46,11 @@ func readUsage(path string) (usageLedger, error) {
 }
 
 func saveObservation(dir, alias string, windows map[string]paceWindow) error {
+	return saveMeter(dir, alias, windows, "")
+}
+
+// A worker checking its login has not spent its reservation yet.
+func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -70,7 +76,12 @@ func saveObservation(dir, alias string, windows map[string]paceWindow) error {
 		if ok && !w.Read.After(previous.Read) {
 			continue
 		}
+		w.Since = w.Read
+		if ok {
+			w.Since = previous.Reset
+		}
 		if ok && previous.Reset.Equal(w.Reset) {
+			w.Since = previous.Since
 			if w.Used < previous.Used {
 				return errors.New("allowance decreased within the same reset window")
 			}
@@ -79,12 +90,12 @@ func saveObservation(dir, alias string, windows map[string]paceWindow) error {
 			delta := w.Used - previous.Used
 			w.Covered = map[string]float64{}
 			for _, r := range records {
-				if r.Profile != alias || neverRan(r) || r.StartedAt.After(w.Read) || r.EndedAt != nil && !r.EndedAt.After(previous.Read) {
+				if r.ID == beforeTurn || r.Profile != alias || r.Unspent || neverRan(r) || r.StartedAt.After(w.Read) || r.EndedAt != nil && !r.EndedAt.After(w.Since) {
 					continue
 				}
 				credited := previous.Covered[r.ID]
 				points := min(delta, max(0, r.Estimate-credited))
-				if r.EndedAt == nil || r.EndedAt.After(w.Read) {
+				if credited+points > 0 {
 					w.Covered[r.ID] = credited + points
 				}
 				delta -= points
@@ -117,7 +128,7 @@ func (c *call) recordUsage(alias, key, reset string, used float64) error {
 	return saveObservation(dir, alias, map[string]paceWindow{key: {Used: used, Reset: end, Read: now, Source: "operator"}})
 }
 
-func (c *call) copyNativeUsage(st profileStatus) error {
+func (c *call) copyNativeUsage(st profileStatus, beforeTurn string) error {
 	windows := map[string]paceWindow{}
 	for name, w := range st.Windows {
 		if w.UsedPercent != nil && w.Reset != nil && *w.UsedPercent >= 0 && *w.UsedPercent <= 100 {
@@ -131,7 +142,7 @@ func (c *call) copyNativeUsage(st profileStatus) error {
 	if err != nil {
 		return err
 	}
-	return saveObservation(dir, st.Alias, windows)
+	return saveMeter(dir, st.Alias, windows, beforeTurn)
 }
 
 // Admission runs under the board lock through creation of the run record.
@@ -272,7 +283,7 @@ func projectedRoom(alias string, b jobModel, reserve float64, windows map[string
 		}
 		remaining := 100 - reserve - w.Used - w.Burn*w.Reset.Sub(w.Read).Hours() - b.Estimate
 		for _, old := range list {
-			if old.Profile == alias && !neverRan(old) && (old.EndedAt == nil || old.EndedAt.After(w.Read)) {
+			if old.Profile == alias && !old.Unspent && !neverRan(old) && (old.EndedAt == nil || old.EndedAt.After(w.Since)) {
 				remaining -= max(0, old.Estimate-w.Covered[old.ID])
 			}
 		}

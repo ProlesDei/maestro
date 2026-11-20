@@ -64,15 +64,25 @@ func (tx *txn) changeCriteria(r CriteriaRequest) (ticket.Criteria, error) {
 		return ticket.Criteria{}, errors.New("ticket has no accepted brief")
 	}
 	state := *t.Criteria
-	if r.Verb == "closed-unmerged" {
-		if r.Actor != "planner" || t.LiveClaim() != nil || state.Merge == "" || state.Merge != r.Head || t.Status != ticket.StatusInReview {
+	if r.Verb == "closed-unmerged" || r.Verb == "head-moved" || r.Verb == "merge-rejected" {
+		if state.Merge == "" || state.Merge != r.Head || t.Status != ticket.StatusInReview {
 			return state, errors.New("merge reservation changed")
+		}
+		if r.Verb == "merge-rejected" {
+			if r.Actor != "qa-lead" || ticket.HolderBot(r.Holder) != r.Actor || t.LiveClaim() == nil || state.AC != r.AC || state.Brief != r.Brief {
+				return state, ticket.ErrLeaseLost
+			}
+			if err := t.CheckFence(r.Holder, r.Token); err != nil {
+				return state, err
+			}
+		} else if r.Actor != "planner" || t.LiveClaim() != nil {
+			return state, ticket.ErrLeaseLost
 		}
 		if err := tx.releaseMerge(t); err != nil {
 			return state, err
 		}
 		state.Merge = ""
-		return state, tx.appendEvent(t.ID, "merge_closed_unmerged", r.Actor, map[string]any{"head": r.Head})
+		return state, tx.appendEvent(t.ID, r.Verb, r.Actor, map[string]any{"head": r.Head})
 	}
 	if r.Verb == "merge" && state.Merge != "" && state.Merge == r.Head && state.AC == r.AC && state.Brief == r.Brief && r.Actor == "qa-lead" && ticket.HolderBot(r.Holder) == r.Actor {
 		return state, t.CheckFence(r.Holder, r.Token)

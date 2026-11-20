@@ -174,7 +174,7 @@ func (c *call) reconsider(ctx context.Context, loc storeLoc) error {
 		if refresh {
 			st, e := readProfile(ctx, alias, p.Harness, p.ConfigDir)
 			if e == nil && st.identity == p.Identity && st.Plan == p.Plan && len(st.Windows) > 0 {
-				if err := c.copyNativeUsage(st); err != nil {
+				if err := c.copyNativeUsage(st, ""); err != nil {
 					return err
 				}
 			}

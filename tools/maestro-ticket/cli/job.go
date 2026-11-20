@@ -1030,6 +1030,9 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	if err := c.mayStart(); err != nil {
 		return fail(err)
 	}
+	if r.Dir, _, err = c.buildCheckout(r); err != nil {
+		return fail(err)
+	}
 	k, _ := findJob(r.Job)
 	if r.Ticket != "" {
 		if err := c.jobFits(ctx, k, r.Ticket); err != nil {
@@ -1203,6 +1206,9 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 		return fail(fmt.Errorf("%w: resume: %s", ticket.ErrStatusConflict, stillRunning(r)))
 	case o.died && r.State != runs.Died && !r.LauncherStopped():
 		return fail(fmt.Errorf("%w: resume --died: run %s %s, it didn't die: a hung or failed run goes to whoever handed you the job", ticket.ErrStatusConflict, r.ID, r.State))
+	}
+	if r.Dir, _, err = c.buildCheckout(r); err != nil {
+		return fail(err)
 	}
 	if o.opus && r.Profile != "" {
 		if r.Job != "build" || r.Ticket == "" || r.Launcher != "junior-engineer" || !codeRole(filepath.Join(filepath.Dir(dir), "notify"), "senior-engineer") {

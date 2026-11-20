@@ -166,7 +166,16 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 		line := r.ID + " " + r.Ticket + ": supervisor and worker gone"
 		if r.Dir != "" {
 			cc := *c
-			cc.env.Dir = r.Dir
+			checkout, found, e := c.buildCheckout(r)
+			if e != nil {
+				out.Held[r.Ticket] = "verify saved build worktree"
+				out.Findings = append(out.Findings, line+"; cannot locate saved build worktree")
+				continue
+			}
+			cc.env.Dir = checkout
+			if r.Job == "build" && !found {
+				line += "; no registered ticket checkout, inspecting launch directory"
+			}
 			head, err := cc.git("rev-parse", "HEAD")
 			if err == nil {
 				if changes, e := cc.git("status", "--porcelain"); e == nil {
@@ -247,6 +256,32 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 	return out, nil
 }
 
+// A build can create its ticket checkout after the supervisor records the launch directory.
+func (c *call) buildCheckout(r runs.Record) (string, bool, error) {
+	if r.BoardID == "" || r.Job != "build" || r.Ticket == "" {
+		return r.Dir, false, nil
+	}
+	cc := *c
+	cc.env.Dir = r.Dir
+	rows, err := cc.git("worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return "", false, err
+	}
+	branch := "branch refs/heads/maestro/" + r.BoardID + "/" + r.Ticket
+	for _, row := range strings.Split(rows, "\x00\x00") {
+		fields := strings.Split(row, "\x00")
+		if slices.Contains(fields, branch) {
+			dir, ok := strings.CutPrefix(fields[0], "worktree ")
+			info, err := os.Stat(dir)
+			if !ok || err != nil || !info.IsDir() {
+				return "", false, errors.New("registered build worktree unavailable")
+			}
+			return dir, true, nil
+		}
+	}
+	return r.Dir, false, nil
+}
+
 func (c *call) startTracker(id string) error {
 	store, _, err := c.storePath()
 	if err != nil {
@@ -324,7 +359,7 @@ func (c *call) recoveryPR(ctx context.Context, branch string) (recoveryPR, error
 	cmd := exec.CommandContext(ctx, "gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "2", "--json", "number,state,headRefName,headRefOid,baseRefName,isCrossRepository")
 	cmd.Dir = c.env.Dir
 	b, err := cmd.Output()
-	if err != nil || json.Unmarshal(b, &prs) != nil || len(prs) != 1 || prs[0].IsCrossRepository || prs[0].HeadRefName != branch {
+	if err != nil || json.Unmarshal(b, &prs) != nil || len(prs) != 1 || prs[0].IsCrossRepository || prs[0].HeadRefName != branch || len(prs[0].HeadRefOid) != 40 || !shaPattern.MatchString(prs[0].HeadRefOid) {
 		return recoveryPR{}, errors.New("cannot verify one same-repository PR for the board branch")
 	}
 	common, err := c.git("rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -408,6 +443,16 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			report.Held[id] = "PR closed without matching merge evidence"
 			report.Findings = append(report.Findings, id+": "+report.Held[id])
 		case pr.HeadRefOid != head:
+			if d.Criteria != nil && d.Criteria.Merge == head {
+				// New merge requests pin the old SHA synchronously. A different head cannot satisfy one.
+				b, err := c.board()
+				if err != nil {
+					return err
+				}
+				if _, err := b.ChangeCriteria(ctx, mongostore.CriteriaRequest{Verb: "head-moved", ID: t.ID, Head: head, Actor: "planner"}, key+"-unreserve-"+pr.HeadRefOid); err != nil {
+					return err
+				}
+			}
 			_, err = s.Comment(ctx, ticket.CommentRequest{ID: t.ID, Actor: "planner", Body: "Rereview: PR head changed after review at " + head, IdempotencyKey: key + "-rereview-" + pr.HeadRefOid})
 			if err != nil {
 				return err

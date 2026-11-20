@@ -98,3 +98,39 @@ func TestRuntimeAdmissionFollowsUsage(t *testing.T) {
 		t.Fatalf("overspent: %v", err)
 	}
 }
+
+func TestLateMeterKeepsCompletedSpend(t *testing.T) {
+	dir := t.TempDir()
+	start := time.Now().UTC().Add(-30 * time.Minute)
+	reset := start.Add(24 * time.Hour)
+	sample := func(at time.Time, used float64) map[string]paceWindow {
+		t.Helper()
+		if err := saveObservation(dir, "max", map[string]paceWindow{"weekly": {Read: at, Reset: reset, Used: used, Source: "trial"}}); err != nil {
+			t.Fatal(err)
+		}
+		state, err := readUsage(filepath.Join(dir, "usage.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state["max"]
+	}
+	sample(start, 90)
+	r, err := runs.Create(filepath.Join(dir, "runs"), runs.Record{Profile: "max", Estimate: 8, StartedAt: start.Add(time.Minute)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := start.Add(2 * time.Minute)
+	r.State, r.EndedAt = runs.Done, &end
+	if err := runs.Save(filepath.Join(dir, "runs"), r); err != nil {
+		t.Fatal(err)
+	}
+	windows := sample(end.Add(time.Minute), 90)
+	reservations := []runs.Record{r}
+	if _, reason := projectedRoom("max", jobModel{Estimate: 8}, 0, windows, reservations, end); reason == "" {
+		t.Fatal("flat meter released eight already spent points")
+	}
+	windows = sample(end.Add(2*time.Minute), 98)
+	if room, reason := projectedRoom("max", jobModel{Estimate: 2}, 0, windows, reservations, end); reason != "" || room != 0 {
+		t.Fatalf("observed spend charged twice: %v %s", room, reason)
+	}
+}

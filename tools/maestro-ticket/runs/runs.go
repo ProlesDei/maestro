@@ -75,6 +75,7 @@ type Record struct {
 	BoardID       string   `json:"board_id,omitempty"`
 	ActionID      string   `json:"action_id,omitempty"`
 	ActionHash    string   `json:"action_hash,omitempty"`
+	Unspent       bool     `json:"-"` // The native wrapper refused the run before starting its provider.
 	Estimate      float64  `json:"estimate_percent,omitempty"`
 	Profile       string   `json:"profile,omitempty"`
 	Harness       string   `json:"harness,omitempty"`
@@ -329,6 +330,10 @@ func Get(dir, id string, now time.Time) (Record, error) {
 		if !r.Ended() {
 			r.State = Died
 		}
+	}
+	if r.Profile != "" {
+		_, e := os.Stat(path(dir, id, ".unspent"))
+		r.Unspent = e == nil
 	}
 	if b, err := os.ReadFile(path(dir, id, ".acked")); err == nil {
 		var a ack
@@ -619,7 +624,7 @@ func Prune(dir string, keep time.Duration, now time.Time) error {
 		pruned[id] = true
 		// .json first, since List finds runs by it, and .acked last: while
 		// .acked stays, no pickup shows the run again.
-		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".acked"} {
+		for _, ext := range []string{".json", ".in", ".out", ".err", ".lock", ".resumed", ".again", ".stop", ".stopcheck", ".stats", streamExt, ".unspent", ".acked"} {
 			os.Remove(path(dir, id, ext))
 		}
 	}

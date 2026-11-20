@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,50 +33,54 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	if err := c.noArgs(); err != nil {
 		return err
 	}
-	var ac, brief int
-	if id := c.env.Getenv(runs.RunIDEnv); runs.ValidID(id) {
-		dir, err := c.besideStore("runs")
+	id := c.env.Getenv(runs.RunIDEnv)
+	if !runs.ValidID(id) {
+		return errors.New("worker: no supervised run")
+	}
+	dir, err := c.besideStore("runs")
+	if err != nil {
+		return err
+	}
+	record, err := runs.Load(dir, id)
+	if err != nil {
+		return err
+	}
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	for record.State == runs.Starting {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return errors.New("worker: supervisor did not record a launch")
+		case <-tick.C:
+		}
+		record, err = runs.Load(dir, id)
 		if err != nil {
 			return err
-		}
-		record, err := runs.Load(dir, id)
-		if err != nil {
-			return err
-		}
-		// The wrapper may start before its supervisor has saved the board
-		// launch. It must never spend subscription usage without that receipt.
-		if record.BoardID != "" {
-			deadline := time.NewTimer(30 * time.Second)
-			defer deadline.Stop()
-			tick := time.NewTicker(25 * time.Millisecond)
-			defer tick.Stop()
-			for record.State == runs.Starting {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-deadline.C:
-					return errors.New("worker: supervisor did not record a launch")
-				case <-tick.C:
-				}
-				record, err = runs.Load(dir, id)
-				if err != nil {
-					return err
-				}
-			}
-			if record.PID != os.Getpid() || record.LaunchID == 0 || record.Stamp != runs.Stamp(os.Getpid()) {
-				return errors.New("worker: launch receipt does not match this process")
-			}
-			if err := c.mayStart(); err != nil {
-				return err
-			}
-		}
-		ac, brief = record.ACRevision, record.BriefRevision
-		if record.BoardID != "" {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithDeadline(ctx, record.StartedAt.Add(record.LimitDuration()))
-			defer cancel()
 		}
 	}
+	loc, err := c.location()
+	if err != nil {
+		return err
+	}
+	if record.State != runs.Running || record.BoardID != loc.boardID || record.Profile != *alias || record.Job != *job || record.PID != os.Getpid() || record.Stamp != runs.Stamp(os.Getpid()) || (loc.boardID != "" && record.LaunchID == 0) {
+		return errors.New("worker: launch receipt does not match this process")
+	}
+	started := false
+	defer func() {
+		if !started {
+			_ = writeWholeMode(filepath.Join(dir, id+".unspent"), []byte("no provider turn"), 0600)
+		}
+	}()
+	if err := c.mayStart(); err != nil {
+		return err
+	}
+	ac, brief := record.ACRevision, record.BriefRevision
+	ctx, cancel := context.WithDeadline(ctx, record.StartedAt.Add(record.LimitDuration()))
+	defer cancel()
 	p, m, err := c.jobProfile(*alias, *job)
 	if err != nil {
 		return err
@@ -130,8 +135,24 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		}
 	}
 	if len(st.Windows) != 0 {
-		if err := c.copyNativeUsage(st); err != nil {
+		if err := c.copyNativeUsage(st, id); err != nil {
 			return err
+		}
+	}
+	if loc.boardID != "" {
+		// The meter may have moved between admission and the provider login check.
+		root := filepath.Dir(dir)
+		ledger, err := readUsage(filepath.Join(root, "usage.json"))
+		if err != nil {
+			return err
+		}
+		list, err := runs.List(dir, time.Now(), true)
+		if err != nil {
+			return err
+		}
+		list = slices.DeleteFunc(list, func(r runs.Record) bool { return r.ID == id })
+		if _, reason := projectedRoom(*alias, m, p.Reserve, ledger[*alias], list, time.Now().UTC()); reason != "" {
+			return fmt.Errorf("worker: %s", reason)
 		}
 	}
 	// Preserve the supervisor identity and the board chosen by the launcher.
@@ -146,11 +167,13 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		if k, _ := findJob(*job); k.lean {
 			cmd.Env = append(cmd.Env, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m")
 		}
+		started = true
 		return c.claudeResult(cmd, *alias)
 	}
+	started = true
 	err = codexResult(cmd, c.env.Stdout)
 	if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
-		if e = c.copyNativeUsage(after); e != nil {
+		if e = c.copyNativeUsage(after, ""); e != nil {
 			fmt.Fprintln(c.env.Stderr, "refresh usage:", e)
 		}
 	}

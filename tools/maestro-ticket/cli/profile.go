@@ -103,7 +103,7 @@ func runProfile(ctx context.Context, c *call) error {
 		if *window != "" || *reset != "" || *used != -1 {
 			err = c.recordUsage(alias, *window, *reset, *used)
 		} else {
-			err = c.copyNativeUsage(st)
+			err = c.copyNativeUsage(st, "")
 		}
 		if err == nil {
 			if loc, e := c.location(); e == nil && loc.boardID != "" && codeRole(filepath.Join(loc.localDir, "notify"), "planner") {

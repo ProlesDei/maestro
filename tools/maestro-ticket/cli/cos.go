@@ -133,7 +133,9 @@ func runCos(ctx context.Context, c *call) error {
 			return usagef("cos: name the goal and its published delivery")
 		}
 		if verb == "ack" {
-			out, err = b.AcceptDelivery(ctx, in.Delivery, "ack")
+			var d mongostore.PlannerDelivery
+			d, err = b.AcceptDelivery(ctx, in.Delivery, "ack")
+			out = map[string]string{"id": d.ID, "receipt": d.Receipt, "state": d.State}
 		} else {
 			out, err = c.deliver(ctx, b, in.Delivery, verb)
 		}

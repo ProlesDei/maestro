@@ -71,6 +71,18 @@ func TestCriteriaChangeAndMerge(t *testing.T) {
 	change(CriteriaRequest{ID: csv, AC: 1, Brief: 2, Verb: "assess", Actor: "planner", Disposition: "fits", Evidence: "CSV remains in scope"}, "csv-cleared")
 	proof.Brief = 2
 	change(proof, "merge")
+	rejected := proof
+	rejected.Verb = "merge-rejected"
+	rejected.Token++
+	if _, err := s.ChangeCriteria(ctx, rejected, "foreign-rejection"); err == nil {
+		t.Fatal("old QA fence released another reservation")
+	}
+	rejected.Token = proof.Token
+	change(rejected, "rejected")
+	if _, err := s.ChangeCriteria(ctx, proof, "merge"); err == nil {
+		t.Fatal("old merge receipt authorized a new attempt")
+	}
+	change(proof, "retry-merge")
 	if res, err := testDB(t, s).Collection("goal_merges").UpdateOne(ctx, bson.M{"_id": "export", "merging": bson.M{"$in": bson.A{nil, 0}}}, bson.M{"$set": bson.M{"revision": 3}}); err != nil || res.MatchedCount != 0 {
 		t.Fatal("publication crossed a merge", err)
 	}

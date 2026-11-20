@@ -74,7 +74,7 @@ Only for a ticket with a `Review: GO at <H>` and your `QA: pass at <H>`. With no
 
 1. Read the PR's head and the ticket again. If the head isn't `H`, merge nothing and post the `Rereview:` as Phase E step 3 says. If the ticket isn't `in_review`, or you can't claim it again after losing the claim, merge nothing and say so in the reply.
 2. Fetch. If the main branch isn't at the `G` your pass names, set `G` to its new sha, merge it into the worktree if it isn't in yet, and rerun Phase D step 5, twice at most. A conflict or a red check is now a fail: post it as Phase E step 4 says, keyed `<run>-ship`, then do step 5 below and stop. On a third move, merge nothing and say so, with `Next:` as `qa-lead: finish <id>`: your pass stays the latest comment, so the planner sends QA again to finish.
-3. Set `SKILL_DIR` to this installed QA skill’s absolute path. Its merge command checks the board branch, head and starting criteria. A refused reservation ends the attempt. A lost GitHub response leaves the reservation for recovery. Merge and set the ticket done. Never squash, rebase, force-push or `--no-verify`.
+3. Set `SKILL_DIR` to this installed QA skill’s absolute path. Its merge command checks the board branch, head and starting criteria. A refused reservation ends the attempt. For a versioned ticket the command requests an immediate merge at the approved SHA. A confirmed GitHub rejection frees the reservation so QA can escalate. A lost response keeps the reservation for recovery. Merge and set the ticket done. Never squash, rebase, force-push or `--no-verify`.
    ```bash
    "$SKILL_DIR/scripts/merge-reviewed.sh" <id> <n> "$H" <holder> <token> <run>
    M=$(gh pr view <n> --json state,mergeCommit -q 'select(.state == "MERGED") | .mergeCommit.oid')

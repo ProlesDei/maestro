@@ -52,7 +52,7 @@ func runCriteria(ctx context.Context, c *call) error {
 		}
 		return json.NewEncoder(c.env.Stdout).Encode(d.Criteria)
 	}
-	if verb != "request" && verb != "assess" && verb != "merge" {
+	if verb != "request" && verb != "assess" && verb != "merge" && verb != "merge-rejected" {
 		return usagef("criteria: unknown operation")
 	}
 	if c.idemKey == "" {
