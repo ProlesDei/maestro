@@ -1,6 +1,6 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v9, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). The proposed runtime is still unbuilt. The team works on this spec from here.
+**Status:** draft v10, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). v10 specifies repeat kickbacks (4.3). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
@@ -108,7 +108,7 @@ flowchart TD
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Map the existing `--opus` line to a senior escalation under section 8. Keep the other fixed shapes; the grammar still allows no rules write. |
 | Ticket revision request (4.2) | Hold affected work and send the evidence to the planner once. |
 | `slot free`, `merged` | Treat these legacy event names as prompts to reassess usage and ready work. Today they trigger refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
-| `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route a concrete defect to its engineer. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
+| `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route review and QA kickbacks by section 4.3. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
 | `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Planner owns triage and groups related causes. Send goal outcomes, material deviations and unresolved product or owner decisions to the goal inbox (5.2). |
 
 Persist one handoff ID per action. Replay returns the recorded run or inbox item, including during a switch back to a webhook. Ack after all actions have durable receipts. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
@@ -185,7 +185,7 @@ sequenceDiagram
   Note over R: no wake, no token
 ```
 
-A send-back from review or QA goes straight back to the engineer. The planner handles delivery blocks. The goal’s chief receives material deviations and unresolved product choices.
+Section 4.3 determines who takes a send-back from review or QA. The planner handles delivery blocks. The goal’s chief receives material deviations and unresolved product choices.
 
 ### 4.1 When an accepted brief changes
 
@@ -212,6 +212,20 @@ When reading the code reveals a material ambiguity, contradiction, missing depen
 5. Bind the engineer handoff, review verdict and QA evidence to both the PR head and AC revision. Before merge, verify that the ticket is cleared for the latest brief and that review and QA cover the current criteria. Serialize merge authorization with revision publication; if a merge is already in flight, reconcile its actual result before treating a conflicting change as effective. Record exactly which evidence carries forward and which needs another run.
 
 **S3 acceptance.** Change a brief while CSV is in QA and Excel is in development. Confirm that cleared CSV can merge, Excel retains its saved work, and neither can merge under withdrawn criteria. Then have an engineer find conflicting access rules before review. A brief that settles the rule yields one planner answer and zero chief wakes. An unresolved product choice yields one goal escalation. Replay the request, change the AC at the same commit, and verify that stale proof cannot authorize a merge. Run a ticket with clear criteria through the ordinary path and count zero clarification turns.
+
+### 4.3 Repeated review or QA kickbacks
+
+Use the ticket’s recorded tries and last engineering role. Review and QA kickbacks share the same count. Preserve the existing [routing function](../../tools/maestro-ticket/cli/route.go) when dispatching work through either harness.
+
+| Recorded tries after a kickback | Next step |
+|---|---|
+| 0 or 1 | Return to the same engineering role with the finding, commit and evidence. |
+| 2, last engineer was junior | Send to a senior engineer with the previous findings and attempted fixes. |
+| 2, last engineer was senior, or 3 or more for either role | Send to the planner to split the ticket, revise its criteria or resolve the dispute. |
+
+Concrete evidence that the ticket itself is wrong can go to the planner immediately through section 4.2. An AC clarification adds no try. A replay of an already recorded kickback keeps its count and its original handoff. Only QA can clear a QA failure: after a fix, review the new head and have QA rerun the failed case. If the engineer disputes the finding without changing code, the planner can request a QA retest at the same reviewed head.
+
+**S2 acceptance.** Exercise the first kickback, both second-kickback branches and a third after escalation. Replay a QA failure and verify one count and one handoff. Insert an AC clarification between kickbacks and verify the next recipient stays the same. Keep the QA finding open until QA records its retest.
 
 ## 5. The chief of staff
 
@@ -408,7 +422,7 @@ flowchart LR
 |---|---|---|
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
-| S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent starts account for projected spend once; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
+| S2 | Code relay, look lock and recovery discovery (3.3) | recovery discovery (3.3) and kickback routing (4.3); one start after replay; concurrent starts account for projected spend once; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
 | S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the brief-change and AC revision trials (4.1–4.2) and the memory trials (5.4); an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
