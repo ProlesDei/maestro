@@ -118,15 +118,22 @@ func runCos(ctx context.Context, c *call) error {
 				counts[t.Goal][t.Status]++
 			}
 			out = counts
+			if verb == "look" {
+				profiles, e := runtimeProfiles(loc.localDir)
+				if e != nil {
+					return e
+				}
+				out = map[string]any{"counts": counts, "profiles": profiles, "store": "available"}
+			}
 		}
 	case "pickup":
-		out, err = b.PendingDeliveries(ctx, in.Goal)
+		out, err = b.GoalItems(ctx, in.Goal)
 	default:
 		if in.Delivery == "" || in.Goal == "" || !strings.HasPrefix(in.Delivery, in.Goal+"/") {
 			return usagef("cos: name the goal and its published delivery")
 		}
 		if verb == "ack" {
-			out, err = b.AcceptDelivery(ctx, in.Delivery)
+			out, err = b.AcceptDelivery(ctx, in.Delivery, "ack")
 		} else {
 			out, err = c.deliver(ctx, b, in.Delivery, verb)
 		}
@@ -138,16 +145,9 @@ func runCos(ctx context.Context, c *call) error {
 }
 
 func (c *call) deliver(ctx context.Context, b *mongostore.Store, id, verb string) (mongostore.PlannerDelivery, error) {
-	d, err := b.AcceptDelivery(ctx, id)
+	d, err := b.AcceptDelivery(ctx, id, verb)
 	if err != nil {
 		return d, err
-	}
-	expected := d.Job
-	if expected == "plan" && strings.HasSuffix(d.ID, "/ruling") {
-		expected = "rule"
-	}
-	if verb != "" && expected != verb {
-		return d, errors.New("delivery belongs to a different verb")
 	}
 	if d.Run != "" || d.State == "completed" {
 		return d, nil
@@ -165,7 +165,7 @@ func (c *call) deliver(ctx context.Context, b *mongostore.Store, id, verb string
 				return d, err
 			}
 		}
-		return b.AcceptDelivery(ctx, id)
+		return b.AcceptDelivery(ctx, id, verb)
 	}
 	if d.Job != "ask" && d.Job != "plan" {
 		return d, errors.New("unsupported planner delivery")
@@ -225,5 +225,5 @@ func (c *call) deliver(ctx context.Context, b *mongostore.Store, id, verb string
 	if err := b.DeliveryStarted(ctx, d, run); err != nil {
 		return d, err
 	}
-	return b.AcceptDelivery(ctx, d.ID)
+	return b.AcceptDelivery(ctx, d.ID, verb)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -49,9 +50,27 @@ func (s *Store) PendingDeliveries(ctx context.Context, goal string) ([]PlannerDe
 	return out, s.markErr(err)
 }
 
+// GoalItems returns the worker cards that still need a chief's ruling.
+func (s *Store) GoalItems(ctx context.Context, goal string) ([]bson.M, error) {
+	db, done, err := s.conn()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	filter := bson.M{"goal": goal, "state": bson.M{"$in": bson.A{"pending", "delivered"}}}
+	cur, err := db.Collection("goal_inbox").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, s.markErr(err)
+	}
+	defer cur.Close(ctx)
+	out := []bson.M{}
+	err = cur.All(ctx, &out)
+	return out, s.markErr(err)
+}
+
 // Receipt and instruction occupy one document. Pin the payload in the
 // match so a concurrent change cannot acknowledge different wording.
-func (s *Store) AcceptDelivery(ctx context.Context, id string) (PlannerDelivery, error) {
+func (s *Store) AcceptDelivery(ctx context.Context, id, verb string) (PlannerDelivery, error) {
 	db, done, err := s.conn()
 	if err != nil {
 		return PlannerDelivery{}, err
@@ -62,11 +81,21 @@ func (s *Store) AcceptDelivery(ctx context.Context, id string) (PlannerDelivery,
 	if err := coll.FindOne(ctx, bson.M{"_id": id}).Decode(&d); err != nil {
 		return d, s.markErr(err)
 	}
+	expected := d.Job
+	if expected == "plan" && strings.HasSuffix(d.ID, "/ruling") {
+		expected = "rule"
+	}
+	if verb != "" && verb != "ack" && expected != verb {
+		return d, errors.New("delivery belongs to a different verb")
+	}
 	if d.Receipt != "" {
 		if d.Receipt != d.Hash() {
 			return d, errors.New("delivery ID has conflicting payloads")
 		}
 		return d, nil
+	}
+	if verb == "ack" {
+		return d, errors.New("planner has not accepted this delivery")
 	}
 	filter := bson.M{"_id": id, "state": "pending", "goal": d.Goal, "job": d.Job, "text": d.Text, "revision": d.Revision}
 	update := bson.M{"$set": bson.M{"receipt": d.Hash(), "state": "accepted"}}

@@ -29,7 +29,7 @@ func TestConcurrentChiefMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
+	t.Cleanup(func() { s.Close() })
 	c, err := Open(ctx, Config{URI: u.String(), Board: board})
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +105,63 @@ func TestConcurrentChiefMemory(t *testing.T) {
 	if n, err := c.db.Collection("planner_deliveries").CountDocuments(ctx, map[string]any{}); err != nil || n != 1 {
 		t.Fatalf("want one plan, got %d %v", n, err)
 	}
+	// A goal-specific delegation can settle one card without an owner question.
+	apply(a, "direction", Request{ID: "export", Kind: "delegation", Text: "Choose CSV or TSV", Source: "owner turn 3", Revision: 2})
+	if err := s.PutGoalItem(ctx, item.ID, item.Goal, "CSV or TSV?"); err != nil {
+		t.Fatal(err)
+	}
+	item.RuleRevision, item.Rationale, item.Text = 3, "CSV fits the current permission", "Use CSV"
+	apply(b, "rule", item)
+	ruling := item.Goal + "/" + item.ID + "/ruling"
+	for _, verb := range []string{"plan", "ack"} {
+		if _, err := s.AcceptDelivery(ctx, ruling, verb); err == nil {
+			t.Fatalf("%s accepted an unserved ruling", verb)
+		}
+	}
+	first, err := s.AcceptDelivery(ctx, ruling, "rule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.AcceptDelivery(ctx, ruling, "rule")
+	if err != nil || first.Receipt == "" || replay.Receipt != first.Receipt {
+		t.Fatalf("replay changed receipt: %v", err)
+	}
+	item.Source = ruling
+	apply(b, "ack", item)
+	if cards, err := s.GoalItems(ctx, item.Goal); err != nil || len(cards) != 0 {
+		t.Fatalf("acknowledged card in pickup: %v", err)
+	}
+	if n, err := c.db.Collection("goal_decisions").CountDocuments(ctx, map[string]any{"_id": "billing/format", "question": map[string]any{"$exists": true}}); err != nil || n != 0 {
+		t.Fatalf("unexpected owner question: %v", err)
+	}
+	// Another goal can publish its own brief, but cannot reuse billing's grant.
+	other := func(verb string, req Request) error {
+		req.Goal = "onboarding"
+		_, err := c.Apply(ctx, "other", verb, req)
+		return err
+	}
+	for _, step := range []struct {
+		verb string
+		req  Request
+	}{
+		{"register", Request{Profile: "max-b", Harness: "claude", Model: "scratch", Effort: "medium"}},
+		{"draft", Request{Text: "Shorten signup"}}, {"publish", Request{Source: "scratch owner acceptance"}},
+		{"propose", Request{ID: item.ID, Revision: 1, Text: "Choose a format"}}, {"claim", Request{ID: item.ID, Revision: 1}},
+	} {
+		if err := other(step.verb, step.req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := other("rule", item); err == nil {
+		t.Fatal("another goal used billing's delegation")
+	}
+	if _, err := s.AcceptDelivery(ctx, "onboarding/brief/1", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AcceptDelivery(ctx, "billing/brief/1", "plan"); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func TestReplyRequiresOriginalQuestion(t *testing.T) {

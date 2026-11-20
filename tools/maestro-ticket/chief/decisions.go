@@ -206,6 +206,9 @@ func (s *Service) ack(ctx context.Context, thread string, r Request) (any, error
 		filter["ruling"] = receipt.Text
 		set["state"] = "acknowledged"
 		err = one(s.db.Collection("goal_decisions").UpdateOne(ctx, filter, bson.M{"$set": set}))
+		if err == nil {
+			_, err = s.db.Collection("goal_inbox").UpdateOne(ctx, bson.M{"_id": r.ID, "goal": r.Goal}, bson.M{"$set": bson.M{"state": "acknowledged", "receipt": receipt.Receipt}})
+		}
 	} else {
 		filter["text"] = receipt.Text
 		err = one(s.db.Collection("goal_briefs").UpdateOne(ctx, filter, bson.M{"$set": set}))

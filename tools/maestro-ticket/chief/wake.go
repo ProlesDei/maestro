@@ -73,7 +73,7 @@ func (s *Service) Wake(ctx context.Context, base string) error {
 		for _, it := range items {
 			ids = append(ids, it.ID)
 		}
-		if _, err := inbox.UpdateMany(ctx, bson.M{"_id": bson.M{"$in": ids}}, bson.M{"$set": bson.M{"state": "delivered"}}); err != nil {
+		if _, err := inbox.UpdateMany(ctx, bson.M{"_id": bson.M{"$in": ids}, "state": "pending"}, bson.M{"$set": bson.M{"state": "delivered"}}); err != nil {
 			return err
 		}
 	}

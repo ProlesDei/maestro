@@ -27,39 +27,55 @@ func runRuntimeStatus(ctx context.Context, c *call) error {
 	if loc.boardID == "" {
 		return usagef("status: select a T3 runtime board")
 	}
-	root := loc.localDir
-	ps, err := loadBindings(filepath.Join(root, "profiles.json"))
+	profiles, err := runtimeProfiles(loc.localDir)
 	if err != nil {
 		return err
+	}
+	boardStatus := "available"
+	s, err := c.open(ctx)
+	if err != nil {
+		boardStatus = "unavailable"
+	} else {
+		s.Close()
+	}
+	return json.NewEncoder(c.env.Stdout).Encode(map[string]any{"as_of": time.Now().UTC(), "board": loc.boardID, "store": boardStatus, "profiles": profiles})
+}
+
+type runtimeProfile struct {
+	Alias, Harness, Login string
+	Reserve               float64 `json:"reserve_percent"`
+	Windows               map[string]paceWindow
+	HoldUntil             time.Time `json:"hold_until,omitzero"`
+	Running               []string
+}
+
+func runtimeProfiles(root string) ([]runtimeProfile, error) {
+	ps, err := loadBindings(filepath.Join(root, "profiles.json"))
+	if err != nil {
+		return nil, err
 	}
 	usage, err := readUsage(filepath.Join(root, "usage.json"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	all, err := runs.List(filepath.Join(root, "runs"), time.Now(), true)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	type profile struct {
-		Alias, Harness, Login string
-		Reserve               float64 `json:"reserve_percent"`
-		Windows               map[string]paceWindow
-		HoldUntil             time.Time `json:"hold_until,omitzero"`
-		Running               []string
-	}
+
 	now := time.Now().UTC()
-	profiles := []profile{}
+	profiles := []runtimeProfile{}
 	for _, alias := range sortedAliases(ps) {
-		p := profile{Alias: alias, Reserve: ps[alias].Reserve, Harness: ps[alias].Harness, Login: "verified at binding; live login unchecked", Windows: usage[alias], Running: []string{}}
+		p := runtimeProfile{Alias: alias, Reserve: ps[alias].Reserve, Harness: ps[alias].Harness, Login: "verified at binding; live login unchecked", Windows: usage[alias], Running: []string{}}
 		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
 			p.Login = "verification required"
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+			return nil, err
 		}
 		for _, scope := range []string{"account-" + alias, "provider-" + p.Harness} {
 			hold, err := readHold(filepath.Join(root, scope+".hold"))
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if hold.After(now) && hold.After(p.HoldUntil) {
 				p.HoldUntil = hold
@@ -72,12 +88,5 @@ func runRuntimeStatus(ctx context.Context, c *call) error {
 		}
 		profiles = append(profiles, p)
 	}
-	boardStatus := "available"
-	s, err := c.open(ctx)
-	if err != nil {
-		boardStatus = "unavailable"
-	} else {
-		s.Close()
-	}
-	return json.NewEncoder(c.env.Stdout).Encode(map[string]any{"as_of": now, "board": loc.boardID, "store": boardStatus, "profiles": profiles})
+	return profiles, nil
 }
