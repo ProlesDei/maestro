@@ -1,13 +1,13 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v8, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). The proposed runtime is still unbuilt. The team works on this spec from here.
+**Status:** draft v9, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). The proposed runtime is still unbuilt. The team works on this spec from here.
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 
 ## 0. The point
 
 1. Grok Bot goes as the runtime. It bills each model call times its whole chat, about 100-200K cached tokens a call ([decisions](../decisions.md), 19). Its seven profiles stay in `bot-profiles/`. Setting a bot's webhook again brings it back, so a team can still run Maestro on Grok.
 2. Each role gets a **server**: a webhook (a Grok bot, as today), a command (the chief of staff's wake), or code (the planner's routing and the five worker roles). Every place that now asks "does this bot have a webhook?" asks "is this role served?" instead.
-3. Agent sessions plan, judge and rule. Section 8 maps each role to a harness, model and account. Code takes only the relaying that Grok bots did: start the next step, refill a slot, take a look, pass on what needs a person (section 3).
+3. Agent sessions plan, judge and rule. Section 8 maps each role to a harness, model and account. Code takes only the relaying that Grok bots did: start the next step, dispatch ready work, take a look, pass on what needs a person (section 3).
 4. The owner specs features with one or more T3 chief-of-staff sessions. Each session uses Astra or Opus. Chiefs share accepted direction, work with the planner on outcomes, and settle delegated product calls. Section 5 defines their authority and handoffs.
 
 5. One machine. The board lives on MongoDB Atlas. Two Claude Max 20x accounts and one ChatGPT Pro account serve the roles in section 8.
@@ -73,7 +73,7 @@ The planner turns an accepted brief into executable work. Its code relay handles
 | Split or rewrite a ticket, carry out a ruling, finish a split | Claude: `job plan`, `job rule` | same |
 | Judge blocks, disputed findings and parked tickets | Claude: the judge session `look --judge` starts | same |
 | Ask the chief of staff before changing scope | Claude: the plan session leaves a card | same; the card goes to the inbox |
-| Pick what starts next, fill slots, route by tier | code: `look`, refill, the chain | same |
+| Pick ready work and route by tier | code: `look`, refill, the chain | dispatch by subscription pace (8) |
 | Wake on a message, run `look`, pass lines on, ack | Grok bot | **code** (3.1) |
 | Report progress, ETAs | Grok bot, from `look --report` | planner verifies progress, records ETAs and reports material deviations to the goal’s chief |
 
@@ -87,7 +87,7 @@ A run's supervisor routes the run once it ends **[code]** `tools/maestro-ticket/
 flowchart TD
   END["A run ends: its supervisor routes it<br/>matches line shapes, reads no ticket or reply"]
   END --> A["Start the next step<br/>build, review, qa, live, design T-n<br/>review T-n --approved sha<br/>do: resume --died, --go-on, senior escalation,<br/>--escalate, --decide; job again"]
-  END --> B["Refill<br/>slot free T-n, merged T-n"]
+  END --> B["Reconsider ready tickets<br/>completion or usage update"]
   END --> C["Delivery event<br/>apply fixed next step or request a ruling"]
   END --> D["Planner reports goal outcome,<br/>material deviation or unresolved product call"]
   A --> RUN["Next eligible run, as that role"]
@@ -107,7 +107,7 @@ flowchart TD
 | `do: resume <run> --died`, `--go-on`, `job again <run>` | Runs it, as now **[code]** `tools/maestro-ticket/cli/chain.go:169` |
 | `do: resume <run> --opus`, `--escalate`, `--decide`, `job again <run> --full` | Map the existing `--opus` line to a senior escalation under section 8. Keep the other fixed shapes; the grammar still allows no rules write. |
 | Ticket revision request (4.2) | Hold affected work and send the evidence to the planner once. |
-| `slot free`, `merged` | Refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
+| `slot free`, `merged` | Treat these legacy event names as prompts to reassess usage and ready work. Today they trigger refill **[code]** `tools/maestro-ticket/cli/look.go:304` |
 | `kickback`, `block`, `timed_out`, `failed`, `mismatch`, `live fail`, a stop | Route a concrete defect to its engineer. Apply known retry, hold and recovery rules. Only a disputed or unresolved delivery decision starts a planner ruling under the lock (3.2). |
 | `usage_limit`, `disk_full`, `died twice`, `goal <slug> done`, `cause …`, a fault line, a card, a design card, a QA question | Planner owns triage and groups related causes. Send goal outcomes, material deviations and unresolved product or owner decisions to the goal inbox (5.2). |
 
@@ -181,7 +181,7 @@ sequenceDiagram
   V-->>R: Review GO at sha
   R->>Q: job qa T-12
   Q-->>R: merged, done
-  R->>E: slot free: next ticket's build
+  R->>E: dispatch next ready build if usage permits
   Note over R: no wake, no token
 ```
 
@@ -197,7 +197,7 @@ The planner compares the accepted revisions and records a disposition per open t
 |---|---|
 | Still fits | Advance the checked brief revision. Carry applicable evidence and continue. |
 | Criteria changed | Publish the revised ticket criteria. Identify affected code paths and evidence that needs fresh review or QA. |
-| Deferred or replaced | Pause affected work, preserve its branch and commits, release the slot, and update dependencies. |
+| Deferred or replaced | Pause affected work, preserve its branch and commits, release its unused usage estimate, and update dependencies. |
 
 Other goals keep moving. Within the changed goal, a cleared ticket can merge while the planner assesses the rest. For example, dropping Excel from a Friday release can leave CSV ready for QA, park the Excel branch, and narrow an unstarted export-menu ticket.
 
@@ -206,7 +206,7 @@ Other goals keep moving. Within the changed goal, a cleared ticket can merge whi
 When reading the code reveals a material ambiguity, contradiction, missing dependency or infeasible criterion, the engineer can request a revision before review. A technical choice that preserves agreed behavior stays with the engineer. The normal build path adds no planner turn.
 
 1. Identify the ticket, brief and AC revisions, affected criterion, concrete evidence, proposed wording or split, and decision needed. Save the branch and commit or worktree checkpoint. Give the request a stable ID.
-2. Record the request and hold the ticket before releasing its claim and worker slot. Hold dependent work only where it needs the disputed point. Replays reuse the request. Count this as a clarification, separate from failed builds, retries and review or QA kickbacks.
+2. Record the request and hold the ticket before releasing its claim and unused usage estimate. Hold dependent work only where it needs the disputed point. Replays reuse the request. Count this as a clarification, separate from failed builds, retries and review or QA kickbacks.
 3. The planner returns revised criteria, a split or dependency, a reason the existing criterion settles the issue, or a product escalation with options and impact. Only a change beyond the accepted brief goes to the goal’s chief. The chief uses delegated authority or asks the owner.
 4. Apply the response against the current request and revisions. Reconcile a stale response before reopening work. A ticket-only clarification increments the AC revision when the text changes. Resume from the saved work once its dependencies allow.
 5. Bind the engineer handoff, review verdict and QA evidence to both the PR head and AC revision. Before merge, verify that the ticket is cleared for the latest brief and that review and QA cover the current criteria. Serialize merge authorization with revision publication; if a merge is already in flight, reconcile its actual result before treating a conflicting change as effective. Record exactly which evidence carries forward and which needs another run.
@@ -254,7 +254,7 @@ A failed wake leaves the item pending. Apply the existing wake and retry interva
 | Register a session or transfer a goal | Bind the session ID, goal, harness, profile, model and effort. Preserve pending decisions across a transfer. |
 | Read or publish a brief | Read the accepted revision or commit against an expected revision. Submit the accepted brief through `cos plan`. |
 | `cos pickup`, claim, `cos rule`, `cos ack` | Read goal-scoped items, claim a decision, deliver its ruling and acknowledge the receipt (5.2). |
-| `cos look`, `goals`, `eta` | Read the planner's verified delivery summary and recorded ETA. Status reads never launch a judge, refill slots or resume work. |
+| `cos look`, `goals`, `eta` | Read the planner's verified delivery summary and recorded ETA. Status reads never launch a judge, dispatch jobs or resume work. |
 | `cos ask` | Request a focused second opinion on a product decision when the planner's evidence leaves a material question. Return the result to the requesting session. |
 | Standing rules, stop and start | Carry an authorized priority, limit or hold to the planner. The planner handles individual retries and recovery. |
 
@@ -356,19 +356,15 @@ Risks:
 
 ## 8. Profiles, model choice and capacity
 
-The installation defines each profile by account alias, harness, approved models and effort levels, eligible roles, and concurrency cap. Each profile uses its owner's native login and its own config. Credentials stay out of commands, run records and logs. Use subscription billing by default. Strip inherited API credentials and reject a launch whose billing mode cannot be verified. API billing requires explicit configuration. See [Claude plan usage](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) and [Codex authentication](https://developers.openai.com/codex/auth).
+The installation defines each profile by account alias, harness, approved models and effort levels, and eligible roles. Each profile uses its owner's native login and its own config. Credentials stay out of commands, run records and logs. Use subscription billing by default. Strip inherited API credentials and reject a launch whose billing mode cannot be verified. API billing requires explicit configuration. See [Claude plan usage](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) and [Codex authentication](https://developers.openai.com/codex/auth).
 
-| Profile | Starting assignment | Capacity rule |
-|---|---|---|
-| ChatGPT Pro / Codex | Astra chief sessions. Start at medium effort for routine turns and use high for hard rulings. Review is its first shared worker role. | Give owner turns priority. Keep worker review disabled outside the trial until measured headroom supports it. |
-| Claude Max A / Claude Code | Opus chief sessions, planning and exception rulings. Qualify review separately. | Reserve capacity for active chief sessions before optional worker jobs. |
-| Claude Max B / Claude Code | Builds, design, QA and review. Start with the existing Claude model settings. | Give long builds and short reviews separate cost estimates. |
+The owner selects Astra on ChatGPT Pro or Opus on an authorized Claude Max profile for a chief session. Keep that session on its chosen profile. Fresh background jobs can use any authorized profile qualified for the role and tier. Qualify review on both harnesses first, then qualify other shared roles independently. Keep private chief and worker configs separate.
 
-These are install defaults. An account may serve only workloads its owner authorizes under its plan. Keep both Claude profiles on their assigned workloads when one reaches a limit. Protect owner capacity on every profile serving an active chief. Count all its chief sessions and workers against the same account allowance. Separate private chief configs from worker configs on both harnesses. P0 checks each authorized login in both contexts. Account-wide limits apply across those contexts.
+**Subscription pacing.** The only throughput limit for ready work is how quickly the authorized subscriptions are being consumed. The T3 runtime has no global, per-profile or QA worker-count ceiling. Remove the legacy build-limit and QA-slot checks from T3 dispatch, including retries and handoffs. Dependencies, explicit holds and STOP still govern whether work is ready.
 
-**Fresh starts.** First select models and effort levels approved for the role and tier. Senior escalation requests a senior-capable model. Within that set, select an eligible profile with room after active reservations, the expected job cost and protected capacity. Use reliable remaining allowance and reset times where available. With missing or stale readings, use conservative concurrency caps and keep protected profiles off optional work. Use observed usage by role, model and effort to tune estimates. Keep exported stats anonymous.
+For each eligible profile, compare observed usage and projected consumption through each applicable reset window. Include owner turns, outstanding work and child sessions. Prefer the profile with the most projected headroom in its tightest window, comparing fractions of each account's own allowance. Charge each fresh job its estimated usage by role, model and effort. Reconcile estimates with observations without counting spend twice. If readings are stale, label estimates with their age and source. Reassess pending work when usage or reset data changes. Report uncertainty when there is too little evidence to estimate pace.
 
-Reserve capacity and claim the handoff together before launch. Concurrent supervisors must see the same reservation. Record the role, profile alias, harness, model, effort, provider session ID when available, worktree and handoff ID. Release the reservation at completion. After a crash, reconcile it against the recorded run before allowing another start.
+Claim the handoff and record its estimated spend together so simultaneous launches see each other's commitments. Record the profile, harness, model, effort, native session ID when available, worktree and handoff ID. Reconcile unused estimates at completion or recovery. A reservation represents expected subscription usage. The number of running sessions is diagnostic only. Keep exported stats anonymous.
 
 **Recovery.** Resume with the original profile, session and worktree. If a qualified role changes harness, start a fresh run from a durable handoff with the ticket, commit, worktree and unfinished step. Preserve pending edits. A reset notification checks that the old run still owns the step. Pause one profile for expired login or exhausted allowance, one provider for a provider outage, and all board-dependent work during a store outage. Show active and waiting jobs in `look`, with the profile, wait reason and reset time when known. Provide a model-free owner status path for quota, login and store failures.
 
@@ -412,7 +408,7 @@ flowchart LR
 |---|---|---|
 | P0 | Probes, below | each answers with a captured run |
 | S1 | Profile and role settings, per-harness start, result and resume handling (section 8); `served(bot)` in place of `hasHook`; `notify set --code`, `--exec-file` | unit tests: each gate starts work for a code role and none for an unserved one |
-| S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent profile reservations respect the cap; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
+| S2 | Code relay, look lock and recovery discovery (3.3) | ID-free recovery trial (3.3); one start after replay; concurrent starts account for projected spend once; a unit test for each row of 3.1; two supervisors racing for the lock; a dead holder's lock taken over |
 | S3 | Shared memory and delivery (5.4), goal inbox, fixed wake and `cos` verbs | run the brief-change and AC revision trials (4.1–4.2) and the memory trials (5.4); an item survives a failed wake and is rung again; `cos` refuses a verb off the list |
 | S4 | The wall, option A: user, sudoers lines, private bundles for both harnesses | a worker session's `t3 thread send` fails; the owner sends a goal from the phone and a plan run starts |
 | S5 | Atlas setup and subscription billing checks | `doctor` shows `mongodb at <host>`; a run's environment holds no API key |
@@ -424,7 +420,7 @@ Race two chiefs on the same decision and on edits to the same brief. Expect one 
 
 Repeat the routing and recovery checks against the production relay in S2. Review is the first shared worker role. Use a scratch board and one fixed PR head. Have Astra take the owner's goal and Claude build the change. Give Claude and Codex independent fresh reviews of that head. Each must load the role instructions, read the diff and record a verdict against the exact SHA. Capture the chosen model, effort, billing mode and session identity. Verify Astra medium and high on the installed Pro profile.
 
-For the routing trial, occupy the eligible Claude review capacity and submit a fresh review with measured Pro capacity available. Expect one Codex review and a responsive chief of staff. Replay the handoff after launch and confirm the same run ID. Exhaust the worker reserve and confirm the next review waits with a reason. Exercise profile login loss, provider outage and restart; verify pause scope, resume affinity and owner status without a model. Qualify builds and QA separately before adding Codex to either role.
+For the routing trial, drive the eligible Claude profiles toward their usage pace limit and submit a fresh review with measured Pro capacity available. Expect one Codex review and a responsive chief of staff. Replay the handoff after launch and confirm the same run ID. Hold worker count constant and vary measured burn; verify routing changes. Launch more jobs than the legacy worker limit while projected burn is sustainable. When every eligible profile would overspend its window, verify the job waits with a usage-based reason and is reconsidered at reset. Exercise profile login loss, provider outage and restart; verify pause scope, resume affinity and owner status without a model. Qualify builds and QA separately before adding Codex to either role.
 
 | Claim | Label | Probe |
 |---|---|---|
@@ -453,7 +449,7 @@ Each box keeps this on its own disk today, so a second box can't join until it m
 | Ring gate | `<bot>.gate` per box **[code]** `tools/maestro-ticket/runs/gate.go` | one per bot per board |
 | Limit, QA slots, standing rules | `board.json`, `rules.md` per box **[code]** `tools/maestro-ticket/cli/rules.go:28-31` | the board |
 
-Then: `resume` and `job again` hop to the run's own box, since transcripts and worktrees stay there. Planning jobs run only on the home box. A run's end refills its own box, then hops `refill` to the box with the most free slots, under one refill mark per box, which keeps SSH under sshd's default of 10 starts at once. Each hop is an SSH key with a forced command.
+Then: `resume` and `job again` hop to the run's own box, since transcripts and worktrees stay there. Planning jobs run only on the home box. A run's end refills its own box, then hops `refill` to a box eligible to run the job under the shared subscription pace, under one refill mark per box, which keeps SSH under sshd's default of 10 starts at once. Each hop is an SSH key with a forced command.
 
 ## 13. What the audits changed
 
