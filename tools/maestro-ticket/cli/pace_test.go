@@ -157,6 +157,7 @@ func TestPreviousLedgerStartsAtLastSample(t *testing.T) {
 func TestPreflightRefusalRetriesWithoutTouchingTicket(t *testing.T) {
 	h := newRouteHarness(t)
 	r := runs.Record{ID: "R-aaaaaaaa", State: runs.Failed, Job: "build", Ticket: "T-18", Profile: "pro", Error: "maestro-ticket: worker admission: projected usage exceeds allowance until 2030-01-01T00:00:00Z"}
+	r.Command = []string{"maestro-ticket", "native-worker", "--resume", "original-session"}
 	out := h.route(r)
 	if out.Outcome != outUsageLimit || len(out.Do) != 1 || out.Do[0] != "maestro-ticket job again R-aaaaaaaa" || len(out.Wrote) != 0 || out.Reset != "2030-01-01T00:00:00Z" {
 		t.Fatalf("wrong preflight route: %+v", out)

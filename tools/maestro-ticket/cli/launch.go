@@ -505,7 +505,7 @@ func (c *call) endRun(ctx context.Context, dir string, r runs.Record) {
 	if replyErr == nil {
 		warn(logRun(ctx, s, reply, id, r.Launcher, c.env.Stderr))
 	}
-	if r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
+	if admissionWait(r) || r.State == runs.Done || (r.State == runs.Failed && r.SessionID != "") {
 		return
 	}
 	host, _ := c.hostID()

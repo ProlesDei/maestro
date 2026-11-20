@@ -1014,7 +1014,7 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 	// the session began with.
 	first := r
 	for range 50 {
-		if first.ResumeOf == "" {
+		if first.ResumeOf == "" || admissionWait(r) {
 			break
 		}
 		p, err := runs.Get(dir, first.ResumeOf, time.Now())
@@ -1065,8 +1065,8 @@ func (c *call) again(ctx context.Context, o againOpts) (runs.Record, error) {
 		return fail(usagef("job again: --limit %s: want 1s to 24h", lim))
 	}
 	rec := runs.Record{Ticket: r.Ticket, Tickets: r.Tickets, Limit: short(lim), Job: r.Job, Command: cmd,
-		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
-	if admissionWait(r) && !r.PinnedProfile && r.ResumeOf == "" {
+		Delivery: r.Delivery, DeliveryRun: r.DeliveryOwner(), ActionHash: r.ActionHash, ACRevision: r.ACRevision, BriefRevision: r.BriefRevision, Overrides: slices.Clone(r.Overrides), PinnedProfile: r.PinnedProfile, Profile: r.Profile, Harness: r.Harness, AgainOf: r.ID, ChainOf: r.ChainOf, Hops: r.Hops, Dir: r.Dir}
+	if admissionWait(r) && r.BoardID != "" && !r.PinnedProfile && flagValue(r.Command, "--resume") == "" {
 		rec.Profile, rec.Harness, rec.Command = "", "", nil
 	}
 

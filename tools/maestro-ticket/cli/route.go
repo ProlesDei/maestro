@@ -312,11 +312,8 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 	if admissionWait(r) {
 		// Eligibility and the meter already hold the affected account or role. The
 		// refused wrapper never touched the ticket or acquired an engineer claim.
-		next := "job again " + r.ID
-		if flagValue(r.Command, "--resume") != "" {
-			next = "resume " + r.ID + " --go-on"
-		}
-		out.Do = []string{"maestro-ticket " + next}
+		out.Do = []string{"maestro-ticket job again " + r.ID}
+
 		return out, nil
 	}
 	// A judge run that gave no answer frees its rows for the next look,
