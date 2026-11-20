@@ -1,7 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
-**Status:** draft v10, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. **v10 makes the runs harness-neutral** (8.1): one small adapter per harness, Claude's first, and a harness per slot behind the same evals as a model move, with one command back to Claude. It also **scripts QA** (14.6): Opus writes a ticket's test script once, and Sonnet runs it at tiers 0-1, handing any surprise to Opus. Nothing here is built.
-**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 14.3: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
+**Status:** draft v11, 2026-11-20. A review proposal on top of v3 (PR #105), for the owner to diff against `docs/design/t3-runtime.md`. v4 added several desks, the phone path, the token plan and the review's fixes; v5 moved the design onto the owner's Windows desktop PC with pushes through T3 Connect. **v6 takes the owner's answers of 2026-11-19, 19:46-19:51 PT** (decisions log, 19.2): the Sonnet moves go ahead behind their evals, effort stays high, the graph re-indexes on merge, the board is Atlas's free tier, the first desk opened has duty, relay-down needs no second channel, and no agents run natively on the owner's Windows account. **v7 adds cleanup** (6.4): a janitor that frees disk before claims are refused, a scratch folder and a memory cap for each run, and a disk that gives space back to Windows, from what fills `grok-bot-vm` today. **v8 adds browsers** (6.5): QA runs test in parallel, each with its own headless Chromium and its own app, under its run's memory scope, with a cap, a reaper and the install for WSL. **v9 puts the code graph to work** (14.3): code queries it before each run and hands build, review and QA a capped pack; every merge re-indexes, and each PR gets an overlay; runs load no MCP server by default. It rests on measurements of real PRs on the VM. **v10 makes the runs harness-neutral** (8.1): one small adapter per harness, Claude's first, and a harness per slot behind the same evals as a model move, with one command back to Claude. It also **scripts QA** (14.6): Opus writes a ticket's test script once, and Sonnet runs it at tiers 0-1, handing any surprise to Opus. **v11 adds logs and traces** (6.6): code writes every line, in one schema, through a writer no run can edit; raw streams are kept with their hashes; the harness's own tokens, cost and plan usage are logged as given; a nightly reconciler checks the logs against the board, git and the harness; and people read a `trace` timeline at no token cost. It starts from what the VM's records lose today. Nothing here is built.
+**Labels:** **[code]** means checked in the source at the `file:line` given; "built" means `GOOS=windows go build` was run on it. **[box]** means checked on `grok-bot-vm`, where Maestro runs today, on 2026-11-19 (6.4, 6.5, 6.6, 14.3: 2026-11-20). Nothing was checked on the desktop: every desktop claim is **[docs]** or **(guess)** until the probe in 16.3 runs. **[docs]** means a vendor doc or release note says it. **(guess)** means nothing has shown it. **[I]** is an inference from measured data. Sections 11 and 16.3 list the probes.
 
 ## 0. The point
 
@@ -12,12 +12,13 @@
 5. Several desks can run at once. Each owns its goals by a 24-hour lease, and all read one small desk state, so each knows what the others do. **The first desk opened has duty**; when it closes or its lease lapses, the next-oldest live desk takes it, atomically (5.4). The duty desk gets what no desk owns and alone changes board-wide settings.
 6. Code tells, Claude decides. Code sorts each inbox item as *owner*, *desk* or *fyi*. Only *owner* and *desk* items wake a desk, and a reminder about a card is a push from code, not a model turn (5.2).
 7. The runs get cheaper: Sonnet 5.5 for four jobs, and for scripted QA at tiers 0-1 (14.6), each after its own eval set passes; effort high everywhere; a 5-minute cache for build and QA; a code graph that code queries for the runs (point 12, section 14).
-8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
+8. One machine: the owner's Windows desktop PC. Everything runs in one WSL2 distro, `Maestro`, with systemd, two Linux users and the wall between them (section 6), and a third user that owns the logs (6.6), unless the 30-minute probe in 16.3 says T3 belongs on native Windows. The board lives on MongoDB Atlas's free tier (7). One Claude Max 20x plan runs it all.
 9. One push channel: T3 Connect, linked **publish-only**, so no tunnel and no cloudflared. Access is Tailscale only. If the relay is down, the failure is shown wherever the owner looks next, and a daily heartbeat push makes silence noticeable. There is no second channel (5.5).
 10. Cleanup is code. A nightly janitor, also started when free space or inodes fall under 20%, frees what is safe before claims are refused at 10%. Each run gets its own TMPDIR and a 4 GB memory cap, so one heavy build fails alone (6.4).
 11. QA tests in parallel: one headless Chromium and one copy of the app per QA run, `qa_slots` of them (4 on a 32 GB PC, guess), in the run's memory scope, which is stopped at the run's end. A shim caps browsers and refuses `close-all` (6.5).
 12. Code queries the code graph; runs read a pack. Before build, review and QA, code writes a capped pack: changed symbols, their callers, the blast radius, and the pages a change reaches. It is at most 2,000 tokens, and 400-1,400 on real PRs **[box]**. Each repo's index is rebuilt on every merge in about 3 seconds, with an overlay for each PR. Runs load no MCP server by default, and `rules set graph off` turns it all off (14.3).
 13. Any harness can fill a slot. Every Claude assumption in `maestro-ticket` (the `claude -p` flags, session ids, the stop hook, the stream and cost parsing, the usage-limit words) moves behind one adapter per harness. Claude's adapter is built first, with no change in behaviour. Later, `rules set harness <slot> grok|codex|…` moves one role at a time, behind the same eval gate as a model move, and `rules set harness all claude` puts every slot back. Skills, the board, the verbs, the packs, the evidence and the wall stay harness-neutral (8.1).
+14. Code writes every log line; models never do. Each hop, from a desk's wake to a run's last tool call, is one line in one schema, sent to `maestro-logd`, a writer under its own user that no run can edit. Lines carry the harness's own tokens, cost and plan usage, marked where the harness reports none, and the raw stream is kept beside them with its hash. A model's word, such as a verdict, is logged as a claim with its hash. A nightly reconciler checks the logs against the board, git and the harness. People read `maestro-ticket trace`; desks see one `logs:` line in `desk brief`; no log enters a context unasked, so logging costs no tokens (6.6).
 
 ```mermaid
 flowchart LR
@@ -138,6 +139,8 @@ flowchart TD
 
 Then it acks the run. A run a usage limit stopped stays unacked, as today, so its ring at the reset fires **[code]** `tools/maestro-ticket/cli/launch.go:409`. With code as the server, that ring runs the run's `do: resume --go-on` line. The same holds for a handoff a pause held, and for the STOP lift.
 
+Each line the relay acts on writes one `route` event naming the row above that matched, and each try for the look lock writes a `look.lock` event: taken, refused or a stale takeover (6.6). So when the relay stalls, `trace` shows which line shape it saw and what it did, with no model turn.
+
 It never forwards a full `--report`. The planner's persona sends a report only when a goal finishes, the line stops, a block needs it or a desk asks, and the relay keeps to that.
 
 ### 3.2 The look lock
@@ -254,6 +257,7 @@ sequenceDiagram
 | `rules set limit <n>`, `rules set qa_slots <n>`, `rules set model <job> <model>`, `rules set graph off\|pack\|live` (14.3), `rules add`, `rules drop <n>`, `stop`, `start` | **the duty desk only**, checked under the duty lock (5.4), as `chief-of-staff`, which `rulesWriters` already allows **[code]** `tools/maestro-ticket/cli/rules.go:48`. Another desk gets `refused: duty desk is <name>`, and sends it a note. |
 | `ask` (question on stdin) | a `/maestro-chief-of-staff` run on the worker side; its answer comes back through the inbox, to the desk that asked |
 | `list`, `get`, `events`, `goals`, `flow`, `eta`, `costs` | as today's commands, as `chief-of-staff` |
+| `trace <id>` | a rendered timeline, capped at 1,500 tokens, with claims as hashes; never a raw stream (6.6) |
 
 `cos` refuses any verb off this list. `desk` verbs stay on the chief-of-staff side, as user `maestro-cos`, and never cross the wall (5.4).
 
@@ -291,6 +295,8 @@ If the probe moves T3 to native Windows (option B, 6.1), the `desk` command need
 
 **Heartbeat, with no model tokens.** The desks' `~maestro-cos/.claude/settings.json` sets three hooks. `Stop` runs `maestro-ticket desk beat`, which reads the session id from the hook's input and renews `beat_at` and the desk's leases (goals, and duty if it holds it). `SessionStart` (startup, resume, compaction) runs `maestro-ticket desk brief` and adds its output to the context. `SessionEnd` runs `desk close`. Hooks are code: the heartbeat costs nothing, and a desk can't forget it.
 
+**Logged, with no model turn.** Each `desk` event (`open`, `close`, `claim`, `release`, `beat`, `ring` with the `t3 thread send` exit code, a duty move with its epoch) and each `cos` verb also writes one line to `maestro-logd` (6.6). `duty.log` stays the desks' own record, and the reconciler checks the two agree. The `Stop` hook reads the turn's tokens from the transcript's tail (its input carries `transcript_path` **[code]** `cli/stopcheck.go:88-96`), so a desk's spend is logged as a `desk.turn` line.
+
 **The handoff note.** A desk writes one before it goes idle on a goal, when the owner says they're switching, and after each card it sends. At most 10 lines, ids not titles:
 
 ```
@@ -304,7 +310,7 @@ next: on T-31 answer, cos rule T-31
 hands off: api/ rules set by owner; don't change limit, ops desk is on duty
 ```
 
-**Catching up.** A new desk, or one back after compaction, gets `desk brief` from its `SessionStart` hook. In 40 lines at most: who has duty, the desks with their focus, goals and presence, each desk's latest note, the fyi items since this desk's last turn, the owner and desk items waiting by goal, and one `counts:` line from the board. Under 2k tokens (guess), against tens of thousands for reading another thread. The top of `billing`'s brief, the turn after `infra` closed:
+**Catching up.** A new desk, or one back after compaction, gets `desk brief` from its `SessionStart` hook. In 40 lines at most: who has duty, the desks with their focus, goals and presence, each desk's latest note, the fyi items since this desk's last turn, the owner and desk items waiting by goal, one `counts:` line from the board, and the `disk:`, `graph:` and `logs:` lines (6.4, 14.3, 6.6). Under 2k tokens (guess), against tens of thousands for reading another thread. The top of `billing`'s brief, the turn after `infra` closed:
 
 ```
 you: billing · goals: billing-v2 (lease to 11-20 22:04Z) · not on duty
@@ -439,14 +445,15 @@ A team on one Linux box with no T3 can skip the wall; the same commands run dire
    default=paul
    ```
    With interop off and no drives mounted, a worker can't run `t3.exe`, `cmd.exe` or `powershell.exe`, or read `C:`.
-2. Users: `paul` (the owner, in `sudo`), `maestro` and `maestro-cos` (neither in `sudo`), homes at mode 0700. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo -f /etc/sudoers.d/maestro`.
+2. Users: `paul` (the owner, in `sudo`), `maestro` and `maestro-cos` (neither in `sudo`), homes at mode 0700. Also `maestro-log`, with no login shell, which owns `/var/log/maestro` (6.6), and the group `maestro-logread`, whose only member is `paul`. `scripts/install.sh` prints the two sudoers lines; the owner adds them with `visudo -f /etc/sudoers.d/maestro`.
 3. Build `maestro-ticket` as `paul` and install it as `/usr/local/bin/maestro-ticket`, `root:root`, mode 0755. **Neither side may be able to write the binary:** the wake rule runs it as `maestro-cos`, so a worker that could replace it could run anything on the desk side. The same goes for `@playwright/cli` in `/opt/pw` and the `playwright-cli` shim in `/usr/local/bin` (6.5), and for `codebase-memory-mcp` in `/usr/local/bin` (14.3).
 4. systemd units, each `Restart=on-failure`:
    - `maestro-t3-cos.service`: `User=maestro-cos`, `t3 serve --host 127.0.0.1 --port 3773 --no-browser`, `MemoryMax=3G` (5.5);
    - `maestro-boot.service` (oneshot, `User=maestro`): a code-only `look` after a boot, with no `--judge`, so dead runs and free slots are seen without a model turn, and `desk brief` shows `rebooted at …`;
    - timers for the relay check, the heartbeat, the T3 resource check (5.5) and the nightly backup (17.4);
    - `maestro-janitor.timer` (`User=maestro`): `janitor` at 03:30, and `janitor --if-low` every 5 minutes; `fstrim.timer` if the disk is sparse; `loginctl enable-linger maestro` for the runs' memory scopes (6.4);
-   - `systemd-timesyncd`.
+   - `systemd-timesyncd`;
+   - `maestro-logd.socket` and `maestro-logd.service` (`User=maestro-log`), `maestro-reconcile.timer` (`User=maestro`, 03:45), and an `ExecStopPost=` on each Maestro unit that logs its result (6.6).
 5. Node 24, Chromium's libraries and fonts through Playwright's `install-deps chromium`, and `fonts-noto-cjk` (6.5).
 
 **As `maestro-cos`:**
@@ -511,6 +518,7 @@ Today nothing frees disk on its own. On low disk, `claim` and `slot` refuse (`lo
 | `/var/backups/maestro` (17.4) | over 14 nights old | the newest 14 |
 | Browsers (6.5) | a playwright daemon or Chromium in no live run scope, over 20 minutes old; a session's `.err` or `.session` file with no live daemon, a day old | anything in a live run's scope |
 | Graph overlays (14.3) | `<repo>~T-<n>` once its ticket is done or cancelled, or untouched for 3 days: `delete_project`, about 20 MB each **[box]** | each repo's main index; an overlay a live run's prep made |
+| Logs (6.6) | never by the janitor: `maestro-logd` prunes its own files at 03:20 (raw streams after 30 days, events after 400). In stage 2 the janitor asks it to drop streams over 7 days old | events, `rejects`, `mismatch` lines |
 
 - **Idempotent.** One janitor at a time, under `flock` on `janitor.lock`. It checks each item again just before removing it. An item already gone counts as removed by someone else. It never deletes a `*.lock`. A second run frees nothing new.
 - **Logs.** It writes one journal line per class, such as `janitor: tmp 4.1 GB 180k files (212 dirs); worktrees 0.2 GB (3); kept T-572 dirty`, and one file, `<store>/janitor.json`, with `at`, `freed_bytes`, `freed_inodes`, the free space and inodes after, and `failed`.
@@ -634,6 +642,244 @@ QA checks every screen in a browser of its own, and several QA runs go at once. 
 - **If a desk later needs a site with no API:** one persistent Playwright MCP profile in `~maestro-cos/browser`, headless, on the chief-of-staff side only. The owner signs it in once, and the desk treats every page as pulled text (6.0).
 - **Owner's call.** Whether any Grok-browser task loses coverage is open question 14.
 
+### 6.6 Logs and traces
+
+The owner's ask (2026-11-20): "Log as much data as possible in this flow so we can debug things. Logging should consume no tokens, or so few it doesn't affect spend. The information in those logs needs to be extremely accurate." The design:
+- code writes every line, in one schema, to files no run can edit;
+- a run's raw stream is kept beside the lines parsed from it, with its hash;
+- a nightly check compares the logs with the board, git and the harness's own numbers;
+- people and desks read a rendered timeline, never the raw files.
+
+```mermaid
+flowchart LR
+  SUP["Supervisor<br/>exit, scope, stream tee"]
+  VERBS["maestro-ticket verbs<br/>board, slot, relay, cos, desk,<br/>janitor, graph, eval, shim"]
+  HOOKS["Hooks, systemd<br/>ExecStopPost"]
+  LOGD["maestro-logd<br/>user maestro-log<br/>stamps uid, pid, exe; checks; redacts"]
+  FILES[("/var/log/maestro<br/>events by day, raw streams, hashes")]
+  REC["reconcile, nightly<br/>board, git, gh, harness"]
+  TRACE["trace: a timeline<br/>owner: all; desks, runs: capped"]
+  BRIEF["desk brief: one logs: line"]
+  SUP --> LOGD
+  VERBS --> LOGD
+  HOOKS --> LOGD
+  LOGD --> FILES
+  FILES --> REC
+  REC -->|"mismatch lines"| LOGD
+  FILES --> TRACE
+  LOGD -->|"counters"| BRIEF
+```
+
+**1. What Maestro records today.** Paths are under `tools/maestro-ticket/` unless named. Every row is **[code]**, plus what was read in agency-ops' store on the VM **[box]**, 2026-11-20.
+
+| Record | Where | Written by | Time | Atomic, fsync |
+|---|---|---|---|---|
+| Run record `runs/<id>.json`: command, job, launcher, session, state, exit, `routed`, `chained`, `reply` (the last 64 KB of the model's result) | `runs/runs.go:265-272`, `:615-618` | the launcher and the supervisor | UTC, ms | temp file and rename; fsync |
+| `<id>.in`, `.out`, `.err`: prompt, the child's stdout and stderr | `runs/runs.go:232-239`, `runs/supervise.go:167,172` | the child | — | plain write |
+| `<id>.stream`, the stream-json | `runs/supervise.go:182` | the child. **Deleted once the run's end is recorded** `runs/runs.go:440`. `.out` is rewritten as the command's own text plus the last `result` line `runs/supervise.go:381-396`. A killed run keeps no result (`:387-391`) | — | — |
+| `streamfilter`'s summary: step codes, tool counts and times, context peak, usage per model | `streamfilter/streamfilter.go:76-102` | parsed from the stream; kept only in stats | the stream's `timestamp` | — |
+| `stats.db`: `run_facts` (about 60 columns), `run_models`, `run_steps`, `findings`; rows roll into `daily` after 90 days | `stats/schema.go:28-103`, `stats/prune.go:21-22` | the supervisor at a run's end, in one transaction | epoch ms | WAL, `synchronous=NORMAL`. A write over 300 ms is dropped silently `stats/stats.go:43` |
+| Board `events` (claimed, transitioned, commented…) and `comments`; `runs` (cost per session); `launches` | `sqlitestore/sqlitestore.go:72-84,509-516`; `cli/runs.go:149-214` | the store, in the change's own transaction; append-only by trigger | the database's clock, epoch ms | WAL |
+| `rules.log` | `cli/rules.go:199-209` | each rules write | UTC, seconds | `O_APPEND`, no fsync |
+| `.acked`, `.stop`, `.stopcheck`, gates, `paused.json`, coord marks, slot files | `runs/runs.go:425-475`, `cli/stopcheck.go:246-263`, `runs/gate.go:111`, `cli/coord.go:200-289` | code | mixed; `.stopcheck` has none | mostly rename. `.acked` is `O_EXCL`, then a write, so a reader can see it empty (`runs/runs.go:451-452`) |
+| The supervisor's own stderr | `cli/launch.go:317-323` | — | — | goes to **/dev/null**, so its warnings are lost |
+| Claude's transcripts, `~/.claude/projects` | Claude Code | per message: UTC ms, `requestId`, usage. A `cost-state` line holds `totalCostUSD` and `totalDuration` **[box]** | UTC, ms | Claude Code's |
+| T3's `statev2.sqlite` | T3 | the desks' threads and turns: 450k `orchestration_events` and 10k command receipts on the VM **[box]** | — | T3's |
+| `pickup`'s `events.log` and `receipt.txt` (the fleet's job tool, outside Maestro) | `t3work/bin/pickup:627-632` | the receipt is the tail of the job's `out.log`, so it is the model's last words | local time, `-0700`, seconds | write and rename |
+
+Not built yet: `duty.log` (5.4), `janitor.json` (6.4) and `graph.json` (14.3). Worker runs have one hook, the stop check; `~/.claude/settings.json` sets none **[box]**.
+
+**2. What is lost, guessed or wrong today.** All **[box]** unless marked otherwise.
+
+| Found | Example | Cause |
+|---|---|---|
+| The raw stream is gone | R-k2l7br7g, a 34-minute senior build, keeps a 6 KB `.out` with one `result` line in it. 14½ minutes of the run were one Bash call. Only `run_steps` (`ms_max` 871 s) and Claude's transcript show that | `.stream` is deleted at the end **[code]** |
+| 121 runs have tokens but no cost | Most of them timed out or failed. Their transcripts' `cost-state` lines hold $227 at list. That is 10% on top of the $2,248 `costs` shows for the same window (1,500 runs since 2026-11-18 16:55 UTC) | A killed run's result is dropped. A run with no result gets `cost_src=stream` and no dollars **[code]** `cli/statsrun.go:365-369` |
+| The cost is list price, not a bill | Claude Code labels its own figure `costBasis: "list"` in `modelUsage` | The Max plan bills no run |
+| The plan's own usage is thrown away | Streams carry `rate_limit_event` lines (75 in the 9 live streams) giving the 5-hour and 7-day `utilization` and `resetsAt` as numbers. No code reads them. The pause's reset is parsed from the reply's words, and when that fails it is set to "ended + 1 h" **[code]** `cli/route.go:73,797-805` | — |
+| `claude_ms` is not the run's time | R-k2l7br7g: `claude_ms` is 1,214 s, wall time 2,054 s, slot wait 0. The transcript's `totalDuration` says 2,054 s. 155 of 1,500 runs differ by more than 10 minutes beyond their slot wait | It stores the result's `duration_ms` |
+| Seven time shapes in one field | `.acked`'s `at` comes as `…05.123Z`, `…05.12Z`, `…05.1Z`, `…05Z`, and 137 times in local time with nanoseconds and `-07:00`. Run records' `started_at` comes in four shapes. `rules.log` is to the second, `.stopcheck` has no time, and `pickup` writes local time | Go drops trailing zeros. Five `Ack(…, time.Now())` calls skip `.UTC()` **[code]** `cli/launch.go:309,328,341`, `cli/job.go:1029,1244`. Variable widths also sort wrongly as text |
+| A model's word is stored as fact | `verdict`, `head`, `findings` and `v_tier` are parsed from the reply. `outcome=question` means "the last line ends in `?`". An escalation with no other reason is recorded as `approval` **[code]** `cli/statsreview.go:97-288,244`, `cli/route.go:127`. On the board, 155 of the last 1,500 comments are `Review: GO` and 131 are `QA: pass`. Both are model text, checked only for shape by a regex (`cli/verdict.go:132-228`) | — |
+| The model is the flag, not what ran | `model` comes from `--model opus` in argv **[code]** `cli/statsrun.go:104-108`, while the result names `claude-opus-5-5` | — |
+| Board events can't be joined to runs | None of the 10,360 events carries a run or session id. `actor` is whatever `--actor` says **[code]** `cli/cli.go:343` | — |
+| Lost silently | stats writes that pass 300 ms; the supervisor's stderr. `log-run` merges models into one row per session `cli/runs.go:201-206` **[code]** | — |
+| No fsync | `.acked`, `.stop`, `.in`, `rules.log`, `.stopcheck`, coord marks, `paused.json`, check passes **[code]** | — |
+| Nothing is redacted | `.in`, `.out`, `.err`, the stream, `reply`, comments and event notes. Only the Mongo URI and webhook URLs are cut **[code]** `mongostore/mongostore.go:788-822`, `runs/notify.go:143-150` | — |
+| No clock sync | PID 1 is `tini`, and no `timesyncd`, `chrony` or `ntpd` runs | — |
+| Backups miss the logs | `backup` dumps the ticket store only **[code]** `cli/cli.go:1305-1342`. `runs/` and `stats.db` are not in it | — |
+
+What is right: stats and the board agree to the cent on all 1,319 sessions they both hold, and stats' `wall_ms` matches the run records on all 1,500 runs **[box]**. The base is sound. The gaps are what gets thrown away, what gets guessed, and what never gets written.
+
+**3. Code writes every line; models never do.**
+- **The writers are code.**
+  - the supervisor: process start and exit, the run's scope, and the stream parser through the harness adapter (8.1);
+  - the `maestro-ticket` verbs: the board store, `slot`, the relay, `cos`, `desk`, `janitor`, `graph` and `eval`;
+  - the hooks, which run `maestro-ticket`;
+  - the browser shim (6.5), through `maestro-ticket log browser …`;
+  - each systemd unit's `ExecStopPost=`, which passes on `$SERVICE_RESULT` and `$EXIT_STATUS` **[docs]**.
+- **git and gh are asked, not told.** At a run's end the supervisor gets the facts from git and gh itself, never from what the model says it did:
+  - `git rev-parse HEAD` in the run's worktree;
+  - `git ls-remote` for the branch;
+  - `gh pr view --json number,state,headRefOid,mergeCommit` for the ticket's PR.
+
+  These calls cost no tokens. Their result is the logged `git`.
+- **A model's word is a claim.** Some facts come only from a model: a verdict, a handoff, a question or the reply. Each is logged as `claim`: the text up to 4 KB, redacted, the sha256 of the whole text, and `src: model`. Every field parsed from it carries `src: model` too. Code then checks what it can. A `Review: GO at <sha>` claim gets a `check` line that compares the sha with the PR head gh reports.
+
+**4. The writer: `maestro-logd`.** Every run is `maestro`, with full permissions, so `maestro` can't own the log: a log that user can write is one any run can edit.
+- **A unit of its own.** It is socket-activated (`maestro-logd.socket` and `.service`) and runs as its own user, `maestro-log`, with no sudo and no login shell. The socket is `/run/maestro-log/sock`, and `maestro` and `maestro-cos` can write to it through its group.
+- **The kernel names the sender.** logd stamps each line with the sender's uid and pid from `SO_PEERCRED`, and its `/proc/<pid>/exe` **[docs]**.
+  - A line that didn't come from `/usr/local/bin/maestro-ticket`, which is root-owned (6.2 step 3), is kept, marked `writer: other`. So a run that writes to the socket by hand can't pass as code.
+  - The side, `worker` or `cos`, comes from the uid, never from the line.
+- **Files no run can touch.** The files are under `/var/log/maestro/`, owned by `maestro-log`, mode 0640. Their group is `maestro-logread`, and its only member is `paul`. No run, desk or T3 server can read or change them directly.
+- **The wall holds.** logd answers a sender only `ok` or an error. It caps each sender at 2,000 lines a second (guess), so a flood can't fill the disk. Reads go through `trace` (8 below), which logd serves only to the binary.
+- **If logd is down,** `maestro-ticket` spools to `~/.cache/maestro/spool/<pid>.jsonl` with `O_APPEND`. logd takes the spool in when it starts and marks those lines `spooled: true`. A run could have edited them, and the mark says so.
+
+**5. One schema.** One JSON object per line, at most 4 KB:
+
+| Field | Holds |
+|---|---|
+| `v` | the schema version |
+| `ts` | UTC, always with three fraction digits: `2026-11-20T13:06:23.793Z` |
+| `mono_ns`, `boot` | the writer's `CLOCK_MONOTONIC` and `/proc/sys/kernel/random/boot_id`. Within one boot the order is exact even if the wall clock steps |
+| `host`, `distro`, `side`, `uid`, `pid`, `exe`, `writer` | where the line came from. logd fills in the last five, not the sender |
+| `kind` | from the fixed list below |
+| `trace`, `span`, `parent` | `trace` is the goal (`G-<slug>`), or the ticket if it has no goal; `span` is this hop; `parent` is the span that caused it |
+| `goal`, `ticket`, `run`, `session`, `subagent`, `tool_use` | ids, each from code: the board; `MAESTRO_RUN_ID` **[code]** `runs/supervise.go:21,190`; the stream's own `session_id`, `parent_tool_use_id` and `tool_use_id` **[box]** |
+| `job`, `role`, `harness`, `model_asked`, `model`, `effort`, `tier`, `route` | `model_asked` is the flag; `model` is what the harness's result or stream names |
+| `git` | `{base, head, remote_head, pr, merge}`, from git and gh |
+| `exit`, `signal`, `stop` | `stop` is `{cause, by}`. The cause is `time_limit`, `asked`, `launcher`, `oom`, `usage_limit`, `api_down`, `died` or `none`. Today it survives only as error text **[code]** `runs/supervise.go:344-347` |
+| `tok` | `{in, out, cache_read, cache_write_5m, cache_write_1h, thinking}` per model, as the harness reports them |
+| `cost` | `{usd, basis, src}`. `usd` appears only as the harness printed it. `basis` is the harness's own word (`list` for Claude Code). `src` is `result`, `transcript` or `none`. Maestro never computes it |
+| `plan` | `{five_hour, seven_day, resets_at}` from the stream's `rate_limit_event`, when the harness sends one |
+| `ms` | `{wall, harness, api, tool, wait}`, each named for what it measures |
+| `res` | `{mem_peak, oom_kills, tmp_bytes, tmp_files, disk_free_pct, inode_free_pct}` (6.4, 6.5) |
+| `graph` | `{mode, pack_tokens, rows, cut, index_sha, calls}` (14.3) |
+| `src` | `code`, `harness` or `model`, for the facts on the line |
+| `raw` | `{file, off, len}`: the bytes in the raw stream this line was parsed from |
+| `data` | the fields of the line's kind |
+
+One kind per hop:
+
+| Hop | Kinds | Written by |
+|---|---|---|
+| A run | `run.start`, `run.end`, `turn` (one per model request: request id, tokens, ms), `tool` (code, ms, ok, bytes), `subagent.start`, `subagent.end`, `compact`, `retry`, `claim`, `check` | the supervisor; the stream parser, through the adapter |
+| Slots, claims, the board | `slot.wait`, `slot.got`, `slot.free`; `board.claim`, `board.release`, `board.transition`, `board.comment` (its id and hash only; the text stays on the board), `lease.expired` | `slot`; the store, in the change's transaction, with `run` from `MAESTRO_RUN_ID` |
+| The relay | `route` (the row of 3.1's table that matched, the line, the action); `look.lock` (taken, refused, stale takeover); `look.dirty`; `inbox.add` with its class | the supervisor |
+| Wakes and desks | `wake` (the gate: sent or held; the exit); `desk.ring` (the desks chosen, the `t3 thread send` exit); `desk.turn` (session, start, end, and tokens from the transcript's tail); `desk.pickup`, `desk.ack`; `duty` (epoch, from, to, why); `desk.open`, `desk.close`, `desk.claim`, `desk.release` | `wake`, `desk` and the three hooks (5.4) |
+| `cos` verbs | `cos` (the verb, the desk, the args' sha256, the exit, ms, and `refused` with the reason) | `cos`, on both sides of the door |
+| Pushes | `page` (template, args, the send's exit), `push.down`, `push.up`, `heartbeat` | `desk page`; the relay check |
+| git, gh | `git.push`, `pr.open`, `pr.merge`, read after the fact | the supervisor at a run's end; the reconciler |
+| Cleanup, graph, browsers | `janitor.pass` (per class: freed, kept and why); `graph.reindex`, `graph.pack`; `browser.open`, `.close`, `.wait`, `.cap`, `.reap` | `janitor`, `graph`, the shim |
+| Evals | `eval.item` (set, harness, model, expected, got, pass), `eval.done` | `eval` |
+| The machine | `unit` (the unit, its result, its exit); `clock` (hourly: synced or not, the offset); `disk` (each `--if-low` pass that acts) | `ExecStopPost=`; a timer |
+| The logs | `reject` (a line that failed the schema, kept whole); `mismatch` (from the reconciler); `prune` | logd; the reconciler |
+
+**6. Accuracy rules.**
+- **Append-only, whole lines.** logd owns each UTC day's file, `events-YYYY-MM-DD.jsonl`. It opens the file with `O_APPEND` and writes one line per `write`. It is the only writer, so lines can't interleave. Claims and payloads over 4 KB go to side files named by their hash.
+- **fsync.** On every `run.end`, `duty`, `cos` and `mismatch`, and at least once a second while lines arrive. A power cut loses at most a second of lines, and the reconciler then finds a `run.start` with no end.
+- **Schema-checked on write.** There is one Go struct per kind, shared by the senders and logd. A line that fails is kept whole in `rejects.jsonl` with its error, never dropped. `desk brief` counts these lines.
+- **Raw streams, verbatim.**
+  - The supervisor reads the child's stdout through a pipe. Today the child writes the file itself (`runs/supervise.go:182`). The supervisor sends every byte to logd and parses the same bytes, so a run can't rewrite its stream later.
+  - logd stores `streams/<run>.jsonl.gz`. `run.end` records two hashes: `sha_raw`, of the bytes as sent, and `sha_kept`, after redaction (10 below).
+  - Every parsed line carries `raw.off`, so any number can be traced back to its source line.
+  - `.out` and `stats.db` work as today. The stream is no longer deleted.
+- **The harness's own numbers.** Tokens, cost and the plan's usage come from the harness.
+  - Where the harness prints no cost (a killed run, Codex, Antigravity), `cost.usd` is `null` with `src: none`. It is never 0, and never priced by Maestro.
+  - For Claude, a killed run's cost is read from its transcript's `cost-state` line, with `src: transcript`. That alone recovers the $227 above.
+  - 8.1's list-price view (`cost_src=list`) is worked out when `costs` reads the logs. It is never logged as a fact.
+- **Clocks.** `systemd-timesyncd` runs in the distro (6.2). Each hour a `clock` line records `NTPSynchronized` and the offset. Order comes from `mono_ns` within a boot and from `ts` across boots. The reconciler flags any `ts` that runs more than 1 s backwards against `mono_ns`.
+- **One time format.** One `stamp()` helper is used everywhere: UTC with three fraction digits. S15a also puts the five local `Ack` calls on it.
+- **A hash chain.** The first line of each day's file holds the sha256 of the day before's file. `trace --verify` checks the chain.
+
+**7. The nightly reconciler.** `maestro-ticket reconcile` is code, uses 0 tokens, and runs at 03:45, after the janitor, as `maestro`. It reads the logs through logd. Each mismatch it finds becomes one `mismatch` line. A mismatch never changes the board: it is there for people to read.
+
+| Check | Against |
+|---|---|
+| Every `run.start` has a `run.end`, or a live pid | the process table |
+| A run's tokens and cost in `run.end` equal the sum of its `turn` lines, the result's totals and, for Claude, the transcript's `cost-state` | the harness's three records |
+| stats.db's row, and the board's `runs` row for the session, match the events | the events |
+| Each ticket's status matches its last `board.transition`. Each transition has a run. Each claim's holder is live or has released | the board |
+| A `Review: GO at <sha>` names a commit on the PR's branch. `QA: pass` comes before `merged`. Each `merged` has a merge sha on `origin/<main>` | git and gh |
+| The 5-hour `utilization` moves with the runs' token use. Flags: a run that ended in a window whose utilization fell, and a limit hit with utilization under 0.9 | the plan's own numbers. The Max plan has no per-run bill to match. An API-billed harness's usage report would go here (19.1) |
+| Each stream's `sha_kept`, and the chain of day files | the files |
+| Yesterday's files hold no secret value (10 below) | the redaction list |
+| The clock | the `clock` lines |
+
+**8. Reading it, with no tokens.**
+- **`maestro-ticket trace <G-slug|T-n|R-id> [--since] [--raw] [--json]`** renders a timeline from the events, one line per hop. An illustration, with R-k2l7br7g's real numbers; the shas, the offset and the times after the run's end are made up:
+  ```
+  R-k2l7br7g · T-398 · 34m · $4.49 list
+  13:06:23.793 run.start  R-k2l7br7g build senior · claude opus-5-5 high · slot 0s · base 4be1c2a
+  13:19:29.578 tool       Bash 871.3s ok · raw +1185440
+  13:40:38.069 run.end    done · exit 0 · wall 2,054s (harness 1,214s, api 807s) · 88 turns · $4.49 list (result)
+  13:40:38.120 claim      model: "…T-398 is now in review as PR #430" · sha256 3f2a91c0
+  13:40:38.402 check      PR #430 head 9c1e77d = worktree head: ok
+  13:40:38.511 route      row "build done" → job review T-398
+  ```
+- **Desks** see one line in `desk brief`, built from logd's counters with no file read:
+  ```
+  logs: 0 rejects · 2 mismatches (R-ab12cd34 cost, T-41 GO sha) · reconcile 03:45 ok · logd up · clock synced
+  ```
+- **A desk asks** with `cos trace <id>`. It gets the same render, capped at 1,500 tokens (4 bytes a token, counted as 14.3 counts them). Claims appear as their hash and first 80 characters, fenced as data (6.0). A desk never gets a raw stream.
+- **A run asks** with `maestro-ticket trace <id> --cap 1500`, which covers its own ticket's runs by default. Nothing is streamed into any context, and no hook adds logs to one.
+- **The owner** reads everything as `paul`, raw streams included:
+  - `trace --raw`;
+  - `trace --db`, which builds `/var/log/maestro/events.db`, a SQLite index of the day files, for ad hoc SQL. The binary already links SQLite: today's board is a SQLite store **[code]**;
+  - DuckDB, which reads the `.jsonl.gz` files directly, if the owner installs it.
+
+  All three cost 0 tokens.
+
+**9. Volume and retention.** Rates from agency-ops on the VM, over the 1.9 days `stats.db` holds **[box]**: about 800 runs, 26,000 tool calls, 19,500 model turns and 200 subagents a day, plus 1,100 board events.
+
+| What | Size | Kept | Disk |
+|---|---|---|---|
+| Events: about 56k lines a day at about 380 bytes **[I]** | about 21 MB a day. gzip shrinks it 8-12× on lines built from real `run_steps` rows **[I]**, but those lines repeat more than real ones will | today and yesterday plain, then gzip; 400 days | about 1 GB |
+| Raw streams | the 9 live streams were 78 KB to 5 MB, 0.6-0.85× the size of their transcripts; gzip 1.5-5×, xz 4-6× **[box]**. Agency-ops' transcripts come to 2.04 GB a week **[box]**. So about 200 MB a day raw and about 50 MB gzipped **[I]** | 30 days | about 1.5 GB |
+| Claims over 4 KB, `rejects`, `mismatch`, `reconcile-*.json` | small | 400 days | — |
+| `stats.db` | as today: 90 days of rows, then `daily` | — | — |
+
+- **Compression** uses Go's own `compress/gzip`, so nothing is installed. A stream is compressed when its run ends.
+- **logd prunes its own files** at 03:20, as its own user; the janitor (6.4) can't touch them. In stage 2 of low disk (6.4), the janitor asks logd over the socket to drop streams older than 7 days. Events are never dropped early.
+- **Claude's transcripts** stay Claude Code's, kept 14 days (6.4). The raw stream is Maestro's own copy, so the 30 days don't depend on them.
+
+**10. Secrets: redacted on write, and tested.**
+- **logd redacts every line and every stream byte** before writing. It works from two lists:
+  - the exact values the environment builder (8) puts into runs: `GH_TOKEN`, the Atlas URI, webhook keys and T3's token. They sit in `/etc/maestro/redact`, owned by `maestro-log`, mode 0400, which `install.sh` writes from the env files;
+  - patterns: `ghp_`, `github_pat_`, `sk-ant-`, `mongodb+srv://…:…@`, `Bearer …`, `AKIA…` and PEM blocks.
+
+  A match, even one split across two chunks, becomes `«GH_TOKEN»` or `«secret:pattern»`.
+- **The kept stream** is verbatim apart from marked spans. `sha_raw` is the hash taken before redaction. logd keeps no copy of the unredacted bytes.
+- **The supervisor** puts the same values through the same filter for `reply` and `error` before `runs.Save`. It already holds the values, because it built the run's environment. Events log environment names only, never values, just as `Command` holds none (8).
+- **The test** (S15): a run prints `GH_TOKEN`, a fake `sk-ant-` key and the Atlas URI three ways: in a tool result, in its reply, and split across two stream lines. Then `grep -rF` for each value finds nothing in `/var/log/maestro`, `stats.db`, the board, the run records or the nightly tarball, and finds the markers where the values were. The reconciler runs the same grep each night over yesterday's files.
+
+**11. Every harness, one schema.** 8.1's `Events(line)` and `Reply(out)` map each harness's output to these kinds.
+- **What a harness doesn't report stays `null`,** with `src: none`:
+  - Codex and Antigravity print no USD **[docs]**, so their `cost.usd` is null;
+  - a harness that sends no plan event leaves `plan` empty;
+  - one with no request ids leaves `turn.request` empty.
+- **The fixtures check it.** The adapter's fixtures (8.1, item 4) gain one check: each recorded output maps to the same events, byte for byte.
+- **Desks too.** Whatever the engine, a desk's turns are logged the same way, from its hooks and its transcript (8.1, item 6).
+
+**12. Build.**
+- **S15a, in step 0 on the VM.** It needs no T3 and no new user.
+  - `stamp()` everywhere;
+  - the event structs and `maestro-ticket log`;
+  - `run.end` with `model`, `stop`, the git and gh facts, `plan`, and a killed run's cost from its transcript;
+  - raw streams through the pipe, kept and gzipped with their hashes;
+  - redaction in the binary;
+  - `trace` and `reconcile`.
+
+  The VM has no systemd (PID 1 is `tini`), so lines go straight to `<store>/events/` with `O_APPEND` and one `write` each.
+- **S15b, on the desktop with S9:**
+  - `maestro-logd`, with its user and socket, and `SO_PEERCRED`;
+  - the files moved under `/var/log/maestro`;
+  - the redaction file;
+  - the `clock` lines;
+  - the units' `ExecStopPost=`;
+  - the brief's `logs:` line;
+  - `cos trace`.
+- **What it costs in tokens.** Nothing in either step adds a model turn. The only tokens are the ones an agent spends when it asks `trace` itself, at most 1,500 an ask.
+
 ## 7. The board on Atlas
 
 The board lives on **MongoDB Atlas's free tier** (decided 2026-11-19). `maestro-ticket` already runs on MongoDB, `mongodb+srv://` URIs included **[code]** `tools/maestro-ticket/README.md:24`. The board then survives the PC's disk and is ready for a second box later.
@@ -722,7 +968,7 @@ Every one has a headless mode, but two aren't ready for unattended runs: **Antig
 | `Resume(cmd, session, model, effort)` | the same run resumed, maybe on another model | `resumeCommand`, `job.go:1277-1308` |
 | `Session()` | a caller-chosen id, or none (then read from the stream) | `newSessionID`, `job.go:130` |
 | `Stream(cmd)` | the streaming form of the command | `StreamArgv`, `supervise.go:363-375` |
-| `Events(line)` | one output line → Maestro's steps, tool codes, usage by model, context peak | `streamfilter` |
+| `Events(line)` | one output line → Maestro's steps, tool codes, usage by model, context peak, and the log kinds of 6.6 (`turn`, `tool`, `subagent`, `plan`), with what the harness lacks left `null` | `streamfilter` |
 | `Reply(out)` | text, session id, is-error, tokens by model, cost and where it came from (`result`, `stream`, or `list` = tokens × that vendor's list price) | `ParseOutput`, `lastResult` |
 | `Ended(reply)` | `usage_limit` and its reset, `api_down`, or nothing | the regexes in `route.go:68-80` |
 | `Family(model id)` | the stats family | `statsrun.go:50-60` |
@@ -750,7 +996,7 @@ Stop, the time limit, cwd and the run's memory scope stay in the supervisor: the
 - **Models belong to a harness.** `rules set harness review.light codex` is refused unless `rules set model review.light` names one of Codex's models, so a slot never runs `--model sonnet` on Codex.
 - **Each harness's limit pauses only its own slots.** `paused.json` becomes `paused-<harness>.json` **[code]** `cli/coord.go:33`, as 12.2 does for accounts. A Claude limit then stops no Codex slot, and the reverse.
 - **The kill switch.** `rules set harness all claude` puts every slot back on Claude and its default model, in one command, logged in `rules.log`. Code also flips one slot back by itself, with a desk item, when two of its runs in a row end with a reply its adapter can't parse.
-- **Costs stay comparable.** A harness that prints no USD is priced as tokens × its vendor's list price, with `cost_src=list`, so `costs --by actor` still adds up. A subscription's real cost is its fee, which 14 doesn't count for Claude either.
+- **Costs stay comparable.** A harness that prints no USD is priced as tokens × its vendor's list price, with `cost_src=list`, so `costs --by actor` still adds up. A subscription's real cost is its fee, which 14 doesn't count for Claude either. That list figure is worked out when `costs` reads; the logs hold only what the harness printed, or `null` (6.6).
 
 **5. What stays neutral, what is per-harness.**
 - **Neutral, always:** skills as plain markdown, the same bytes in every harness's folder (`install.sh`'s copy); the board and every `maestro-ticket` verb, which any harness with a shell can run; the packs (14.3) and the QA script (14.6), which are files; evidence formats and replies; the wall (6), which is Linux users and sudoers, not hooks. Two skill lines change, from "`claude -p`" to "a headless run" (9). Rules files are already shared in Maestro's own repo: `CLAUDE.md` is the single line `@AGENTS.md` **[code]** `CLAUDE.md:1`, which Claude Code imports **[docs]**. Grok reads both files, and Codex and Muse read `AGENTS.md`. In a team's repo, install leaves both files alone **[code]** `INSTALL.md:9`, so a team with only a `CLAUDE.md` needs an `AGENTS.md` before a harness that reads only that one gets a slot; `check` warns.
@@ -773,7 +1019,7 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 
 | File | Change |
 |---|---|
-| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"**, code builds the packs, and runs load no MCP server unless `rules set graph live` (14.3). A harness per slot, Claude by default, each move behind the slot's eval set, with `rules set harness all claude` as the way back (8.1). A Sonnet QA pass at tiers 0-1 merges only with every script step passed and evidenced; a surprise goes to Opus (14.6). |
+| `docs/decisions.md` | 1: a ring may run a command; a run's end may run the judge's look under the lock. 7: the inbox and `cos` verbs hold the ticket-text guard in code. 12: desks run in full access. 15: desks are the Claude sessions `launch` didn't start. 19 and 21: served roles, not Grok bots. New: the wall; desks (first opened has duty, next-oldest succeeds, one duty desk changes board-wide settings); model per job, effort high (14.1); the graph re-indexes on merge, **reversing T-136's "no hooks/refresh"**, code builds the packs, and runs load no MCP server unless `rules set graph live` (14.3). A harness per slot, Claude by default, each move behind the slot's eval set, with `rules set harness all claude` as the way back (8.1). A Sonnet QA pass at tiers 0-1 merges only with every script step passed and evidenced; a surprise goes to Opus (14.6). Code writes every log line, a model's word is logged as a claim with its hash, and costs are only the harness's own (6.6). |
 | `AGENTS.md` | "What we're building": the outer layer is the desks plus code; Grok is one supported runtime |
 | `README.md`, `docs/team.mermaid`, `docs/bot-anatomy.mermaid` | redraw for served roles, desks and the wall |
 | `bot-profiles/chief-of-staff/persona.md` | rewrite for desks: the `cos` and `desk` verbs, duty, the handoff note, the card shape, the 12-line reply. Procedures move to the skill. |
@@ -791,6 +1037,8 @@ The owner asked for a full rewrite of how Maestro runs. Every file below changes
 | `templates/project-setup.md` | a `## Runtime` section and a `## Env` section |
 | `docs/evals/` | the pinned eval sets (14.2) |
 | `skills/maestro-qa-lead/references/browser.md`, `INSTALL.md` step 7 | the shim's refusals and its `browser cap` wait; a tab that crashes again after a reopen counts as no browser; Node 24 and `install-deps` on Linux (6.5) |
+| `skills/maestro-working-principles/SKILL.md`, `skills/maestro-chief-of-staff`, `bot-profiles/chief-of-staff/persona.md` | to see what happened, `maestro-ticket trace <id> --cap 1500` (desks: `cos trace`); never read `/var/log/maestro`, a run's stream or another run's transcript (6.6) |
+| `docs/logging.md` (new) | the schema of 6.6: kinds, fields, `src` and `cost.basis`, the redaction lists, and how to read a trace |
 
 Outside this repo: the fleet model rule ("Claude is always Opus 5.5 at effort high", `t3work/OPS-RUNBOOK.md` line 84) gets an exception for the jobs 14.1 moves, once each passes its set. That is a live rule, so the owner makes the edit.
 
@@ -810,10 +1058,10 @@ flowchart LR
 
 | Step | Needs | Rollback |
 |---|---|---|
-| 0. Token knobs and fixes | S0, S7, S12, S13, S14 | `rules set model <job> opus` (for scripted QA, `rules set model qa opus`); `rules set graph off`; revert the skill lines. S13 changes no behaviour, so it needs none |
+| 0. Token knobs and fixes | S0, S7, S12, S13, S14, S15a | `rules set model <job> opus` (for scripted QA, `rules set model qa opus`); `rules set graph off`; revert the skill lines. S13 changes no behaviour, so it needs none; nor does S15a, which changes only what is written |
 | 1. Workers on code | S1, S2 | `notify set <worker> --url-file` |
 | 2. Planner relay on code | S2, S3 (the inbox, so its lines reach the Grok chief of staff through a webhook ring) | `notify set planner --url-file` |
-| 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, S11, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
+| 3. Move to the desktop; one desk in T3 | S4, S5, S9, S10, S11, S15b, and the move (17) | for 14 days: drain the desktop, copy `rules.md` and `board.json` back, start the VM's runs, `notify set chief-of-staff --url-file` |
 | 4. Several desks | S8 | close all but one desk |
 
 A harness move (8.1) is not a step. Each one comes after step 3, one slot at a time, once a second adapter exists and the slot's set passes on it. The way back is `rules set harness all claude`.
@@ -838,6 +1086,8 @@ A harness move (8.1) is not a step. Each one comes after step 3, one slot at a t
 | S8 | `desk` command: open, close, claim, release, beat, note, remember, brief, ring, page; the duty check; the three hooks | two desks claim one goal and one wins; a desk silent for 24 h loses its goals to the duty desk; the first desk opened has duty; closing it gives duty to the next-oldest live desk, and a lapsed lease does too at the next desk event; 5 desks racing 1,000 duty checks leave one holder per epoch in `duty.log`; a `rules set` that holds the lock finishes before a takeover, and the old holder's next one is refused; a failed ring send moves duty at once; `brief` shows `duty:` and stays under 40 lines with 5 desks; `ring` wakes only the owning desk |
 | S13 | The harness seam (8.1): the `harness` package and the Claude adapter, by moving `claudeCommand`, `resumeCommand`, `newSessionID`, `StreamArgv`, `streamfilter`, `ParseOutput`, `lastResult`, the limit and outage regexes, the model-id regexes, `stopSettings` and the `claude` argv checks behind it; the record's `harness` field; the two skill lines | no behaviour change: a golden test shows each job's argv, `resume`, `resume --opus` and `again` byte for byte as before, and each recorded reply (done, question, usage limit with its reset, API error, death) parsed to the same outcome, session, cost and tokens; a record with no `harness` resumes as `claude`; nothing outside `harness/` names `claude` but the record's default |
 | S14 | Scripted QA (14.6): the `## QA script` section and its lint; `QA script amend:`; `script_gap=`; `qa-prep.sh`'s `script.md` and `script=`; the `script` route in `job qa`; the surprise reply and its `resume --opus` with a QA text; the stop check's step rule; the 1-in-10 second look; eval QS | a Sonnet run on a script with one step it can't follow replies `surprise`, posts no verdict, and is resumed on Opus once; a `QA: pass` with a step missing from `results.md` is blocked; a stale script, a `script_gap=yes` or tier 2 routes to Opus; the pack's pages appear as steps; QS passes before the route is on |
+| S15a | Logs, on the VM (6.6): `stamp()`; the event structs, kinds and `maestro-ticket log`; `run.end` with `model`, `stop`, git and gh facts, `plan` and a killed run's cost from its transcript; the stdout pipe and tee, raw streams kept gzipped with `sha_raw` and `sha_kept`; `run` on board events from `MAESTRO_RUN_ID`; redaction in the binary; `trace`, `trace --verify`, `trace --db`; `reconcile` | a killed run's `run.end` carries the transcript's cost with `src: transcript`, and a run with no number carries `null`, never 0; every `ts` matches `^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$`, the five old `Ack` calls included; a tool's `raw.off` points at the stream line it came from; a stream changed after the run's end fails `sha_kept`; a line that fails the schema lands in `rejects.jsonl`; `trace R-…` renders a 2-hour build in under 1 s; the reconciler, run on a copy of the VM's store, lists the 121 cost-less runs and nothing it can't explain; the redaction test of 6.6 item 10 finds no value anywhere |
+| S15b | `maestro-logd` on the desktop (6.6): user `maestro-log`, the socket and service, `SO_PEERCRED` and the exe check, `/var/log/maestro` and `maestro-logread`, `/etc/maestro/redact`, the spool, `clock` lines, `ExecStopPost=` on each unit, `maestro-reconcile.timer`, the brief's `logs:` line, `cos trace` | as `maestro`, a run can't open, rename or truncate a file under `/var/log/maestro`; a line written to the socket by `bash` or `claude` is kept as `writer: other`; with logd stopped, lines spool and come back `spooled: true`; a flood of 100k lines from one run is capped and the disk line holds; a power cut (`wsl --shutdown` mid-run) loses at most a second of lines, and the reconciler flags the run's missing `run.end`; `cos trace` stays under 1,500 tokens on a 40-run ticket; `desk brief` shows `logs:` |
 
 | Claim | Label | Probe |
 |---|---|---|
@@ -882,6 +1132,12 @@ A harness move (8.1) is not a step. Each one comes after step 3, one slot at a t
 | T3 runs an engine's own hooks inside a thread (for a desk on Codex or Grok) | (guess) | a Grok thread in T3 with a `SessionStart` hook that writes a file |
 | A Sonnet QA flags what no step covers | (guess) | eval QS: the known catches the script didn't cover |
 | Surprises stay near 1 in 6 Sonnet QA runs | (guess) | QS's clean heads, then a week of `surprise` replies |
+| A killed Claude run's transcript holds its own cost in a `cost-state` line | **[box]**: all 121 cost-less runs on the VM had one, $227 in all | S15a's reconciler on the VM's store |
+| Claude Code's stream sends `rate_limit_event` with 5-hour and 7-day `utilization` and `resetsAt` on every run on the Max plan | **[box]**: 75 in 9 live streams on the VM; other plans (guess) | a week of `plan` fields; one run on an API key, which should send none |
+| `SO_PEERCRED` and `/proc/<pid>/exe` tell `maestro-ticket` from a shell writing to the socket | [docs] | S15b: write a line with `socat` from a run |
+| `systemd-timesyncd` keeps the distro's clock in sync, including after the PC's clock changes | (guess): WSL also sets the clock from Windows **[docs]** | 16.3 step 5; a week of `clock` lines |
+| Events come to about 21 MB a day and gzip about 8× | **[I]** from the VM's rates and lines built from `run_steps` | a week of day files on the VM after S15a |
+| Raw streams come to about 200 MB a day, 50 MB gzipped | **[I]** from 9 live streams and a week of transcripts **[box]** | a week of `streams/` after S15a |
 
 ## 12. Later: what the audits found for scale
 
@@ -1257,6 +1513,7 @@ Back in the distro, check which writes printed a line, then `kill %1`.
 **5. Idle stop and clock (3 min).** Close every WSL window. PowerShell: `wsl -l -v`; wait 2 minutes; `wsl -l -v` again. Does `MaestroProbe` show Stopped? Then:
 ```
 wsl -d MaestroProbe -- date -u +%T; (Get-Date).ToUniversalTime().ToString("T")    # within 1 s?
+wsl -d MaestroProbe -- timedatectl show -p NTPSynchronized -p NTP    # want: yes, yes (6.6)
 ```
 
 **5b. Disk give-back and memory caps (8 min).** These feed 6.4. In `MaestroProbe`: `df -h /; df -i /` (inodes per GB). Then `systemd-run --user --scope -p MemoryMax=200M python3 -c 'b=bytearray(400<<20)'`, which should be killed while the shell stays. PowerShell:
@@ -1343,7 +1600,7 @@ Remove-Item -Recurse -Force C:\probe
 |---|---|---|
 | 3 | `git status` ×5 and `go test` times: ext4, `/mnt/c`, NTFS; `launch` refused natively; `install_test` in WSL and Git Bash | — (decides only that files live on ext4) |
 | 4 | which writes inotify saw | — |
-| 5 | idle distro stopped? clock skew | — (the keepalive task covers a stop) |
+| 5 | idle distro stopped? clock skew; `NTPSynchronized` | — (the keepalive task covers a stop; with no sync, logs order by `mono_ns` and a `clock` line marks the skew, 6.6) |
 | 5b | inodes per GB; the scope killed alone; `--set-sparse` refused without the unsafe flag?; vhdx size before and after `fstrim` | — (no shrink, or the unsafe flag: no sparse, the owner compacts by hand, 6.4) |
 | 5c | `install-deps` passed; open time and RSS at 1, 4 and 8; shm used; the browser in the scope and gone with it; the fonts | — (sets `qa_slots` with step 0's RAM, 6.5; a browser that outlives its scope means the janitor's browser class does the reaping) |
 | 5d | the sha256 matched; index and re-index seconds; `detect_changes` printed changed files | — (over 10 s for the re-index: reindex from the janitor's timer, not inline on `merged`) |
@@ -1373,7 +1630,7 @@ While steps 0-2 (section 10) run on the VM, build the desktop per 6.2. Point it 
 |---|---|
 | **Runs and supervisors** | On the VM, `maestro-ticket stop`: no new starts. Let the running runs end and ack them. A resume can't cross boxes, since transcripts and worktrees stay on the VM, so a run that can't finish is stopped and restarted on the desktop as `job again` from its Handoff/WIP note. Per-run supervisors end with their runs. On the desktop, the code relay starts with S1-S2 in place. |
 | **The board** | If S5 already ran on the VM, the board is on the free cluster and nothing moves. Else `maestro-ticket migrate` to it first, on the VM. Then add the desktop's IP to the allowlist and remove the VM's after the rollback window. |
-| **The store folder** | Copy `board.json`, `rules.md`, `rules.log` and `backups/` from the VM's store folder **[code]** `cli/rules.go:28-31`. Don't copy `runs/`, `slots/`, `notify/`, `handouts/`, `checks/`, `bundles/` or `dep-cache/` **[code]** (`besideStore`): per box, and their runs are over. Archive the VM's `runs/` for stats history. |
+| **The store folder** | Copy `board.json`, `rules.md`, `rules.log` and `backups/` from the VM's store folder **[code]** `cli/rules.go:28-31`. Don't copy `runs/`, `slots/`, `notify/`, `handouts/`, `checks/`, `bundles/` or `dep-cache/` **[code]** (`besideStore`): per box, and their runs are over. Archive the VM's `runs/`, `stats.db` and `events/` (S15a) for history; `trace --store <archive>` reads them. |
 | **`codebase-memory-mcp`** | As root, the pinned v0.12.1 binary in `/usr/local/bin`, `root:root`, mode 0755, with its sha256 checked against the VM's (16.3 step 5d). Never its `install` or `update`. As `maestro`, its config has watchers and the UI off. Then `graph reindex` for each repo: seconds each (14.3). The VM's index is empty **[box]**, so nothing is copied. |
 | **Secrets and env** | Made new, not copied. **GitHub:** a new fine-grained token in `~maestro/.config/maestro/env`; revoke the VM's after 14 days. **Atlas:** the same database user; `maestro-ticket store --uri-file -` reads stdin, so nothing echoes. **Claude:** log in as `maestro` and `maestro-cos`; no API key in either environment (8). **T3 Connect:** a new publish-only link. **Tailscale:** the Windows client's own login; no `TS_AUTHKEY`. **Windows Credential Manager:** unused by the distro (interop off); it holds only the Atlas admin key for the IP script (7). Env files are written in an editor, never with `echo` in a shell that logs. |
 | **Switch on** | `notify set <role> --code` for each code role, `systemctl enable --now` for the units, a code-only `look`, open the first desk, which takes duty. Grok's webhooks stay unset. |
@@ -1391,11 +1648,15 @@ Each night a timer in the distro writes a tarball to `/var/backups/maestro/` (ow
 - `~maestro-cos/desk/state`;
 - a `sqlite3 .backup` copy of T3's state database (not a live file copy);
 - `board.json`, `rules.md` and `rules.log`;
-- the latest `maestro-ticket backup` JSON dump of the board **[code]** `cli/cli.go:1305`, since the free tier has no Atlas backups (7).
+- the latest `maestro-ticket backup` JSON dump of the board **[code]** `cli/cli.go:1305`, since the free tier has no Atlas backups (7);
+- yesterday's events from `/var/log/maestro`, gzipped (about 3 MB, **[I]**), with the day files' chain hashes, and the reconciler's report (6.6);
+- a `sqlite3 .backup` copy of `stats.db`, which `backup` leaves out today **[code]** `cli/cli.go:1305-1342`.
+
+Raw streams are not copied (about 50 MB a day, **[I]**); their hashes are in the events. Everything in the tarball has been through redaction (6.6), and the reconciler's nightly grep covers it.
 
 A Windows task, as the owner, copies that folder from `\\wsl.localhost\Maestro\var\backups\maestro` to a backed-up Windows folder. Restoring after a reinstall means re-running `install.sh` and unpacking the tarball; leases and `cos look` handle the gap.
 
-## 18. What v6, v7, v8, v9 and v10 changed
+## 18. What v6 to v11 changed
 
 | v5 said | The owner's answer (19.2) | v6 |
 |---|---|---|
@@ -1448,6 +1709,18 @@ v10, 2026-11-20, asked for by the owner: build it so harnesses can be swapped pe
 | Desks are Claude threads with Claude hooks | Their hooks and persona are Claude Code's files; Grok reads them, Codex doesn't **[docs]** | A desk on another engine is possible but not proposed; the pager is the first try (8.1) |
 | QA, every tier: Opus writes `plan.md` and runs it | Tiers 0-1 are a small share of QA spend; a script costs 1-3k output tokens in a session that is already warm | The planner writes a `## QA script` for every ship ticket; a full review may amend it at GO; code adds the pack's pages; Sonnet runs it at tiers 0-1 after QS; a surprise goes to Opus; tier 2 runs the script, then explores; about $0-20/week net **[I]** (14.6) |
 
+v11, 2026-11-20, asked for by the owner: log as much as possible, at no token cost, and accurately.
+
+| v10 said | Found on the VM **[box]** | v11 |
+|---|---|---|
+| Records as today: run files, stats, the board, `rules.log` | The raw stream is deleted at each run's end **[code]**; a 34-minute build keeps one `result` line. 121 killed or failed runs have tokens but no cost, while their transcripts hold $227 of it, 10% on top of what `costs` shows | A raw stream per run, kept 30 days with its hashes; every parsed line points at its bytes; a killed run's cost read from its transcript, else `null` (6.6) |
+| — | Times in seven shapes, 137 acks in local time **[code]**; no clock sync; stats writes dropped silently; the supervisor's stderr to /dev/null; no fsync on acks, stops or `rules.log` | One UTC ms format; `mono_ns` and `boot`; `timesyncd` and `clock` lines; schema checks with `rejects.jsonl`; fsync on every run end (6.6) |
+| — | Verdicts, heads, findings and questions parsed from model prose and stored as facts; the model is the `--model` flag; board events have no run id; `actor` is self-declared | Code writes every line; a model's word is a `claim` with its hash and `src: model`, checked against gh where it can be; `model` from the harness; `run` on board events from `MAESTRO_RUN_ID` (6.6) |
+| Cost is `total_cost_usd` | Claude Code labels its figure `costBasis: list`; streams carry the plan's 5-hour and 7-day utilization, which no code reads | `cost.basis` and `cost.src` on every figure; a `plan` field; the reconciler checks token use against utilization, since the Max plan bills no run (6.6) |
+| — | Any run can edit any file `maestro` owns | `maestro-logd` under its own user, the sender named by the kernel, files only `paul` can read (6.6) |
+| — | Nothing is redacted but the Mongo URI and webhook URLs **[code]** | Redaction on write, by exact value and pattern, with a test and a nightly grep (6.6) |
+| — | — | `trace` for the owner; `cos trace` and `trace --cap` at 1,500 tokens for desks and runs; one `logs:` line in `desk brief`; about 21 MB of events and 50 MB of gzipped streams a day **[I]** (6.6, 17.4) |
+
 ## 19. Open questions
 
 ### 19.1 Still open
@@ -1466,6 +1739,11 @@ v10, 2026-11-20, asked for by the owner: build it so harnesses can be swapped pe
 20. **Who writes the QA script.** Recommended: the planner at plan time, with an Opus full review amending it at GO and code adding the pages. Tier 0-1 reviews are moving to Sonnet, so the reviewer can't be the usual author at those tiers. A separate Opus `job script` at GO would cost more than the tier 0-1 saving (14.6).
 21. **Scripted QA's worth.** The saving is about $0-20/week **[I]**. Tiers 0-1 are a small share of QA spend. The stronger case is a QA plan that can be read before QA runs, the same steps on every retest, and the way it opens to Sonnet at tier 2 later. Build it for those reasons, or wait for the tier-2 version?
 22. **QS needs past catches.** It wants 15 tier 0-1 QA kickbacks with known heads. QA kicked back 14 tickets on content in the report's window **[box]** (`token-plan-report.md` §1), at every tier. If the board holds too few at tiers 0-1, QS takes longer to build, or takes tier-2 catches whose failing step is a plain criterion.
+23. **What "billed" means on the Max plan.** No run is billed on it. Claude Code's own figure is a list price (`costBasis: list`) **[box]**, so the logs mark every cost `basis: list`. The reconciler can check token use only against the plan's own utilization, not a bill. If a harness or a slot moves to an API key, its vendor's usage report becomes the bill to match. Is list price, labelled, enough?
+24. **`maestro-logd` as a third user.** Recommended: yes. Every run is `maestro` with full permissions, so logs that `maestro` writes are logs any run can edit. The cost is one small unit, one user and a socket. The simpler choice is `O_APPEND` files under `maestro`, as S15a does on the VM, with the hash chain to show tampering after the fact.
+25. **Retention.** Proposed: raw streams for 30 days (about 1.5 GB **[I]**) and events for 400 days (about 1 GB). Longer for streams?
+26. **Model text in the logs.** Proposed: each claim keeps up to 4 KB of redacted text, plus the hash of the whole. Hash only would leak less but say less.
+27. **Backfill on the VM.** The 121 cost-less runs' figures could be read from their transcripts into `stats.db` and the board's `runs` table, adding $227 to `costs`. That writes to a live store, so it needs your yes.
 
 ### 19.2 Decisions log
 
@@ -1487,4 +1765,4 @@ All by the owner on 2026-11-19, 19:46-19:51 PT, numbered as in v5's §19:
 
 Earlier on 2026-11-19 (18:01 PT): the main machine is the desktop PC, and pushes go through T3 Connect (section 1).
 
-On 2026-11-20 the owner asked for harnesses that can be swapped per part (8.1), and approved scripted QA on Sonnet in principle (14.1, 14.2, 14.6).
+On 2026-11-20 the owner asked for harnesses that can be swapped per part (8.1), and approved scripted QA on Sonnet in principle (14.1, 14.2, 14.6). Later that day the owner asked for logging that costs no tokens and is extremely accurate (6.6).
