@@ -146,6 +146,10 @@ func (c *call) board() (*mongostore.Store, error) {
 			sh.boardErr = err
 			return
 		}
+		if loc.kind != kindMongoDB {
+			sh.boardErr = fmt.Errorf("%w: this store keeps no shared marks", ticket.ErrInvalid)
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), markTimeout)
 		defer cancel()
 		s, err := c.openStore(ctx, loc)

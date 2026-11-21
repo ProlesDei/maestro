@@ -377,8 +377,26 @@ func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 	return
 }
 
-func qaReceiptID(id string, review ticket.Comment) string {
-	return fmt.Sprintf("%s.review-%d.qa", id, review.ID)
+// A planner answer to a QA escalation starts another QA run at the same review.
+func qaReceiptID(d ticket.Detail, review ticket.Comment, head string) string {
+	key := fmt.Sprintf("%s.review-%d.qa", d.ID, review.ID)
+	escalation, ok := latestWith(d, "Escalation:")
+	if !ok || escalation.ID <= review.ID {
+		return key
+	}
+	atHead := strings.HasPrefix(escalation.Body, "Escalation: QA at ") && shaIn(escalation.Body) == head
+	// blockNoVerdict names the QA job but omits the head. The review ID above scopes it.
+	noVerdict := strings.HasPrefix(escalation.Body, "Escalation: qa ended 3 times with no verdict")
+	if !atHead && !noVerdict {
+		return key
+	}
+	for i := len(d.Comments) - 1; i >= 0 && d.Comments[i].ID > escalation.ID; i-- {
+		answer := d.Comments[i]
+		if strings.HasPrefix(answer.Body, "Answer:") && ticket.HolderBot(answer.Author) == "planner" {
+			return fmt.Sprintf("%s.escalation-%d", key, escalation.ID)
+		}
+	}
+	return key
 }
 
 type recoveryPR struct {
@@ -438,7 +456,7 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 		if head == "" || d.Criteria != nil && d.Criteria.Review != head {
 			continue
 		}
-		key := qaReceiptID(id, note)
+		key := qaReceiptID(d, note, head)
 		if _, err := co.s.read("receipts", key); err == nil && qa == "" {
 			report.Held[id] = "QA handoff received"
 			continue

@@ -305,7 +305,7 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 			return false
 		}
 		if review, head, _ := recoveryProof(d); head != "" {
-			req.actionID = qaReceiptID(req.ids[0], review)
+			req.actionID = qaReceiptID(d, review, head)
 		} else {
 			return false
 		}
