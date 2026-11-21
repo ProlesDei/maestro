@@ -5,6 +5,7 @@ Instructions for coding agents. CLAUDE.md imports this file; edit only this one,
 ## General principles
 
 - Start with the outcome you want. Work backward to what it would take to get there.
+- Treat token efficiency as a design priority. Ask for the smallest result that can settle the question. Stop once you have enough evidence. Count repeated reads and handoffs across agents.
 - Reason from first principles. Ask what facts set the limits and which assumptions you can test. Question familiar ways of doing things.
 - Question each requirement and name the need it serves. Cut unnecessary parts or steps. Simplify what remains, then make it faster. Automate last.
 - Compare the full cost of a result with the cost of its basic inputs. Find out what accounts for the gap before deciding what to cut.

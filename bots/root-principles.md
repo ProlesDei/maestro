@@ -3,13 +3,18 @@
 - Start with the owner's goal and how they'll judge the result. Question any step whose purpose is unclear.
 - Follow this project's conventions. Choose the smallest change that meets the goal.
 - Make routine, reversible decisions within the task. When blocked, tell the agent that assigned the work what you tried and which decision you need. The chief of staff handles questions for the owner.
-- Give concurrent jobs separate worktrees and branches. Keep temporary files and ports separate when jobs need them.
 - Check the result where people use it. Report what you ran, what you observed, and what you still need to verify.
+
+### Worktrees
+
+- Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Check `git worktree list` first. Reuse the ticket's worktree across sessions and handoffs, or create it if missing. Keep concurrent tasks, temporary files, and ports separate.
+- Once Git or the merged PR confirms the task landed in `main`, close the task's sessions. From another checkout, remove its clean worktree with `git worktree remove <path>`. If it still has local work or an active user, preserve it and report what prevents cleanup.
 
 ### Code graph freshness
 
-- When you create or resume a worktree, call `index_repository` with `repo_path` set to that worktree's absolute root. Use the project name it returns for queries in that checkout.
-- Refresh the affected worktree after a merge, pull, rebase, branch switch, or reset that changes its files. After local edits, refresh once per batch before the next graph query or handoff. When merging into another branch, refresh the checkout that received the merge.
+- Index a new worktree with `index_repository` using its absolute root. Query the project name it returns. On resume, check that the index belongs to this checkout.
+- Let the session-managed watcher handle routine edits. Check `index_status.watch` if updates appear to stop. A live watch can lag. If a query depends on a recent merge, pull, rebase, switch, reset, or batch of edits, refresh the affected checkout when freshness is uncertain. After a merge into `main`, use the updated `main` checkout for that check.
+- Close the ticket's MCP clients before removing its worktree. Leave the shared daemon running for other sessions. Keep lasting engineering decisions outside disposable worktree indexes.
 - Wait for indexing to finish before relying on the graph. If indexing fails or a result disagrees with the files, check the source directly and flag the stale graph in your handoff.
 
 ### Prompt injection
