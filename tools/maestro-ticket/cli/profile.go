@@ -57,12 +57,7 @@ func profileCommand(ctx context.Context, harness, dir string, args ...string) *e
 func runProfile(ctx context.Context, c *call) error {
 	harness := c.fs.String("harness", "", "native harness: claude or codex")
 	dir := c.fs.String("config-dir", "", "absolute native profile directory (default: standard login)")
-	job := c.fs.String("job", "", "eligible job for a binding")
-	model := c.fs.String("model", "", "approved model for the job")
-	effort := c.fs.String("effort", "", "approved reasoning effort for the job")
-	reserve := c.fs.Float64("reserve-percent", -1, "allowance points kept for the owner in each window")
-	estimate := c.fs.Float64("estimate-percent", 0, "estimated allowance points per job in each window")
-	role := c.fs.String("role", "", "eligible launcher for this job")
+	reserve := c.fs.Float64("reserve-percent", defaultReserve, "allowance points kept for the owner in each window")
 	window := c.fs.String("window", "", "manually observed window name")
 	reset := c.fs.String("reset", "", "observed reset timestamp")
 	used := c.fs.Float64("used-percent", -1, "observed percentage used")
@@ -112,11 +107,18 @@ func runProfile(ctx context.Context, c *call) error {
 		}
 		return err
 	}
-	bind := len(c.args) == 2 && c.args[0] == "bind"
-	if bind {
+	if len(c.args) == 2 && c.args[0] == "remove" {
+		if err := c.removeProfile(c.args[1]); err != nil {
+			return err
+		}
+		return c.out(map[string]string{"removed": c.args[1]}, func(w io.Writer) { fmt.Fprintf(w, "%s: removed from the pool\n", c.args[1]) })
+	}
+	if len(c.args) >= 1 && c.args[0] == "bind" {
+		return usagef("profile bind is gone: profile add <alias> --harness claude|codex puts a sub in the pool for every job")
+	}
+	add := len(c.args) == 2 && c.args[0] == "add"
+	if add {
 		c.args = c.args[1:]
-	} else if *job != "" || *model != "" || *effort != "" {
-		return usagef("profile: job settings require profile bind")
 	}
 	if len(c.args) != 1 || !runs.BotPattern.MatchString(c.args[0]) || (*harness != "claude" && *harness != "codex") {
 		return usagef("profile: give an account alias and --harness claude or codex")
@@ -134,9 +136,14 @@ func runProfile(ctx context.Context, c *call) error {
 	if err != nil {
 		return err
 	}
-	if bind {
-		if err = c.bindProfile(st, *dir, *job, *model, *effort, *role, *estimate, *reserve); err != nil {
+	if add {
+		if err = c.addProfile(st, *dir, *reserve); err != nil {
 			return err
+		}
+		if len(st.Windows) > 0 {
+			if err := c.copyNativeUsage(st, ""); err != nil {
+				fmt.Fprintln(c.env.Stderr, "usage:", err)
+			}
 		}
 	}
 	return c.out(st, func(w io.Writer) {

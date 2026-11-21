@@ -592,11 +592,6 @@ func TestChainNotifiesTheLaunch(t *testing.T) {
 	uri := sharedBoard(t)
 	a := onBoard(t, uri, "reviewer")
 	blockedReview(t, a)
-	for _, bot := range []string{"reviewer", "planner"} {
-		if code, _, errs := a.run("http://127.0.0.1:1/x\n", "notify", bot, "--url-file", "-"); code != 0 {
-			t.Fatal(errs)
-		}
-	}
 	c := &call{actor: "reviewer", env: Env{Getenv: func(k string) string { return a.env[k] }, Dir: a.dir, Stderr: os.Stderr}}
 	defer c.closeBoard()
 	dir, err := c.besideStore("runs")

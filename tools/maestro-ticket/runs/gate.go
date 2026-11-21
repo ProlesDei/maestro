@@ -12,14 +12,13 @@ import (
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/render"
 )
 
-// GateWindow is how often, at most, a bot's webhook rings while a run its
-// last ring listed waits for an ack: every ring wakes a bot that rereads
-// its whole chat, and one ring carries all its results. A var only so
+// GateWindow is how often, at most, a role rings while a run its last
+// ring listed waits for an ack: one ring carries all its results. A var only so
 // tests can shorten it.
 var GateWindow = 4 * time.Minute
 
 // gate is a bot's last ring: when, the runs it covered, and whether the
-// webhook took it. It lives in <bot>.gate beside the webhooks, and
+// wake took it. It lives in <bot>.gate in the notify folder, and
 // <bot>.gate.lock lets one ringer at a time read and write it.
 type gate struct {
 	At     time.Time `json:"at"`
@@ -34,10 +33,10 @@ type DigestFunc func(now time.Time) (Notification, []string)
 
 // Gated is what one RingBot did.
 type Gated struct {
-	Tried bool // it rang the webhook
-	Rang  bool // and the webhook took it
+	Tried bool // it rang
+	Rang  bool // and the wake took it
 	// Covered are the ids asked about that are acked, or that a ring the
-	// webhook took lists: this one's, or one under GateWindow old.
+	// wake took lists: this one's, or one under GateWindow old.
 	Covered []string
 	// At is when the ring that covered them rang.
 	At time.Time
@@ -51,7 +50,7 @@ func (g Gated) Covers(id string) bool { return slices.Contains(g.Covered, id) }
 // Held reports whether the gate held the ring back.
 func (g Gated) Held() bool { return !g.Next.IsZero() }
 
-// RingBot rings bot's webhook once with build's digest of every result
+// RingBot rings bot once with build's digest of every result
 // left to it, unless a ring under GateWindow old listed a run that is
 // still unacked: then it rings nothing, and says which of ids that ring
 // covered and when the gate opens. Of any number of callers at once, on

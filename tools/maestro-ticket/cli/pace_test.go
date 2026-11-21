@@ -18,7 +18,10 @@ func TestConcurrentPacedAdmission(t *testing.T) {
 	h := newRouteHarness(t)
 	root := h.dir
 	path := filepath.Join(root, "profiles.json")
-	if err := writeWholeMode(path, []byte(`{"test":{"harness":"codex","jobs":{"review":{"model":"astra","effort":"medium","estimate_percent":1}}}}`), 0600); err != nil {
+	if err := writeWholeMode(path, []byte(`{"test":{"harness":"codex","reserve_percent":0}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWholeMode(filepath.Join(root, estimatesFile), []byte(`{"codex/review/weekly":1}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -67,8 +70,11 @@ func TestRuntimeAdmissionFollowsUsage(t *testing.T) {
 	loc.boardID = "scratch"
 	c.loc.v = loc
 	root := h.dir
-	profiles := `{"max":{"harness":"claude","reserve_percent":2,"jobs":{"review":{"model":"opus","effort":"medium","estimate_percent":1}}},"pro":{"harness":"codex","jobs":{"review":{"model":"astra","effort":"medium","estimate_percent":1}}}}`
+	profiles := `{"max":{"harness":"claude","reserve_percent":2},"pro":{"harness":"codex","reserve_percent":0}}`
 	if err := writeWholeMode(filepath.Join(root, "profiles.json"), []byte(profiles), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWholeMode(filepath.Join(root, estimatesFile), []byte(`{"claude/review/weekly":1,"codex/review/weekly":1}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

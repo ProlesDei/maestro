@@ -66,7 +66,7 @@ func runtimeProfiles(root string) ([]runtimeProfile, error) {
 	now := time.Now().UTC()
 	profiles := []runtimeProfile{}
 	for _, alias := range sortedAliases(ps) {
-		p := runtimeProfile{Alias: alias, Reserve: ps[alias].Reserve, Harness: ps[alias].Harness, Login: "verified at binding; live login unchecked", Windows: usage[alias], Running: []string{}}
+		p := runtimeProfile{Alias: alias, Reserve: ps[alias].Reserve, Harness: ps[alias].Harness, Login: "verified when added; live login unchecked", Windows: usage[alias], Running: []string{}}
 		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
 			p.Login = "verification required"
 		} else if !errors.Is(err, os.ErrNotExist) {

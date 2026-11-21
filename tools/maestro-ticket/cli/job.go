@@ -495,14 +495,15 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	var cmd []string
 	var harness string
 	if req.profile != "" {
-		p, binding, err := c.jobProfile(req.profile, k.name)
+		p, err := c.poolProfile(req.profile)
 		if err != nil {
 			return fail(err)
 		}
-		if req.model != "" && req.model != binding.Model || req.effort != "" && req.effort != binding.Effort {
-			return fail(usagef("job: model or effort differs from the profile binding"))
+		binding := poolModel(p.Harness, m)
+		if req.effort != "" && req.effort != binding.Effort {
+			return fail(usagef("job: the pool runs every job at %s effort", binding.Effort))
 		}
-		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "bound subscription profile"
+		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "pinned sub"
 		cmd, err = c.nativeCommand(req.profile, k.name, binding, harness)
 		if err != nil {
 			return fail(err)
@@ -1339,7 +1340,11 @@ func (c *call) resume(ctx context.Context, o resumeOpts) (runs.Record, error) {
 			return fail(usagef("resume: send the answer on stdin, in a quoted heredoc"))
 		}
 	}
-	cmd, err := c.stopHook(resumeCommand(r.Command, session, o.opus), r.Job)
+	opus := ""
+	if o.opus {
+		opus = poolModel(r.Harness, modelOpus).Model
+	}
+	cmd, err := c.stopHook(resumeCommand(r.Command, session, opus), r.Job)
 	if err != nil {
 		return fail(err)
 	}
@@ -1417,32 +1422,33 @@ func flagValue(cmd []string, flag string) string {
 
 // resumeCommand is a run's command made to resume session: its own
 // --session-id or --resume goes, --resume <session> comes after -p, and
-// with opus the model and effort become Opus at high.
-func resumeCommand(cmd []string, session string, opus bool) []string {
+// with opus set the model and effort become opus, the harness's model for
+// Opus work, at high.
+func resumeCommand(cmd []string, session, opus string) []string {
 	out := []string{}
 	cmd = thisSlotBinary(cmd)
 	for i := 0; i < len(cmd); i++ {
 		w := cmd[i]
 		name, _, eq := strings.Cut(w, "=")
 		switch {
-		case w == "--session-id" || w == "--resume" || (opus && (w == "--model" || w == "--effort")):
+		case w == "--session-id" || w == "--resume" || (opus != "" && (w == "--model" || w == "--effort")):
 			i++ // and its value
 			continue
-		case strings.HasPrefix(w, "--") && eq && (name == "--session-id" || name == "--resume" || (opus && (name == "--model" || name == "--effort"))):
+		case strings.HasPrefix(w, "--") && eq && (name == "--session-id" || name == "--resume" || (opus != "" && (name == "--model" || name == "--effort"))):
 			continue
 		}
 		out = append(out, w)
 		if w == "-p" || w == "--print" {
 			out = append(out, "--resume", session)
-			if opus {
-				out = append(out, "--model", modelOpus, "--effort", effortHigh)
+			if opus != "" {
+				out = append(out, "--model", opus, "--effort", effortHigh)
 			}
 		}
 	}
 	if !slices.Contains(out, "--resume") {
 		out = append(out, "--resume", session)
-		if opus {
-			out = append(out, "--model", modelOpus, "--effort", effortHigh)
+		if opus != "" {
+			out = append(out, "--model", opus, "--effort", effortHigh)
 		}
 	}
 	return out

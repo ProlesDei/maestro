@@ -19,12 +19,12 @@ func (s seen) flag(name string) string { return flagValue(s.args, name) }
 
 func TestResumeCommand(t *testing.T) {
 	cmd := []string{"env", "A=1", "claude", "-p", "--session-id", "S1", "--model", "sonnet", "--effort=high", "--output-format", "json"}
-	got := resumeCommand(cmd, "S1", false)
+	got := resumeCommand(cmd, "S1", "")
 	want := []string{"env", "A=1", "claude", "-p", "--resume", "S1", "--model", "sonnet", "--effort=high", "--output-format", "json"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("resume: %q", got)
 	}
-	got = resumeCommand(got, "S1", true)
+	got = resumeCommand(got, "S1", modelOpus)
 	want = []string{"env", "A=1", "claude", "-p", "--resume", "S1", "--model", "opus", "--effort", "high", "--output-format", "json"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("resume --opus: %q", got)

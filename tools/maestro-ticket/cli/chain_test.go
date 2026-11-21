@@ -35,73 +35,6 @@ func (h *routeHarness) endedRun(job, launcher, reply string) runs.Record {
 	return r
 }
 
-func (h *routeHarness) hook(bot string) {
-	h.t.Helper()
-	if code, _, errs := h.run("http://127.0.0.1:1/x\n", "notify", bot, "--url-file", "-"); code != 0 {
-		h.t.Fatal(errs)
-	}
-}
-
-// Only a fixed job for a worker bot chains, and none past maxHops.
-func TestChainNextStep(t *testing.T) {
-	for _, c := range []struct {
-		bot, line string
-		hops      int
-		want      string
-	}{
-		{"reviewer", "review T-1", 0, "review T-1"},
-		{"qa-lead", "qa T-12", maxHops - 1, "qa T-12"},
-		{"senior-engineer", "build T-3", 2, "build T-3"},
-		{"reviewer", "review T-1", maxHops, ""},
-		{"planner", "slot free T-1", 0, ""},
-		{"chief-of-staff", "design T-1: card", 0, ""},
-		{"reviewer", "review T-1 --approved abc1234", 0, ""},
-		{"qa-lead", "live T-1", 0, ""},
-		{"designer", "build T-1", 0, ""},
-	} {
-		got := ""
-		if k, id, ok := nextStep(runs.Record{Hops: c.hops}, send{c.bot, c.line}); ok {
-			got = k.name + " " + id
-		}
-		if got != c.want {
-			t.Errorf("%s: %s at %d hops: %q; want %q", c.bot, c.line, c.hops, got, c.want)
-		}
-	}
-}
-
-// A review a look handed out lately is on its way: the end starts none,
-// and with nothing left to do, acks the run.
-func TestChainLeavesALooksHandout(t *testing.T) {
-	h := newRouteHarness(t)
-	h.ok(nil, "create", "--title", "a", "--tier", "junior")
-	h.move("T-1", "in_progress", "in_review")
-	h.hook("reviewer")
-	dir := filepath.Join(h.dir, "runs")
-	h.c.actor = "junior-engineer"
-
-	// A launcher with no webhook, such as a person, reads its own pickup:
-	// the run stays for it, routed.
-	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
-		t.Fatal("no handout")
-	}
-	r := h.endedRun("build", "junior-engineer", "build: done")
-	h.c.chain(context.Background(), dir, r)
-	if got, _ := runs.Load(dir, r.ID); len(got.Routed) == 0 || len(got.Chained) != 0 || runs.Acked(dir, r.ID) {
-		t.Fatalf("a launcher with no webhook: %+v acked %v", got, runs.Acked(dir, r.ID))
-	}
-	h.hook("junior-engineer")
-
-	r = h.endedRun("build", "junior-engineer", "build: done")
-	h.c.chain(context.Background(), dir, r)
-	got, _ := runs.Load(dir, r.ID)
-	if len(got.Chained) != 0 || !runs.Acked(dir, r.ID) {
-		t.Fatalf("a look's handout: %+v acked %v", got, runs.Acked(dir, r.ID))
-	}
-	if list, _ := runs.List(dir, time.Now(), true); len(list) != 2 {
-		t.Fatalf("%d runs; want the two ended", len(list))
-	}
-}
-
 // A run that hit the usage limit starts nothing, but its end routes it
 // and keeps the route: the pause is set once, and the planner hears of it
 // from the run's ring and pickup, which show that route.
@@ -109,8 +42,6 @@ func TestChainStoresALimitsRoute(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
-	h.hook("reviewer")
-	h.hook("planner")
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "Claude AI usage limit reached|"+strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))
 	h.c.chain(context.Background(), dir, r)
@@ -150,8 +81,6 @@ func TestChainLeavesACommandToTheBot(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
-	h.hook("reviewer")
-	h.hook("planner")
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "review: stopped: tier 2 needs the full model")
 	h.c.chain(context.Background(), dir, r)
@@ -195,16 +124,13 @@ func TestChainSettlesItsRun(t *testing.T) {
 	}
 }
 
-// A build that handed off, then died, hands on as one that ended done: a
-// look's handout of its review is on its way, so it acks with nothing left.
+// A build that handed off, then died, hands on as one that ended done.
 // Under a pause, a landed run's job for a worker waits like a do: line.
 func TestChainHandsOnALandedRun(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
 	h.comment("T-1", "Handoff: PR https://x/pull/1 at "+sha)
-	h.hook("reviewer")
-	h.hook("junior-engineer")
 	dir := filepath.Join(h.dir, "runs")
 	h.c.actor = "junior-engineer"
 	if !claimHandout(filepath.Join(h.dir, "handouts"), "T-1", "reviewer", "review T-1", time.Hour, time.Now()) {
@@ -216,8 +142,8 @@ func TestChainHandsOnALandedRun(t *testing.T) {
 	h.c.chain(context.Background(), dir, r)
 	got, _ := runs.Load(dir, r.ID)
 	var rt routed
-	if json.Unmarshal(got.Routed, &rt) != nil || !rt.Landed || !runs.Acked(dir, r.ID) {
-		t.Fatalf("a landed build: %+v acked %v", got, runs.Acked(dir, r.ID))
+	if json.Unmarshal(got.Routed, &rt) != nil || !rt.Landed || !slices.Equal(sends(rt), []string{"send reviewer: review T-1"}) {
+		t.Fatalf("a landed build: %+v", got)
 	}
 	worker := []send{{"reviewer", "review T-1"}}
 	if !doWaits(routed{Landed: true, Send: worker}) || !doWaits(routed{Outcome: outDone, Send: worker}) || doWaits(routed{Send: worker}) || doWaits(routed{Landed: true, Send: []send{{"planner", "block T-1"}}}) {
@@ -227,8 +153,8 @@ func TestChainHandsOnALandedRun(t *testing.T) {
 
 // A review that ended done with a send-back while a pause holds: the
 // pause refuses the build its end starts, so the run stays its bot's, its
-// ring holds the line rather than wake the bot only to be refused, and it
-// rings again as the pause lifts, carrying the line.
+// ring holds it rather than wake anyone only to be refused, and it rings
+// again as the pause lifts.
 func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a", "--tier", "junior")
@@ -236,9 +162,6 @@ func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
 	h.claimed("T-1", "junior-engineer")
 	h.comment("T-1", "Kickback: 1 blockers at "+sha+"\n- F1 [blocker, auto-fix] a.go:1: x. Fix: y")
 	h.move("T-1", "in_progress")
-	for _, b := range []string{"reviewer", "junior-engineer", "planner"} {
-		h.hook(b)
-	}
 	dir := filepath.Join(h.dir, "runs")
 	r := h.endedRun("review", "reviewer", "review: NO-GO")
 	co, _ := h.c.coord()
@@ -251,14 +174,14 @@ func TestChainHoldsASendBackAPauseRefused(t *testing.T) {
 	if json.Unmarshal(got.Routed, &rt) != nil || !slices.Equal(sends(rt), []string{"send junior-engineer: build T-1"}) || runs.Acked(dir, r.ID) {
 		t.Fatalf("the refused send-back: %v acked %v", sends(rt), runs.Acked(dir, r.ID))
 	}
-	if n, covered := ringDigest(co, dir, "reviewer", now); len(n.Lines) != 0 || slices.Contains(covered, r.ID) {
-		t.Fatalf("a ring under the pause: %q covers %v", n.Lines, covered)
+	if _, covered := ringDigest(co, dir, "reviewer", now); slices.Contains(covered, r.ID) {
+		t.Fatalf("a ring under the pause covers %v", covered)
 	}
 	if at := ringAgain(co, got, now); !at.Equal(until.Add(30 * time.Second)) {
 		t.Fatalf("rings again at %v; want 30s after %v", at, until)
 	}
-	if n, _ := ringDigest(co, dir, "reviewer", until.Add(31*time.Second)); !slices.Contains(n.Lines, "send junior-engineer: build T-1") {
-		t.Fatalf("the ring at the lift: %q", n.Lines)
+	if _, covered := ringDigest(co, dir, "reviewer", until.Add(31*time.Second)); !slices.Contains(covered, r.ID) {
+		t.Fatalf("the ring at the lift covers %v", covered)
 	}
 }
 
@@ -276,18 +199,9 @@ func TestRuntimeHandoffGrammar(t *testing.T) {
 		{"reviewer", "review T-1 --approved " + head, "build", false},
 		{"qa-lead", "build T-1", "plan", false}, {"designer", "design T-1 extra", "plan", false},
 	} {
-		if served(dir, test.role) {
-			t.Fatal("unserved role", test.role)
-		}
-		if err := runs.SetLocalServer(dir, test.role, ""); err != nil {
-			t.Fatal(err)
-		}
 		_, ok := stepRequest(dir, runs.Record{Job: test.source}, send{test.role, test.line})
 		if !served(dir, test.role) || ok != test.ok {
 			t.Errorf("%s %s: %t", test.role, test.line, ok)
-		}
-		if err := runs.SetWebhook(dir, test.role, ""); err != nil {
-			t.Fatal(err)
 		}
 	}
 }

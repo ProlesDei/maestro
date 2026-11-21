@@ -124,7 +124,7 @@ type Record struct {
 	Frozen    bool   `json:"frozen,omitempty"`
 	Rings     int    `json:"rings,omitempty"`
 	RingError string `json:"ring_error,omitempty"`
-	// Rang is true once a ring reached the webhook; OrphanTries counts the
+	// Rang is true once a ring reached its wake; OrphanTries counts the
 	// rings readers tried for a run whose supervisor went away first.
 	Rang        bool `json:"rang,omitempty"`
 	OrphanTries int  `json:"orphan_tries,omitempty"`
@@ -195,7 +195,7 @@ const (
 )
 
 // Owner is the bot whose pickup shows the run once it ends, who acks it
-// and whose webhook rings for it: its launcher, unless its end named
+// and who is rung for it: its launcher, unless its end named
 // another in Notify.
 func (r Record) Owner() string {
 	if r.Notify != "" {
@@ -513,7 +513,7 @@ func once(name string, body []byte) (bool, error) {
 }
 
 // orphanTries caps how often readers ring for one orphan whose rings
-// fail, so a webhook that is down can't slow every pickup for good.
+// fail, so a wake that is down can't slow every pickup for good.
 const orphanTries = 5
 
 // Unacked lists the ended runs left to bot that it hasn't acked and whose

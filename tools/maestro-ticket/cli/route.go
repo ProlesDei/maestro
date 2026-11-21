@@ -657,7 +657,7 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		}
 	case out.Outcome == outTimedOut:
 		planner("timed_out " + id) // the ticket moved on, or another bot holds it
-	case (out.Outcome == outQuestion || escalated) && !outside && flagValue(r.Command, "--model") == modelSonnet && !c.nudged(r, "opus"):
+	case (out.Outcome == outQuestion || escalated) && !outside && claudeTier(flagValue(r.Command, "--model")) == modelSonnet && !c.nudged(r, "opus"):
 		// The junior's session holds the ticket; on Opus it settles the
 		// question itself or sends it up (owner's ruling, Nov 14 2026).
 		out.Do = append(out.Do, "maestro-ticket resume "+r.ID+" --opus")

@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016,SC2015,SC2012,SC2035 # literal backticks, a && b || fail, ls of known names
-# Acceptance test for scripts/install.sh and scripts/bot-bundle.sh, run
+# Acceptance test for scripts/install.sh and scripts/runtime-roles.sh, run
 # against a copy of Maestro in its own git repo so an update can change it.
+# runtime-roles.sh prints one role, each collection and action once;
+# chief makes a new private folder from t3.md and refuses one that exists;
+# apply builds maestro-ticket at the pin with GOWORK=off (a stand-in go)
+# over PATH's copy, or into GOBIN or GOPATH/bin, keeps a copy built at the
+# pin or from a newer commit, and refuses with no go, a failed build or a
+# folder PATH doesn't find first;
+# a bots: line refuses apply and check, not uninstall, and an old
+# .maestro/bots/ gets a note and no exclude line;
 # apply installs hidden or committed, and a second run changes nothing; an
 # update replaces and removes only what it placed, and leaves a team's
 # file beside them; a team's file in the way, or one changed since
@@ -19,9 +27,7 @@
 # not yet on main; a git too old for review refuses apply and check, not
 # uninstall; a linked worktree refuses, and one that holds
 # a stray .maestro/src/ says to delete it; a repo git doesn't trust shows
-# git's reason; a bare repo works under safe.bareRepository=explicit; a
-# bot block that differs only in its Maestro line is the same, one over
-# Grok's limit refuses, and memories go in a message apart; uninstall
+# git's reason; a bare repo works under safe.bareRepository=explicit; uninstall
 # runs off the pin; stats: on or off sets the marker and says which, on
 # says when it removed a marker, no line leaves a person's stats off, and
 # any other value or a second line refuses; store: mongodb with no
@@ -47,13 +53,26 @@ fail() { cat "$tmp/out" 2>/dev/null || true; echo "FAIL: $*" >&2; exit 1; }
 export GIT_CONFIG_GLOBAL=$tmp/gitconfig GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n\tname = t\n\temail = t@t\n[init]\n\tdefaultBranch = main\n' >"$GIT_CONFIG_GLOBAL"
 
+# One role for the one database user: each collection once, each action
+# once, the board's and the chief of staff's collections both in it.
+roles=$(bash "$here/runtime-roles.sh" maestro) || fail "runtime-roles.sh maestro exited non-zero"
+jq -e '([.[].resource.collection] | length == (unique | length)) and all(.[]; .resource.db == "maestro" and (.actions | length == (unique | length)))
+	and ([.[].resource.collection] | contains(["", "tickets", "events", "goal_revisions", "chief_sessions", "owner_rules"]))' <<<"$roles" >/dev/null ||
+	fail "runtime-roles.sh: want one entry per collection, no action twice: $roles"
+for a in "maestro worker" admin ""; do
+	# shellcheck disable=SC2086 # the words are the arguments
+	if bash "$here/runtime-roles.sh" $a >/dev/null 2>&1; then fail "runtime-roles.sh took: $a"; fi
+done
+
 # A Maestro to install from: the parts INSTALL.md checks out.
 m=$tmp/maestro
 mkdir "$m"
 cp -R "$here/../skills" "$here/../templates" "$here/../bot-profiles" "$m/"
-mkdir "$m/scripts" && cp "$here/install.sh" "$here/bot-bundle.sh" "$m/scripts/"
+mkdir "$m/scripts" && cp "$here/install.sh" "$here/runtime-roles.sh" "$m/scripts/"
+# What apply builds; the stand-in go below never reads it.
+mkdir -p "$m/tools/maestro-ticket/cmd/maestro-ticket" && echo 'package main' >"$m/tools/maestro-ticket/cmd/maestro-ticket/main.go"
 touch "$m/templates/empty" # an empty blob in Maestro's history
-# Filled in, as INSTALL.md step 6 leaves it, so check passes; the real
+# Filled in, as INSTALL.md step 5 leaves it, so check passes; the real
 # template's placeholder is tested below.
 sed -i 's/^<each check .*>$/- test: `true`/' "$m/templates/project-setup.md"
 grep -qx -- '- test: `true`' "$m/templates/project-setup.md" || fail "the template's ## Checks placeholder moved"
@@ -68,8 +87,8 @@ skills=$(cd "$m/skills" && ls -d */ | tr -d / | sort)
 nskills=$(echo "$skills" | wc -l)
 
 # A stand-in maestro-ticket: prints a help that lists launch, job,
-# resume and look (only launch with STUB_NOJOB), unless
-# STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
+# resume, look, cos and chief (only launch, cos and chief with STUB_NOJOB,
+# no chief with STUB_NOCHIEF), unless STUB_OLD is set; logs where any other command ran, fails when STUB_FAIL
 # is set, and otherwise makes the store as doctor does (with a store.uri
 # beside it, MongoDB's: no file), the STATS_OFF
 # marker beside it as stats off does, and says on or off as stats health
@@ -80,15 +99,29 @@ nskills=$(echo "$skills" | wc -l)
 mkdir "$tmp/bin"
 # shellcheck disable=SC2016 # the stub's code, not ours
 printf '%s\n' '#!/usr/bin/env bash' \
-	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || { printf "Commands:\n  launch      [--ticket T-1]\n"; [ -n "${STUB_NOJOB:-}" ] || printf "  job         <job>\n  resume      <run-id>\n  look        --limit N\n"; }; exit 0; }' \
+	'[ "$1" != help ] || { [ -n "${STUB_OLD:-}" ] || { printf "Commands:\n  launch      [--ticket T-1]\n  cos         plan\n"; [ -n "${STUB_NOJOB:-}" ] || printf "  job         <job>\n  resume      <run-id>\n  look        --limit N\n"; [ -n "${STUB_NOCHIEF:-}" ] || printf "  chief       register\n"; }; exit 0; }' \
 	'echo "$PWD $*" >>"$STUB_LOG"' \
 	'[ -z "${STUB_FAIL:-}" ] || { echo "FAIL  stub: no store here"; exit 1; }' \
 	'[ "$1" != get ] || { ! grep -q garbage "${@: -1}" || exit 2; grep -qs T-1 "${@: -1}" "${@: -1}-wal" || exit 3; exit 0; }' \
 	'[ "$1" != create ] || { ! grep -q moved "${@: -1}"; exit; }' \
 	'[ "$1" != doctor ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; if [ -f "$d/store.uri" ]; then echo "ok  store  mongodb at h"; else mkdir -p "$d" && printf "SQLite format 3\0" >"$d/tickets.db"; fi; }' \
-	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; health) if [ "${MAESTRO_TICKET_STATS:-}" = off ]; then echo "stats: off (MAESTRO_TICKET_STATS=off): no run is written"; elif [ -e "$d/STATS_OFF" ]; then echo "stats: off (STATS_OFF sits beside the store): no run is written"; else echo "stats: on"; fi; echo "stats.db: none yet" ;; *) exit 2 ;; esac; }' >"$tmp/bin/maestro-ticket"
-chmod +x "$tmp/bin/maestro-ticket"
-# check wants what the bots' runs need; stand-ins, so the test passes on a
+	'[ "$1" != stats ] || { d=$(git rev-parse --path-format=absolute --git-common-dir)/maestro; case $2 in off) : >"$d/STATS_OFF" ;; on) rm -f "$d/STATS_OFF" ;; --maestro-sha) ;; health) if [ "${MAESTRO_TICKET_STATS:-}" = off ]; then echo "stats: off (MAESTRO_TICKET_STATS=off): no run is written"; elif [ -e "$d/STATS_OFF" ]; then echo "stats: off (STATS_OFF sits beside the store): no run is written"; else echo "stats: on"; fi; echo "stats.db: none yet" ;; *) exit 2 ;; esac; }' >"$tmp/stub"
+cp "$tmp/stub" "$tmp/bin/maestro-ticket" && chmod +x "$tmp/bin/maestro-ticket"
+# A stand-in go: build logs where it ran and with what GOWORK, fails with
+# GO_FAIL, and writes the stand-in maestro-ticket stamped with the commit
+# git names there; version -m reads that stamp back, as go reads
+# vcs.revision; env GOBIN is FAKE_GOBIN, GOPATH two folders.
+# shellcheck disable=SC2016 # the stub's code, not ours
+printf '%s\n' '#!/usr/bin/env bash' \
+	'case $1 in' \
+	'build) echo "$PWD GOWORK=${GOWORK-} $*" >>"$GO_LOG"; [ -z "${GO_FAIL:-}" ] || { echo "stub: build broke" >&2; exit 1; }; { cat "$STUB_SRC"; echo "# rev=$(git rev-parse HEAD)"; } >"$3" ;;' \
+	'version) r=$(sed -n "s/^# rev=//p" "$3" 2>/dev/null); [ -n "$r" ] || exit 1; printf "%s: go1.26.0\n\tbuild\tvcs.revision=%s\n" "$3" "${r%+}"; [[ $r != *+ ]] || printf "\tbuild\tvcs.modified=true\n" ;;' \
+	'env) case $2 in GOBIN) echo "${FAKE_GOBIN-}" ;; GOPATH) echo "$FAKE_GOPATH:/elsewhere" ;; esac ;;' \
+	'*) exit 2 ;;' 'esac' >"$tmp/bin/go"
+chmod +x "$tmp/bin/go"
+export STUB_SRC=$tmp/stub GO_LOG=$tmp/go.log FAKE_GOPATH=$tmp/gopath
+: >"$GO_LOG"
+# check wants what Maestro's runs need; stand-ins, so the test passes on a
 # machine without them.
 for t in claude gh jq; do printf '#!/bin/sh\n' >"$tmp/bin/$t" && chmod +x "$tmp/bin/$t"; done
 # Claude Code's settings, where check looks for code graph hooks: not the
@@ -151,13 +184,13 @@ installed() {
 
 # --- hidden: a space in the path, and a user exclude file with no final newline ---
 r="$tmp/my repo"
-repo "$r" "harnesses: claude codex grok" "skills-home: hidden" "bots: planner reviewer"
+repo "$r" "harnesses: claude codex grok" "skills-home: hidden"
 printf '# mine\n*.log' >"$r/.git/info/exclude"
 ok apply "$r"
 installed "$r" .claude .agents
 cmp -s "$m/templates/project-setup.md" "$r/.maestro/project/project-setup.md" || fail "project-setup.md isn't the template"
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "the user's exclude line was changed"
-mkdir -p "$r/.maestro/src" "$r/.maestro/worktrees/T-1" "$r/.maestro/bots" && touch "$r/.maestro/src/a" "$r/.maestro/worktrees/T-1/a" "$r/.maestro/bots/a"
+mkdir -p "$r/.maestro/src" "$r/.maestro/worktrees/T-1" && touch "$r/.maestro/src/a" "$r/.maestro/worktrees/T-1/a"
 seen=$(git -C "$r" status --porcelain --untracked-files=all)
 [ "$seen" = "?? .maestro/project/install.yaml
 ?? .maestro/project/project-setup.md" ] || fail "git should see only .maestro/project: $seen"
@@ -170,9 +203,68 @@ says "run stats on: numbers about each run in stats.db beside the store"
 [ "$(grep -c . "$r/.git/maestro/installed.list")" -eq $(($(find "$m/skills" -mindepth 2 -type f | wc -l) * 2 + 1)) ] ||
 	fail "the record should list every file in both harness folders"
 
+# The build: once, at the pin, in Maestro's tools, with no go.work, over
+# PATH's copy.
+grep -qxE "$m/tools/maestro-ticket GOWORK=off build -o .*/maestro-ticket \./cmd/maestro-ticket" "$GO_LOG" && [ "$(grep -c . "$GO_LOG")" -eq 1 ] ||
+	fail "apply didn't build maestro-ticket once in tools/ with GOWORK=off: $(cat "$GO_LOG")"
+grep -qx "# rev=$(git -C "$m" rev-parse HEAD)" "$tmp/bin/maestro-ticket" || fail "apply didn't install the build over PATH's copy"
+[ -x "$tmp/bin/maestro-ticket" ] || fail "the installed maestro-ticket isn't executable"
+says "maestro-ticket at $tmp/bin/maestro-ticket: built from $sha"
+
 before=$(snap "$r")
 ok apply "$r"
 [ "$before" = "$(snap "$r")" ] || fail "a second apply changed the repo"
+[ "$(grep -c . "$GO_LOG")" -eq 1 ] || fail "a second apply rebuilt a copy built at the pin: $(cat "$GO_LOG")"
+# A bots: line is Grok Bot's, gone; apply and check refuse it.
+cp "$r/.maestro/project/install.yaml" "$tmp/choices"
+echo "bots: planner" >>"$r/.maestro/project/install.yaml"
+for c in apply check; do refuses "bots: is gone with Grok Bot support; remove the line" "$r" $c "$r"; done
+cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+# An older install hid .maestro/bots/ inside the marked block: the next
+# apply drops that line and says to delete the folder.
+mkdir "$r/.maestro/bots" && touch "$r/.maestro/bots/planner.md"
+sed -i 's|^/\.maestro/worktrees/$|&\n/.maestro/bots/|' "$r/.git/info/exclude"
+grep -qxF /.maestro/bots/ "$r/.git/info/exclude" || fail "the test didn't add an old exclude line"
+ok apply "$r"
+says "note: .maestro/bots/ holds Grok Bot blocks, which Maestro no longer builds or hides from git: delete the folder"
+! grep -qF /.maestro/bots/ "$r/.git/info/exclude" || fail "apply kept hiding .maestro/bots/"
+rm -r "$r/.maestro/bots"
+ok apply "$r"
+! grep -qF "note: .maestro/bots/" "$tmp/out" || fail "apply noted a .maestro/bots/ that is gone"
+says "maestro-ticket at $tmp/bin/maestro-ticket: built from $sha"
+# A copy built from a newer commit stays.
+newer=$(git -C "$m" commit-tree -p HEAD -m newer "HEAD^{tree}")
+sed -i "s/^# rev=.*/# rev=$newer/" "$tmp/bin/maestro-ticket"
+ok apply "$r"
+says "kept, built from ${newer:0:12}, newer than the pinned $sha"
+[ "$(grep -c . "$GO_LOG")" -eq 1 ] && grep -qx "# rev=$newer" "$tmp/bin/maestro-ticket" || fail "apply replaced a copy built from a newer commit"
+# One from a commit Maestro doesn't know, or at the pin with changes, is rebuilt.
+for stale in 0123456789abcdef0123456789abcdef01234567 "$(git -C "$m" rev-parse HEAD)+"; do
+	sed -i "s/^# rev=.*/# rev=$stale/" "$tmp/bin/maestro-ticket"
+	: >"$GO_LOG"
+	ok apply "$r"
+	[ "$(grep -c . "$GO_LOG")" -eq 1 ] && grep -qx "# rev=$(git -C "$m" rev-parse HEAD)" "$tmp/bin/maestro-ticket" || fail "apply kept a copy built from $stale"
+done
+# A failed build, or no go, installs nothing.
+sed -i 's/^# rev=.*/# rev=0123456789abcdef0123456789abcdef01234567/' "$tmp/bin/maestro-ticket"
+cp "$tmp/bin/maestro-ticket" "$tmp/kept"
+GO_FAIL=1 refuses "couldn't build maestro-ticket in $m/tools/maestro-ticket; nothing was written" "$r" apply "$r"
+says "stub: build broke"
+cmp -s "$tmp/kept" "$tmp/bin/maestro-ticket" || fail "a failed build changed maestro-ticket"
+PATH=$(hide go) refuses "go isn't on PATH: apply builds maestro-ticket" "$r" apply "$r"
+PATH=$(hide go) refuses "problem: go isn't on PATH" "$r" check "$r"
+ok apply "$r"
+# With no copy on PATH, it goes in GOBIN, or else GOPATH's first bin; one
+# there that PATH doesn't find refuses.
+mkdir "$tmp/gobin"
+nomt=$(hide maestro-ticket)
+PATH=$tmp/gobin:$nomt FAKE_GOBIN=$tmp/gobin ok apply "$r"
+[ -x "$tmp/gobin/maestro-ticket" ] || fail "apply didn't install maestro-ticket into GOBIN"
+says "maestro-ticket at $tmp/gobin/maestro-ticket: built from $sha"
+PATH=$nomt refuses "installed maestro-ticket into $tmp/gopath/bin, but PATH finds none: put $tmp/gopath/bin first on PATH" "$r" apply "$r"
+[ -x "$tmp/gopath/bin/maestro-ticket" ] || fail "apply didn't install maestro-ticket into GOPATH/bin"
+rm "$tmp/gopath/bin/maestro-ticket"
+rm -r "$tmp/gobin"
 
 # check changes nothing, the store included: it runs no maestro-ticket
 # command but help.
@@ -184,7 +276,7 @@ says "ok: hidden install of $nskills skills at $sha"
 [ ! -s "$STUB_LOG" ] || fail "check ran maestro-ticket: $(cat "$STUB_LOG")"
 # With no origin, no ticket's worktree has a main to branch from.
 says "warn: no origin/main ref as of the last fetch"
-# A store that is empty or no SQLite file, a tool the bots' runs need, and
+# A store that is empty or no SQLite file, a tool Maestro's runs need, and
 # the identity they commit with: each is a problem.
 cp "$r/.git/maestro/tickets.db" "$tmp/tickets.db"
 : >"$r/.git/maestro/tickets.db"
@@ -193,10 +285,12 @@ echo garbage >"$r/.git/maestro/tickets.db"
 refuses "unreadable or isn't a SQLite file" "$r" check "$r"
 cp "$tmp/tickets.db" "$r/.git/maestro/tickets.db"
 for t in claude gh jq; do PATH=$(hide $t) refuses "problem: $t isn't on PATH" "$r" check "$r"; done
-# A maestro-ticket built before launch would start no bot's runs.
+# A maestro-ticket built before launch would start no runs.
 STUB_OLD=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no launch" "$r" check "$r"
-# One built before job and look would leave the bots routing by hand.
+# One built before job and look would leave the planner routing by hand.
 STUB_NOJOB=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no look" "$r" check "$r"
+# One built before chief left the chief of staff on a binary that is gone.
+STUB_NOCHIEF=1 refuses "problem: maestro-ticket at $tmp/bin/maestro-ticket has no chief, which Maestro runs: run apply" "$r" check "$r"
 GIT_CONFIG_GLOBAL=/dev/null refuses "problem: git user.name isn't set" "$r" check "$r"
 says "problem: git user.email isn't set"
 # A name of spaces commits nothing; an identity from the environment does.
@@ -259,18 +353,18 @@ read -r _ s3 _ < <(sed -n 1p "$PW_LOG")
 [[ $d1 != "$(cd "$r" && pwd -P)"* ]] || fail "check opened the browser inside the repo: $d1"
 [ ! -e "$d1" ] || fail "check left its browser folder: $d1"
 PW_FAIL="/x/chrome: error while loading shared libraries: libasound.so.2: cannot open shared object file" refuses \
-	"problem: playwright-cli can't open a headless page (error while loading shared libraries: libasound.so.2): INSTALL.md step 7" "$r" check "$r"
+	"problem: playwright-cli can't open a headless page (error while loading shared libraries: libasound.so.2): INSTALL.md step 5" "$r" check "$r"
 [ "$(sed -n '$s/^[^ ]* \([^ ]*\) \([^ ]*\).*/\2/p' "$PW_LOG")" = close ] || fail "check left a failed browser open: $(cat "$PW_LOG")"
 # On a Linux Playwright knows, it checks the libraries itself and boxes its
 # own message.
 PW_FAIL=$'Error: browserType.launch:\n╔══════╗\n║ Host system is missing dependencies to run browsers. ║\n║     sudo apt-get install libasound2t64 ║' refuses \
-	"problem: playwright-cli can't open a headless page (Host system is missing dependencies to run browsers): INSTALL.md step 7" "$r" check "$r"
+	"problem: playwright-cli can't open a headless page (Host system is missing dependencies to run browsers): INSTALL.md step 5" "$r" check "$r"
 PW_FAIL='Error: Browser "chrome-for-testing" is not installed; expected executable at /x/chrome.' refuses \
-	"problem: playwright-cli can't open a headless page (Browser \"chrome-for-testing\" is not installed): INSTALL.md step 7" "$r" check "$r"
+	"problem: playwright-cli can't open a headless page (Browser \"chrome-for-testing\" is not installed): INSTALL.md step 5" "$r" check "$r"
 PW_FAIL=$'You are running Node.js 18.20.0.\nPlaywright requires Node.js 20 or higher. \nPlease update your version of Node.js.' refuses \
-	"problem: playwright-cli can't open a headless page (Playwright requires Node.js 20 or higher): INSTALL.md step 7" "$r" check "$r"
+	"problem: playwright-cli can't open a headless page (Playwright requires Node.js 20 or higher): INSTALL.md step 5" "$r" check "$r"
 PW_FAIL="Error: browserType.launch: Timeout 180000ms exceeded." refuses "problem: playwright-cli can't open a headless page (Error: browserType.launch: Timeout 180000ms exceeded.)" "$r" check "$r"
-PW_FAIL="no error line" refuses "problem: playwright-cli can't open a headless page: INSTALL.md step 7" "$r" check "$r"
+PW_FAIL="no error line" refuses "problem: playwright-cli can't open a headless page: INSTALL.md step 5" "$r" check "$r"
 sed -i 's/^browser: .*/browser: none/' "$r/.maestro/project/install.yaml"
 : >"$PW_LOG"
 ok check "$r"
@@ -398,159 +492,35 @@ printf %s "$(cat "$rec")" >"$rec"
 ok check "$r"
 cp "$tmp/rec" "$rec"
 
-# bot-bundle: one block per bot named, and the team's own memories in a
-# message apart from it.
-mkdir -p "$r/.maestro/project/bots"
-printf '# ours\n\nIntro.\n\n- Runs at once: up to 3.\n  Wrapped.\n' >"$r/.maestro/project/bots/planner.memory.md"
-# INSTALL.md runs it as a command, not through bash.
-"$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
-[ "$(ls "$r/.maestro/bots" | sort | tr '\n' ' ')" = "a planner.md planner.memories.md planner.routine.md reviewer.md reviewer.routine.md " ] || fail "bundles: $(ls "$r/.maestro/bots")"
-b=$r/.maestro/bots/planner.md bm=$r/.maestro/bots/planner.memories.md br=$r/.maestro/bots/planner.routine.md
-# Each bot's routine is the shipped one with its id filled in.
-[ "$(cat "$br")" = "$(sed 's/<bot id>/planner/g' "$m/bot-profiles/routine.md")" ] && ! grep -qF '<bot id>' "$br" || fail "planner routine: $(cat "$br")"
-grep -qF "MAESTRO_TICKET_ACTOR=reviewer maestro-ticket pickup" "$r/.maestro/bots/reviewer.routine.md" || fail "reviewer routine lacks its id"
-says "planner routine: new, paste .maestro/bots/planner.routine.md"
-grep -qxF -- "- Runs at once: up to 3." "$bm" && grep -qxF "  Wrapped." "$bm" || fail "planner memories lack the team's memory"
-! grep -qF "Intro." "$bm" || fail "planner memories hold the memory file's intro"
-grep -qF 'save each bullet below as one memory that starts `Starting:`' "$bm" || fail "planner memories don't say to save them"
-! grep -qF "Runs at once" "$b" || fail "planner block holds a memory: Grok caps the block, so memories go in their own message"
-grep -qF "$(sed -n 2p "$m/bot-profiles/team-rules.md")" "$b" || fail "planner block lacks the team rules"
-! grep -q '^name: planner' "$b" || fail "planner block holds front matter"
-grep -qxF -- "- Maestro: $sha" "$b" || fail "planner block lacks the sha"
-# A rebuild says which blocks changed, and drops a bot no longer listed.
-says "planner: new" && says "planner memories: new"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && says "planner memories: same" && says "reviewer: same" && says "planner routine: same"
-! grep -qF "reviewer memories" "$tmp/out" || fail "bot-bundle wrote memories for a bot with none"
-# An update that changes no persona changes only the block's Maestro line:
-# the block is the same, so no one pastes it again.
-sed -i 's/^- Maestro: .*/- Maestro: 0000000/' "$b"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && grep -qxF -- "- Maestro: 0000000" "$b" || fail "a block that differs only in its Maestro line was rewritten"
-# A changed memory changes only the memories, and every line of them
-# counts, the last too. The message replaces the bot's starting memories
-# as a set, and each bullet any memory on its topic: it is the owner's.
-echo "- Maestro: pin updates to Mondays." >>"$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: same" && says "planner memories: changed"
-sed -i 's/Mondays/Fridays/' "$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: changed" && grep -qxF -- "- Maestro: pin updates to Fridays." "$bm" || fail "a changed last memory didn't count"
-grep -q "^Forget your old starting memories: each starts \`Starting:\`, or you saved it from a \`## Starting memories\` list.*the owner's: each takes the place of any memory on its topic; tell" "$bm" || fail "the memories don't replace the old set: $(cat "$bm")"
-echo "- Another." >>"$r/.maestro/project/bots/planner.memory.md"
-cp "$r/.maestro/project/install.yaml" "$tmp/choices"
-sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: changed" && says "reviewer: removed .maestro/bots/reviewer.md"
-grep -qxF -- "- Another." "$bm" || fail "planner memories lack the new memory"
-[ ! -e "$r/.maestro/bots/reviewer.md" ] && [ ! -e "$r/.maestro/bots/reviewer.routine.md" ] && [ -e "$r/.maestro/bots/a" ] || fail "bundles after a shorter bots: $(ls "$r/.maestro/bots")"
-says "reviewer: removed .maestro/bots/reviewer.routine.md"
-# A dropped bot loses its memories too. A bot whose memories went gets a
-# message to forget the old ones.
-sed -i 's|^bots: .*|bots: reviewer|' "$r/.maestro/project/install.yaml"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner: removed .maestro/bots/planner.memories.md" && [ ! -e "$bm" ] || fail "a dropped bot kept its memories"
-sed -i 's|^bots: .*|bots: planner|' "$r/.maestro/project/install.yaml"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: new"
-mv "$r/.maestro/project/bots/planner.memory.md" "$tmp/mem" && printf '# none\n' >"$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: changed" && grep -q '^Forget your old starting memories.*set none in their place' "$bm" && ! grep -q '^- ' "$bm" || fail "no message to forget the memories that went: $(cat "$bm")"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: same"
-mv "$tmp/mem" "$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: changed" && grep -qxF -- "- Another." "$bm" || fail "memories didn't come back with the team's file"
-# A bot set up from an older block, with its memories in it, gets a
-# message to forget them even when the team now sets none.
-cp "$r/.maestro/project/bots/planner.memory.md" "$tmp/mem" && printf '# none\n' >"$r/.maestro/project/bots/planner.memory.md"
-printf 'Persona.\n\n## Starting memories\n\n- Runs at once: up to 9.\n\n## Where you work\n' >"$b" && rm "$bm"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: new" && grep -q 'set none in their place' "$bm" || fail "an old block's memories got no message to forget them"
-mv "$tmp/mem" "$r/.maestro/project/bots/planner.memory.md"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle rebuild failed"; }
-says "planner memories: changed" && grep -qxF -- "- Another." "$bm" || fail "the team's memories didn't come back after the old block's"
-# Every shipped profile fits in Grok's 20,000 characters, with room for a
-# long repo path: bot-bundle refuses one that doesn't.
-all=$(cd "$m/bot-profiles" && ls -d */ | tr -d / | tr '\n' ' ')
-sed -i "s|^bots: .*|bots: $all|" "$r/.maestro/project/install.yaml"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "a shipped profile's block is over Grok's limit"; }
-for p in $all; do
-	n=$(sed '/^## Where you work$/,$d' "$r/.maestro/bots/$p.md" | wc -c)
-	[ "$n" -le 19700 ] || fail "$p: persona and team rules are $n bytes; keep them under 19,700 so the block fits Grok's 20,000 with a repo path up to about 190 characters"
-	# Grok rereads the block at every step: keep the routing bots' small.
-	case $p in
-	chief-of-staff) max=16500 ;; # fewer turns than the routers: it talks to the owner
-	planner) max=12000 ;;
-	*) max=8500 ;;
-	esac
-	[ "$n" -le "$max" ] || fail "$p: persona and team rules are $n bytes; a router's block stays under $max, since Grok rereads it at every step"
-	# Every ring bills the routine's instruction.
-	n=$(wc -c <"$r/.maestro/bots/$p.routine.md")
-	[ "$n" -le 1000 ] || fail "$p: its routine is $n bytes; keep it under 1,000, since every ring bills it"
+# --- chief: a new private folder holding the chief of staff's project ---
+c=$tmp/chief
+cr=$(cd "$r" && git rev-parse --show-toplevel)
+bash "$m/scripts/install.sh" chief "$r" "$c" >"$tmp/out" 2>&1 || fail "install.sh chief exited non-zero"
+says "chief project at $c for $cr: open it in T3"
+for f in AGENTS.md CLAUDE.md; do
+	head -c "$(wc -c <"$m/bot-profiles/chief-of-staff/t3.md")" "$c/$f" | cmp -s "$m/bot-profiles/chief-of-staff/t3.md" - || fail "chief: $f doesn't start with t3.md"
+	grep -qF "cd $(printf %q "$cr") && maestro-ticket" "$c/$f" || fail "chief: $f doesn't name the repo"
+	[ -z "$(find "$c/$f" -perm /077)" ] || fail "chief: $f is open to other users"
 done
-cp "$tmp/choices" "$r/.maestro/project/install.yaml"
-"$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle exited non-zero"; }
-# A CRLF checkout of install.yaml names the same bots.
-cp "$r/.maestro/project/install.yaml" "$tmp/choices"
-sed -i 's/$/\r/' "$r/.maestro/project/install.yaml"
-bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" || { cat "$tmp/out"; fail "bot-bundle failed on a CRLF install.yaml"; }
-cp "$tmp/choices" "$r/.maestro/project/install.yaml"
-# A bot name holding a path refuses.
-sed -i 's|^bots: .*|bots: ../planner|' "$r/.maestro/project/install.yaml"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took a bot name with a path"; fi
-says "no bot profile ../planner"
-cp "$tmp/choices" "$r/.maestro/project/install.yaml"
-# A block or a memory file that is a symlink, which a PR can commit,
-# refuses: bot-bundle would write through it, or paste its target into
-# the block.
-echo outside >"$tmp/victim"
-mv "$b" "$tmp/planner.md" && ln -s "$tmp/victim" "$b"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked block"; fi
-says ".maestro/bots/planner.md is a symlink"
-[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked block"
-rm "$b" && mv "$tmp/planner.md" "$b"
-mem=$r/.maestro/project/bots/planner.memory.md
-mv "$mem" "$tmp/memory" && printf -- '- token: s3cr3t\n' >"$tmp/victim" && ln -s "$tmp/victim" "$mem"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle read a symlinked memory file"; fi
-says ".maestro/project/bots/planner.memory.md is a symlink"
-! grep -qF s3cr3t "$b" "$bm" || fail "bot-bundle pasted a symlink's target into a block"
-rm "$mem" && mv "$tmp/memory" "$mem"
-echo outside >"$tmp/victim"
-mv "$bm" "$tmp/planner.memories.md" && ln -s "$tmp/victim" "$bm"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked memories file"; fi
-says ".maestro/bots/planner.memories.md is a symlink"
-[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked memories file"
-rm "$bm" && mv "$tmp/planner.memories.md" "$bm"
-echo outside >"$tmp/victim"
-mv "$br" "$tmp/planner.routine.md" && ln -s "$tmp/victim" "$br"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote through a symlinked routine"; fi
-says ".maestro/bots/planner.routine.md is a symlink"
-[ "$(cat "$tmp/victim")" = outside ] || fail "bot-bundle wrote through a symlinked routine"
-rm "$br" && mv "$tmp/planner.routine.md" "$br"
-# A block over Grok's limit refuses before any bot's files are written,
-# even a bot listed first that is due a new one.
-sed -i 's|^bots: .*|bots: reviewer planner|' "$r/.maestro/project/install.yaml"
-rm -f "$r/.maestro/bots/reviewer.md"
-echo "- One more." >>"$r/.maestro/project/bots/planner.memory.md"
-snap "$r/.maestro/bots" >"$tmp/before"
-head -c 20000 /dev/zero | tr '\0' x >>"$m/bot-profiles/planner/persona.md"
-git -C "$m" commit -q -am big && sed -i "s/^maestro-sha: .*/maestro-sha: $(git -C "$m" rev-parse --short HEAD)/" "$r/.maestro/project/install.yaml"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle wrote a block over Grok's limit"; fi
-says "over Grok's 20,000-character limit"
-snap "$r/.maestro/bots" | diff "$tmp/before" - >/dev/null || fail "bot-bundle wrote files before it refused a block over Grok's limit"
-git -C "$m" reset -q --hard HEAD~1 && cp "$tmp/choices" "$r/.maestro/project/install.yaml"
-sed -i '/^- One more\.$/d' "$r/.maestro/project/bots/planner.memory.md"
-# The blocks come from the pinned commit, as install.sh's copies do.
-echo "- An edit no one reviewed." >>"$m/bot-profiles/team-rules.md"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle took uncommitted bot-profiles"; fi
-says "uncommitted changes in bot-profiles/"
-! grep -qF "no one reviewed" "$b" || fail "bot-bundle put an uncommitted edit in the block"
-git -C "$m" checkout -q -- bot-profiles/team-rules.md
-sed -i "s/^maestro-sha: .*/maestro-sha: 0000000/" "$r/.maestro/project/install.yaml"
-if bash "$m/scripts/bot-bundle.sh" "$r" >"$tmp/out" 2>&1; then fail "bot-bundle ran off its pin"; fi
-says "but install.yaml pins 0000000"
-cp "$tmp/choices" "$r/.maestro/project/install.yaml"
+[ -z "$(find "$c" -maxdepth 0 -perm /077)" ] || fail "chief: the folder is open to other users"
+[ "$(ls -A "$c" | tr '\n' ' ')" = "AGENTS.md CLAUDE.md " ] || fail "chief wrote: $(ls -A "$c")"
+echo mine >>"$c/AGENTS.md"
+before=$(snap "$c")
+if bash "$m/scripts/install.sh" chief "$r" "$c" >"$tmp/out" 2>&1; then fail "install.sh chief took a folder that exists"; fi
+says "choose a new directory for the chief's project"
+[ "$before" = "$(snap "$c")" ] || fail "install.sh chief changed a folder that exists"
+if bash "$m/scripts/install.sh" chief "$tmp" "$tmp/c1" >"$tmp/out" 2>&1; then fail "install.sh chief took a folder that isn't a checkout"; fi
+for a in "" "$tmp/c1" "$r $tmp/c1 $tmp/c2"; do
+	# shellcheck disable=SC2086 # the words are the arguments
+	rc=0 && bash "$m/scripts/install.sh" chief $a >"$tmp/out" 2>&1 || rc=$?
+	[ "$rc" -eq 2 ] || fail "install.sh chief $a: want usage, exit 2; got $rc"
+done
+[ ! -e "$tmp/c1" ] || fail "install.sh chief made a folder on a usage error"
+# The Grok-era runtime commands are gone.
+for g in runtime-sudoers runtime-service; do
+	rc=0 && bash "$m/scripts/install.sh" $g >"$tmp/out" 2>&1 || rc=$?
+	[ "$rc" -eq 2 ] || fail "install.sh $g: want usage, exit 2; got $rc"
+done
 
 # --- update: Maestro changes a skill, adds a file and drops a skill ---
 # The team changed one copy of the dropped skill: that one stays as
@@ -664,8 +634,7 @@ left=$(cd "$r" && { find .claude .agents -type f 2>/dev/null || true; } | sort |
 [ "$left" = ".agents/skills/maestro-tdd/SKILL.md " ] || fail "uninstall left: $left"
 [ ! -e "$r/.claude" ] || fail "uninstall left an empty .claude/"
 ! grep -q '/skills/' "$r/.git/info/exclude" || fail "uninstall left skill exclude lines"
-grep -qxF /.maestro/src/ "$r/.git/info/exclude" && grep -qxF /.maestro/bots/ "$r/.git/info/exclude" ||
-	fail "uninstall should keep .maestro/src/ and .maestro/bots/ hidden: they stay"
+grep -qxF /.maestro/src/ "$r/.git/info/exclude" || fail "uninstall should keep .maestro/src/ hidden: it stays"
 grep -qxF '*.log' "$r/.git/info/exclude" || fail "uninstall changed the user's exclude line"
 [ -f "$r/.maestro/project/install.yaml" ] && [ -f "$r/.maestro/project/project-setup.md" ] || fail "uninstall removed the team's choices or setup"
 
@@ -769,12 +738,12 @@ d17=$(cd "$r17" && pwd -P)/.git/maestro
 : >"$STUB_LOG"
 ok apply "$r17"
 installed "$r17" .claude
-says "next: join the team's board: at the repo's root, run maestro-ticket store --uri-file - and paste the MongoDB URI, from the owner, on stdin"
+says "next: join the team's board: at the repo's root, run maestro-ticket store init --uri-file - and paste the MongoDB URI, from the owner, on stdin"
 ! grep -qF "store: sqlite" "$tmp/out" || fail "apply with no store.uri says to set store: sqlite, which forks the board"
 ! grep -qF "ticket store ready" "$tmp/out" || fail "apply with no store.uri says the store is ready"
 [ ! -e "$d17/tickets.db" ] || fail "apply with no store.uri made a SQLite store"
 [ ! -s "$STUB_LOG" ] || fail "apply with no store.uri ran maestro-ticket: $(cat "$STUB_LOG")"
-refuses "problem: store is mongodb, but there is no $d17/store.uri: at the repo's root, run maestro-ticket store --uri-file -" "$r17" check "$r17"
+refuses "problem: store is mongodb, but there is no $d17/store.uri: at the repo's root, run maestro-ticket store init --uri-file -" "$r17" check "$r17"
 ! grep -qF "store: sqlite" "$tmp/out" || fail "check with no store.uri says to set store: sqlite, which forks the board"
 mkdir -p "$d17" && echo 'mongodb+srv://u:p@h/x' >"$d17/store.uri" && chmod 644 "$d17/store.uri"
 : >"$STUB_LOG"
@@ -833,7 +802,7 @@ ok apply "$r16"
 # --- refusals ---
 mkdir "$tmp/plain"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
-# A repo another user owns, as when the bots get a user of their own: git's
+# A repo another user owns, as when another account cloned it: git's
 # reason shows, with its fix.
 # A warning git prints on stderr is no part of the repo's path.
 git -C "$r2" config core.fsyncObjectFiles true
@@ -842,8 +811,6 @@ run check "$r2" || true
 git -C "$r2" config --unset core.fsyncObjectFiles
 if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 run check "$r2"; then fail "check passed in a repo git doesn't trust"; fi
 says "dubious ownership"
-if GIT_TEST_ASSUME_DIFFERENT_OWNER=1 bash "$m/scripts/bot-bundle.sh" "$r2" >"$tmp/out" 2>&1; then fail "bot-bundle passed in a repo git doesn't trust"; fi
-says "dubious ownership" && says "git can't read the repo"
 export GIT_DIR="$r2/.git"
 refuses "not in a git work tree" "$tmp/plain" apply "$tmp/plain"
 unset GIT_DIR
@@ -863,8 +830,7 @@ skills-home: hidden|install.yaml:6: skills-home twice
 code-graph: mcp|install.yaml:6: code-graph twice
 browser: none|install.yaml:6: browser twice
 skip: maestro-recall|install.yaml:6: skip: is gone: every skill installs
-bots: art-director|no bot profile art-director
-bots: ../bot-profiles/planner|no bot profile ../bot-profiles/planner
+bots: planner|install.yaml:6: bots: is gone with Grok Bot support; remove the line
 tickets: our-tickets|install.yaml:6: tickets: Maestro's bots run only on maestro-ticket
 EOF
 for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses must include claude" "skills-home: user|skills-home wants committed or hidden" "code-graph: yes|code-graph wants mcp or none" "browser: chrome|browser wants playwright-cli or none"; do
@@ -872,10 +838,10 @@ for bad in "harnesses: vim|unknown harness vim" "harnesses: codex grok|harnesses
 	refuses "${bad#*|}" "$r4" apply "$r4"
 done
 grep -v '^code-graph:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
-for c in apply check; do refuses "code-graph wants mcp or none; INSTALL.md step 4" "$r4" $c "$r4"; done
+for c in apply check; do refuses "code-graph wants mcp or none; INSTALL.md step 3" "$r4" $c "$r4"; done
 # An install from before the browser choice: apply and check ask for it.
 grep -v '^browser:' "$tmp/keep" >"$r4/.maestro/project/install.yaml"
-for c in apply check; do refuses "browser wants playwright-cli or none; INSTALL.md step 4" "$r4" $c "$r4"; done
+for c in apply check; do refuses "browser wants playwright-cli or none; INSTALL.md step 3" "$r4" $c "$r4"; done
 # uninstall never asks: a team can still remove an install from before it.
 run uninstall "$r4" || true
 grep -q "browser wants" "$tmp/out" && fail "uninstall asked for the browser choice"
@@ -1083,7 +1049,8 @@ says ".claude/skills/maestro-tdd is hidden from git, but skills-home is committe
 # Cloned with the sparse patterns INSTALL.md step 2 gives: none is left.
 real=$tmp/real
 mkdir "$real"
-(cd "$here/.." && git ls-files -z | tar --null -T - -cf -) | tar -xf - -C "$real"
+# A file deleted but not yet committed is gone from the tree.
+(cd "$here/.." && git ls-files -z | while IFS= read -r -d '' f; do [ ! -e "$f" ] && [ ! -L "$f" ] || printf '%s\0' "$f"; done | tar --null -T - -cf -) | tar -xf - -C "$real"
 git -C "$real" init -q && git -C "$real" add -A -f && git -C "$real" commit -q -m real
 mapfile -t sparse < <(sed -n '/^Clone `github.com/p' "$here/../INSTALL.md" | grep -o '`/[^`]\+`' | tr -d '`')
 [[ " ${sparse[*]} " == *" /scripts/ "* && " ${sparse[*]} " == *" /skills/ "* ]] || fail "no sparse patterns in INSTALL.md step 2: ${sparse[*]}"
@@ -1208,4 +1175,4 @@ for n in $(cd "$r11/.claude/skills" && ls); do echo ".claude/skills/$n/"; done >
 ok apply "$r11"
 installed "$r11" .claude
 
-echo "ok: install.sh applies hidden and committed installs, updates and switches cleanly, refuses clashes and bad choices, survives a failed copy and a CRLF checkout, and uninstalls only what it placed; bot-bundle builds each bot's block"
+echo "ok: install.sh applies hidden and committed installs, updates and switches cleanly, refuses clashes and bad choices, survives a failed copy and a CRLF checkout, and uninstalls only what it placed, builds maestro-ticket at the pin, and writes the chief's project"

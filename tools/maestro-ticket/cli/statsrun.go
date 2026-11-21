@@ -31,7 +31,7 @@ import (
 // holds, so the stats package sees only typed values. Nothing here prints:
 // a run's end reads the same with stats on, off or broken.
 
-// botProfiles are the seven Grok bots' ids, as bot-profiles/ names them.
+// botProfiles are the seven roles' ids, as bot-profiles/ names them.
 var botProfiles = []string{"chief-of-staff", "planner", "senior-engineer", "junior-engineer", "qa-lead", "reviewer", "designer"}
 
 // statsRole reduces a launcher to a profile name, person or other, by

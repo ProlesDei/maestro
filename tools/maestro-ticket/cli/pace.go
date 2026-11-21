@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,6 +122,114 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 	return writeWholeMode(path, data, 0600)
 }
 
+// estimatesFile holds what each job costs, learned from meter readings:
+// window points per run, by harness, job and window.
+const estimatesFile = "estimates.json"
+
+type estimates map[string]float64
+
+func readEstimates(dir string) (estimates, error) {
+	b, err := os.ReadFile(filepath.Join(dir, estimatesFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return estimates{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var e estimates
+	if json.Unmarshal(b, &e) != nil || e == nil {
+		return estimates{}, nil // a bad file only costs the learning
+	}
+	return e, nil
+}
+
+// estimateFor is a job's cost on harness: the most it costs in any
+// window it was read in, else defaultEstimate.
+func estimateFor(dir, harness, job string) float64 {
+	e, _ := readEstimates(dir)
+	best := 0.0
+	prefix := harness + "/" + job + "/"
+	for k, v := range e {
+		if strings.HasPrefix(k, prefix) && v > best {
+			best = v
+		}
+	}
+	if best <= 0 {
+		return defaultEstimate
+	}
+	return best
+}
+
+// meterSpan is the first and last reading a native worker saw of each
+// window during its run: for Codex, before and after its turn; for Claude,
+// the first and last rate-limit event of its stream.
+type meterSpan map[string][2]paceWindow
+
+func (m *meterSpan) see(windows map[string]paceWindow) {
+	if *m == nil {
+		*m = meterSpan{}
+	}
+	for k, w := range windows {
+		s, ok := (*m)[k]
+		if !ok {
+			s[0] = w
+		}
+		s[1] = w
+		(*m)[k] = s
+	}
+}
+
+// learnSpan moves r's job's estimate toward what its run spent: each
+// window's rise between the first and last reading it saw, split evenly
+// with the other runs on its sub that ran at the same time. The rise may
+// hold the owner's own use, which makes the estimate err high; a Claude
+// run's first call comes before its first reading, which makes it err low.
+func (c *call) learnSpan(dir string, r runs.Record, harness string) error {
+	if len(c.span) == 0 || r.Job == "" || r.Profile == "" {
+		return nil
+	}
+	unlock, err := lockBoard(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	list, err := runs.List(filepath.Join(dir, "runs"), time.Now(), true)
+	if err != nil {
+		return err
+	}
+	e, err := readEstimates(dir)
+	if err != nil {
+		return err
+	}
+	learnEstimate(e, r, harness, c.span, list, time.Now())
+	data, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	return writeWholeMode(filepath.Join(dir, estimatesFile), data, 0600)
+}
+
+func learnEstimate(e estimates, r runs.Record, harness string, span meterSpan, list []runs.Record, now time.Time) {
+	others := 0
+	for _, o := range list {
+		if o.ID != r.ID && o.Profile == r.Profile && !o.Unspent && !neverRan(o) && !o.StartedAt.After(now) && (o.EndedAt == nil || o.EndedAt.After(r.StartedAt)) {
+			others++
+		}
+	}
+	for window, s := range span {
+		first, last := s[0], s[1]
+		if !first.Reset.Equal(last.Reset) || !last.Read.After(first.Read) || last.Used < first.Used {
+			continue // one reading, or the window reset between them
+		}
+		sample := min(50, max(0.5, (last.Used-first.Used)/float64(1+others)))
+		k := harness + "/" + r.Job + "/" + window
+		if old, ok := e[k]; ok && old > 0 {
+			sample = 0.7*old + 0.3*sample
+		}
+		e[k] = math.Round(sample*100) / 100
+	}
+}
+
 func (c *call) recordUsage(alias, key, reset string, used float64) error {
 	if !runs.BotPattern.MatchString(key) || math.IsNaN(used) || used < 0 || used > 100 {
 		return usagef("profile sample: give a named --window and --used-percent from 0 to 100")
@@ -147,6 +256,7 @@ func (c *call) copyNativeUsage(st profileStatus, beforeTurn string) error {
 	if len(windows) == 0 {
 		return errors.New("profile sample: no numeric allowance from the native meter")
 	}
+	c.span.see(windows)
 	dir, err := c.standingDir()
 	if err != nil {
 		return err
@@ -216,13 +326,20 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 			next = at
 		}
 	}
+	// The model the job asked for: an override, else its command's.
+	want := cmp.Or(flagValue(r.Overrides, "--model"), flagValue(r.Command, "--model"))
+	bindingFor := func(p boundProfile) jobModel {
+		b := poolModel(p.Harness, want)
+		b.Estimate = estimateFor(root, p.Harness, r.Job)
+		return b
+	}
 	for _, alias := range sortedAliases(profiles) {
 		p := profiles[alias]
-		binding, ok := p.binding(r.Job, r.Launcher)
-		if !ok || (r.Profile != "" && r.Profile != alias) {
+		binding := bindingFor(p)
+		if r.Profile != "" && r.Profile != alias {
 			continue
 		}
-		if m, e := flagValue(r.Overrides, "--model"), flagValue(r.Overrides, "--effort"); (m != "" && binding.Model != m) || (e != "" && binding.Effort != e) {
+		if e := flagValue(r.Overrides, "--effort"); e != "" && binding.Effort != e {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
@@ -267,7 +384,7 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		return r, waitingForReset{at: next, reason: fmt.Sprintf("%s: %s: %s", ticket.ErrPaused, r.Job, strings.Join(reasons, ", "))}
 	}
 	p := profiles[chosen]
-	b, _ := p.binding(r.Job, r.Launcher)
+	b := bindingFor(p)
 	if !isNativeCommand(r.Command) {
 		r.Command, err = c.nativeCommand(chosen, r.Job, b, p.Harness)
 		if err != nil {

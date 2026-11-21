@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -192,7 +191,7 @@ func (c *call) reconsider(ctx context.Context, loc storeLoc) error {
 
 func (c *call) runtimeStoreDown(dir string) {
 	// Atlas cannot route its own outage. Rate-limit the fixed fault wake locally.
-	if account, e := user.Current(); e == nil && account.Username == "maestro" {
+	{
 		notify := false
 		if unlock, e := lockBoard(dir); e == nil {
 			gate := filepath.Join(dir, "store-down.until")
@@ -204,7 +203,7 @@ func (c *call) runtimeStoreDown(dir string) {
 		if notify {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			_ = c.crossDoor(ctx, "maestro-cos", []string{"wake", "store-down"})
+			_ = c.wakeStoreDown(ctx)
 		}
 	}
 	if err := c.scheduleReconsider(dir, time.Now().Add(5*time.Second)); err != nil {

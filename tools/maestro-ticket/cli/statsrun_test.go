@@ -246,13 +246,13 @@ func TestArgvFacts(t *testing.T) {
 			if k.slot != "" {
 				cmd = inSlot(cmd, k.slot, 3)
 			}
-			for _, c := range [][]string{withEnv(cmd), resumeCommand(withEnv(cmd), newSessionID(), false)} {
+			for _, c := range [][]string{withEnv(cmd), resumeCommand(withEnv(cmd), newSessionID(), "")} {
 				model, effort, lean := argvFacts(c)
 				if model != m || effort != effortHigh || lean != k.lean {
 					t.Errorf("%s on %s: argvFacts = %s %s %v; want %s high %v", k.name, m, model, effort, lean, m, k.lean)
 				}
 			}
-			model, effort, _ := argvFacts(resumeCommand(withEnv(cmd), newSessionID(), true))
+			model, effort, _ := argvFacts(resumeCommand(withEnv(cmd), newSessionID(), modelOpus))
 			if model != modelOpus || effort != effortHigh {
 				t.Errorf("%s resumed --opus: %s %s", k.name, model, effort)
 			}
@@ -341,7 +341,7 @@ func TestDeadRunKeepsSession(t *testing.T) {
 	c := &call{env: Env{Getenv: func(string) string { return "" }, DiskFree: halfFree}}
 	for _, cmd := range [][]string{
 		claudeCommand(s1, modelSonnet, effortHigh, false),
-		resumeCommand(claudeCommand("22222222-2222-4222-8222-222222222222", modelSonnet, effortHigh, false), s1, false),
+		resumeCommand(claudeCommand("22222222-2222-4222-8222-222222222222", modelSonnet, effortHigh, false), s1, ""),
 	} {
 		r := runs.Record{ID: "R-aaaaaaaa", State: runs.TimedOut, Launcher: "planner", Job: "build",
 			StartedAt: time.Unix(1000, 0), EndedAt: ended(time.Unix(1000, 0), time.Minute), Command: withEnv(cmd)}

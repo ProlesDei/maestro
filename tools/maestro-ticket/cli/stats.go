@@ -108,7 +108,7 @@ func runStatsSwitch(c *call) error {
 }
 
 // refuseBot keeps a view from a bot in its own shell, where whatever it
-// reads reaches Grok (decision 24). A Claude session a bot started runs
+// reads reaches a model provider (decision 24). A Claude session a bot started runs
 // with MAESTRO_RUN_ID set, and may read them.
 func (c *call) refuseBot(view string) error {
 	if c.env.Getenv(runs.RunIDEnv) != "" {

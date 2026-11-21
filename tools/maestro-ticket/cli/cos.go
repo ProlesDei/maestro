@@ -1,27 +1,24 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/chief"
-	"github.com/ProlesDei/maestro/tools/maestro-ticket/door"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/mongostore"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
-// cos receives fixed verbs from the chief account. Plan and ruling text
-// comes from a previously published delivery on this board.
+// cos runs the chief of staff's fixed verbs on the worker side of the
+// board. Plan and ruling text comes from a delivery the chief published.
 func runCos(ctx context.Context, c *call) error {
 	if err := c.parse(); err != nil {
 		return err
@@ -47,33 +44,26 @@ func runCos(ctx context.Context, c *call) error {
 	if dec.Decode(new(any)) != io.EOF {
 		return usagef("cos: expected one request")
 	}
-	if account, e := user.Current(); e == nil && account.Username == "maestro-cos" {
-		if !door.Cos(verb) {
-			return usagef("cos: invalid verb")
+	// The chief's thread must hold the goal and the published delivery
+	// the verb names before the board acts on it.
+	s, err := func() (*chief.Service, error) {
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		s, _, err := c.chiefService(cctx)
+		return s, err
+	}()
+	if err != nil {
+		if verb == "look" {
+			return json.NewEncoder(c.env.Stdout).Encode(map[string]string{"store": "unavailable"})
 		}
-		cfg, err := chief.ReadConfig(filepath.Join(account.HomeDir, ".config", "maestro-chief", "board.json"))
-		if err != nil {
-			return err
-		}
-		s, err := chief.Open(ctx, cfg)
-		if err != nil {
-			if verb == "look" {
-				return json.NewEncoder(c.env.Stdout).Encode(map[string]string{"store": "unavailable"})
-			}
-			return err
-		}
-		defer s.Close(ctx)
-		if err := s.CheckDoor(ctx, c.env.Getenv("T3CODE_THREAD_ID"), in.Goal, verb, in.Delivery); err != nil {
-			return chief.DescribeError(err)
-		}
-		data, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		cc := *c
-		cc.env.Stdin = bytes.NewReader(data)
-		return cc.crossDoor(ctx, "maestro", []string{"cos", verb})
+		return err
 	}
+	err = s.CheckCos(ctx, c.env.Getenv("T3CODE_THREAD_ID"), in.Goal, verb, in.Delivery)
+	s.Close(ctx)
+	if err != nil {
+		return chief.DescribeError(err)
+	}
+	c.recoverAfterBoot()
 	loc, err := c.location()
 	if err != nil {
 		return err

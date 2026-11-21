@@ -1,5 +1,7 @@
 # T3 runtime: a spec for Maestro without Grok Bot
 
+> **Dropped Nov 20 2026:** the two-OS-user wall, per-role profile binding and the remaining Grok parts. See [decisions](../decisions.md) 1, 10, 12, 15 and 25.
+
 **Status:** draft v11, 2026-11-20. v1 went through two fresh-context audits on 2026-11-18; v2 fixed what they found (section 13). v3 takes the owner's answers (section 1). v4 added subscription routing. v5 supports concurrent Astra and Opus chiefs and gives delivery to the planner. v6 specifies recovery discovery (3.3). v7 defines chief memory on Atlas (5.4). v8 covers changes to active briefs and ticket criteria (4.1–4.2). v9 replaces worker-count limits with subscription pacing (8). v10 specifies repeat kickbacks (4.3). v11 starts a fresh Atlas board for new work (7, 10). The implementation branch records its scratch evidence in [P0 findings](t3-runtime-p0-findings.md) and [runtime trials](t3-runtime-trials.md).
 **Labels:** **[code]** means the claim was checked in the source at the `file:line` given. **[docs]** means a vendor doc says it; no run here has shown it. **(guess)** means neither has. Section 11 lists the probes that settle each **[docs]** and **(guess)** claim the build depends on.
 

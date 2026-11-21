@@ -108,13 +108,22 @@ Commands:
               [--keepalive PID]
   heartbeat   <id> --holder H --token N [--ttl 30m]
   keepalive   <id> --holder H --token N --pid PID [--ttl 30m] [--interval D]
-  wake        [store-down] (fixed chief wake from the worker OS user)
+  wake        [store-down]   (wakes the chief's T3 thread with fixed text; store-down wakes the
+              newest registered chief thread about a store outage)
+  chief       register|assign|draft|publish|read|instruction|result|direction|propose|claim|
+              question|answer|rule|ack|prepare   (the chief of staff's goal records; one JSON
+              request on stdin; the T3 thread in $T3CODE_THREAD_ID; $MAESTRO_T3_BASE names
+              T3's data folder)
   criteria    status|request|assess|merge T-n (versioned criteria and merge authority)
-  cos         plan|rule|pickup|ack|look|goals|eta (goal request on stdin)
+  cos         plan|rule|ask|stop|start|rules|pickup|ack|look|goals|eta   (a chief thread's
+              fixed verbs on the board; goal request on stdin)
   status      read runtime board, account holds, usage samples and active jobs
   recover     reconcile the runtime board with local workers and saved runs
-  profile     [bind] <alias> --harness claude|codex [--config-dir DIR]
-              (show subscription status; bind adds --job JOB --model MODEL --effort LEVEL)
+  profile     add <alias> --harness claude|codex [--config-dir DIR] [--reserve-percent 4]
+              (verify a login and add it to the pool: every sub runs every job, and each job
+              goes to the sub with the most room; the reserve stays the owner's)
+  profile     remove <alias> | sample <alias> | usage | <alias> --harness H [--config-dir DIR]
+              (drop a sub, refresh its usage, show the ledger, or show a login's status)
   launch      [--ticket T-1] [--limit 2h] [--rings 0s,5m,10m,40m] -- claude -p [flags]
               (starts the run in the background, prompt on stdin, and returns its id)
   job         <job> [<id>...] [--profile ALIAS] [--model M] [--effort E] [--limit D]   (a bot's job as a Claude Code
@@ -125,12 +134,11 @@ Commands:
   resume      <run-id> [--opus] [--escalate] [--decide] [--died]   (the run's session again,
               answer on stdin; --opus moves it to Opus high; --died resumes a dead run once)
   pickup      (shows each run you launched that ended and you haven't acked; lists yours still running)
-  ack         <run-id>...   (you acted on its result: pickup stops showing it, its rings stop)
+  ack         <run-id>...   (you acted on its result: pickup stops showing it)
   stop        <run-id>   (ends a live run as its time limit would and records it failed, stopped
               by you; its launcher or the planner)
   stop        --all [--off]   (halts every claim and start, on every machine on the store; --off lifts it)
   runs        [<run-id>] [--all] [--launcher B]   (and claude -p sessions started outside launch)
-  notify      [set] [<bot-id>] [--url-file F|- | --exec-file PATH | --code] [--key-file F|-] [--clear] [--test]   (the webhook launch rings)
   release     <id> --holder H --token N [--died]
   reap
   transition  <id> --to S [--from S] [--expect-version N] [--holder H --token N] [--role R] [--note T] [--release]
@@ -247,6 +255,7 @@ var commands = []command{
 	{"status", runRuntimeStatus},
 	{"cos", runCos},
 	{"wake", runWake},
+	{"chief", runChief},
 	{"criteria", runCriteria},
 	{"track-worker", runTrackWorker},
 	{"eta", runETA},
@@ -264,7 +273,6 @@ var commands = []command{
 	{"ack", runAck},
 	{"stop", runStop},
 	{"runs", runRuns},
-	{"notify", runNotify},
 	{"release", runRelease},
 	{"reap", runReap},
 	{"transition", runTransition},
@@ -299,6 +307,7 @@ type call struct {
 	idemKey   string
 	args      []string  // positional arguments
 	runCache  *pastRuns // every run, listed once a call (allRuns)
+	span      meterSpan // the meter readings a native worker saw in its run
 	store     struct {  // storePath's answer, so git runs once a call
 		done         bool
 		path, source string

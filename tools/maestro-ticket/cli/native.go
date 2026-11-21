@@ -81,13 +81,14 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	ac, brief := record.ACRevision, record.BriefRevision
 	ctx, cancel := context.WithDeadline(ctx, record.StartedAt.Add(record.LimitDuration()))
 	defer cancel()
-	p, m, err := c.jobProfile(*alias, *job)
+	p, err := c.poolProfile(*alias)
 	if err != nil {
 		return err
 	}
-	if m.Model != *model || m.Effort != *effort {
-		return errors.New("worker: job's model or effort no longer matches its binding")
+	if !poolAllows(p.Harness, *model, *effort) {
+		return errors.New("worker: model or effort isn't one the pool runs on this sub")
 	}
+	m := jobModel{Model: *model, Effort: *effort, Estimate: record.Estimate}
 	st, err := readProfile(ctx, *alias, p.Harness, p.ConfigDir)
 	if err != nil || st.identity == "" || st.identity != p.Identity || st.Plan != p.Plan {
 		if root, e := c.standingDir(); e == nil {
@@ -168,12 +169,18 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		if k, _ := findJob(*job); k.lean {
 			cmd.Env = append(cmd.Env, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m")
 		}
-		return c.claudeResult(cmd, *alias)
+		err = c.claudeResult(cmd, *alias)
+	} else {
+		err = codexResult(cmd, c.env.Stdout)
+		if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
+			if e = c.copyNativeUsage(after, ""); e != nil {
+				fmt.Fprintln(c.env.Stderr, "refresh usage:", e)
+			}
+		}
 	}
-	err = codexResult(cmd, c.env.Stdout)
-	if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
-		if e = c.copyNativeUsage(after, ""); e != nil {
-			fmt.Fprintln(c.env.Stderr, "refresh usage:", e)
+	if err == nil {
+		if e := c.learnSpan(filepath.Dir(dir), record, p.Harness); e != nil {
+			fmt.Fprintln(c.env.Stderr, "learn usage:", e)
 		}
 	}
 	return err
@@ -302,7 +309,9 @@ func (c *call) claudeResult(cmd *exec.Cmd, alias string) error {
 				break
 			}
 			if e.Rate.Used != nil && *e.Rate.Used >= 0 && *e.Rate.Used <= 1 && e.Rate.Reset > time.Now().Unix() && e.Rate.Kind != "" {
-				err = saveObservation(root, alias, map[string]paceWindow{e.Rate.Kind: {Used: 100 * *e.Rate.Used, Reset: time.Unix(e.Rate.Reset, 0).UTC(), Read: time.Now().UTC(), Source: "claude"}})
+				w := map[string]paceWindow{e.Rate.Kind: {Used: 100 * *e.Rate.Used, Reset: time.Unix(e.Rate.Reset, 0).UTC(), Read: time.Now().UTC(), Source: "claude"}}
+				c.span.see(w)
+				err = saveObservation(root, alias, w)
 			}
 		case "result":
 			var result map[string]json.RawMessage

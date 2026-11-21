@@ -152,7 +152,6 @@ func againsOf(t *testing.T, dir, id string) []runs.Record {
 func TestAgainOnceRace(t *testing.T) {
 	sup := fakeSupervisor(t)
 	h := newRouteHarness(t)
-	h.hook("planner")
 	dir := filepath.Join(h.dir, "runs")
 	notify := filepath.Join(h.dir, "notify")
 	r := h.endedPlan(runs.Failed)
@@ -238,7 +237,6 @@ func TestAgainMarkFreedOnStartFail(t *testing.T) {
 func TestDiedResumeRace(t *testing.T) {
 	sup := fakeSupervisor(t)
 	h := newRouteHarness(t)
-	h.hook("planner")
 	dir := filepath.Join(h.dir, "runs")
 	notify := filepath.Join(h.dir, "notify")
 	r := h.endedPlan(runs.Died)
@@ -331,7 +329,6 @@ func TestDoMovedOnAcks(t *testing.T) {
 	h := newRouteHarness(t)
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress", "in_review")
-	h.hook("senior-engineer")
 	dir := filepath.Join(h.dir, "runs")
 	notify := filepath.Join(h.dir, "notify")
 	ended := func(state, do string) runs.Record {
@@ -382,13 +379,12 @@ func TestDoMovedOnAcks(t *testing.T) {
 	}
 }
 
-// runDo runs only the fixed grammar, for this run, for a launcher with a
-// webhook, and keeps the line on a refusal or a start under way; once the
+// runDo runs only the fixed grammar, for this run, for a served launcher,
+// and keeps the line on a refusal or a start under way; once the
 // pause lifts, the same line starts the retry.
 func TestRunDoGrammar(t *testing.T) {
 	sup := fakeSupervisor(t)
 	h := newRouteHarness(t)
-	h.hook("planner")
 	dir := filepath.Join(h.dir, "runs")
 	notify := filepath.Join(h.dir, "notify")
 	r := h.saveRun(runs.Record{Launcher: "planner", Job: "plan", State: runs.Failed, IsError: true})
@@ -397,7 +393,6 @@ func TestRunDoGrammar(t *testing.T) {
 		"maestro-ticket rules text",
 		"maestro-ticket resume " + r.ID + " --opus",
 		"maestro-ticket resume " + r.ID,
-		"maestro-ticket job again " + r.ID + " --full",
 		"maestro-ticket job again R-zzzzzzzz",
 		"maestro-ticket job again " + r.ID + "; rm -rf /",
 		"maestro-ticket job again " + r.ID + " --limit 4h --model sonnet",
@@ -407,10 +402,10 @@ func TestRunDoGrammar(t *testing.T) {
 			t.Errorf("ran %q", line)
 		}
 	}
-	// A launcher with no webhook reads its pickup.
-	o := h.saveRun(runs.Record{Launcher: "senior-engineer", Job: "plan", State: runs.Failed, IsError: true})
+	// A person reads their pickup.
+	o := h.saveRun(runs.Record{Launcher: "person", Job: "plan", State: runs.Failed, IsError: true})
 	if on, _ := h.c.runDo(context.Background(), dir, notify, o, "maestro-ticket job again "+o.ID); on {
-		t.Error("ran for a launcher with no webhook")
+		t.Error("ran for a person")
 	}
 	// Another start of the same again under way: the line stays.
 	os.WriteFile(filepath.Join(dir, r.ID+".again"), nil, 0o644)
@@ -443,8 +438,6 @@ func TestRunDoGrammar(t *testing.T) {
 func TestChainBuildTimeoutRetriesThenBlocks(t *testing.T) {
 	sup := fakeSupervisor(t)
 	h := newRouteHarness(t)
-	h.hook("senior-engineer")
-	h.hook("planner")
 	h.ok(nil, "create", "--title", "a")
 	h.move("T-1", "in_progress")
 	dir := filepath.Join(h.dir, "runs")

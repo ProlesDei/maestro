@@ -4,10 +4,7 @@ package runs
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -26,10 +23,7 @@ type hookServer struct {
 
 func newHookServer(t *testing.T) (*hookServer, Hook) {
 	k := &hookServer{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var n Notification
-		b, _ := io.ReadAll(r.Body)
-		json.Unmarshal(b, &n)
+	return k, Hook{Wake: func(_ context.Context, n Notification) error {
 		k.mu.Lock()
 		k.bodies = append(k.bodies, n)
 		k.at = append(k.at, time.Now())
@@ -38,9 +32,8 @@ func newHookServer(t *testing.T) (*hookServer, Hook) {
 		if on != nil {
 			on(n)
 		}
-	}))
-	t.Cleanup(srv.Close)
-	return k, Hook{URL: srv.URL}
+		return nil
+	}}
 }
 
 func (k *hookServer) count() int {
@@ -187,12 +180,8 @@ func TestRingGateFailedCoversNothing(t *testing.T) {
 	now := time.Now()
 	ids := endedRuns(t, dir, "planner", 2, now)
 	var tries atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		tries.Add(1)
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-	h, build := Hook{URL: srv.URL}, plainDigest(dir, "planner")
+	h := Hook{Wake: func(context.Context, Notification) error { tries.Add(1); return errors.New("down") }}
+	build := plainDigest(dir, "planner")
 	if g, err := RingBot(context.Background(), dir, dir, "planner", ids[:1], h, now, build); err == nil || !g.Tried || g.Rang || len(g.Covered) != 0 {
 		t.Fatalf("failed ring: %+v %v", g, err)
 	}
