@@ -1,8 +1,0 @@
-# Code review: T-20 Bump the HTTP client
-PR: https://github.com/acme/app/pull/44 | branch: maestro/T-20 | head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | base: main @ 2222222222222222222222222222222222222222 | gated on: 3333333333333333333333333333333333333333
-Verdict: ESCALATE
-Tier: 2, dependencies | Mode: full
-## Outcome        Escalation comment 99: the lockfile changed, which needs the owner's yes
-
-{"head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verdict": "ESCALATE", "tier": 2, "mode": "full",
- "findings": [{"id": "F1", "severity": "minor", "action": "no-op", "pass": 8, "file": "go.mod", "line": 3, "evidence": "e", "impact": "x", "fix": "y", "prior": "new"}]}

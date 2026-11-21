@@ -1,6 +1,0 @@
-# Personal, per-machine agent settings
-CLAUDE.local.md
-.claude/settings.local.json
-
-# Build output
-tools/maestro-ticket/bin/
