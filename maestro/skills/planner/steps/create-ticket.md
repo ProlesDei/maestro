@@ -31,7 +31,7 @@ Risk: low | high: <why>
 
 **Checks.** The team trusts these over any test the engineer writes, because you wrote them from the goal. Each check:
 - tests one behavior, so a failure says what broke;
-- starts from a state QA can set up on this branch's build, and says how when it isn't obvious;
+- starts from a state QA can set up in its test build, and says how when it isn't obvious;
 - names the input and the exact result, with numbers instead of adjectives: "responds within 2 s", not "fast";
 - runs in the app or as a command, so QA gets a clear yes or no;
 - gives the same answer on every run, with no result that hangs on timing or order;
@@ -64,4 +64,4 @@ Read the ticket as an engineer who has seen nothing else. File it only if each h
 - The outcome serves the goal.
 - Nothing in it guesses at code you didn't read.
 
-File it on the board under the epic keyed by the goal slug. Put Checks in acceptance, each Waits on in a blocks dependency pointing to the prerequisite, and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design.
+File it on the board under the epic keyed by the goal slug. Put Checks in acceptance, each Waits on in a blocks dependency pointing to the prerequisite, and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design.
