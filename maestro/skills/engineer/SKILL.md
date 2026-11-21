@@ -55,7 +55,7 @@ Start a fresh session that runs `maestro-code-review` on the PR. Give it only th
 
 ## When review or QA sends it back
 
-On the ticket's third `Review changes needed` verdict or third QA fail verdict, stop and hand the ticket back to whoever assigned it with the PR and what's still open. QA's 3 reruns of one failure count as one verdict.
+On the third `Review changes needed` verdict or third QA fail verdict since the ticket was assigned to you, stop and hand the ticket back to whoever assigned it with the PR and what's still open. QA's 3 reruns of one failure count as one verdict.
 
 Answer each blocker in the PR. Fix what it asks and nothing more, or say in a sentence or two, with evidence, why it's wrong. A blocker that adds work the ticket didn't ask for is a new ticket; say so. Notes need no fix or answer. If you changed code, rerun the steps under "Prove it" for what you touched and push. If you and the reviewer still disagree after one round, take it to whoever assigned the ticket.
 
