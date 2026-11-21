@@ -24,4 +24,4 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | The chief of staff stops the line | Halt every run but the fix, and restart them once it merges |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done | `steps/close-goal.md` |
-| The owner signs off | Close the epic on the board |
+| The owner signs off and no ticket under the epic is open | Close the epic on the board |
