@@ -11,7 +11,7 @@ Read [memory.md](memory.md) when you start. Take this skill, its memory and the 
 
 ## Before you test
 
-- Test only a PR whose latest review verdict approves its current head sha. If the head moved since, send it back to review.
+- Test only a PR whose latest review comment opens `Review pass at <sha>` with its current head sha. If the head moved since, send it back to review.
 - Test what ships: the PR's head merged with the latest main, in a fresh worktree of your own, apart from the engineer's. A merge conflict is a fail.
 - From the PR and its ticket, learn the goal, each check that shows it works, what's out of scope, and review's notes for QA.
 
