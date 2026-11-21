@@ -1,15 +1,10 @@
----
-name: maestro-create-ticket
-description: Write one Maestro ticket that an engineer can take to a merged PR without asking. Use when the planner turns part of a goal into work, splits a ticket, or files work a check found missing.
----
-
 # Create a ticket
 
 An engineer builds from the ticket in a fresh session, a reviewer checks the PR against it, and QA runs its checks before merging. Each knows only the ticket and the repo. Write it so none of them has to ask you.
 
 ## Before you write
 
-- Look for an open ticket that covers the work. Wait on it, or change it with `maestro-update-ticket`, instead of filing a second one.
+- Look for an open ticket that covers the work. Wait on it, or change it with `steps/update-ticket.md`, instead of filing a second one.
 - Read the code the ticket touches on the main branch. Name only paths and symbols you saw, and check each decision you settle against that code.
 - Search for code that already does part of the work. Have the ticket build on it, or say why not.
 - Find what reads the behavior you change: other commands, alerts, stored state, other agents. Decide what each should do once the change lands.
@@ -40,9 +35,9 @@ Risk: low | high: <why>
 - names the input and the exact result, with numbers instead of adjectives: "responds within 2 s", not "fast";
 - runs in the app or as a command, so QA gets a clear yes or no;
 - gives the same answer on every run, with no result that hangs on timing or order;
-- fails on today's code and passes once the change lands.
+- for behavior the ticket changes, fails on today's code and passes once the change lands; for behavior that must stay, passes on both.
 
-Write one for the main path, then one for each case that must hold: the empty state, bad input users will send, data that is missing or malformed, and any failure that loses data or money. For a bug, the first check is the steps that show it today. For a change that must keep behavior, such as a refactor, check the behavior that must not change. Past six checks, split the ticket. Only you change the checks, through `maestro-update-ticket`.
+Write one for the main path, then one for each case that must hold: the empty state, bad input users will send, data that is missing or malformed, and any failure that loses data or money. For a bug, the first check is the steps that show it today. For a change that must keep behavior, such as a refactor, check the behavior that must not change. Past six checks, split the ticket. Only you change the checks, through `steps/update-ticket.md`.
 
 **Not handled.** Each case you weighed and left out, with why it can wait: rare, cheap to fix later, or another ticket's job. The engineer builds none of them, and review and QA send nothing back for them.
 
@@ -50,7 +45,7 @@ Write one for the main path, then one for each case that must hold: the empty st
 
 **Waits on.** Another ticket, only when this one needs its code to build or run. Name that code. Order alone is not a reason to wait.
 
-**Touches.** The paths the change edits, as narrow as you can. Tickets whose paths overlap can't run at the same time, so keep them apart or make one wait on the other.
+**Touches.** The paths the change edits, as narrow as you can. Tickets whose paths overlap don't run at the same time: `steps/assign-ticket.md` holds one back. That isn't a reason to wait on it.
 
 **Risk.** High for auth, money, data loss or migrations, public APIs, concurrency, or scope you couldn't pin down. Low otherwise. Risk sets the engineer's model and how deep review goes.
 
