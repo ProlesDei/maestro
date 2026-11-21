@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -eu
+IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
+primary=${worktree#worktree }
+cd "$primary/.maestro/maestro-board"
+export GIT_CEILING_DIRECTORIES="$primary"
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
+export BEADS_DIR="$PWD/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
+export DOLT_ROOT_PATH="$PWD" DOLT_DISABLE_EVENT_FLUSH=1
+if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
+  echo "Maestro board setup is missing in $BEADS_DIR" >&2
+  exit 1
+fi
+exec bd --sandbox --dolt-auto-commit on "$@"

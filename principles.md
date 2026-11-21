@@ -5,6 +5,11 @@
 - Make routine, reversible decisions within the task. When blocked, tell the agent that assigned the work what you tried and which decision you need. The chief of staff handles questions for the owner.
 - Check the result where people use it. Report what you ran, what you observed, and what you still need to verify.
 
+### Ticket board
+
+- From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Use JSON for queries. If the board is down, report the block to whoever assigned the work.
+- Tickets go from open to in progress to closed. Keep review and QA verdicts in PR comments.
+
 ### Worktrees
 
 - Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Check `git worktree list` first. Reuse the ticket's worktree across sessions and handoffs, or create it if missing. QA tests in a fresh worktree of its own, apart from the engineer's. Keep concurrent tasks, temporary files, and ports separate.
