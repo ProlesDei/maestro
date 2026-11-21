@@ -32,7 +32,7 @@ Spend your thought on the two to four calls that decide the outcome.
 - Replace one of the repo's patterns only on purpose, and name every place that must change with it.
 - Check the installed version of an API before you call it.
 - Guard against the failure that would hurt most, not every failure. A check that grants access denies it when it can't decide.
-- Update the docs that describe what you changed. Edit agent instructions, such as skills, prompts or `AGENTS.md`, only when the ticket asks.
+- Update the docs that describe what you changed.
 - Never swallow an error, add a dependency the ticket doesn't name, commit generated files, or leave debug output, commented-out code or values that only work on your machine.
 - For a bug, follow [debug.md](debug.md).
 - Add tests only when the ticket or a person asks for them, following [tests.md](tests.md). If your change breaks a repo test on purpose, update it and say why in the PR. Never weaken, skip or mark flaky a test to make it pass.
@@ -43,8 +43,8 @@ Commit in small steps that each build.
 
 - Bring your branch up to date with the base branch the way the repo does it, and resolve each conflict to keep what both sides meant.
 - Run the project's checks. If one also fails on the base branch, say so in the PR and move on. Run each ticket check as a user would and save the result. For each, also try one input likely to break it, such as a second file, an input that exercises the old behavior, or empty or bad input.
-- For what you changed, run QA's [Test it](.maestro/skills/qa/server.md#test-it) and [Check each changed screen](.maestro/skills/qa/browser.md#check-each-changed-screen) probes where they apply. Follow the guides' setup and cleanup steps. If you lack a tool, name it and the probe you skipped in the PR, then run the rest.
-- Read your whole diff against the base branch and fix anything on the [shared blocker list](.maestro/skills/code-review/blockers.md).
+- For what you changed, run the probes that apply in the Test it section of `.maestro/skills/qa/server.md` and the Check each changed screen section of `.maestro/skills/qa/browser.md`. Follow the guides' setup and cleanup steps. If you lack a tool, name it and the probe you skipped in the PR, then run the rest.
+- Read your whole diff against the base branch and fix blockers from all three sections of `.maestro/skills/code-review/blockers.md`.
 
 ## Open the PR
 

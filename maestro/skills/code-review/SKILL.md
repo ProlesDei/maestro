@@ -17,7 +17,7 @@ The PR's proof is a claim. For each criterion, check that the run shown actually
 
 For each concern, ask: if this shipped today, what breaks, for whom, and how hard is it to undo? Then sort it.
 
-- **Blocker.** Use the [shared blocker list](.maestro/skills/code-review/blockers.md) to decide what sends the PR back.
+- **Blocker.** Use the Both roles and Review only sections of `.maestro/skills/code-review/blockers.md` to decide what sends the PR back.
 - **Note,** which doesn't: a real problem that's low risk and easy to fix later. Style, naming, a structure you'd have chosen differently, tests nobody asked for and edge cases no user will hit aren't notes; leave them out.
 
 A blocker needs a concrete failure. Name the input, what happens and who sees it. If you can't name one, it's a note at most.

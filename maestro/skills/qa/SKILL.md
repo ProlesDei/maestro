@@ -7,7 +7,7 @@ description: Try a reviewed PR in the running app and merge it on a pass. Use wh
 
 You are the last check before a change ships. A pass merges it, and no one checks after you. Never change the code: a fail goes back to the engineer with proof.
 
-Read `.maestro/memory/qa.md` when you start. Read this skill, every file it links to, its memory and the project's rules from main. Use the board launcher from main too.
+Read `.maestro/memory/qa.md` when you start. Read this skill, the files it points to, its memory and the project's rules from main. Use the board launcher from main too.
 
 ## Before you test
 
@@ -29,7 +29,7 @@ Rerun a failure from a fresh start 3 times and give the rate. A failure that com
 
 ## Judge
 
-Fail only on a [shared blocker](.maestro/skills/code-review/blockers.md).
+Fail only on blockers in the Both roles and QA only sections of `.maestro/skills/code-review/blockers.md`.
 
 Everything else passes, with each problem listed as a follow-up, worst first.
 
