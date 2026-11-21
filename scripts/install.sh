@@ -104,6 +104,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 User=maestro
 ExecStart=/usr/local/libexec/maestro-door startup
 Restart=on-failure

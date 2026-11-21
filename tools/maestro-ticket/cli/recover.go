@@ -235,6 +235,12 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 		for _, d := range pending {
 			if _, err = c.deliver(ctx, b, d.ID, ""); err != nil {
 				out.Findings = append(out.Findings, d.Goal+": "+err.Error())
+				switch d.Job {
+				case "stop", "start", "rules":
+					if err := c.scheduleReconsider(filepath.Dir(dir), time.Now().Add(time.Minute)); err != nil {
+						return out, err
+					}
+				}
 			}
 		}
 	}
