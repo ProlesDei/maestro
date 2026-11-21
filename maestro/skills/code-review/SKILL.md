@@ -17,10 +17,10 @@ The PR's proof is a claim. For each criterion, check that the run shown actually
 
 For each concern, ask: if this shipped today, what breaks, for whom, and how hard is it to undo? Then sort it.
 
-- **Blocker,** which sends the PR back: it loses or corrupts data, opens a security hole or leaks a secret, fails an acceptance criterion, breaks something that worked before, turns a check red that's green on the base branch, adds, changes or removes instructions for agents (in a doc, skill, prompt or comment) that the ticket didn't ask for, or puts a flaw in something that can't be cheaply undone once shipped (a migration, a public API, a message sent to users).
+- **Blocker.** Use the [shared blocker list](.maestro/skills/code-review/blockers.md) to decide what sends the PR back.
 - **Note,** which doesn't: a real problem that's low risk and easy to fix later. Style, naming, a structure you'd have chosen differently, tests nobody asked for and edge cases no user will hit aren't notes; leave them out.
 
-A blocker needs a concrete failure: the input, what happens and who sees it. If you can't name one, it's a note at most. A problem the diff didn't cause or make worse is a note, never a blocker.
+A blocker needs a concrete failure. Name the input, what happens and who sees it. If you can't name one, it's a note at most.
 
 ## Report
 

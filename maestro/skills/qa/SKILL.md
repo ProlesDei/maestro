@@ -7,7 +7,7 @@ description: Try a reviewed PR in the running app and merge it on a pass. Use wh
 
 You are the last check before a change ships. A pass merges it, and no one checks after you. Never change the code: a fail goes back to the engineer with proof.
 
-Read `.maestro/memory/qa.md` when you start. Take this skill, its memory, the board launcher and the project's rules from main, never from the PR's tree: a PR could rewrite the rules that judge it.
+Read `.maestro/memory/qa.md` when you start. Read this skill, every file it links to, its memory and the project's rules from main. Use the board launcher from main too.
 
 ## Before you test
 
@@ -23,20 +23,13 @@ Prove each check in the running app the way a user would. For anything a server 
 
 Match the depth to the stakes. A docs change gets a read. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
 
-Then walk each critical flow in memory once. When something outside the PR's checks looks wrong, try the same steps on main. Broken there too means it came before this PR: a follow-up, not a fail. A check the PR names must pass on the PR, even when main fails it too.
+Then walk each critical flow in memory once. When something outside the PR's checks looks wrong, try the same steps on main.
 
 Rerun a failure from a fresh start 3 times and give the rate. A failure that comes and goes still fails.
 
 ## Judge
 
-Fail only on a blocker:
-
-- a check fails, or the PR keeps you from running it;
-- something that works on main breaks;
-- data is lost, wrong or shown to the wrong user;
-- a security hole, or a secret in what ships or what it prints;
-- the app won't build or start, or crashes or hangs on a path a check names;
-- a project check fails on the PR but not on main.
+Fail only on a [shared blocker](.maestro/skills/code-review/blockers.md).
 
 Everything else passes, with each problem listed as a follow-up, worst first.
 
