@@ -381,7 +381,13 @@ func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 func qaReceiptID(d ticket.Detail, review ticket.Comment, head string) string {
 	key := fmt.Sprintf("%s.review-%d.qa", d.ID, review.ID)
 	escalation, ok := latestWith(d, "Escalation:")
-	if !ok || escalation.ID <= review.ID || !strings.HasPrefix(escalation.Body, "Escalation: QA at ") || shaIn(escalation.Body) != head {
+	if !ok || escalation.ID <= review.ID {
+		return key
+	}
+	atHead := strings.HasPrefix(escalation.Body, "Escalation: QA at ") && shaIn(escalation.Body) == head
+	// blockNoVerdict names the QA job but omits the head. The review ID above scopes it.
+	noVerdict := strings.HasPrefix(escalation.Body, "Escalation: qa ended 3 times with no verdict")
+	if !atHead && !noVerdict {
 		return key
 	}
 	for i := len(d.Comments) - 1; i >= 0 && d.Comments[i].ID > escalation.ID; i-- {
