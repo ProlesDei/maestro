@@ -15,10 +15,10 @@ T3 chief sessions work with the owner on goals. Code starts the planner and work
 
 1. The **chief of staff** talks to the owner, one decision at a time, sets direction and hands goals to the planner. It never touches code or tickets and never starts runs.
 2. The **planner** runs the team day to day, as product owner and project manager in one. It turns goals into tickets with `/maestro-planner`, each tagged junior or senior, hands out builds by tier with one `maestro-ticket look` per wake, sends what needs reading to a judge session, and reports status and the blocks it can't settle to the chief of staff.
-3. When a goal changes screens, the **designer** runs `/maestro-designer` on its `Design:` ticket first: two or three directions in code, one pick and a spec, handed up as a draft PR. The owner approves it or asks for changes; only then does the planner write the screen tickets, with criteria from the spec.
-4. The **senior engineer** (Opus) takes senior-tier tickets and a junior's ticket sent back twice; the **junior engineer** (Sonnet) takes junior-tier ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree; a build in review goes straight to the reviewer.
+3. Engineers build screens directly. The designer prepares options for owner approval when the owner asks or the planner identifies a costly choice that a first implementation would settle too late.
+4. The **senior engineer** (Opus) takes senior-tier tickets and a junior's ticket sent back twice; the **junior engineer** (Sonnet) takes junior-tier ones. Either runs `/maestro-software-engineer <id>` in a Claude Code session, which takes one ticket to an open PR in its own worktree. Low-risk, reversible work can go straight to QA. Other builds go to review.
 5. The **reviewer**, in a fresh session that shares no context with the author, runs `/maestro-code-review`. GO goes straight to QA with a `Review: GO` note; NO-GO goes straight back to the engineer with a `Kickback:` note.
-6. The **QA lead** is the last line of defence before production: it tests the reviewed PR in the running app with `/maestro-qa-lead`, as close to production as it can. A pass merges the PR and closes the ticket; a fail sends it back with a `Kickback: QA fail` note.
+6. The QA lead checks the changed behavior in the running app. QA can send a direct handoff to review if the diff carries more risk than the planner expected. A pass merges the PR and closes the ticket. Users try the finished goal or demo.
 7. A block climbs one rung at a time until someone can answer it: a junior build's stuck session goes on, on Opus; then the planner's judge session, the chief of staff, the owner. A review's block leaves an `Escalation:` note; the answer goes on the ticket and the ticket goes back to review.
 
 The planner sends product decisions to the goal’s chief and handles delivery questions itself. A review verdict covers the branch head and ticket criteria the reviewer read.
@@ -44,7 +44,9 @@ flowchart TD
         Router <--> Board
         P --> Board
         Router --> D & J & S
-        J & S -->|"branch and criteria revision"| R
+        J & S -->|"standard review"| R
+        J & S -->|"low risk and reversible"| Q
+        Q -->|"risk calls for review"| R
         R -->|"GO at current head"| Q
         R & Q -.->|"kickback"| Router
         Q -->|"verified merge"| Board

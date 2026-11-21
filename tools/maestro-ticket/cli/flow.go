@@ -145,7 +145,7 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 	status, at := ticket.Status(""), d.CreatedAt
 	// Who held the ticket when it last left review: a stay that comes
 	// back from blocked goes on with them, since no new GO is posted.
-	held, fromBlocked := "review", false
+	held := "review"
 	leave := func(to time.Time) {
 		sec := to.Sub(at).Seconds()
 		if sec <= 0 {
@@ -161,10 +161,7 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 		case ticket.StatusInReview:
 			// Within one stay, review's GO hands the ticket to QA, and QA's
 			// Rereview: hands it back.
-			stage, from := "review", at
-			if fromBlocked {
-				stage = held
-			}
+			stage, from := held, at
 			for _, cm := range d.Comments {
 				if cm.CreatedAt.Before(at) || !cm.CreatedAt.Before(to) {
 					continue
@@ -186,7 +183,10 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 		}
 	}
 	for _, e := range evs {
-		var data struct{ Status, From, To ticket.Status }
+		var data struct {
+			Status, From, To ticket.Status
+			Note             string
+		}
 		json.Unmarshal(e.Data, &data)
 		switch e.Type {
 		case ticket.EventCreated:
@@ -218,7 +218,12 @@ func ticketFlow(d ticket.Detail, evs []ticket.Event) (spent map[string]float64, 
 					*by++
 				}
 			}
-			fromBlocked = status == ticket.StatusBlocked
+			if data.To == ticket.StatusInReview && status != ticket.StatusBlocked {
+				held = "review"
+				if d.DirectQA && strings.HasSuffix(data.Note, " (direct QA)") {
+					held = "qa"
+				}
+			}
 			status, at = data.To, e.CreatedAt
 			if data.To == ticket.StatusDone {
 				done = e.CreatedAt

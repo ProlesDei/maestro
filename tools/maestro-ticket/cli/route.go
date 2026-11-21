@@ -532,12 +532,12 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			planner(out.Outcome + " " + id + " after its verdict")
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job, d)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
 		case c.stoppedMidWork(r, id, &out):
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job, d)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
 			// The first end with no verdict at a head runs again, in code.
 			out.Do = append(out.Do, "maestro-ticket job again "+r.ID)
 		default:
@@ -582,12 +582,12 @@ func (c *call) routeRun(ctx context.Context, s ticket.Store, r runs.Record) (rou
 			planner("live " + id + ": " + out.First)
 		case out.Outcome == outRefused:
 			planner("refused " + id + ": " + out.First)
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) >= 2:
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job, d)) >= 2:
 			if err := c.blockNoVerdict(ctx, s, r, d, &out); err != nil {
 				return out, err
 			}
 		case c.stoppedMidWork(r, id, &out):
-		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
+		case t.Status == ticket.StatusInReview && c.noVerdictRuns(r, d, verdictMark(r.Job, d)) == 0 && !neverRan(r) && !c.stoppedOnPurpose(r):
 			out.Do = append(out.Do, "maestro-ticket job again "+r.ID) // the first with no verdict, as for review
 		default:
 			out.Mismatch = "done, a Kickback: QA fail, a Rereview: or an Escalation:, found " + string(t.Status) + " " + quoteFirst(last.Body)
@@ -637,7 +637,11 @@ func (c *call) routeBuild(ctx context.Context, s ticket.Store, r runs.Record, d 
 		// same route again, never a resume on a ticket the judge holds.
 		planner("block " + id + ": " + headLine(last.Body))
 	case t.Status == ticket.StatusInReview:
-		out.Send = append(out.Send, send{"reviewer", "review " + id})
+		step := send{"reviewer", "review " + id}
+		if directQAHandoff(d) {
+			step = send{"qa-lead", "qa " + id}
+		}
+		out.Send = append(out.Send, step)
 		ready, err := c.readyWork(ctx, s)
 		if err != nil {
 			return out, err
@@ -859,7 +863,10 @@ func (c *call) noVerdicts(r runs.Record, d ticket.Detail, mark string) []runs.Re
 
 // verdictMark is the note a review or QA run's count of runs with no
 // verdict starts from.
-func verdictMark(job string) string {
+func verdictMark(job string, d ticket.Detail) string {
+	if job == "qa" && directQAHandoff(d) {
+		return "Handoff:"
+	}
 	if job == "qa" || job == "live" {
 		return "Review: GO"
 	}
@@ -877,7 +884,7 @@ func (c *call) blockNoVerdict(ctx context.Context, s ticket.Store, r runs.Record
 	// Say how many ended past the Stop hook: those sessions were told to
 	// post a verdict and still didn't.
 	capped := 0
-	for _, o := range append(c.noVerdicts(r, d, verdictMark(r.Job)), r) {
+	for _, o := range append(c.noVerdicts(r, d, verdictMark(r.Job, d)), r) {
 		if c.stopCapped(o.ID) {
 			capped++
 		}
@@ -1315,7 +1322,7 @@ func movedIntoReview(ctx context.Context, s ticket.Store, d ticket.Detail) (time
 func (c *call) qaTimedOut(ctx context.Context, s ticket.Store, r runs.Record, d ticket.Detail, out routed) (routed, error) {
 	t, id := d.Ticket, d.ID.String()
 	planner := func(line string) { out.Send = append(out.Send, send{"planner", line}) }
-	gate, ok := latestWith(d, "Review: GO")
+	gate, ok := latestWith(d, verdictMark(r.Job, d))
 	if t.Status == ticket.StatusBlocked && strings.Contains(latest(d).Body, postedBy(r)) {
 		planner("block " + id + ": QA ran past " + r.Limit + " twice") // as the first pickup of this run said
 		return out, nil

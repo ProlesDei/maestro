@@ -110,6 +110,7 @@ func (tx *txn) changeCriteria(r CriteriaRequest) (ticket.Criteria, error) {
 				return state, errors.New("write the revised ticket criteria")
 			}
 			state.AC++
+			state.Direct = ""
 			state.Build, state.Review, state.QA = "", "", ""
 			set["body"] = r.Body
 		case "deferred", "replaced":
@@ -168,6 +169,7 @@ func (tx *txn) changeCriteria(r CriteriaRequest) (ticket.Criteria, error) {
 		}
 		state.QA = ""
 		if r.Verb != "qa-withdraw" {
+			state.Direct = ""
 			state.Review = ""
 		}
 	case "build", "review", "qa", "merge":
@@ -185,20 +187,24 @@ func (tx *txn) changeCriteria(r CriteriaRequest) (ticket.Criteria, error) {
 			if t.Status != ticket.StatusInProgress || (r.Actor != "junior-engineer" && r.Actor != "senior-engineer") {
 				return state, ticket.ErrForbidden
 			}
+			state.Direct = ""
+			if t.DirectQA && state.Build == "" && state.AC == 1 {
+				state.Direct = r.Head
+			}
 			state.Build, state.Review, state.QA = r.Head, "", ""
 		case "review":
 			if r.Actor != "reviewer" || state.Build != r.Head || t.Status != ticket.StatusInReview {
 				return state, errors.New("review needs the current build at this head")
 			}
-			state.Review, state.QA = r.Head, ""
+			state.Review, state.QA, state.Direct = r.Head, "", ""
 		case "qa":
-			if r.Actor != "qa-lead" || state.Review != r.Head || t.Status != ticket.StatusInReview {
-				return state, errors.New("QA needs the current review at this head")
+			if r.Actor != "qa-lead" || (state.Review != r.Head && state.Direct != r.Head) || t.Status != ticket.StatusInReview {
+				return state, errors.New("QA needs the current review or direct handoff at this head")
 			}
 			state.QA = r.Head
 		case "merge":
-			if r.Actor != "qa-lead" || state.Review != r.Head || state.QA != r.Head || t.Status != ticket.StatusInReview {
-				return state, errors.New("merge needs the current review and QA proof")
+			if r.Actor != "qa-lead" || (state.Review != r.Head && state.Direct != r.Head) || state.QA != r.Head || t.Status != ticket.StatusInReview {
+				return state, errors.New("merge needs the current handoff or review and QA proof")
 			}
 			if marker.Revision != state.Brief {
 				return state, errors.New("planner has not cleared this ticket for the latest brief")

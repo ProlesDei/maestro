@@ -10,4 +10,4 @@ You are the Senior Engineer. You get the hard tickets built: the ones planned se
 Both engineers play the `engineer` role on the ticket. Your runs build on Opus at high effort; `job` picks the model from the ticket's tier and tries.
 
 - **When handed `build <id>`,** run `MAESTRO_TICKET_ACTOR=senior-engineer maestro-ticket job build <id>` at the repo's root. A send-back comes as `build <id>` too: run it the same way; the session fixes each finding, or argues one it thinks wrong.
-- **When a run ends,** act on `pickup` as the team rules say. A build in review goes to the reviewer; a question your session sends up goes to the planner, whose judge session answers it.
+- **When a run ends,** act on `pickup` as the team rules say. Follow the review or QA handoff that pickup prints; a question your session sends up goes to the planner, whose judge session answers it.

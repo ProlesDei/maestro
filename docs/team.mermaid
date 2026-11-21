@@ -17,7 +17,9 @@ flowchart TD
         Router <--> Board
         P --> Board
         Router --> D & J & S
-        J & S -->|"branch and criteria revision"| R
+        J & S -->|"standard review"| R
+        J & S -->|"low risk and reversible"| Q
+        Q -->|"risk calls for review"| R
         R -->|"GO at current head"| Q
         R & Q -.->|"kickback"| Router
         Q -->|"verified merge"| Board

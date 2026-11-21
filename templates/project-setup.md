@@ -8,6 +8,8 @@
 
 Sessions read the rest as plain text, but for `## Cache`, whose bullets `maestro-ticket cache` reads.
 
+For a deterministic check, use `maestro-ticket check` in place of `slot` to share a pass between review and QA on the same PR head, base, and clean tree. In the check command set `MAESTRO_CHECK_ENVIRONMENT` to the identity of its pinned tools and other external inputs, such as the digest of its build image. Keep checks that depend on live state or need to produce local artifacts as ordinary commands. Review and QA supply `MAESTRO_CHECK_CANDIDATE`.
+
 ## Project
 
 - Name: <name>
@@ -31,7 +33,7 @@ main
 
 ## QA
 
-<what every QA run covers, read by `/maestro-qa-lead`: how to build and start the app the way production does; the user flows that must never break, one per line; how to load data like production's; test accounts, by environment variable name; the screen sizes to check; a browser tool only if QA uses one other than Playwright CLI>
+<how to test each PR, read by `/maestro-qa-lead`: how to build and start the app the way production does; the critical user flows for reviewed PRs, one per line; how to load data like production's; test accounts, by environment variable name; the screen sizes to check; a browser tool only if QA uses one other than Playwright CLI>
 
 ## Proof
 

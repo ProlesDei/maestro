@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -29,6 +30,10 @@ type checkPass struct {
 	Job     string    `json:"job,omitempty"`
 	Actor   string    `json:"actor,omitempty"`
 }
+
+// A candidate-scoped check shares a result only when main's check command
+// identifies the reproducible environment it used.
+var checkCandidate = regexp.MustCompile(`^[0-9a-f]{40}/[0-9a-f]{40}$`)
 
 // checkKeep is how long a pass stays on record.
 const checkKeep = 14 * 24 * time.Hour
@@ -77,7 +82,17 @@ func runCheck(ctx context.Context, c *call) error {
 	// The same command in another folder runs other tests: a monorepo's
 	// make test in a/ says nothing of b/.
 	sub, _ := c.git("rev-parse", "--show-prefix")
-	key := checkKey(name, tree, sub, command)
+	candidate := c.env.Getenv("MAESTRO_CHECK_CANDIDATE")
+	environment := c.env.Getenv("MAESTRO_CHECK_ENVIRONMENT")
+	keyName := name
+	if candidate != "" || environment != "" {
+		if !checkCandidate.MatchString(candidate) || environment == "" {
+			why = "candidate or check environment is missing or invalid"
+		} else {
+			keyName += "\x00" + candidate + "\x00" + environment
+		}
+	}
+	key := checkKey(keyName, tree, sub, command)
 	if why == "" && !*fresh {
 		if p, ok := loadCheckPass(dir, key); ok && p.Tree == tree && p.Dir == sub && slices.Equal(p.Command, command) {
 			fmt.Fprintf(c.env.Stdout, "check %s: carried: passed on tree %s (head %s) %s ago, by %s, in %s; not run again (--fresh runs it)\n",

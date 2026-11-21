@@ -71,7 +71,7 @@ Usage: maestro-ticket <command> [flags]
 Commands:
   create      --title T [--body B | --body-file F|-] [--type ship|scout] [--role R] [--priority 0-3]
               [--status backlog|todo|blocked (default todo)] [--owner NAME] [--deps T-1,T-2]
-              [--areas path,path] [--split-from T-1] [--goal G] [--tier senior|junior]
+              [--areas path,path] [--split-from T-1] [--goal G] [--tier senior|junior] [--direct-qa]
               [--parked R (required for backlog)] [--lint (refuse an engineer's ship ticket with
               no numbered criterion, no Not handled: list or no areas)]
   update      <id> [--add-deps T-1,..] [--remove-deps T-1,..] [--areas path,..] [--parked R] [--goal G]
@@ -142,6 +142,7 @@ Commands:
               Escalation: blocks it; refuses a review Kickback: that lists anything but blockers)
   handoff     <id> --holder H --token N --body-file F|- --idempotency-key K   (an engineer's
               Handoff: note, the move to in_review and the release, in one call)
+  qa-basis    <id>  (current QA route and its exact head, or none)
   events      [--since SEQ] [--limit N] [--ticket ID] [--type T]
   backup      [--dir D] [--keep N]   (default dir: backups/ next to the store)
   export      [--out PATH|-]
@@ -270,6 +271,7 @@ var commands = []command{
 	{"comment", runComment},
 	{"verdict", runVerdict},
 	{"handoff", runHandoff},
+	{"qa-basis", runQABasis},
 	{"events", runEvents},
 	{"backup", runBackup},
 	{"export", runExport},
@@ -682,6 +684,7 @@ func checkBody(s string) error {
 
 func runCreate(ctx context.Context, c *call) error {
 	defaultRevision, _ := strconv.Atoi(c.env.Getenv("MAESTRO_BRIEF_REVISION"))
+	directQA := c.fs.Bool("direct-qa", false, "planner: send a low-risk, reversible change straight to QA")
 	briefRev := c.fs.Int("brief-revision", defaultRevision, "accepted revision of a runtime goal")
 	title := c.fs.String("title", "", "one-line title (required)")
 	body := c.fs.String("body", "", "ticket body")
@@ -739,7 +742,7 @@ func runCreate(ctx context.Context, c *call) error {
 			}
 		}
 		t, err := s.Create(ctx, ticket.CreateRequest{
-			BriefRevision: *briefRev, Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
+			DirectQA: *directQA, BriefRevision: *briefRev, Title: *title, Body: b, Type: ty, Role: *role, Priority: prio, Status: st,
 			Owner: *owner, DependsOn: dl, Areas: ticket.SplitList(*areas), SplitFrom: from,
 			Parked: pk, Goal: strings.TrimSpace(*goal), Tier: strings.TrimSpace(*tier), Actor: c.actor, IdempotencyKey: c.idemKey,
 		})

@@ -383,8 +383,8 @@ touch "$C/files.txt"
 # collaborators, since anyone can comment on a public PR. QA reads no diff, so its kickback is never a base.
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
 if [ -n "$ticket" ]; then
-	firsts=$(maestro-ticket get "$ticket" --json |
-		jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // "")) | sub("^[ \t]+"; "")') ||
+	detail=$(maestro-ticket get "$ticket" --json) || die 1 "maestro-ticket get $ticket failed"
+	firsts=$(jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // "")) | sub("^[ \t]+"; "")' <<<"$detail") ||
 		die 1 "maestro-ticket get $ticket failed"
 else
 	firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
@@ -412,6 +412,20 @@ if [ -n "$qa" ]; then
 	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	review_go=
 	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
+	direct_head='' current_pass=unknown
+	if [[ -n "$ticket" ]] && jq -e '.direct_qa == true' <<<"$detail" >/dev/null; then
+		basis=$(maestro-ticket qa-basis "$ticket" --json) || die 1 "cannot resolve QA basis for $ticket"
+		review_go=
+		current_pass=$(jq -r 'if .passed == true then "yes" else "no" end' <<<"$basis")
+		case $(jq -er '.route' <<<"$basis") in
+			direct)
+				# Known sensitive paths require the reviewer's GO.
+				if [[ $tier2 == 0 ]]; then direct_head=$(jq -er '.head' <<<"$basis"); fi ;;
+			review) review_go=$(jq -er '.head' <<<"$basis") ;;
+			none) ;;
+			*) die 1 "unknown QA basis for $ticket" ;;
+		esac
+	fi
 	# QA's own latest verdict. Only a fail that tested is a base for a
 	# retest: a pass or a "not tested:" checked nothing to carry over.
 	inc=retest by="QA's fail" why="no earlier QA verdict" K=""
@@ -497,6 +511,8 @@ fi
 	echo "docs_only=$([ -n "$light" ] && [ "$nfiles" -gt 0 ] && echo yes || echo no)"
 	if [ -n "$qa" ]; then
 		echo "review_go=${review_go:-none}"
+		echo "direct_head=${direct_head:-none}"
+		echo "current_pass=$current_pass"
 		echo "qa_last=$qa_last"
 		echo "qa_last_at=${qa_at:-none}"
 		echo "qa_last_main=${qa_main:-none}"

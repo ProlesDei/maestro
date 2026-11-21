@@ -60,7 +60,7 @@ var jobKinds = []jobKind{
 	{name: "review", skill: "/maestro-code-review", ticket: true, model: "route", stopHook: true,
 		help: "review <id> [--approved SHA] [--drop IDS --drop-file F|-] [--full]: a fresh review, Sonnet on a docs-only PR, else Opus; limit sized to the diff"},
 	{name: "qa", skill: "/maestro-qa-lead", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
-		help: "qa <id>: test the reviewed PR and merge it on a pass"},
+		help: "qa <id>: test the handed-off PR and merge it on a pass"},
 	{name: "live", skill: "/maestro-qa-lead", prefix: "live", ticket: true, model: modelOpus, slot: "qa", stopHook: true,
 		help: "live <id>: a goal's live run"},
 	{name: "qa-ask", skill: "/maestro-qa-lead", text: "need", model: modelOpus, slot: "qa",

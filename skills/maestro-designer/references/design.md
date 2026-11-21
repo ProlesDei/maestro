@@ -1,6 +1,6 @@
 # Design a goal's screens
 
-A goal that changes screens starts with a `Design:` ticket, and no screen ticket exists until the owner approves a design. You turn the ticket into two or three directions built in code, pick one, write the spec the screen tickets will be cut from, and hand it all up as a draft PR the owner looks at. The PR never merges.
+The planner sends a `Design:` ticket for screens that need a design decision before the build. You turn the ticket into two or three directions built in code, pick one, write the spec the screen tickets will be cut from, and hand it all up as a draft PR the owner looks at. The PR never merges.
 
 ## Phase A: Claim
 

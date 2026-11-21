@@ -376,6 +376,7 @@ type Claim struct {
 
 // Ticket is one unit of work.
 type Ticket struct {
+	DirectQA  bool      `json:"direct_qa,omitempty"`
 	Criteria  *Criteria `json:"criteria,omitempty"`
 	ID        ID        `json:"id"`
 	Title     string    `json:"title"`
@@ -540,6 +541,7 @@ type Event struct {
 // backlog, todo (default) or blocked; a ticket created blocked returns to
 // todo. Owner defaults to the actor.
 type CreateRequest struct {
+	DirectQA      bool     `json:"direct_qa,omitempty"`
 	BriefRevision int      `json:"brief_revision,omitempty"`
 	Title         string   `json:"title"`
 	Body          string   `json:"body"`
@@ -615,6 +617,9 @@ func (r *CreateRequest) Validate() error {
 		return err
 	}
 	r.Actor = actorFor(r.Actor, "")
+	if r.DirectQA && (r.Actor != RolePlanner || r.Type != TypeShip || r.Role != RoleEngineer) {
+		return fmt.Errorf("%w: only the planner can choose direct QA for an engineer ship ticket", ErrInvalid)
+	}
 	r.Owner = actorFor(r.Owner, r.Actor)
 	if HasControl(r.Owner) {
 		return fmt.Errorf("%w: owner must be one line", ErrInvalid)
@@ -970,6 +975,17 @@ type TransitionRequest struct {
 	Release        bool   `json:"release,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
+
+	// DirectQAHandoff adds the route observed at handoff to the event. Later
+	// changes to the route cannot change the move or its idempotency key.
+	DirectQAHandoff bool `json:"-"`
+}
+
+func (r TransitionRequest) EventNote() string {
+	if r.DirectQAHandoff {
+		return r.Note + " (direct QA)"
+	}
+	return r.Note
 }
 
 // Keyed is what a transition's idempotency key covers. With Release it
@@ -1022,12 +1038,46 @@ func (r *TransitionRequest) Validate() error {
 // CommentRequest adds a comment. Holder and Token are fenced like a
 // transition's: a claimed ticket takes comments only from its holder.
 type CommentRequest struct {
+	// ProofRole is set only by handoff and verdict on direct tickets. Check
+	// the comment snapshot inside the write, after checking the replay key.
+	ProofRole    string `json:"proof_role,omitempty"`
+	AfterComment int64  `json:"-"`
+
 	ID             ID     `json:"id"`
 	Body           string `json:"body"`
 	Holder         string `json:"holder,omitempty"`
 	Token          int64  `json:"-"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
+}
+
+// CheckProof prevents an ordinary comment from granting merge authority.
+func (r CommentRequest) CheckProof(t Ticket, lastID int64) error {
+	if !t.DirectQA {
+		return nil
+	}
+	if r.ProofRole == "" {
+		body := strings.TrimSpace(r.Body)
+		if strings.HasPrefix(body, "Handoff:") || strings.HasPrefix(body, "Review: GO") || strings.HasPrefix(body, "QA: pass") {
+			return fmt.Errorf("%w: use handoff or verdict under the role's claim", ErrForbidden)
+		}
+		return nil
+	}
+	role := r.Actor
+	if role == "senior-engineer" || role == "junior-engineer" {
+		role = RoleEngineer
+	}
+	if r.Actor != HolderBot(r.Holder) || role != r.ProofRole || r.Holder == "" || r.Token == 0 {
+		return fmt.Errorf("%w: proof needs the assigned role's claim", ErrForbidden)
+	}
+	status := StatusInReview
+	if role == RoleEngineer {
+		status = StatusInProgress
+	}
+	if t.Status != status || r.AfterComment != lastID {
+		return fmt.Errorf("%w: proof needs the current handoff or review and ticket status", ErrStatusConflict)
+	}
+	return nil
 }
 
 // Validate checks the request and fills defaults.

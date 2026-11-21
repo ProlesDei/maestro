@@ -1,6 +1,6 @@
 # Live run
 
-A goal that calls an outside API ends with a `Live run:` ticket. Its code was built against fakes or the API's docs, and a response shape guessed wrong works in every local run and fails the owner's first real call. So before the goal reaches the owner, you run the user's path once for real, the way a new user would, from nothing but the README. The ticket is a scout ticket you own: your pass sets it `done`, and the goal reads done only then.
+Use this procedure for an existing `Live run:` ticket. New goals ship through their PRs. People try the complete feature or demo. QA checks any consequential API behavior on the PR that changes it.
 
 ## Phase A: Claim
 
