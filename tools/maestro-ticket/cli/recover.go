@@ -358,10 +358,12 @@ var passedHead = regexp.MustCompile(`^QA: pass at ([0-9a-f]{40})(?: |$)`)
 // Read proof in ticket order. A later kickback, new handoff or retest invalidates it.
 func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 	direct := d.DirectQA
+	awaitingRetest := false
 	for _, note := range d.Comments {
 		line := firstLine(note.Body)
 		switch {
 		case strings.HasPrefix(line, "Handoff:"):
+			awaitingRetest = false
 			review, head, qa = ticket.Comment{}, "", ""
 			actor := ticket.HolderBot(note.Author)
 			if direct && (actor == "senior-engineer" || actor == "junior-engineer") {
@@ -369,11 +371,17 @@ func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 					review, head = note, sha
 				}
 			}
+		case d.DirectQA && head != "" && strings.HasPrefix(line, "Kickback: QA fail at ") && shaIn(line) == head && ticket.HolderBot(note.Author) == ticket.RoleQALead:
+			// A planner can request another QA run on this same handoff.
+			// A later build still needs review.
+			awaitingRetest, direct, qa = true, false, ""
+		case awaitingRetest && strings.HasPrefix(line, "Retest: planner at ") && ticket.HolderBot(note.Author) == ticket.RolePlanner && shaIn(line) == head:
+			awaitingRetest, qa = false, ""
 		case strings.HasPrefix(line, "Kickback:"), strings.HasPrefix(line, "Rereview:"), strings.HasPrefix(line, "Escalation: review"):
 			direct = false
 			review, head, qa = ticket.Comment{}, "", ""
 		case strings.HasPrefix(line, "Review:"):
-			direct = false
+			awaitingRetest, direct = false, false
 			review, head, qa = ticket.Comment{}, "", ""
 			if m := reviewedHead.FindStringSubmatch(line); m != nil && ticket.HolderBot(note.Author) == "reviewer" {
 				review, head = note, m[1]
@@ -384,6 +392,9 @@ func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 				qa = m[1]
 			}
 		}
+	}
+	if awaitingRetest {
+		return ticket.Comment{}, "", ""
 	}
 	if head != "" && d.Criteria != nil {
 		proof := d.Criteria.Review

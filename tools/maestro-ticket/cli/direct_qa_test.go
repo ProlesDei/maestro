@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ProlesDei/maestro/tools/maestro-ticket/runs"
+	"github.com/ProlesDei/maestro/tools/maestro-ticket/ticket"
 )
 
 func TestPlannerDirectQARouteAndRereview(t *testing.T) {
@@ -63,4 +64,23 @@ func TestPlannerDirectQARouteAndRereview(t *testing.T) {
 	if got := sends(h.route(build)); !slices.Equal(got, []string{"send reviewer: review T-1"}) {
 		t.Fatalf("replayed handoff after QA requested review: %v", got)
 	}
+}
+
+func TestDirectQARetestKeepsOnlyMatchingHandoff(t *testing.T) {
+	d := ticket.Detail{Ticket: ticket.Ticket{DirectQA: true}, Comments: []ticket.Comment{
+		{ID: 1, Author: "junior-engineer", Body: "Handoff: PR u at " + vsha},
+		{ID: 2, Author: "qa-lead", Body: "Kickback: QA fail at " + vsha},
+	}}
+	check := func(want string) {
+		t.Helper()
+		_, head, pass := recoveryProof(d)
+		if head != want || pass != "" {
+			t.Fatalf("head=%q pass=%q, want head=%q and no pass", head, pass, want)
+		}
+	}
+	check("")
+	d.Comments = append(d.Comments, ticket.Comment{ID: 3, Author: "planner", Body: "Retest: planner at " + vsha + ": corrected fixture"})
+	check(vsha)
+	d.Comments = append(d.Comments, ticket.Comment{ID: 4, Author: "qa-lead", Body: "Rereview: QA at " + vsha}, d.Comments[2])
+	check("")
 }
