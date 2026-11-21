@@ -244,8 +244,15 @@ func (c *call) boardQASlots() int {
 	return 0
 }
 
-// standingRules is rules.md's lines, as a plan, rule or judge prompt
-// carries them, and whether the file is there.
+// defaultRules are the planner's standing rules until the owner sets
+// others: rules text, or the chief's rules verb on a T3 board.
+const defaultRules = `- Junior or senior: give the junior only a ticket where a wrong change can't hurt: clear criteria, one area, easy to revert, and no money, user data, security or public API. When in doubt, the senior. A senior run costs more tokens; a bad change that ships costs more than that.
+- Ticket size: each ticket costs a QA run and a review, so don't split small. Split only what one review can't hold: more than one area, or criteria that don't belong together. Fold small changes in one area into one ticket.
+- Stop the line: 3 tickets failing or blocking at one step with one cause.`
+
+// standingRules is the rules a plan, rule or judge prompt carries: the
+// board's, else rules.md's lines, else defaultRules. It reports false
+// only when the rules can't be read.
 func (c *call) standingRules() (string, bool) {
 	if loc, err := c.location(); err == nil && loc.boardID != "" {
 		b, err := c.board()
@@ -261,13 +268,20 @@ func (c *call) standingRules() (string, bool) {
 		if rules != "" {
 			return rules, true
 		}
+		return defaultRules, true
 	}
 	dir, err := c.standingDir()
 	if err != nil {
 		return "", false
 	}
 	_, lines, ok, err := readRules(dir)
-	return strings.Join(lines, "\n"), ok && err == nil
+	if err != nil {
+		return "", false
+	}
+	if !ok {
+		return defaultRules, true
+	}
+	return strings.Join(lines, "\n"), true
 }
 
 // lookLimit is the build limit a look hands out by. The planner's
@@ -573,18 +587,21 @@ func (c *call) rulesCheck() ticket.Check {
 		return ticket.Check{Name: "rules", OK: false, Detail: err.Error()}
 	}
 	var miss []string
+	// A T3 board paces by subscription, with no limit to set.
+	runtime := false
+	if loc, err := c.location(); err == nil && loc.boardID != "" {
+		runtime = true
+	}
 	if b, _, err := readBoard(dir); err != nil {
 		miss = append(miss, err.Error())
-	} else if b.Limit == nil {
+	} else if b.Limit == nil && !runtime {
 		miss = append(miss, "no limit in board.json: look needs --limit until rules set limit")
 	}
-	if _, _, ok, err := readRules(dir); err != nil {
+	if _, _, _, err := readRules(dir); err != nil {
 		miss = append(miss, err.Error())
-	} else if !ok {
-		miss = append(miss, "no rules.md: a judge session starts only once rules text sets the standing rules")
 	}
 	if len(miss) > 0 {
 		return ticket.Check{Name: "rules", OK: true, Warn: true, Detail: strings.Join(miss, "; ")}
 	}
-	return ticket.Check{Name: "rules", OK: true, Detail: "board.json and rules.md set"}
+	return ticket.Check{Name: "rules", OK: true, Detail: "standing values readable; unset rules use the defaults"}
 }

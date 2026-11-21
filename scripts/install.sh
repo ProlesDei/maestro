@@ -5,23 +5,23 @@
 #   scripts/install.sh apply [--replace <skill>]... <repo>
 #   scripts/install.sh check <repo>
 #   scripts/install.sh uninstall <repo>
+#   scripts/install.sh chief <repo> <new dir>
 #
 # The choices live in <repo>/.maestro/project/install.yaml, one
 # "key: value" per line; a line starting with # is a comment:
 #   maestro-sha: <sha>              the commit this Maestro is on (required)
 #   harnesses: claude codex grok    claude reads .claude/skills, codex and
 #                                   grok .agents/skills (required; must
-#                                   hold claude, which every bot runs);
+#                                   hold claude, which every job runs);
 #                                   where one is a symlink to the other,
 #                                   both install once, in the real one
 #   skills-home: committed|hidden   tracked in git, or hidden from it (required)
-#   bots: <profile> ...             the bots scripts/bot-bundle.sh builds
 #   code-graph: mcp|none            codebase-memory-mcp in the repo's .mcp.json,
 #                                   without its hooks, or none (required:
-#                                   INSTALL.md step 7)
+#                                   INSTALL.md step 5)
 #   browser: playwright-cli|none    the browser QA sessions open pages with,
 #                                   or none for an app with no screens
-#                                   (required: INSTALL.md step 7)
+#                                   (required: INSTALL.md step 5)
 #   stats: on|off                   local run stats in stats.db beside the
 #                                   store; off stops their writes, and no
 #                                   line leaves them as they are (on, at first)
@@ -29,8 +29,10 @@
 #                                   folder, or MongoDB, which machines share
 #                                   (sqlite with no line)
 #
-# apply copies each skill in skills/ beside this script into every harness
-# folder, writes project-setup.md once, creates the ticket store (for
+# apply builds tools/maestro-ticket beside this script and installs it on
+# PATH, over the copy PATH finds (kept when built from a newer commit), else
+# in go env GOBIN or GOPATH/bin; copies each skill in skills/ into every
+# harness folder, writes project-setup.md once, creates the ticket store (for
 # mongodb, checks the one store.uri names; with none, makes no store and
 # says to join the board), turns
 # local run stats on or off and lists
@@ -52,10 +54,10 @@
 # works in one linked worktree instead.
 #
 # check reports what's wrong with an install and with the machine its
-# bots run on, and changes nothing: copies that are missing or changed, a
+# sessions run on, and changes nothing: copies that are missing or changed, a
 # store that is empty, unreadable or no SQLite file (for mongodb, a
 # store.uri that is missing or not 0600, or a failing doctor), a missing
-# claude, gh or jq, an
+# claude, gh, jq or go, a maestro-ticket older than the pin, an
 # unset git identity, a code graph install.yaml asks for that .mcp.json
 # lacks, a browser install.yaml asks for that can't open a headless page,
 # Maestro's own AGENTS.md, CLAUDE.md or harness folders in .maestro/src/
@@ -64,6 +66,10 @@
 # committed skills, on codebase-memory-mcp hooks in Claude Code's
 # settings, and on Playwright CLI's own skill in the repo.
 # uninstall removes the files the record lists, except those changed since.
+#
+# chief makes <new dir>, private to this user, holding the chief of staff's
+# project: AGENTS.md and CLAUDE.md, each bot-profiles/chief-of-staff/t3.md
+# and the repo's path, where its commands run. It refuses a path that exists.
 #
 # Exit codes: 0 ok, 1 a clash or a problem, 2 usage.
 set -euo pipefail
@@ -74,45 +80,28 @@ unset CDPATH
 unset $(git rev-parse --local-env-vars)
 
 die() { echo "install.sh: $*" >&2; exit 1; }
-usage() { echo "usage: scripts/install.sh apply [--replace <skill>]... <repo> | check <repo> | uninstall <repo>" >&2; exit 2; }
+usage() { echo "usage: scripts/install.sh apply [--replace <skill>]... <repo> | check <repo> | uninstall <repo> | chief <repo> <new dir>" >&2; exit 2; }
 # 4.4: mapfile -d, and "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die "needs bash 4.4 or later (macOS: brew install bash)"
 
 cmd=${1-}
 [ $# -gt 0 ] && shift
-# Print exact arguments for the root-owned door. The owner applies them with visudo.
-if [ "$cmd" = runtime-sudoers ]; then
-	[ $# -eq 0 ] || usage
-	door=/usr/local/libexec/maestro-door
-	echo "maestro ALL=(maestro-cos) NOPASSWD: NOSETENV: $door wake, $door wake store-down"
-	printf 'maestro-cos ALL=(maestro) NOPASSWD: NOSETENV: '
-	sep=
-	for verb in plan rule ask rules stop start pickup ack look goals eta; do
-		printf '%s%s cos %s' "$sep" "$door" "$verb"
-		sep=', '
-	done
-	printf '\n'
-	exit 0
-fi
-if [ "$cmd" = runtime-service ]; then
-	[ $# -eq 0 ] || usage
-	cat <<'UNIT'
-[Unit]
-Description=Recover this Maestro worker board on startup
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-User=maestro
-ExecStart=/usr/local/libexec/maestro-door startup
-Restart=on-failure
-RestartSec=30s
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+if [ "$cmd" = chief ]; then
+	[ $# -eq 2 ] || usage
+	root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+	# The chief's commands find the board from the repo, so its path goes in.
+	repo=$(cd -- "$1" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null) || die "$1 isn't a git checkout; nothing was written"
+	[[ $repo != *$'\n'* ]] || die "the repo's path holds a newline; nothing was written"
+	# The project holds the chief's direction for the owner: this user's alone.
+	umask 077
+	mkdir -- "$2" || die "choose a new directory for the chief's project; nothing was written"
+	{
+		cat -- "$root/bot-profiles/chief-of-staff/t3.md"
+		# shellcheck disable=SC2016 # literal backticks
+		printf '\n## Where you work\n\nRun every `maestro-ticket` command from the team repo: `cd %s && maestro-ticket ...`.\n' "$repo"
+	} >"$2/AGENTS.md"
+	cp -- "$2/AGENTS.md" "$2/CLAUDE.md"
+	echo "chief project at $(cd -- "$2" && pwd -P) for $repo: open it in T3"
 	exit 0
 fi
 replace=()
@@ -163,7 +152,7 @@ choices=$target/.maestro/project/install.yaml
 
 # --- The choices ---
 declare -A set=()
-sha='' harnesses=() home='' bots=() graph='' browser='' stats='' board=''
+sha='' harnesses=() home='' graph='' browser='' stats='' board=''
 [ -f "$choices" ] || die "no $choices: INSTALL.md says what goes in it"
 n=0
 while IFS= read -r line || [ -n "$line" ]; do
@@ -180,7 +169,8 @@ while IFS= read -r line || [ -n "$line" ]; do
 	skip) die "install.yaml:$n: skip: is gone: every skill installs; remove the line" ;;
 	# Older installs wrote the default; any other tracker is gone.
 	tickets) [ "$val" = maestro-ticket ] || die "install.yaml:$n: tickets: Maestro's bots run only on maestro-ticket; remove the line" ;;
-	bots) read -ra bots <<<"$val" ;;
+	# uninstall still removes an install from before Grok support went.
+	bots) [ "$cmd" = uninstall ] || die "install.yaml:$n: bots: is gone with Grok Bot support; remove the line" ;;
 	code-graph) graph=$val ;;
 	browser) browser=$val ;;
 	stats) stats=$val ;;
@@ -191,18 +181,18 @@ done <"$choices"
 
 [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "install.yaml: maestro-sha wants a commit sha"
 head=$(git -C "$root" rev-parse HEAD 2>/dev/null) || die "$root isn't a git checkout"
-# uninstall reads the record, not Maestro's skills or bot profiles, so it
+# uninstall reads the record, not Maestro's skills or tools, so it
 # runs from any commit: a team can back out of an update it stopped halfway.
 [ "$cmd" = uninstall ] || [[ $head == "$sha"* ]] || die "Maestro at $root is on ${head:0:12}, but install.yaml pins $sha"
 # The copies must be the pinned commit's.
-[ "$cmd" != apply ] || [ -z "$(git -C "$root" status --porcelain -- skills templates)" ] ||
-	die "Maestro at $root has uncommitted changes in skills/ or templates/; commit them and pin that commit"
+[ "$cmd" != apply ] || [ -z "$(git -C "$root" status --porcelain -- skills templates tools/maestro-ticket)" ] ||
+	die "Maestro at $root has uncommitted changes in skills/, templates/ or tools/maestro-ticket/; commit them and pin that commit"
 [[ $home == committed || $home == hidden ]] || die "install.yaml: skills-home wants committed or hidden"
-# An install with no answer here never ran step 7, by mistake or not.
+# An install with no answer here never ran step 5, by mistake or not.
 [ "$cmd" = uninstall ] || [[ $graph == mcp || $graph == none ]] ||
-	die "install.yaml: code-graph wants mcp or none; INSTALL.md step 4 says how to pick"
+	die "install.yaml: code-graph wants mcp or none; INSTALL.md step 3 says how to pick"
 [ "$cmd" = uninstall ] || [[ $browser == playwright-cli || $browser == none ]] ||
-	die "install.yaml: browser wants playwright-cli or none; INSTALL.md step 4 says how to pick"
+	die "install.yaml: browser wants playwright-cli or none; INSTALL.md step 3 says how to pick"
 # No line means on: an install from before the key asks nothing.
 [ "$cmd" = uninstall ] || [[ -z ${set[stats]-} || $stats == on || $stats == off ]] ||
 	die "install.yaml: stats wants on or off"
@@ -270,12 +260,9 @@ for d in "${dirs[@]}"; do
 	[[ " ${real_dirs[*]-} " == *" $cpath "* ]] || real_dirs+=("$cpath")
 done
 dirs=("${real_dirs[@]}")
-# Every bot runs its jobs with claude -p, which reads only .claude/skills.
+# Claude Code jobs read only .claude/skills.
 [ "$cmd" = uninstall ] || [[ " ${harnesses[*]} " == *" claude "* ]] ||
-	die "install.yaml: harnesses must include claude: every bot runs its jobs through Claude Code"
-[ "$cmd" = uninstall ] || for b in ${bots[@]+"${bots[@]}"}; do
-	{ [[ $b =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ -f "$root/bot-profiles/$b/persona.md" ]; } || die "install.yaml: no bot profile $b"
-done
+	die "install.yaml: harnesses must include claude: Maestro's jobs run through Claude Code"
 
 # skill <dir> <label>: die unless <dir> is a skill folder. The name goes
 # into paths and exclude lines, so no glob or space characters.
@@ -380,7 +367,6 @@ legacy=
 exclude_lines() {
 	echo /.maestro/src/
 	echo /.maestro/worktrees/
-	echo /.maestro/bots/
 	[ "$home" = hidden ] || return 0
 	local n d
 	for n in $(printf '%s\n' "$@" | sort -u); do
@@ -422,12 +408,19 @@ leaks() {
 	out=${out#./} out=${out//$'\n'.\//$'\n'}
 	leaked=$(LC_ALL=C sort <<<"$out")
 }
-urifix="at the repo's root, run maestro-ticket store --uri-file - and paste the MongoDB URI, from the owner, on stdin, as INSTALL.md's Move the board to MongoDB says"
+urifix="at the repo's root, run maestro-ticket store init --uri-file - and paste the MongoDB URI, from the owner, on stdin, as INSTALL.md says"
 leakread="couldn't read all of .maestro/src/ to look for Maestro's own files: make it readable"
 if [ "$cmd" = apply ]; then
 	leaks || die "$leakread, then run again; nothing was changed"
 	[ -z "$leaked" ] || die "Maestro's own files are in .maestro/src/, where the team's harnesses would load them: ${leaked//$'\n'/ }; $leakfix, then run again; nothing was changed"
 fi
+
+# rev_of <binary>: the commit go stamped the build with, a + after it when
+# the tree had changes, or nothing.
+rev_of() {
+	go version -m "$1" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); r=$2}
+		$1=="build" && $2=="vcs.modified=true" {m="+"} END {if (r != "") print r m}' || true
+}
 
 # Temp files go in one folder in the git dir, out of the work tree, and
 # it goes when the script ends, however it ends.
@@ -475,22 +468,22 @@ if [ "$cmd" = check ]; then
 		# migrate an older one and fill an empty one, and check changes nothing.
 		problem "the ticket store at $store is empty, unreadable or isn't a SQLite file: make it readable, or restore a snapshot from backups/ beside it, as maestro-ticket's README says"
 	fi
-	# What every bot's run needs (INSTALL.md step 1). A missing one stops
-	# the first run, not the install.
-	for t in claude gh jq; do
-		command -v "$t" >/dev/null || problem "$t isn't on PATH: the bots' runs need it"
+	# What every run needs, and go to rebuild maestro-ticket (INSTALL.md
+	# step 1). A missing one stops the first run, not the install.
+	for t in claude gh jq go; do
+		command -v "$t" >/dev/null || problem "$t isn't on PATH: Maestro's runs need it"
 	done
-	# The code graph (INSTALL.md step 7): in this repo's .mcp.json, with
-	# none of its hooks, which run on every bot session's tool calls.
+	# The code graph (INSTALL.md step 5): in this repo's .mcp.json, with
+	# none of its hooks, which run on every session's tool calls.
 	graphed=false
 	[ -f "$target/.mcp.json" ] && grep -q '"codebase-memory-mcp"[[:space:]]*:' "$target/.mcp.json" && graphed=true
 	if [ "$graph" = mcp ]; then
-		$graphed || problem "code-graph is mcp, but .mcp.json registers no codebase-memory-mcp server: INSTALL.md step 7"
+		$graphed || problem "code-graph is mcp, but .mcp.json registers no codebase-memory-mcp server: INSTALL.md step 5"
 		command -v codebase-memory-mcp >/dev/null || problem "codebase-memory-mcp isn't on PATH: sessions can't start the code graph"
 	elif $graphed; then
 		warn "code-graph is none, but .mcp.json registers codebase-memory-mcp: set code-graph to mcp, or remove the server"
 	fi
-	# The browser (INSTALL.md step 7): QA opens pages with playwright-cli,
+	# The browser (INSTALL.md step 5): QA opens pages with playwright-cli,
 	# headless, in Playwright's Chromium. Open one the same way, from a temp
 	# folder so its files land there, under a session name no run uses, and
 	# close only that session: other runs' browsers may share the machine.
@@ -506,7 +499,7 @@ if [ "$cmd" = check ]; then
 				# which only says it exited.
 				why=$(grep -m1 -oE 'Playwright requires Node.js [0-9]+ or higher|Host system is missing dependencies to run browsers|error while loading shared libraries: [^:]+|Browser "[^"]+" is not installed|Chromium distribution [^ ]+ is not found' <<<"$out" ||
 					grep -v 'Daemon pid=' <<<"$out" | grep -m1 -oE 'Error: .*[^[:space:]]' || true)
-				problem "playwright-cli can't open a headless page${why:+ ($why)}: INSTALL.md step 7"
+				problem "playwright-cli can't open a headless page${why:+ ($why)}: INSTALL.md step 5"
 			fi
 			(cd "$probe" && NO_UPDATE_NOTIFIER=1 playwright-cli -s="$pw" close) >/dev/null 2>&1 || true
 			# It never removes a session's error log; the name is this check's
@@ -520,23 +513,23 @@ if [ "$cmd" = check ]; then
 	# mobile.dev's Maestro keeps its flows in .maestro/ too: a flows glob
 	# that recurses would run the copies in Maestro's folders as tests.
 	if compgen -G "$target/.maestro/*.yaml" >/dev/null || compgen -G "$target/.maestro/*.yml" >/dev/null; then
-		warn ".maestro/ also holds mobile.dev Maestro flows: a flows glob in its config.yaml that recurses, such as **, also runs the copies in src/, worktrees/ and bots/: list only the folders that hold the team's flows"
+		warn ".maestro/ also holds mobile.dev Maestro flows: a flows glob in its config.yaml that recurses, such as **, also runs the copies in src/ and worktrees/: list only the folders that hold the team's flows"
 	fi
 	# Its own skill, in the repo or the user's home, loads in every session
 	# and tells it to close every browser session, other runs' too.
 	for d in "$target/.claude" "$target/.agents" "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}" "${HOME:-}/.agents"; do
 		[ ! -e "$d/skills/playwright-cli" ] ||
-			warn "$d/skills/playwright-cli is Playwright CLI's own skill: it loads in every session and tells it to close every browser session, other runs' too; INSTALL.md step 7 leaves it out"
+			warn "$d/skills/playwright-cli is Playwright CLI's own skill: it loads in every session and tells it to close every browser session, other runs' too; INSTALL.md step 5 leaves it out"
 	done
 	for f in "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/settings.json" "$target/.claude/settings.json" "$target/.claude/settings.local.json"; do
 		[ -f "$f" ] && grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*(cbm-|codebase-memory)' "$f" &&
-			warn "$f runs codebase-memory-mcp hooks, which fire on every bot session's tool calls: INSTALL.md step 7 leaves them out"
+			warn "$f runs codebase-memory-mcp hooks, which fire on every session's tool calls: INSTALL.md step 5 leaves them out"
 	done
 	for k in name email; do
 		v=$(git -C "$target" config "user.$k" || true)
 		a=GIT_AUTHOR_${k^^} c=GIT_COMMITTER_${k^^}
 		[[ $v == *[![:space:]]* ]] || [[ ${!a-} == *[![:space:]]* && ${!c-} == *[![:space:]]* ]] ||
-			problem "git user.$k isn't set: the bots commit and merge"
+			problem "git user.$k isn't set: Maestro's sessions commit and merge"
 	done
 	[ "$root" != "$target/.maestro/src" ] || git -C "$target" check-ignore -q .maestro/src/ ||
 		problem ".maestro/src/ isn't hidden from git: run apply in this clone"
@@ -577,25 +570,26 @@ if [ "$cmd" = check ]; then
 	done
 	[ "$(git -C "$root" rev-parse --is-shallow-repository)" != true ] ||
 		warn "Maestro at $root is a shallow clone: check can't tell if the tools are older than the pin; fetch its full history"
-	# shellcheck disable=SC2043 # one tool today; the loop takes more
-	for b in maestro-ticket; do
-		bin=$(command -v "$b") || { problem "$b isn't on PATH"; continue; }
-		# Every bot starts its runs with job and reads the board with look
-		# and pickup (team-rules.md); a build without them starts nothing,
-		# and the bot's job stops.
+	if ! bin=$(command -v maestro-ticket); then
+		problem "maestro-ticket isn't on PATH: run apply"
+	else
+		# Jobs start with launch, job and resume; the planner reads the board
+		# with look; the chief of staff talks through chief and cos. A build
+		# without them is from before the pin.
 		help=$("$bin" help 2>/dev/null || true)
-		for c in launch job resume look; do
+		for c in launch job resume look cos chief; do
 			[[ $help == *$'\n  '"$c "* ]] ||
-				problem "$b at $bin has no $c, which the bots run: rebuild it from $root/tools/$b"
+				problem "maestro-ticket at $bin has no $c, which Maestro runs: run apply to rebuild it"
 		done
-		command -v go >/dev/null || continue
-		rev=$(go version -m "$bin" 2>/dev/null | awk '$1=="build" && $2 ~ /^vcs.revision=/ {sub(/^vcs.revision=/, "", $2); print $2}' || true)
-		if [ -z "$rev" ]; then
-			warn "$b has no build revision; build it from $root/tools/$b"
-		elif [[ $rev != "$sha"* ]] && git -C "$root" merge-base --is-ancestor "$rev" "$sha" 2>/dev/null; then
-			warn "$b is built from ${rev:0:12}, older than the pinned $sha; rebuild it from $root/tools/$b"
+		if command -v go >/dev/null; then
+			rev=$(rev_of "$bin")
+			if [ -z "$rev" ]; then
+				warn "maestro-ticket at $bin has no build revision: run apply to rebuild it"
+			elif [[ $rev != "$sha"* ]] && git -C "$root" merge-base --is-ancestor "$rev" "$sha" 2>/dev/null; then
+				warn "maestro-ticket at $bin is built from ${rev:0:12}, older than the pinned $sha: run apply to rebuild it"
+			fi
 		fi
-	done
+	fi
 	setup=$target/.maestro/project/project-setup.md
 	if [ ! -f "$setup" ]; then
 		problem "no .maestro/project/project-setup.md"
@@ -710,11 +704,11 @@ if [ "$cmd" = uninstall ]; then
 		fi
 	done
 	[ ${#old[@]} -eq 0 ] || prune "${!old[@]}"
-	# .maestro/src/ and .maestro/bots/ stay, so they stay hidden.
+	# .maestro/src/ stays, so it stays hidden.
 	write_exclude "$(home=committed exclude_lines)"
 	rm -f -- "$record"
 	echo "removed $removed files"
-	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/, .maestro/bots/ and the ticket store at $common/maestro/"
+	echo "left in place: .maestro/project/ (install.yaml, project-setup.md), .maestro/src/, maestro-ticket and the ticket store at $common/maestro/"
 	[ ${#kept[@]} -eq 0 ] || printf 'kept, changed since install: %s\n' "${kept[@]}"
 	[ ${#behind[@]} -eq 0 ] || printf 'kept, behind a symlink: %s\n' "${behind[@]}"
 	[ ${#kept[@]} -eq 0 ] && [ ${#behind[@]} -eq 0 ] || exit 1
@@ -892,10 +886,49 @@ if [ ${#clashes[@]} -gt 0 ]; then
 	die "nothing was written; move the team's changes to a skill named without maestro-, then replace them with --replace <skill>"
 fi
 
+# maestro-ticket at the pin, built here and put where PATH finds it. A
+# copy built from the pin stays; so does one from a newer commit, which a
+# person who knows that build put there. go stamps the commit from git.
+tools=$root/tools/maestro-ticket
+command -v go >/dev/null || die "go isn't on PATH: apply builds maestro-ticket from $tools; install Go 1.26 or later; nothing was written"
+hash -r
+bin=$(command -v maestro-ticket || true)
+rev=
+[ -z "$bin" ] || rev=$(rev_of "$bin")
+if [ "$rev" = "$head" ]; then
+	built="maestro-ticket at $bin: built from $sha"
+elif [ -n "$rev" ] && [ "${rev%+}" != "$head" ] && git -C "$root" merge-base --is-ancestor "$head" "${rev%+}" 2>/dev/null; then
+	built="maestro-ticket at $bin: kept, built from ${rev:0:12}, newer than the pinned $sha"
+else
+	[ -d "$tools/cmd/maestro-ticket" ] || die "no $tools/cmd/maestro-ticket: check out tools/maestro-ticket/ as INSTALL.md step 2 says; nothing was written"
+	# GOWORK=off: a go.work above the team's repo must not pick the modules.
+	out=$(cd -- "$tools" && GOWORK=off go build -o "$scratch/maestro-ticket" ./cmd/maestro-ticket 2>&1) || {
+		printf '%s\n' "$out" >&2
+		die "couldn't build maestro-ticket in $tools; nothing was written"
+	}
+	if [ -n "$bin" ]; then
+		dir=$(dirname -- "$bin")
+	else
+		dir=$(go env GOBIN)
+		[ -n "$dir" ] || { dir=$(go env GOPATH) && dir=${dir%%:*}/bin; }
+	fi
+	# A new file, then a rename: a run that starts meanwhile gets the old
+	# build or the new one, never half of one.
+	{ mkdir -p -- "$dir" && t=$(mktemp "$dir/.maestro-ticket.XXXXXX"); } ||
+		die "can't write maestro-ticket into $dir: make it yours, or remove ${bin:-nothing}, then run again; nothing was written"
+	{ cp -- "$scratch/maestro-ticket" "$t" && chmod 755 "$t" && mv -f -- "$t" "$dir/maestro-ticket"; } || {
+		rm -f -- "$t"
+		die "couldn't install maestro-ticket into $dir; nothing was written"
+	}
+	hash -r
+	now=$(command -v maestro-ticket || true)
+	[ "$now" = "$dir/maestro-ticket" ] || die "installed maestro-ticket into $dir, but PATH finds ${now:-none}: put $dir first on PATH and run apply again"
+	built="maestro-ticket at $now: built from $sha"
+fi
+
 # The store lives in the git common dir, outside the work tree; doctor
 # creates it and checks the repo can hold one, before anything is written.
 # No other maestro-ticket command makes one, so a stray clone gets none.
-command -v maestro-ticket >/dev/null || die "maestro-ticket isn't on PATH: build it from $root/tools/maestro-ticket"
 db=${MAESTRO_TICKET_STORE:-$common/maestro/tickets.db}
 nouri=
 if [ "$board" = mongodb ]; then
@@ -922,7 +955,7 @@ if [ "$board" = mongodb ]; then
 		}
 		# No T-1: the board is empty, and nothing is lost.
 		[ "$rc" = 3 ] || ! (cd "$probe" && maestro-ticket create --title probe --store "$probe/tickets.db") >/dev/null 2>&1 ||
-			die "$db holds a SQLite board that never moved to MongoDB: stop new work and run maestro-ticket migrate --to mongodb, as INSTALL.md's Move the board to MongoDB says; nothing was written"
+			die "$db holds a SQLite board that never moved to MongoDB: stop new work and run maestro-ticket migrate --to mongodb, as tools/maestro-ticket/README.md's Move between stores says; nothing was written"
 	fi
 elif [[ $db == /* ]] && [ -f "$(dirname "$db")/store.uri" ]; then
 	die "$(dirname "$db")/store.uri puts the board on MongoDB, but install.yaml has no store: mongodb: add that line, or move the board back with maestro-ticket migrate --to sqlite; nothing was written"
@@ -941,7 +974,7 @@ reon=''
 [ "$stats" != on ] || [ ! -e "$marker" ] || reon=1
 [ -n "$nouri" ] || out=$(cd "$target" && maestro-ticket stats ${stats:+"$stats"} --maestro-sha "$sha" 2>&1) || {
 	printf '%s\n' "$out" >&2
-	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: rebuild maestro-ticket from $root/tools/maestro-ticket; nothing was written"
+	die "maestro-ticket stats ${stats:+$stats }--maestro-sha failed in $target: the maestro-ticket on PATH is too old for this pin; nothing was written"
 }
 
 # Hide the old and new skills before the first copy, so a run that stops
@@ -1012,6 +1045,7 @@ if [ -z "$nouri" ]; then
 	*) echo "run stats: maestro-ticket stats health says whether they are on" ;;
 	esac
 fi
+echo "$built"
 echo "installed ${#from[@]} skills into ${dirs[*]} ($home): ${#writes[@]} files written, ${#deletes[@]} removed"
 echo "record: $record"
 # It's the team's own skill now, so git sees it like the rest of theirs.
@@ -1020,3 +1054,5 @@ visible=
 for f in "${!theirs[@]}"; do echo "kept as the team's, out of the record$visible: $f"; done
 [ "$untracked" -eq 0 ] || echo "untracked $untracked files git tracked: commit that to hide them; every other clone loses the skills on its next pull until it runs the install"
 [ -z "$nouri" ] || echo "next: join the team's board: $urifix, then run apply again"
+# bot-bundle.sh wrote Grok Bot blocks there; no one pastes them now.
+[ ! -d "$target/.maestro/bots" ] || echo "note: .maestro/bots/ holds Grok Bot blocks, which Maestro no longer builds or hides from git: delete the folder"

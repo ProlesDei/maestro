@@ -495,14 +495,15 @@ func (c *call) startJob(ctx context.Context, req jobReq) (runs.Record, string, s
 	var cmd []string
 	var harness string
 	if req.profile != "" {
-		p, binding, err := c.jobProfile(req.profile, k.name)
+		p, err := c.poolProfile(req.profile)
 		if err != nil {
 			return fail(err)
 		}
-		if req.model != "" && req.model != binding.Model || req.effort != "" && req.effort != binding.Effort {
-			return fail(usagef("job: model or effort differs from the profile binding"))
+		binding := poolModel(p.Harness, m)
+		if req.effort != "" && req.effort != binding.Effort {
+			return fail(usagef("job: the pool runs every job at %s effort", binding.Effort))
 		}
-		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "bound subscription profile"
+		m, e, harness, why = binding.Model, binding.Effort, p.Harness, "pinned sub"
 		cmd, err = c.nativeCommand(req.profile, k.name, binding, harness)
 		if err != nil {
 			return fail(err)

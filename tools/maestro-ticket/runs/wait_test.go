@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -89,12 +87,11 @@ func TestSuperviseRingsAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rings atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { rings.Add(1) }))
-	defer srv.Close()
+	count := Hook{Wake: func(context.Context, Notification) error { rings.Add(1); return nil }}
 	begun := time.Now()
 	err = Supervise(context.Background(), dir, r.ID, Options{
 		Rings:     []time.Duration{0, 300 * time.Millisecond, 600 * time.Millisecond}, // only the first, then the lift
-		Hook:      func(string) (Hook, error) { return Hook{URL: srv.URL}, nil },
+		Hook:      func(string) (Hook, error) { return count, nil },
 		RingAgain: func(Record) time.Time { return begun.Add(1500 * time.Millisecond) },
 	})
 	if err != nil {
@@ -185,12 +182,14 @@ func TestEndAfterAFreeze(t *testing.T) {
 func TestSuperviseAfterRing(t *testing.T) {
 	dir := t.TempDir()
 	var rings, status atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	hook := Hook{Wake: func(context.Context, Notification) error {
 		rings.Add(1)
-		w.WriteHeader(int(status.Load()))
-	}))
-	defer srv.Close()
-	for _, hook := range []string{"rang", "ok", "broken", "none"} {
+		if status.Load() != 200 {
+			return errors.New("down")
+		}
+		return nil
+	}}
+	for _, kind := range []string{"rang", "ok", "broken", "none"} {
 		r, err := Create(dir, Record{Launcher: "planner", Limit: "10s", Command: []string{"true"}, Dir: dir}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -204,15 +203,15 @@ func TestSuperviseAfterRing(t *testing.T) {
 			},
 		}
 		want := "rings 0, rang false, none"
-		status.Store(http.StatusServiceUnavailable)
-		switch hook {
+		status.Store(503)
+		switch kind {
 		case "rang":
-			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
-			status.Store(http.StatusOK)
+			o.Hook = func(string) (Hook, error) { return hook, nil }
+			status.Store(200)
 			want = "rings 1, rang true, none"
 		case "ok":
-			o.Hook = func(string) (Hook, error) { return Hook{URL: srv.URL}, nil }
-			want = "rings 1, rang false, http5xx"
+			o.Hook = func(string) (Hook, error) { return hook, nil }
+			want = "rings 1, rang false, other"
 		case "broken":
 			o.Hook = func(string) (Hook, error) { return Hook{}, errors.New("bad notify file") }
 			want = "rings 0, rang false, other"
@@ -221,7 +220,7 @@ func TestSuperviseAfterRing(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(calls) != 1 || calls[0] != want {
-			t.Fatalf("hook %s: AfterRing calls %q; want one: %s", hook, calls, want)
+			t.Fatalf("hook %s: AfterRing calls %q; want one: %s", kind, calls, want)
 		}
 	}
 }

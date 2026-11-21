@@ -193,7 +193,7 @@ func withEnv(command []string) []string {
 
 // runLaunch starts a command, Claude Code as a rule, in the background
 // under a supervisor that records it, keeps it to its time limit, writes
-// its result and rings its launcher's webhook. It returns once the command
+// its result and rings its launcher. It returns once the command
 // runs, with the run's id.
 func runLaunch(ctx context.Context, c *call) error {
 	var command []string
@@ -202,7 +202,7 @@ func runLaunch(ctx context.Context, c *call) error {
 	}
 	tk := c.fs.String("ticket", "", "the ticket the run works on")
 	limit := c.fs.Duration("limit", 2*time.Hour, "stop the run after this long (1s to 24h)")
-	ringsFlag := c.fs.String("rings", ringsText(runs.DefaultRings), "when to ring your webhook after the run ends, while you haven't acked it")
+	ringsFlag := c.fs.String("rings", ringsText(runs.DefaultRings), "when to ring you after the run ends, while you haven't acked it")
 	if err := c.parse(); err != nil {
 		return err
 	}
@@ -387,7 +387,7 @@ func runSupervise(ctx context.Context, c *call) error {
 		Env:    os.Environ(),
 		Rings:  rings,
 		Stream: c.streamNames(dir, c.args[0]),
-		Hook:   func(bot string) (runs.Hook, error) { return runs.Webhook(notify, bot) },
+		Hook:   func(bot string) (runs.Hook, error) { return c.hook(bot), nil },
 		Gate:   notify,
 		Digest: func(bot string, now time.Time) (runs.Notification, []string) {
 			return ringDigest(co, dir, bot, now)
@@ -621,8 +621,8 @@ func (c *call) ringOrphans(ctx context.Context, dir, own string) []string {
 				}
 				return
 			}
-			h, err := runs.Webhook(notify, owner)
-			if err != nil || !h.CanRing() {
+			h, err := c.hook(owner), error(nil)
+			if !h.CanRing() {
 				msg := ""
 				if err != nil {
 					msg = err.Error()
@@ -1262,145 +1262,6 @@ func (c *call) runsCheck(ctx context.Context, store string) ticket.Check {
 		detail += "; can't look for untracked sessions: " + scanErr.Error()
 	}
 	return ticket.Check{Name: "runs", OK: true, Detail: detail}
-}
-
-// runNotify sets, clears, tests or shows the webhook launch rings when a
-// bot's run ends. It never prints the URL, which often holds a secret.
-func runNotify(ctx context.Context, c *call) error {
-	code := c.fs.Bool("code", false, "serve the role in the supervisor")
-	execFile := c.fs.String("exec-file", "", "absolute path to the fixed wake executable")
-	urlFile := c.fs.String("url-file", "", "read the webhook URL from this file, or - for stdin")
-	keyFile := c.fs.String("key-file", "", "read the key the webhook wants as Authorization: Bearer from this file, or - for stdin")
-	clr := c.fs.Bool("clear", false, "remove the bot's webhook")
-	test := c.fs.Bool("test", false, "ring the webhook once now")
-	if err := c.parse(); err != nil {
-		return err
-	}
-	dir, err := c.besideStore("notify")
-	if err != nil {
-		return err
-	}
-	if len(c.args) == 2 && c.args[0] == "set" {
-		c.args = c.args[1:]
-	}
-	if (*code || *execFile != "") && (*urlFile != "" || *keyFile != "" || *clr || (*code && *execFile != "") || (*code && *test)) {
-		return usagef("notify: choose one server; --test requires an external wake")
-	}
-	if len(c.args) == 0 {
-		if *urlFile != "" || *keyFile != "" || *clr || *test || *code || *execFile != "" {
-			return usagef("notify: name the bot")
-		}
-		bots, err := runs.Webhooks(dir)
-		if err != nil {
-			return err
-		}
-		if bots == nil {
-			bots = []string{}
-		}
-		return c.out(map[string]any{"bots": bots}, func(w io.Writer) {
-			if len(bots) == 0 {
-				fmt.Fprintln(w, "no bot has a webhook")
-			}
-			for _, b := range bots {
-				fmt.Fprintln(w, b)
-			}
-		})
-	}
-	if len(c.args) > 1 {
-		return usagef("notify: want one bot id")
-	}
-	bot := c.args[0]
-	if !runs.BotPattern.MatchString(bot) {
-		return usagef("notify: bot id %q: use lowercase letters, digits and single hyphens", bot)
-	}
-	switch {
-	case *clr && (*urlFile != "" || *keyFile != ""):
-		return usagef("notify: use --url-file and --key-file, or --clear, not both")
-	case *urlFile == "-" && *keyFile == "-":
-		return usagef("notify: only one of --url-file and --key-file can read stdin")
-	}
-	if *code || *execFile != "" {
-		if err := runs.SetLocalServer(dir, bot, *execFile); err != nil {
-			return usagef("notify: %v", err)
-		}
-	}
-	if *urlFile != "" {
-		u, err := c.readBody("", *urlFile)
-		if err != nil {
-			return err
-		}
-		// An empty file is a mistake, not a clear: SetWebhook would drop
-		// the webhook and its key.
-		if u = strings.TrimSpace(u); u == "" {
-			return usagef("notify: the URL file is empty; --clear removes a webhook")
-		}
-		if err := runs.SetWebhook(dir, bot, u); err != nil {
-			return usagef("notify: %v", err)
-		}
-	}
-	if *keyFile != "" {
-		if h, err := runs.Webhook(dir, bot); err != nil || h.URL == "" {
-			return usagef("notify: give %s a webhook with --url-file before its key", bot)
-		}
-		k, err := c.readBody("", *keyFile)
-		if err != nil {
-			return err
-		}
-		if k = strings.TrimSpace(k); k == "" {
-			return usagef("notify: the key file is empty")
-		}
-		if err := runs.SetKey(dir, bot, k); err != nil {
-			return usagef("notify: %v", err)
-		}
-	}
-	if *clr {
-		if err := runs.SetWebhook(dir, bot, ""); err != nil {
-			return err
-		}
-	}
-	h, err := runs.Webhook(dir, bot)
-	if err != nil {
-		return err
-	}
-	u := h.URL
-	if *test {
-		if !h.CanRing() {
-			return fmt.Errorf("%w: notify: %s has no webhook", ticket.ErrNotFound, bot)
-		}
-		// Straight to the webhook: a test ring skips the bot's gate.
-		n := runs.Notification{Text: "Maestro test ring: launch rings here when a run " + bot + " launched ends.", Bot: bot, Launcher: bot, State: "test"}
-		if err := runs.Ring(ctx, h, n); err != nil {
-			return fmt.Errorf("%w: notify: %v", ticket.ErrInvalid, err)
-		}
-	}
-	res := map[string]any{"bot": bot, "webhook": u != "", "key": h.Key != "", "rang": *test}
-	if h.Code {
-		res["server"] = "code"
-	}
-	if h.Exec != "" {
-		res["server"] = "exec"
-	}
-	if u != "" {
-		res["host"] = runs.Host(u)
-	}
-	return c.out(res, func(w io.Writer) {
-		key := ""
-		if h.Key != "" {
-			key = " with its key"
-		}
-		switch {
-		case h.Code:
-			fmt.Fprintf(w, "%s: served by code\n", bot)
-		case h.Exec != "":
-			fmt.Fprintf(w, "%s: fixed wake command configured\n", bot)
-		case u == "":
-			fmt.Fprintf(w, "%s: no webhook; it learns a run ended only when it runs maestro-ticket pickup\n", bot)
-		case *test:
-			fmt.Fprintf(w, "%s: rang %s%s\n", bot, runs.Host(u), key)
-		default:
-			fmt.Fprintf(w, "%s: rings %s%s\n", bot, runs.Host(u), key)
-		}
-	})
 }
 
 // dirFor is dir, the folder a run ran in, while it is still there, else

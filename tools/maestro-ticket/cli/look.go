@@ -263,7 +263,7 @@ func runLook(ctx context.Context, c *call) error {
 			if rules, ok := c.standingRules(); ok {
 				c.startJudge(ctx, &out, rules, co)
 			} else {
-				out.Errors = append(out.Errors, "judge: no maestro/rules.md: set the planner's standing rules with maestro-ticket rules text")
+				out.Errors = append(out.Errors, "judge: can't read the planner's standing rules")
 			}
 		}
 		co.pruneHandouts(time.Now())
@@ -284,10 +284,8 @@ func runLook(ctx context.Context, c *call) error {
 	return nil
 }
 
-// startSends starts each send that is a fixed job for a worker bot with a
-// webhook, as that bot: the bot would only have woken, reread its chat
-// and run job (owner's ruling, Nov 17 2026). A send it can't start stays,
-// for the bot to run and see why.
+// startSends starts each send that is a fixed job for a worker role, as
+// that role. A send it can't start stays, for pickup to show why.
 func (c *call) startSends(ctx context.Context, rdir string, out *lookOut) {
 	notify := filepath.Join(filepath.Dir(rdir), "notify")
 	left := []send{}

@@ -17,7 +17,7 @@ For a deterministic check, use `maestro-ticket check` in place of `slot` to shar
 
 ## Runtime
 
-Grok webhook by default. For T3, record the board ID, served roles and eligible profile aliases here. Keep connection files and account credentials in the OS accounts that use them.
+<the board ID `maestro-ticket store init` printed, and the alias of each subscription in the pool (`maestro-ticket profile usage` lists them). Never the board's URI or a login: those stay with the person who set them up.>
 
 ## Main branch
 

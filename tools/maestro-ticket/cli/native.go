@@ -81,13 +81,14 @@ func runNativeWorker(ctx context.Context, c *call) error {
 	ac, brief := record.ACRevision, record.BriefRevision
 	ctx, cancel := context.WithDeadline(ctx, record.StartedAt.Add(record.LimitDuration()))
 	defer cancel()
-	p, m, err := c.jobProfile(*alias, *job)
+	p, err := c.poolProfile(*alias)
 	if err != nil {
 		return err
 	}
-	if m.Model != *model || m.Effort != *effort {
-		return errors.New("worker: job's model or effort no longer matches its binding")
+	if !poolAllows(p.Harness, *model, *effort) {
+		return errors.New("worker: model or effort isn't one the pool runs on this sub")
 	}
+	m := jobModel{Model: *model, Effort: *effort, Estimate: record.Estimate}
 	st, err := readProfile(ctx, *alias, p.Harness, p.ConfigDir)
 	if err != nil || st.identity == "" || st.identity != p.Identity || st.Plan != p.Plan {
 		if root, e := c.standingDir(); e == nil {

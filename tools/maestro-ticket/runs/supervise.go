@@ -40,7 +40,7 @@ const FreezeGap = time.Minute
 const pickPoll = 2 * time.Second
 
 // DefaultRings are when, after a run ends, the supervisor rings the
-// launcher's webhook while no one has acked the result. Each goes through
+// launcher while no one has acked the result. Each goes through
 // the bot's gate (RingBot), so a bot with many results hears of them in
 // one ring each GateWindow at most.
 var DefaultRings = []time.Duration{0, 5 * time.Minute, 10 * time.Minute, 40 * time.Minute}
@@ -53,7 +53,7 @@ const maxHeld = 5
 type Options struct {
 	Env   []string        // the command's environment, before RunIDEnv
 	Rings []time.Duration // DefaultRings if nil
-	// Hook returns the launcher's webhook; a zero Hook for none.
+	// Hook returns how the launcher hears of the end; a zero Hook for none.
 	Hook func(launcher string) (Hook, error)
 	// OnStart, if set, runs once the command started, before the record
 	// says running: it returns the run's launch id in the store.
@@ -69,8 +69,8 @@ type Options struct {
 	// its bot learns its run can go on; zero for none, 24h out at most.
 	RingAgain func(Record) time.Time
 	// AfterRing, if set, runs once after the first ring, with its error,
-	// or with the error looking up the webhook, or with nil once the
-	// supervisor knows no ring comes (no webhook, or the result acked
+	// or with the error looking up the hook, or with nil once the
+	// supervisor knows no ring comes (no wake, or the result acked
 	// first), so work that must not hold up the ring, such
 	// as a stats prune, waits for it.
 	AfterRing func(Record, error)
@@ -89,7 +89,7 @@ type Options struct {
 }
 
 // Supervise runs the command of a starting record to its end within its
-// time limit, writes the result, then rings the launcher's webhook until
+// time limit, writes the result, then rings the launcher until
 // someone acks the result or the rings run out. Stopping ctx stops the
 // command and records it as failed.
 func Supervise(ctx context.Context, dir, id string, o Options) error {
@@ -457,7 +457,7 @@ func join(a, b string) string {
 	return a + "\n" + b
 }
 
-// ring rings the owner's webhook at each of o.Rings after the end while
+// ring rings the owner at each of o.Rings after the end while
 // no one has acked the result, each time through the bot's gate: a ring
 // the gate holds back waits for it to open, and a newer ring that listed
 // this run counts as this run's.

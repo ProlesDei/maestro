@@ -5,11 +5,11 @@ Maestro is infrastructure for a fully agentic workflow: a swarm of up to hundred
 A team installs it into its own repo and gets:
 
 - `maestro-ticket`, a ticket store and CLI.
-- 19 `maestro-*` skills, and seven bot profiles.
+- 19 `maestro-*` skills, and seven role profiles.
 
 ## Who drives it
 
-T3 chief sessions work with the owner on goals. Code starts the planner and workers, routes fixed handoffs and recovers interrupted work. Fresh jobs draw on the eligible subscriptions with room through their reset windows. Owners can keep the Grok webhook runtime on a separate board. [Runtime setup](INSTALL.md#t3-runtime)
+T3 chief sessions work with the owner on goals. Code starts the planner and workers, routes fixed handoffs and recovers interrupted work. Every job draws on the Claude or Codex subscription with the most room through its reset windows. One OS user runs it all, on one board in MongoDB Atlas. [Install](INSTALL.md)
 
 ## How work moves
 
@@ -27,12 +27,12 @@ The planner sends product decisions to the goal’s chief and handles delivery q
 ```mermaid
 flowchart TD
     Owner([Owner])
-    subgraph Chief["Chief account"]
+    subgraph T3["T3 chief project"]
         C["Chief of staff · Astra or Opus"]
         Memory[("Private drafts, decisions and accepted briefs")]
         C <--> Memory
     end
-    subgraph Worker["Worker account"]
+    subgraph Team["Code-served roles · one subscription pool"]
         P["Planner · plan and judge sessions"]
         Router["Code relay · recover and look"]
         D["Designer"]
@@ -56,12 +56,11 @@ flowchart TD
     C -->|"accepted brief or ruling"| P
     Router -.->|"fixed wake for pending goal items"| C
     D -->|"design for owner approval"| Board
-    Grok["Grok Bot · webhook runtime"] --> Old[("Separate Grok board")]
 ```
 
 ## What we hold to
 
-- **Least friction for your team.** Every bot's sessions run with all permissions, since a headless run can't stop to ask.
+- **Least friction for your team.** Every session runs with all permissions, since a headless run can't stop to ask.
 - **Rules in code first.** A rule goes in code, a schema or a lint before it goes in prose.
 - **Proof over claims.** A review or QA verdict covers one head sha. A worker's report is a claim until a run shows it.
 - **Never clash with your setup.** Every shipped skill is named `maestro-*`. The installer never writes over a file it didn't place, and you pick where the skills live.
@@ -71,9 +70,9 @@ flowchart TD
 
 ## Install
 
-Tell your agent (Claude Code, Codex or Grok), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you each call, one at a time: which harnesses, where the skills live, your checks, each bot's starting memories. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
+Tell your agent (Claude Code or Codex), in your repo: *"Follow INSTALL.md in github.com/ProlesDei/maestro."* [INSTALL.md](INSTALL.md) has it ask you only what your repo can't answer, one call at a time: where the skills live, your checks, your board on Atlas, your subscriptions. It writes your answers to `.maestro/project/install.yaml` and `project-setup.md`, and leaves the exact building and copying to [scripts/install.sh](scripts/install.sh), which never writes over a file of yours.
 
-It needs git 2.38+, Go 1.26+, bash 4.4+, `jq`, `gh` with access to this repo, and Claude Code; Codex is optional.
+It needs git 2.38+, Go 1.26+, bash 4.4+, `jq`, `gh` with access to this repo, Claude Code, T3 Code and a MongoDB Atlas account; Codex is optional.
 
 What you get:
 
@@ -81,8 +80,9 @@ What you get:
 - `maestro-ticket` on your `PATH`, one copy for every repo on the machine.
 - The skills in `.claude/skills/` and `.agents/skills/`: committed, or hidden from git.
 - `.maestro/project/project-setup.md`: your main branch, checks, how to run the app.
-- One paste-ready block per Grok bot in `.maestro/bots/`, and a message with its starting memories.
-- Run stats: numbers about each run in `stats.db` beside the ticket store, never text, kept on your machine ([decisions](docs/decisions.md), 24). [The views](tools/maestro-ticket/README.md#run-stats) are for you and Claude sessions, not bots.
+- The board on MongoDB Atlas, and your Claude and Codex logins in one pool.
+- A T3 project for the chief of staff, outside your repo.
+- Run stats: numbers about each run in `stats.db` beside the ticket store, never text, kept on your machine ([decisions](docs/decisions.md), 24). [The views](tools/maestro-ticket/README.md#run-stats) are for you and the sessions you start.
 
 The same guide updates Maestro to a newer commit and uninstalls it.
 
@@ -94,40 +94,37 @@ For an app with screens: [Playwright CLI](https://playwright.dev/agent-cli/intro
 
 Every job is a skill, in Claude Code (or headless: `claude -p "/maestro-code-review 12" --permission-mode bypassPermissions --output-format json`):
 
-- `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets, tags each junior or senior, and creates them. Given a ticket id, it splits or rewrites that ticket. `judge <ids>` makes the planner bot's calls that need reading: blocks, disputes, parked tickets, a shared cause. It also carries out the planner bot's rulings on blocks, finishes a split, drop or merge that stopped short, checks a plan, finds what keeps the board from running in parallel, or answers a code question a plan turns on, for the planner bot, which can't read the repo.
+- `/maestro-planner <goal>` writes a short spec, slices it into ordered, testable tickets, tags each junior or senior, and creates them. Given a ticket id, it splits or rewrites that ticket. `judge <ids>` makes the planner's calls that need reading: blocks, disputes, parked tickets, a shared cause. It also carries out the planner's rulings on blocks, finishes a split, drop or merge that stopped short, checks a plan, finds what keeps the board from running in parallel, or answers a code question a plan turns on.
 - `/maestro-create-ticket <what needs doing>` drafts the ticket, creates it in `maestro-ticket` and prints its id.
 - `/maestro-qa-lead <id or pr>` is the last check before production, and it tests only a head sha that review passed. It builds that sha on today's main the way production does, walks each criterion and the critical flows in a browser, tries harder angles as the risk goes up (upgrade from old data, rollback, a second user, a dependency down), and reruns the project's checks. A pass adds a `QA: pass` comment with evidence, merges the PR and moves the ticket to `done`. A fail moves it back to `in_progress` with a `Kickback: QA fail` note. It blocks a ticket when it can't test it, GitHub refuses the merge, or the PR already merged. `/maestro-qa-lead <ask>` does the QA lead's other jobs: a second look at a verdict, a bug reproduced, a ticket checked before it's built, a test plan.
 - `/maestro-code-review <pr>` reviews the PR at its head sha, in a fresh session apart from the author. GO adds a `Review: GO` comment and leaves the ticket in `in_review` for QA; review never merges. NO-GO moves it back to `in_progress` with a `Kickback:` note, and the engineer runs the ticket again with that feedback. ESCALATE blocks the ticket with an `Escalation:` note when the change needs the owner's yes (a dependency, CI or hook change, or one a revert can't undo) or a third kickback would repeat the last two. The review's depth follows the PR's risk: a docs fix gets one pass, an auth or migration change all nine. Add `--report-only` for the report alone.
-- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a bot's report or get a second opinion on a call. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
-- `/maestro-software-engineer <id or change>` takes a ticket to an open PR, or makes a change by hand, always in its own worktree kept up to date with main: plan, build, self-review. The engineer bots run it on each ticket, and any session that writes code loads it.
+- `/maestro-chief-of-staff <question or id>` is the chief of staff thinking inside the repo while the swarm runs. The chief of staff runs it to check a report or get a second opinion on a call. It drafts the `Answer:` texts, the owner's next card and the messages to send. It changes nothing and hands back no commands.
+- `/maestro-software-engineer <id or change>` takes a ticket to an open PR, or makes a change by hand, always in its own worktree kept up to date with main: plan, build, self-review. Every build job runs it on its ticket, and any session that writes code loads it.
 
 ## Your own skills
 
 Maestro ships 19 skills, each with the `maestro-` prefix so they stay clear of your own: the ticket and review commands, one per role, working tools such as `/maestro-unslop` and `/maestro-figure-it-out`, and four on how to build. [skills/README.md](skills/README.md) lists them. Your own skills go in your repo's `.claude/skills/` or `.agents/skills/`, named without `maestro-`.
 
-## How a bot works
+## How a job runs
 
-What a bot loads and what the installer leaves in your repo:
+How the chief, the code relay and each job connect:
 
 <!-- Source: docs/bot-anatomy.mermaid. Edit that file, then copy it here. -->
 ```mermaid
 flowchart LR
     Owner([Owner]) <--> Chief["T3 chief session"]
     Chief <--> Private[("Private chief memory")]
-    Chief -->|"cos verb and published delivery ID"| Door["Fixed commands across OS users"]
-    Door --> Relay["Worker code relay"]
-    Relay -.->|"wake without worker text"| Door
-    Door -.->|"ring: run pickup"| Chief
-    Relay <--> Board[("Board, usage and receipts")]
-    Relay -->|"job with verified profile"| Harness["Claude Code or Codex"]
+    Chief -->|"maestro-ticket cos or chief verb"| Relay["Code relay"]
+    Relay -.->|"fixed wake, no worker text"| Chief
+    Relay <--> Board[("Atlas board, usage and receipts")]
+    Relay -->|"job on the sub with most room"| Harness["Claude Code or Codex"]
     Repo["Team repo · role skills and project setup"] --> Harness
     Harness -->|"commit, verdict and evidence"| Board
-    Hook["Grok webhook server"] -->|"job in its own installation"| Harness
 ```
 
 ## Tools
 
-- [tools/maestro-ticket](tools/maestro-ticket/README.md): the ticket store and CLI. SQLite by default, or MongoDB to share one board across machines; leases and fencing tokens.
+- [tools/maestro-ticket](tools/maestro-ticket/README.md): the ticket store and CLI, on MongoDB Atlas; leases and fencing tokens.
 
 ## Credits
 

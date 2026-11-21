@@ -21,16 +21,10 @@ import (
 
 // A chain is the fixed next step a run's end starts itself: a build in
 // review goes to review, a GO to QA, a send-back to its engineer, a
-// Rereview: to review. Each of those was a line a bot passed to another
-// bot, which woke, reread its chat and ran job: Grok spent a turn on each
-// and decided nothing (owner's ruling, Nov 15 2026). New work it picks
-// only through refill, the planner's look without the judge; whatever it
-// can't start stays for the launcher's pickup, as before.
-var (
-	chainJobs = map[string]bool{"build": true, "review": true, "qa": true, "live": true}
-	chainBots = map[string]bool{"junior-engineer": true, "senior-engineer": true, "reviewer": true, "qa-lead": true}
-	chainLine = regexp.MustCompile(`^(build|review|qa) (T-[0-9]+)$`)
-)
+// Rereview: to review. New work it picks only through refill, the
+// planner's look without the judge; whatever it can't start stays for
+// the launcher's pickup.
+var chainJobs = map[string]bool{"build": true, "review": true, "qa": true, "live": true}
 
 // maxHops is how many ends in a row may each start the next step: past
 // it, a bot looks. A ticket's tries end a send-back loop well before.
@@ -146,7 +140,7 @@ func (c *call) chain(ctx context.Context, dir string, r runs.Record) {
 			left = remaining
 		}
 		rt.Send = left
-		// A launcher with no webhook, such as a person, reads its pickup:
+		// A launcher no one serves, such as a person, reads its pickup:
 		// leave it what it would have seen.
 		bot := served(notify, r.Launcher)
 		rest := leftForBot(rt)
@@ -196,27 +190,21 @@ func ackable(rt routed) bool {
 	return rt.Outcome == outDone || len(rt.Send)+len(rt.Do) > 0 || rt.Reply != "" || rt.quiet
 }
 
-// doGrammar is every do: line a run's end runs itself: a died run's one
-// resume, a limited one's go-on, and one job again. Nothing else, and
-// never a rules write: the supervisor runs outside any run, as the
-// launcher, so a looser grammar would let a reply set what only a bot
-// outside a run may.
-var doGrammar = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on)|job again (R-[a-z2-7]{8})(?: --limit ([0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
-
+// runtimeDo is every do: line a run's end runs itself: a died run's one
+// resume, a limited one's go-on, an escalation, and one job again.
+// Nothing else, and never a rules write: the supervisor runs outside any
+// run, as the launcher, so a looser grammar would let a reply set what
+// only someone outside a run may.
 var runtimeDo = regexp.MustCompile(`^maestro-ticket (?:resume (R-[a-z2-7]{8}) --(died|go-on|opus|escalate|decide)|job again (R-[a-z2-7]{8})(?: (--full|--limit [0-9]+[hms](?:[0-9]+[ms]){0,2}))?)$`)
 
 // runDo runs one do: line of r's route as r's launcher would, and reports
 // whether the work goes on: started now, or by another start of the same
 // line; and whether the line is gone for good, its ticket moved on. It
-// runs none for a launcher with no webhook, such as a person, who reads
+// runs none for a launcher no one serves, such as a person, who reads
 // its pickup, and none that names another run. Any other refusal, such as
 // a pause, leaves the line for the launcher.
 func (c *call) runDo(ctx context.Context, dir, notify string, r runs.Record, line string) (on, gone bool) {
-	grammar := doGrammar
-	if codeRole(notify, r.Launcher) {
-		grammar = runtimeDo
-	}
-	m := grammar.FindStringSubmatch(line)
+	m := runtimeDo.FindStringSubmatch(line)
 	if m == nil || !served(notify, r.Launcher) {
 		return false, false
 	}
@@ -282,7 +270,7 @@ func (c *call) refileFollowUps(ctx context.Context, s ticket.Store, r runs.Recor
 
 // handOn starts one send's job as the bot it was for, and reports whether
 // that job now runs: started, or already going. It starts none for a bot
-// with no webhook, which would never hear how its run ended.
+// no one serves, which would never hear how its run ended.
 func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd send) bool {
 	req, ok := stepRequest(notify, r, sd)
 	if !ok || !served(notify, sd.Bot) {
@@ -290,9 +278,7 @@ func (c *call) handOn(ctx context.Context, dir, notify string, r runs.Record, sd
 	}
 	req.chainOf, req.hops = r.ID, r.Hops+1
 	if !codeRole(notify, sd.Bot) {
-		_, err := c.startAs(ctx, dir, sd.Bot, req)
-		var a alreadyGoing
-		return err == nil || errors.As(err, &a)
+		return false
 	}
 	co, err := c.coord()
 	if err != nil {
@@ -372,28 +358,15 @@ func refillLine(sd send) bool {
 	return sd.Bot == "planner" && (strings.HasPrefix(sd.Line, "slot free ") || strings.HasPrefix(sd.Line, "merged "))
 }
 
-// nextStep is the job and ticket of a send that is a fixed handoff to a
-// worker bot, which r's end may start itself.
-func nextStep(r runs.Record, sd send) (jobKind, string, bool) {
-	m := chainLine.FindStringSubmatch(sd.Line)
-	if m == nil || !chainBots[sd.Bot] || r.Hops >= maxHops {
-		return jobKind{}, "", false
-	}
-	k, ok := findJob(m[1])
-	return k, m[2], ok
-}
-
 var runtimeStep = regexp.MustCompile(`^(build|review|qa|live|design) (T-[0-9]+)(?: --approved ([0-9a-f]{7,40}))?(?: --drop ([A-Za-z0-9._,-]+): ([^\r\n]+))?$`)
 
-func codeRole(dir, bot string) bool {
-	h, err := runs.Webhook(dir, bot)
-	return err == nil && h.Code
-}
+// codeRole reports whether code serves bot: its runs' ends route
+// themselves. The dir is the old notify folder, kept for its ring gates.
+func codeRole(_, bot string) bool { return runs.Serving(bot).Code }
 
 func stepRequest(notify string, r runs.Record, sd send) (jobReq, bool) {
 	if !codeRole(notify, sd.Bot) {
-		k, id, ok := nextStep(r, sd)
-		return jobReq{kind: k, ids: []string{id}}, ok
+		return jobReq{}, false
 	}
 	m := runtimeStep.FindStringSubmatch(sd.Line)
 	if m == nil || r.Hops >= maxHops {
@@ -416,11 +389,9 @@ func stepRequest(notify string, r runs.Record, sd send) (jobReq, bool) {
 	return jobReq{kind: k, ids: []string{m[2]}, approved: m[3], drop: m[4], dropWhy: m[5]}, true
 }
 
-// served reports whether the role has a configured server.
-func served(notify, bot string) bool {
-	h, err := runs.Webhook(notify, bot)
-	return err == nil && h.Served()
-}
+// served reports whether something acts on the role's ended runs: code,
+// or the chief's wake.
+func served(_, bot string) bool { return runs.Serving(bot).Served() }
 
 // lastSlots is the slot count bot passed on its newest run in slot name,
 // as its memories set it; 0, the default, if none of its runs did.
@@ -498,16 +469,12 @@ func (c *call) queueGoalItem(ctx context.Context, notify string, r runs.Record, 
 	if err := b.PutGoalItem(ctx, id, goal, sd.Line); err != nil {
 		return err
 	}
-	h, err := runs.Webhook(notify, "chief-of-staff")
-	if err == nil && h.Exec != "" {
-		return c.wakeGoalInbox(ctx, b, filepath.Join(filepath.Dir(notify), "runs"), h)
-	}
-	return nil
+	return c.wakeGoalInbox(ctx, b, filepath.Join(filepath.Dir(notify), "runs"))
 }
 
 // A successful invocation can still leave new items behind the private wake gate.
-func (c *call) wakeGoalInbox(ctx context.Context, b *mongostore.Store, dir string, h runs.Hook) error {
-	err := runs.Ring(ctx, h, runs.Notification{})
+func (c *call) wakeGoalInbox(ctx context.Context, b *mongostore.Store, dir string) error {
+	err := c.wakeChief(ctx)
 	pending, checkErr := b.HasPendingGoalItem(ctx)
 	if err != nil || checkErr != nil || pending {
 		if e := c.scheduleReconsider(filepath.Dir(dir), time.Now().Add(runs.GateWindow)); e != nil {

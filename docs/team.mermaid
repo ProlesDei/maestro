@@ -1,11 +1,11 @@
 flowchart TD
     Owner([Owner])
-    subgraph Chief["Chief account"]
+    subgraph T3["T3 chief project"]
         C["Chief of staff · Astra or Opus"]
         Memory[("Private drafts, decisions and accepted briefs")]
         C <--> Memory
     end
-    subgraph Worker["Worker account"]
+    subgraph Team["Code-served roles · one subscription pool"]
         P["Planner · plan and judge sessions"]
         Router["Code relay · recover and look"]
         D["Designer"]
@@ -29,4 +29,3 @@ flowchart TD
     C -->|"accepted brief or ruling"| P
     Router -.->|"fixed wake for pending goal items"| C
     D -->|"design for owner approval"| Board
-    Grok["Grok Bot · webhook runtime"] --> Old[("Separate Grok board")]

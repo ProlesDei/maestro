@@ -629,7 +629,7 @@ func Write(ctx context.Context, db *sql.DB, r Run) error {
 }
 
 // SetRing records, after a run's first ring, whether it reached the
-// webhook and how it failed (a ring_err name).
+// wake and how it failed (a ring_err name).
 func SetRing(ctx context.Context, db *sql.DB, run string, rang bool, ringErr string) error {
 	ctx, cancel := context.WithTimeout(ctx, writeLimit)
 	defer cancel()

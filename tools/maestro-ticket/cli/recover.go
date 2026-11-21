@@ -277,11 +277,8 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 			return out, err
 		}
 		if pending {
-			h, err := runs.Webhook(filepath.Join(filepath.Dir(dir), "notify"), "chief-of-staff")
-			if err == nil && h.Exec != "" {
-				if err := c.wakeGoalInbox(ctx, b, dir, h); err != nil {
-					out.Findings = append(out.Findings, "chief wake pending")
-				}
+			if err := c.wakeGoalInbox(ctx, b, dir); err != nil {
+				out.Findings = append(out.Findings, "chief wake pending")
 			}
 		}
 	}

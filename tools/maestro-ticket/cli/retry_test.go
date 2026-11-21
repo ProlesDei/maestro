@@ -211,9 +211,6 @@ func TestBuildAPIOutagePauses(t *testing.T) {
 		if i == 0 && (!slices.Equal(sends(rt), []string{"send planner: usage_limit T-1 resets " + p.Until.Format(time.RFC3339)}) || !slices.Contains(rt.Wrote, "released T-1 till the limit lifts")) {
 			t.Fatalf("outage %d: %+v", i, rt)
 		}
-		if _, ok := bodyLines(rt); !ok {
-			t.Fatalf("outage %d: held from the body: %+v", i, rt)
-		}
 		if out, _ := outcomeOf(r); out != outFailed {
 			t.Fatalf("stats read outage %d as %s", i, out)
 		}
@@ -358,9 +355,6 @@ func TestRoutePlanFailRetriesOnce(t *testing.T) {
 				want := strings.TrimSpace("failed twice " + job + " " + again.ID + " " + id)
 				if len(rt.Do) != 0 || !slices.Equal(sends(rt), []string{"send chief-of-staff: " + want}) {
 					t.Fatalf("%s %s %q second: %+v", job, state, id, rt)
-				}
-				if _, ok := bodyLines(rt); !ok {
-					t.Fatalf("the fault line is held from the body: %+v", rt)
 				}
 				if !ticketed {
 					continue

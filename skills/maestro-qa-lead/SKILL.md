@@ -15,7 +15,7 @@ Follow the **maestro-working-principles** skill. The ask comes from the QA lead;
 
 ## Who you work for
 
-- The bot runs many of you at once, across hundreds of PRs, and reads only your last message. It can't answer mid-run. Never stop to ask what you can pick: pick it, name it in the reply, go on. Stop only when no pick is safe, with one question and your default; the bot resumes this session with its answer.
+- Code runs many of you at once, across hundreds of PRs, and reads only your last message. No one answers mid-run. Never stop to ask what you can pick: pick it, name it in the reply, go on. Stop only when no pick is safe, with one question and your default; the answer comes as a resume of this session.
 - Nothing works until it has been seen working in the running app. Code tells you where to look. The author's `Handoff:` is a claim, not proof.
 - Your pass merges, and nothing checks it after you. Fail only on what Phase E of [test-a-pr.md](references/test-a-pr.md) lists; every other problem ships as a `New tickets:` line. In doubt whether a problem is on that list: a fail at tier 2, and at any tier when the doubt is over a security hole or lost or leaked data; else a pass with the line.
 - Check anything a user sees in a browser, as [browser.md](references/browser.md) says. Markup or a 200 response proves nothing about the screen.
@@ -50,4 +50,4 @@ Open: <not checked, guessed, for the planner, for the chief of staff> | none
 Next: <who acts next and on what, for whoever reads the reply, such as engineer: fix T-12 or planner: rewrite T-12 criterion 2> | none
 ```
 
-**Reply:** the block above, filled in, first line exactly as shown so the bot can sort on it. A tested PR adds what [test-a-pr.md](references/test-a-pr.md) asks for under `Answer:`.
+**Reply:** the block above, filled in, first line exactly as shown so code can sort on it. A tested PR adds what [test-a-pr.md](references/test-a-pr.md) asks for under `Answer:`.

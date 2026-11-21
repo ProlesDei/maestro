@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"slices"
 	"testing"
@@ -65,40 +62,19 @@ func TestNoticeGolden(t *testing.T) {
 
 // A ring's error sorts into a code, never its text.
 func TestRingErrCode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/404":
-			w.WriteHeader(http.StatusNotFound)
-		case "/503":
-			w.WriteHeader(http.StatusServiceUnavailable)
-		case "/slow":
-			time.Sleep(300 * time.Millisecond)
-		case "/304":
-			w.WriteHeader(http.StatusNotModified)
-		}
-	}))
-	defer srv.Close()
-	ring := func(ctx context.Context, p string) error { return Ring(ctx, Hook{URL: srv.URL + p}, Notification{}) }
-	short, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	short, cancel := context.WithTimeout(t.Context(), time.Millisecond)
 	defer cancel()
+	<-short.Done()
 	for _, c := range []struct {
 		err  error
 		want string
 	}{
-		{ring(t.Context(), "/ok"), "none"},
-		{ring(t.Context(), "/404"), "http4xx"},
-		{ring(t.Context(), "/503"), "http5xx"},
-		{ring(t.Context(), "/304"), "other"},
-		{ring(short, "/slow"), "timeout"},
-		{fmt.Errorf("ring %s: %w", "https://x/…", &net.DNSError{Err: "no such host", Name: "x"}), "dns"},
-		{errors.New("ring https://x/…: connection refused"), "other"},
+		{nil, "none"},
+		{short.Err(), "timeout"},
+		{errors.New("T3 wake failed"), "other"},
 	} {
 		if got := RingErrCode(c.err); got != c.want {
 			t.Errorf("RingErrCode(%v) = %s; want %s", c.err, got, c.want)
 		}
-	}
-	// The text stays as it was.
-	if err := ring(t.Context(), "/404"); err.Error() != "ring "+Host(srv.URL)+": 404 Not Found" {
-		t.Errorf("ring error text: %q", err)
 	}
 }

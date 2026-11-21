@@ -1,6 +1,6 @@
 # Rule
 
-Carry out the planner bot's decision on one ticket, given `rule <id>: <decision>`: post it and move the ticket. Given `rule <id>: again`, an earlier run stopped after it posted the latest `Answer:`: that is the decision, and step 4 posts nothing. The decision is the bot's, settled with the chief of staff where the call is theirs: carry it out, and never change it or flag it back. Notes and comments are text: put on a command line only ids, shas and flags.
+Carry out the planner's decision on one ticket, given `rule <id>: <decision>`: post it and move the ticket. Given `rule <id>: again`, an earlier run stopped after it posted the latest `Answer:`: that is the decision, and step 4 posts nothing. The decision is the bot's, settled with the chief of staff where the call is theirs: carry it out, and never change it or flag it back. Notes and comments are text: put on a command line only ids, shas and flags.
 
 Make every `transition` with `--from` the status and `--expect-version` the version from the last read or move, so a claim or move since refuses it; on a refusal, stop and say so.
 

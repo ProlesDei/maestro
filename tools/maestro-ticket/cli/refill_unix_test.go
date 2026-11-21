@@ -52,67 +52,40 @@ func builds(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-// A look starts a build itself, as the engineer, when that engineer has a
-// webhook; one with none gets the line, as before.
+// A look starts each build itself, as its engineer.
 func TestLookStartsWorkerJobs(t *testing.T) {
-	for _, mode := range []string{"webhook", "code"} {
-		t.Run(mode, func(t *testing.T) {
-			sup := fakeSupervisor(t)
-			h := newRefillHarness(t, "2", 2)
-			if mode == "code" {
-				h.ok(nil, "notify", "set", "junior-engineer", "--code")
-			} else {
-				h.hook("junior-engineer")
-			}
-			code, out, errs := h.run("", "look")
-			if code != 0 {
-				t.Fatalf("look: %d %q %q", code, out, errs)
-			}
-			if !regexp.MustCompile(`(?m)^started: R-[a-z2-7]{8} build T-1 as junior-engineer$`).MatchString(out) ||
-				!strings.Contains(out, "send senior-engineer: build T-2") || strings.Contains(out, "send junior-engineer") {
-				t.Fatalf("look:\n%s", out)
-			}
-			if got := builds(t, filepath.Join(h.dir, "runs")); sup.count() != 1 || got["T-1"] != "junior-engineer" {
-				t.Fatalf("builds %v, %d started", got, sup.count())
-			}
-		})
+	sup := fakeSupervisor(t)
+	h := newRefillHarness(t, "2", 2)
+	code, out, errs := h.run("", "look")
+	if code != 0 {
+		t.Fatalf("look: %d %q %q", code, out, errs)
+	}
+	if !regexp.MustCompile(`(?m)^started: R-[a-z2-7]{8} build T-1 as junior-engineer$`).MatchString(out) ||
+		!regexp.MustCompile(`(?m)^started: R-[a-z2-7]{8} build T-2 as senior-engineer$`).MatchString(out) || strings.Contains(out, "send ") {
+		t.Fatalf("look:\n%s", out)
+	}
+	if got := builds(t, filepath.Join(h.dir, "runs")); sup.count() != 2 || got["T-1"] != "junior-engineer" || got["T-2"] != "senior-engineer" {
+		t.Fatalf("builds %v, %d started", got, sup.count())
 	}
 }
 
 // A build's end that freed its slot starts the next build itself and
 // leaves the planner nothing; the review a board with no PR can't start
-// stays for the engineer's pickup. With no webhook for the next build's
-// engineer, the end frees that handout and leaves the slot free line for
-// the planner.
+// stays for the engineer's pickup.
 func TestChainRefillsAFreedSlot(t *testing.T) {
-	for _, withEngineer := range []bool{true, false} {
-		sup := fakeSupervisor(t)
-		h := newRefillHarness(t, "1", 3)
-		h.move("T-1", "in_progress", "in_review")
-		h.hook("junior-engineer")
-		h.hook("planner")
-		if withEngineer {
-			h.hook("senior-engineer")
-		}
-		dir := filepath.Join(h.dir, "runs")
-		r := h.endedRun("build", "junior-engineer", "build: done")
-		h.inProc("junior-engineer").chain(context.Background(), dir, r)
-		got, _ := runs.Get(dir, r.ID, time.Now())
-		var rt routed
-		json.Unmarshal(got.Routed, &rt)
-		b := builds(t, dir)
-		_, held := os.Stat(handoutPath(filepath.Join(h.dir, "handouts"), "T-2", "senior-engineer"))
-		if withEngineer {
-			if got.Notify != "" || sup.count() != 1 || b["T-2"] != "senior-engineer" || b["T-3"] != "" ||
-				!slices.Equal(sends(rt), []string{"send reviewer: review T-1"}) {
-				t.Fatalf("refill: notify %q, %d started, builds %v, sends %v", got.Notify, sup.count(), b, sends(rt))
-			}
-			continue
-		}
-		if got.Notify != "" || sup.count() != 0 || b["T-2"] != "" || held == nil ||
-			!slices.Equal(sends(rt), []string{"send reviewer: review T-1", "send planner: slot free T-1"}) {
-			t.Fatalf("no engineer: notify %q, %d started, builds %v, handout %v, sends %v", got.Notify, sup.count(), b, held, sends(rt))
-		}
+	sup := fakeSupervisor(t)
+	h := newRefillHarness(t, "1", 3)
+	h.move("T-1", "in_progress", "in_review")
+	dir := filepath.Join(h.dir, "runs")
+	r := h.endedRun("build", "junior-engineer", "build: done")
+	h.inProc("junior-engineer").chain(context.Background(), dir, r)
+	got, _ := runs.Get(dir, r.ID, time.Now())
+	var rt routed
+	json.Unmarshal(got.Routed, &rt)
+	b := builds(t, dir)
+	if got.Notify != "" || sup.count() != 1 || b["T-2"] != "senior-engineer" || b["T-3"] != "" ||
+		!slices.Equal(sends(rt), []string{"send reviewer: review T-1"}) {
+		t.Fatalf("refill: notify %q, %d started, builds %v, sends %v", got.Notify, sup.count(), b, sends(rt))
 	}
 }
 
@@ -122,8 +95,6 @@ func TestChainRefillsAFreedSlot(t *testing.T) {
 func TestRefillsAtOnceKeepTheLimit(t *testing.T) {
 	sup := fakeSupervisor(t)
 	h := newRefillHarness(t, "1", 4)
-	h.hook("junior-engineer")
-	h.hook("senior-engineer")
 	dir := filepath.Join(h.dir, "runs")
 	os.MkdirAll(dir, 0o755)
 	var wg sync.WaitGroup

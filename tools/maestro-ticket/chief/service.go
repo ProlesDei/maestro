@@ -1,5 +1,5 @@
 // Package chief holds goal conversations and decision claims in collections
-// accessible to the chief OS user. Workers read only the published projection.
+// the chief of staff writes. Workers read only the published projection.
 package chief
 
 import (
@@ -314,7 +314,7 @@ func (s *Service) direction(ctx context.Context, r Request) (any, error) {
 }
 
 // Save an explicit board control or a second-opinion request before asking
-// the worker account to carry it out. Replays must carry identical content.
+// the workers to carry it out. Replays must carry identical content.
 func (s *Service) instruction(ctx context.Context, thread string, r Request) (any, error) {
 	if !identifier.MatchString(r.ID) || r.Source == "" || r.Text == "" {
 		return nil, errors.New("instruction needs a stable ID, text and owner or brief source")
@@ -356,9 +356,9 @@ func (s *Service) instruction(ctx context.Context, thread string, r Request) (an
 	return bson.M{"delivery": id}, s.publishDelivery(ctx, id, r.Goal, r.Kind, r.Text, rev)
 }
 
-// CheckDoor binds the OS-level command to the private session that issued it.
+// CheckCos binds a cos verb to the registered chief session that issued it.
 // The worker sees only the goal and a previously published delivery ID.
-func (s *Service) CheckDoor(ctx context.Context, thread, goal, verb, id string) error {
+func (s *Service) CheckCos(ctx context.Context, thread, goal, verb, id string) error {
 	if !threadID.MatchString(thread) || !identifier.MatchString(goal) {
 		return errors.New("cos needs a registered goal and thread")
 	}

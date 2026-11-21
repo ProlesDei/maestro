@@ -448,7 +448,7 @@ func TestDoctorWarnsMissingBoardAndRules(t *testing.T) {
 		t.Fatal("no rules check")
 		return false, ""
 	}
-	if warn, d := check(); !warn || !strings.Contains(d, "no limit in board.json") || !strings.Contains(d, "no rules.md") {
+	if warn, d := check(); !warn || !strings.Contains(d, "no limit in board.json") || strings.Contains(d, "rules.md") {
 		t.Fatalf("fresh: %v %s", warn, d)
 	}
 	h.must("", "rules", "set", "limit", "3")
@@ -504,9 +504,9 @@ func promptOf(h *harness, dir, id string) []string {
 	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 }
 
-// With no rules.md, look --judge starts no judge and frees the rows it
-// claimed; an empty rules.md gives the judge "none" as its rules.
-func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
+// With no rules.md, look --judge starts a judge on the default rules; an
+// empty rules.md gives the judge "none" as its rules.
+func TestJudgeDefaultRules(t *testing.T) {
 	h := newRulesHarness(t, "planner")
 	dir := rulesSupervisor(h)
 	h.ok(nil, "create", "--title", "x")
@@ -514,15 +514,25 @@ func TestJudgeNoRulesFileStartsNoJudge(t *testing.T) {
 	if code, out := h.try("Escalation: build at abc: which key?\nReturn-role: engineer", "comment", "T-1", "--body-file", "-"); code != 0 {
 		t.Fatal(out)
 	}
-	code, out := h.try("", "look", "--limit", "2", "--judge")
-	if code == 0 || strings.Contains(out, "judging:") || !strings.Contains(out, "judge: no maestro/rules.md") {
-		t.Fatalf("no rules.md: exit %d\n%s", code, out)
+	var first []string
+	for _, l := range strings.Split(h.must("", "look", "--limit", "2", "--judge"), "\n") {
+		if strings.HasPrefix(l, "judging: ") {
+			first = append(first, l)
+		}
 	}
-	if fileExists(filepath.Join(h.dir, "handouts", "T-1.judge")) {
-		t.Fatal("a judge row stayed claimed with no judge")
+	if len(first) != 1 {
+		t.Fatalf("no rules.md: %q", first)
 	}
-	if ids, _ := filepath.Glob(filepath.Join(dir, "R-*.in")); len(ids) != 0 {
-		t.Fatalf("a judge run started with no rules.md: %q", ids)
+	if s := promptOf(h, dir, strings.Fields(strings.TrimPrefix(first[0], "judging: "))[0]); !slices.Contains(s, "Standing rules:") || !strings.Contains(strings.Join(s, "\n"), "- Stop the line:") {
+		t.Fatalf("default judge prompt %q", s)
+	}
+	// An empty rules.md, on a fresh board.
+	h = newRulesHarness(t, "planner")
+	dir = rulesSupervisor(h)
+	h.ok(nil, "create", "--title", "x")
+	h.ok(nil, "transition", "T-1", "--to", "blocked")
+	if code, out := h.try("Escalation: build at abc: which key?\nReturn-role: engineer", "comment", "T-1", "--body-file", "-"); code != 0 {
+		t.Fatal(out)
 	}
 	os.WriteFile(filepath.Join(h.dir, rulesFile), []byte("# via: rules\n"), 0o644)
 	var j []string
@@ -569,13 +579,14 @@ func TestQASlotsOrder(t *testing.T) {
 	}
 }
 
-// The plan and rule prompts end with the standing rules, once there are any.
+// The plan and rule prompts end with the standing rules: the defaults,
+// then the ones set.
 func TestPlanAndRulePromptsCarryRules(t *testing.T) {
 	h := newRulesHarness(t, "planner")
 	dir := rulesSupervisor(h)
 	h.ok(nil, "create", "--title", "x")
-	if _, s := startedRun(h, dir, "goal g: ship it\n", "plan"); slices.Contains(s, "Standing rules:") {
-		t.Fatalf("no rules.md, yet the plan prompt has rules: %q", s)
+	if _, s := startedRun(h, dir, "goal g: ship it\n", "plan"); !strings.Contains(strings.Join(s, "\n"), "Standing rules:\n- Junior or senior:") {
+		t.Fatalf("no rules.md, yet the plan prompt lacks the defaults: %q", s)
 	}
 	h.must("api/: senior only\n", "rules", "text")
 	rule := "api/: senior only (set by planner, " + today() + ")"

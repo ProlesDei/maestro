@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,10 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 	if err != nil {
 		return err
 	}
+	learned, err := readEstimates(dir)
+	if err != nil {
+		return err
+	}
 	for key, w := range windows {
 		previous, ok := state[alias][key]
 		if ok && !w.Read.After(previous.Read) {
@@ -97,6 +102,7 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 			// Split this observed delta once. Attribution to Maestro runs is
 			// an estimate; the unassigned portion includes owner and child turns.
 			delta := w.Used - previous.Used
+			learnEstimate(learned, alias, key, previous.Read, w.Read, delta, records)
 			w.Covered = map[string]float64{}
 			for _, r := range records {
 				if r.ID == beforeTurn || r.Profile != alias || r.Unspent || neverRan(r) || r.StartedAt.After(w.Read) || r.EndedAt != nil && !r.EndedAt.After(w.Since) {
@@ -118,7 +124,78 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 	if err != nil {
 		return err
 	}
-	return writeWholeMode(path, data, 0600)
+	if err := writeWholeMode(path, data, 0600); err != nil {
+		return err
+	}
+	data, err = json.Marshal(learned)
+	if err != nil {
+		return err
+	}
+	return writeWholeMode(filepath.Join(dir, estimatesFile), data, 0600)
+}
+
+// estimatesFile holds what each job costs, learned from meter readings:
+// window points per run, by harness, job and window.
+const estimatesFile = "estimates.json"
+
+type estimates map[string]float64
+
+func readEstimates(dir string) (estimates, error) {
+	b, err := os.ReadFile(filepath.Join(dir, estimatesFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return estimates{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var e estimates
+	if json.Unmarshal(b, &e) != nil || e == nil {
+		return estimates{}, nil // a bad file only costs the learning
+	}
+	return e, nil
+}
+
+// estimateFor is a job's cost on harness: the most it costs in any
+// window it was read in, else defaultEstimate.
+func estimateFor(dir, harness, job string) float64 {
+	e, _ := readEstimates(dir)
+	best := 0.0
+	prefix := harness + "/" + job + "/"
+	for k, v := range e {
+		if strings.HasPrefix(k, prefix) && v > best {
+			best = v
+		}
+	}
+	if best <= 0 {
+		return defaultEstimate
+	}
+	return best
+}
+
+// learnEstimate moves a job's estimate toward one reading's rise when
+// one run on alias explains it: the run started and ended between the
+// two readings, and no other run on alias ran then. The rise may include
+// the owner's own use, which makes the estimate err high.
+func learnEstimate(e estimates, alias, window string, from, to time.Time, delta float64, list []runs.Record) {
+	var only *runs.Record
+	for i, r := range list {
+		if r.Profile != alias || r.Unspent || neverRan(r) || r.StartedAt.After(to) || r.EndedAt != nil && !r.EndedAt.After(from) {
+			continue
+		}
+		if only != nil {
+			return
+		}
+		only = &list[i]
+	}
+	if only == nil || only.Job == "" || only.Harness == "" || only.StartedAt.Before(from) || only.EndedAt == nil || only.EndedAt.After(to) {
+		return
+	}
+	sample := min(50, max(0.5, delta))
+	k := only.Harness + "/" + only.Job + "/" + window
+	if old, ok := e[k]; ok && old > 0 {
+		sample = 0.7*old + 0.3*sample
+	}
+	e[k] = math.Round(sample*100) / 100
 }
 
 func (c *call) recordUsage(alias, key, reset string, used float64) error {
@@ -216,13 +293,20 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 			next = at
 		}
 	}
+	// The model the job asked for: an override, else its command's.
+	want := cmp.Or(flagValue(r.Overrides, "--model"), flagValue(r.Command, "--model"))
+	bindingFor := func(p boundProfile) jobModel {
+		b := poolModel(p.Harness, want)
+		b.Estimate = estimateFor(root, p.Harness, r.Job)
+		return b
+	}
 	for _, alias := range sortedAliases(profiles) {
 		p := profiles[alias]
-		binding, ok := p.binding(r.Job, r.Launcher)
-		if !ok || (r.Profile != "" && r.Profile != alias) {
+		binding := bindingFor(p)
+		if r.Profile != "" && r.Profile != alias {
 			continue
 		}
-		if m, e := flagValue(r.Overrides, "--model"), flagValue(r.Overrides, "--effort"); (m != "" && binding.Model != m) || (e != "" && binding.Effort != e) {
+		if e := flagValue(r.Overrides, "--effort"); e != "" && binding.Effort != e {
 			continue
 		}
 		if _, err := os.Stat(filepath.Join(root, "account-"+alias+".login")); err == nil {
@@ -267,7 +351,7 @@ func (c *call) createPacedRun(dir string, r runs.Record, prompt []byte) (runs.Re
 		return r, waitingForReset{at: next, reason: fmt.Sprintf("%s: %s: %s", ticket.ErrPaused, r.Job, strings.Join(reasons, ", "))}
 	}
 	p := profiles[chosen]
-	b, _ := p.binding(r.Job, r.Launcher)
+	b := bindingFor(p)
 	if !isNativeCommand(r.Command) {
 		r.Command, err = c.nativeCommand(chosen, r.Job, b, p.Harness)
 		if err != nil {
