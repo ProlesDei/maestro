@@ -1,9 +1,0 @@
-flowchart LR
-    Owner([Owner]) <--> Chief["T3 chief session"]
-    Chief <--> Private[("Private chief memory")]
-    Chief -->|"maestro-ticket cos or chief verb"| Relay["Code relay"]
-    Relay -.->|"fixed wake, no worker text"| Chief
-    Relay <--> Board[("Atlas board, usage and receipts")]
-    Relay -->|"job on the sub with most room"| Harness["Claude Code or Codex"]
-    Repo["Team repo · role skills and project setup"] --> Harness
-    Harness -->|"commit, verdict and evidence"| Board
