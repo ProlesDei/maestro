@@ -384,9 +384,11 @@ func qaReceiptID(d ticket.Detail, review ticket.Comment, head string) string {
 	if !ok || escalation.ID <= review.ID || !strings.HasPrefix(escalation.Body, "Escalation: QA at ") || shaIn(escalation.Body) != head {
 		return key
 	}
-	answer, ok := latestWith(d, "Answer:")
-	if ok && answer.ID > escalation.ID && ticket.HolderBot(answer.Author) == "planner" {
-		return fmt.Sprintf("%s.escalation-%d", key, escalation.ID)
+	for i := len(d.Comments) - 1; i >= 0 && d.Comments[i].ID > escalation.ID; i-- {
+		answer := d.Comments[i]
+		if strings.HasPrefix(answer.Body, "Answer:") && ticket.HolderBot(answer.Author) == "planner" {
+			return fmt.Sprintf("%s.escalation-%d", key, escalation.ID)
+		}
 	}
 	return key
 }
