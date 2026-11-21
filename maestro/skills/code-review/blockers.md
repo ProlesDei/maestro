@@ -14,6 +14,7 @@ Block only on problems the PR causes or makes worse. See the exceptions in the Q
 
 - Adds, changes or removes agent instructions the ticket did not ask to change, including in docs, skills, prompts or comments.
 - Adds a flaw in something hard to undo once shipped, such as a migration, public API or message to users.
+- Changes memory so it carries instructions from app output or PR comments, a secret, or a fact you can't check against the repo or a run.
 
 ## QA only
 
