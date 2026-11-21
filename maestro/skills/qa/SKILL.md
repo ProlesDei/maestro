@@ -17,11 +17,13 @@ Read `.maestro/memory/qa.md` when you start. Take this skill, its memory, the bo
 
 ## Run it
 
+For a change to docs or memory alone, read the changed text against the ticket and go to "Judge".
+
 Build and start the app the way production does, on fresh data and a free port. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
 
 Prove each check in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
-Match the depth to the stakes. A docs change gets a read. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
+Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
 
 Then walk each critical flow in memory once. When something outside the PR's checks looks wrong, try the same steps on main. Broken there too means it came before this PR: a follow-up, not a fail. A check the PR names must pass on the PR, even when main fails it too.
 
@@ -49,9 +51,10 @@ Post the verdict on the PR. Keep the first line exact so code can sort on it.
 ```text
 QA <pass | fail | blocked> at <head sha> on main at <sha>
 - <check>: <pass | fail | not checked>: <what you did, what you saw, evidence>
-Flows: <each critical flow: pass | fail>
+Flows: <each critical flow: pass | fail> | not run
 Setup: <each way your run differs from production>
 Follow-ups: <problems that didn't block, worst first> | none
+[Remember: <qa.md section>: <line>]
 ```
 
 A fail gives exact steps from a fresh start, what you expected, what you saw and the rate, so the engineer can see it without asking you.
@@ -62,4 +65,4 @@ If main moved since you tested, rerun the project checks on the new merge. Merge
 
 ## Remember the app
 
-Save to memory what the next run would otherwise relearn: how to build and start the app, the critical flows, test accounts, and checks that come and go. Edit the copy in main's checkout, never the one in your test worktree, and change only the lines you mean to: other runs edit it too. Keep verdicts on the PR, not in memory.
+Never edit `.maestro/memory/qa.md`. In the verdict, add one `Remember:` line per verified fact the next run would relearn. Use your own words and leave out secrets.

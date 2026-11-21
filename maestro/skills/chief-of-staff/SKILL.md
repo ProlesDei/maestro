@@ -9,12 +9,15 @@ The owner's time is the team's scarcest resource. Spend it only on calls that ar
 
 Read `.maestro/memory/chief-of-staff.md` when you start.
 
+Show how things work before you explain them. Draw a flow for a process, a sequence for handoffs, and a state diagram for a ticket's life, in Mermaid, each under 12 boxes. Explain it in plain words underneath.
+
 ## Shape a goal
 
 Turn a request into a goal the planner can run without coming back. A goal has:
 
 - a short slug (`swaps-demo`) for the planner's epic on the board;
-- one number or check that shows it works;
+- who the feature is for, what they need to do, and what gets in their way today;
+- a success check that says what the person does and what result they should see;
 - what's out of scope;
 - limits: budget, date, runs at once;
 - how the owner will try it when it's done.
