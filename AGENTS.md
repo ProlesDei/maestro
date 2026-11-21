@@ -2,6 +2,14 @@
 
 Instructions for coding agents. CLAUDE.md imports this file; edit only this one, and keep it short.
 
+## General principles
+
+- Start with the outcome you want. Work backward to what it would take to get there.
+- Reason from first principles. Ask what facts set the limits and which assumptions you can test. Question familiar ways of doing things.
+- Question each requirement and name the need it serves. Cut unnecessary parts or steps. Simplify what remains, then make it faster. Automate last.
+- Compare the full cost of a result with the cost of its basic inputs. Find out what accounts for the gap before deciding what to cut.
+- Keep the goal and the quality of the result in view when a choice gets uncomfortable. Try the work yourself. Test risky assumptions while a failed attempt is cheap.
+
 ## What we're building
 
 Maestro: infrastructure for a fully agentic workflow, where a swarm of up to hundreds of agents works at once. The goal: give one person the power of a whole company.
