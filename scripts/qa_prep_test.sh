@@ -44,6 +44,12 @@ case "${args[0]} ${args[1]}" in
 "api repos/{owner}/{repo}/issues/"*)
 	n=${args[1]#*issues/}; f=$FX/comments-${n%%/*}.json ;;
 "pr view") f=$FX/pr-${args[2]}.json ;;
+"api --include")
+	n=${args[4]%/merge}; n=${n##*/}
+	f=$FX/pr-$n.json
+	[[ ${args[3]} == PUT && ${args[6]} == sha=* && ${args[8]} == merge_method=merge ]] || exit 9
+	jq -e --arg h "${args[6]#sha=}" 'select(.headRefOid == $h) | .state="MERGED" | .mergeCommit={oid:$h}' "$f" >"$f.merged" || exit 9
+	mv "$f.merged" "$f"; exit 0 ;;
 "pr merge")
 	f=$FX/pr-${args[2]}.json
 	[[ ${args[3]} == --merge && ${args[4]} == --match-head-commit ]] || exit 9
@@ -57,6 +63,7 @@ jq -r "$q" "$f"
 EOF
 cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" = heartbeat ]; then [[ $3 == --holder && $4 == qa-lead/test && $5 == --token && $6 == 1 ]]; exit $?; fi
 if [ "$1" = branch ]; then echo "${BOARD_PREFIX:-maestro/}${2-}"; exit 0; fi
 if [ "$1 $3" = "qa-basis --json" ]; then cat "$FX/basis-$2.json"; exit $?; fi
 if [ "$1 $2" = "criteria status" ]; then echo null; exit 0; fi
@@ -180,6 +187,8 @@ for record in '{"route":"none"}' "$(jq -n --arg h "$H" '{route:"direct",head:$h,
 	cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted without current QA proof"
 done
 jq -n --arg h "$H" '{route:"direct",head:$h,passed:true}' >"$FX/basis-T-7.json"
+if bash "$merge" T-7 7 "$H" qa-lead/test 2 qa-test main >/dev/null; then fail "merge accepted an outdated lease"; fi
+cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted with a stale lease"
 [[ $("${attempt[@]}") == "$H" ]] || fail "merge refused a current pass"
 mv "$tmp/open.json" "$FX/pr-7.json"
 

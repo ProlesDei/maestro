@@ -187,11 +187,11 @@ func (tx *txn) changeCriteria(r CriteriaRequest) (ticket.Criteria, error) {
 			if t.Status != ticket.StatusInProgress || (r.Actor != "junior-engineer" && r.Actor != "senior-engineer") {
 				return state, ticket.ErrForbidden
 			}
-			state.Build, state.Review, state.QA = r.Head, "", ""
 			state.Direct = ""
-			if t.DirectQA && t.Tries == 0 && state.AC == 1 {
+			if t.DirectQA && state.Build == "" && state.AC == 1 {
 				state.Direct = r.Head
 			}
+			state.Build, state.Review, state.QA = r.Head, "", ""
 		case "review":
 			if r.Actor != "reviewer" || state.Build != r.Head || t.Status != ticket.StatusInReview {
 				return state, errors.New("review needs the current build at this head")

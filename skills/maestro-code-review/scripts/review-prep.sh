@@ -412,7 +412,7 @@ if [ -n "$qa" ]; then
 	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	review_go=
 	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
-	direct_head= current_pass=unknown
+	direct_head='' current_pass=unknown
 	if [[ -n "$ticket" ]] && jq -e '.direct_qa == true' <<<"$detail" >/dev/null; then
 		basis=$(maestro-ticket qa-basis "$ticket" --json) || die 1 "cannot resolve QA basis for $ticket"
 		review_go=

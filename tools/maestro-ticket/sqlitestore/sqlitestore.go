@@ -1692,6 +1692,16 @@ func (s *Store) Comment(ctx context.Context, req ticket.CommentRequest) (ticket.
 			if err := t.CheckFence(req.Holder, req.Token); err != nil {
 				return ticket.Comment{}, err
 			}
+			var lastID int64
+			if req.ProofRole != "" {
+				err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(id), 0) FROM comments WHERE ticket_id = ?", req.ID).Scan(&lastID)
+				if err != nil {
+					return ticket.Comment{}, err
+				}
+			}
+			if err := req.CheckProof(t, lastID); err != nil {
+				return ticket.Comment{}, err
+			}
 			res, err := tx.ExecContext(ctx,
 				"INSERT INTO comments (ticket_id, author, body, created_at) VALUES (?, ?, ?, ?)",
 				req.ID, req.Actor, req.Body, now)

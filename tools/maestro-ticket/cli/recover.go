@@ -357,7 +357,7 @@ var passedHead = regexp.MustCompile(`^QA: pass at ([0-9a-f]{40})(?: |$)`)
 
 // Read proof in ticket order. A later kickback, new handoff or retest invalidates it.
 func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
-	direct := d.DirectQA && d.Tries == 0
+	direct := d.DirectQA
 	for _, note := range d.Comments {
 		line := firstLine(note.Body)
 		switch {
@@ -387,7 +387,7 @@ func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
 	}
 	if head != "" && d.Criteria != nil {
 		proof := d.Criteria.Review
-		if strings.HasPrefix(review.Body, "Handoff:") {
+		if strings.HasPrefix(firstLine(review.Body), "Handoff:") {
 			proof = d.Criteria.Direct
 		}
 		if proof != head {
@@ -402,13 +402,17 @@ func directQAHandoff(d ticket.Detail) bool {
 		return false
 	}
 	note, head, _ := recoveryProof(d)
-	return head != "" && strings.HasPrefix(note.Body, "Handoff:")
+	return head != "" && strings.HasPrefix(firstLine(note.Body), "Handoff:")
 }
 
 // A planner answer to a QA escalation starts another QA run at the same review.
 func qaReceiptID(d ticket.Detail, review ticket.Comment, head string) string {
 	key := fmt.Sprintf("%s.review-%d.qa", d.ID, review.ID)
 	escalation, ok := latestWith(d, "Escalation:")
+	if retest, found := latestWith(d, "Retest: planner at "); found && retest.ID > review.ID && retest.ID > escalation.ID &&
+		ticket.HolderBot(retest.Author) == "planner" && shaIn(retest.Body) == head {
+		return fmt.Sprintf("%s.retest-%d", key, retest.ID)
+	}
 	if !ok || escalation.ID <= review.ID {
 		return key
 	}
@@ -485,11 +489,18 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			continue
 		}
 		key := qaReceiptID(d, note, head)
-		if _, err := co.s.read("receipts", key); err == nil && qa == "" {
+		basis := "review"
+		if strings.HasPrefix(firstLine(note.Body), "Handoff:") {
+			basis = "direct QA handoff"
+		}
+		_, receiptErr := co.s.read("receipts", key)
+		if receiptErr != nil && !errors.Is(receiptErr, os.ErrNotExist) {
+			return receiptErr
+		}
+		received := receiptErr == nil && qa == ""
+		if received && !d.DirectQA {
 			report.Held[id] = "QA handoff received"
 			continue
-		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
 		}
 		pr, err := c.recoveryPR(ctx, "maestro/"+board+"/"+id)
 		if err != nil {
@@ -507,7 +518,7 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			if err != nil {
 				return err
 			}
-			report.Findings = append(report.Findings, id+": verified review, QA and merged PR at "+head+"; closed")
+			report.Findings = append(report.Findings, id+": verified "+basis+", QA and merged PR at "+head+"; closed")
 		case pr.State == "CLOSED" && d.Criteria != nil && d.Criteria.Merge == head:
 			b, err := c.board()
 			if err != nil {
@@ -537,13 +548,15 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 				return err
 			}
 			report.Findings = append(report.Findings, id+": changed PR head; requested fresh review")
+		case received:
+			report.Held[id] = "QA handoff received"
 		default:
 			report.Held[id] = "QA handoff pending"
 			notify := filepath.Join(filepath.Dir(dir), "notify")
 			if c.handOn(ctx, dir, notify, runs.Record{}, send{"qa-lead", "qa " + id}) {
 				report.Held[id] = "QA handoff received"
 			}
-			report.Findings = append(report.Findings, id+": review passed "+head+"; "+report.Held[id])
+			report.Findings = append(report.Findings, id+": "+basis+" at "+head+"; "+report.Held[id])
 		}
 	}
 	return nil

@@ -1038,12 +1038,46 @@ func (r *TransitionRequest) Validate() error {
 // CommentRequest adds a comment. Holder and Token are fenced like a
 // transition's: a claimed ticket takes comments only from its holder.
 type CommentRequest struct {
+	// ProofRole is set only by handoff and verdict on direct tickets. Check
+	// the comment snapshot inside the write, after checking the replay key.
+	ProofRole    string `json:"proof_role,omitempty"`
+	AfterComment int64  `json:"-"`
+
 	ID             ID     `json:"id"`
 	Body           string `json:"body"`
 	Holder         string `json:"holder,omitempty"`
 	Token          int64  `json:"-"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
+}
+
+// CheckProof prevents an ordinary comment from granting merge authority.
+func (r CommentRequest) CheckProof(t Ticket, lastID int64) error {
+	if !t.DirectQA {
+		return nil
+	}
+	if r.ProofRole == "" {
+		body := strings.TrimSpace(r.Body)
+		if strings.HasPrefix(body, "Handoff:") || strings.HasPrefix(body, "Review: GO") || strings.HasPrefix(body, "QA: pass") {
+			return fmt.Errorf("%w: use handoff or verdict under the role's claim", ErrForbidden)
+		}
+		return nil
+	}
+	role := r.Actor
+	if role == "senior-engineer" || role == "junior-engineer" {
+		role = RoleEngineer
+	}
+	if r.Actor != HolderBot(r.Holder) || role != r.ProofRole || r.Holder == "" || r.Token == 0 {
+		return fmt.Errorf("%w: proof needs the assigned role's claim", ErrForbidden)
+	}
+	status := StatusInReview
+	if role == RoleEngineer {
+		status = StatusInProgress
+	}
+	if t.Status != status || r.AfterComment != lastID {
+		return fmt.Errorf("%w: proof needs the current handoff or review and ticket status", ErrStatusConflict)
+	}
+	return nil
 }
 
 // Validate checks the request and fills defaults.

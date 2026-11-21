@@ -1455,6 +1455,17 @@ func (tx *txn) addComment(req ticket.CommentRequest) (ticket.Comment, error) {
 	if err := t.CheckFence(req.Holder, req.Token); err != nil {
 		return ticket.Comment{}, err
 	}
+	var last commentDoc
+	if req.ProofRole != "" {
+		err := tx.coll(cComments).findOne(bson.M{"ticket_id": int64(req.ID)}, &last,
+			options.FindOne().SetSort(bson.D{{Key: "_id", Value: -1}}).SetProjection(bson.M{"_id": 1}))
+		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+			return ticket.Comment{}, err
+		}
+	}
+	if err := req.CheckProof(t, last.ID); err != nil {
+		return ticket.Comment{}, err
+	}
 	c := commentDoc{ID: tx.next(&tx.w.Comments), TicketID: int64(req.ID), Author: req.Actor, Body: req.Body, CreatedAt: dt(tx.now)}
 	if err := tx.coll(cComments).insert(c); err != nil {
 		return ticket.Comment{}, err

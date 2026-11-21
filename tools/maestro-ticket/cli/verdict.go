@@ -167,7 +167,7 @@ func runQABasis(ctx context.Context, c *call) error {
 		if d.Status == ticket.StatusInReview && head != "" {
 			result.Head, result.CommentID, result.Route = head, note.ID, "review"
 			result.Passed = qa == head && (d.Criteria == nil || d.Criteria.QA == head)
-			if strings.HasPrefix(note.Body, "Handoff:") {
+			if strings.HasPrefix(firstLine(note.Body), "Handoff:") {
 				result.Route = "direct"
 			}
 		}
@@ -221,18 +221,31 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 		// A replay finds this note on the ticket already, wherever the
 		// ticket went since: the store answers it from the key.
 		replay := slices.ContainsFunc(d.Comments, func(cm ticket.Comment) bool { return cm.Body == b })
-		if d.Status != k.from && !replay {
+		if !d.DirectQA && d.Status != k.from && !replay {
 			return fmt.Errorf("%w: %s is %s, and this note goes on a ticket in %s: post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
 		}
-		if d.DirectQA && d.Criteria == nil && k.name == "qa-pass" && !replay {
-			_, head, _ := recoveryProof(d)
-			if head != shaIn(b) || c.actor != ticket.RoleQALead || ticket.HolderBot(*holder) != c.actor {
-				return fmt.Errorf("%w: QA needs its claim and the current handoff or review at this head", ticket.ErrForbidden)
+		note := ticket.CommentRequest{
+			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,
+		}
+		if d.DirectQA {
+			note.AfterComment = latest(d).ID
+			switch {
+			case k.name == "handoff":
+				note.ProofRole = ticket.RoleEngineer
+			case strings.HasPrefix(k.name, "review-"):
+				note.ProofRole = ticket.RoleReviewer
+			default:
+				note.ProofRole = ticket.RoleQALead
+			}
+			if k.name == "qa-pass" {
+				_, head, _ := recoveryProof(d)
+				if head != shaIn(b) {
+					// Only the original key may replay a withdrawn pass.
+					note.AfterComment = -1
+				}
 			}
 		}
-		cm, err := c.postProof(ctx, s, d, k, ticket.CommentRequest{
-			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,
-		}, *ac, *brief)
+		cm, err := c.postProof(ctx, s, d, k, note, *ac, *brief)
 		if err != nil {
 			return err
 		}
