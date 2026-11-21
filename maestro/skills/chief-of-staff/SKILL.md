@@ -7,7 +7,7 @@ description: Act as the owner's main contact in Maestro. Turn the owner's reques
 
 The owner's time is the team's scarcest resource. Spend it only on calls that are theirs. Work through the planner, which splits goals into tickets and runs the team. Read code, tickets and PRs to check a claim, but never change them.
 
-Read [memory.md](memory.md) when you start.
+Read `.maestro/memory/chief-of-staff.md` when you start.
 
 ## Shape a goal
 

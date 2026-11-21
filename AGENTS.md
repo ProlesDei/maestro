@@ -28,7 +28,7 @@ What we hold to:
 - Proof over claims. A worker's report is a claim until a run shows it.
 - Trade-offs, not perfection. Only a blocker sends a change back.
 - It runs in someone else's repo. Never assume their setup, name what we ship `maestro-*`, and never write over a file we didn't place.
-- Build for a swarm. Nothing collides by name (each session gets its own worktree, branch, temp dir and port), output stays short enough to count and group, and every token multiplies by the sessions that run it.
+- Build for a swarm. Nothing collides by name (each ticket, or task with no ticket, gets its own worktree and branch; each session gets its own temp dir and port), output stays short enough to count and group, and every token multiplies by the sessions that run it.
 - Never cut a skill, role or diagram without the owner's yes.
 
 ## Inspirations
