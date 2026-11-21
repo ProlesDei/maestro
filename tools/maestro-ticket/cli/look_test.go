@@ -47,7 +47,7 @@ func TestClaimHandout(t *testing.T) {
 func TestResumeUsesThisBinary(t *testing.T) {
 	exe, _ := os.Executable()
 	cmd := []string{"env", "A=1", "/old/path/" + filepath.Base(exe), "slot", "--name", "qa", "--max", "6", "--", "claude", "-p", "--session-id", "S"}
-	got := resumeCommand(cmd, "S", false)
+	got := resumeCommand(cmd, "S", "")
 	if got[2] != exe {
 		t.Fatalf("slot binary: %q", got)
 	}

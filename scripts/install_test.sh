@@ -499,7 +499,7 @@ bash "$m/scripts/install.sh" chief "$r" "$c" >"$tmp/out" 2>&1 || fail "install.s
 says "chief project at $c for $cr: open it in T3"
 for f in AGENTS.md CLAUDE.md; do
 	head -c "$(wc -c <"$m/bot-profiles/chief-of-staff/t3.md")" "$c/$f" | cmp -s "$m/bot-profiles/chief-of-staff/t3.md" - || fail "chief: $f doesn't start with t3.md"
-	grep -qF "cd $cr && maestro-ticket" "$c/$f" || fail "chief: $f doesn't name the repo"
+	grep -qF "cd $(printf %q "$cr") && maestro-ticket" "$c/$f" || fail "chief: $f doesn't name the repo"
 	[ -z "$(find "$c/$f" -perm /077)" ] || fail "chief: $f is open to other users"
 done
 [ -z "$(find "$c" -maxdepth 0 -perm /077)" ] || fail "chief: the folder is open to other users"

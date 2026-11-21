@@ -307,6 +307,7 @@ type call struct {
 	idemKey   string
 	args      []string  // positional arguments
 	runCache  *pastRuns // every run, listed once a call (allRuns)
+	span      meterSpan // the meter readings a native worker saw in its run
 	store     struct {  // storePath's answer, so git runs once a call
 		done         bool
 		path, source string

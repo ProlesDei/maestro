@@ -153,6 +153,11 @@ func TestRouteBuild(t *testing.T) {
 	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-aaaaaaaa --opus"}) || len(rt.Send) != 0 || rt.Reply != "" || rt.Outcome != outQuestion {
 		t.Fatalf("a junior's question goes to Opus, unread: %+v", rt)
 	}
+	sol := []string{"maestro-ticket", "native-worker", "--profile", "pro", "--job", "build", "--model", codexSonnet, "--effort", effortHigh}
+	rt = h.route(runs.Record{Job: "build", Ticket: "T-2", Command: sol, Harness: "codex", Reply: "Plan...\nShould the cache be per user?"})
+	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-aaaaaaaa --opus"}) {
+		t.Fatalf("a junior's question on Codex goes to Astra: %+v", rt)
+	}
 	rt = h.route(runs.Record{Job: "build", Ticket: "T-2", Command: opusCmd(), Reply: "Plan...\nShould the cache be per user?"})
 	if !slices.Equal(rt.Do, []string{"maestro-ticket resume R-aaaaaaaa --escalate"}) || len(rt.Send) != 0 {
 		t.Fatalf("Opus asked but posted nothing: it writes the question up: %+v", rt)

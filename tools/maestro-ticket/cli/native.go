@@ -169,12 +169,18 @@ func runNativeWorker(ctx context.Context, c *call) error {
 		if k, _ := findJob(*job); k.lean {
 			cmd.Env = append(cmd.Env, "CLAUDE_CODE_PROMPT_CACHE_TTL=5m")
 		}
-		return c.claudeResult(cmd, *alias)
+		err = c.claudeResult(cmd, *alias)
+	} else {
+		err = codexResult(cmd, c.env.Stdout)
+		if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
+			if e = c.copyNativeUsage(after, ""); e != nil {
+				fmt.Fprintln(c.env.Stderr, "refresh usage:", e)
+			}
+		}
 	}
-	err = codexResult(cmd, c.env.Stdout)
-	if after, e := readProfile(ctx, *alias, p.Harness, p.ConfigDir); e == nil && after.identity == p.Identity && len(after.Windows) > 0 {
-		if e = c.copyNativeUsage(after, ""); e != nil {
-			fmt.Fprintln(c.env.Stderr, "refresh usage:", e)
+	if err == nil {
+		if e := c.learnSpan(filepath.Dir(dir), record, p.Harness); e != nil {
+			fmt.Fprintln(c.env.Stderr, "learn usage:", e)
 		}
 	}
 	return err
@@ -303,7 +309,9 @@ func (c *call) claudeResult(cmd *exec.Cmd, alias string) error {
 				break
 			}
 			if e.Rate.Used != nil && *e.Rate.Used >= 0 && *e.Rate.Used <= 1 && e.Rate.Reset > time.Now().Unix() && e.Rate.Kind != "" {
-				err = saveObservation(root, alias, map[string]paceWindow{e.Rate.Kind: {Used: 100 * *e.Rate.Used, Reset: time.Unix(e.Rate.Reset, 0).UTC(), Read: time.Now().UTC(), Source: "claude"}})
+				w := map[string]paceWindow{e.Rate.Kind: {Used: 100 * *e.Rate.Used, Reset: time.Unix(e.Rate.Reset, 0).UTC(), Read: time.Now().UTC(), Source: "claude"}}
+				c.span.see(w)
+				err = saveObservation(root, alias, w)
 			}
 		case "result":
 			var result map[string]json.RawMessage

@@ -94,7 +94,7 @@ The board lives on MongoDB Atlas. The person sets it up; you can't sign in for t
 4. One database user for Maestro alone, with one custom role and nothing else, so the password can't rewrite the board's history: MongoDB adds up a user's grants, so `readWrite` would allow updates to `events`. `.maestro/src/scripts/runtime-roles.sh maestro` prints the role's privileges on the `maestro` database; give the person that output to enter in Atlas.
 5. The URI with that user's password, naming the `maestro` database.
 
-Then the person runs `maestro-ticket store init --uri-file -` at the repo's root and pastes the URI on stdin. It prints the board's ID and the host, never the URI. A repeat against the same board checks it.
+Then the person runs `maestro-ticket store init --uri-file -` at the repo's root and pastes the URI on stdin. It prints the board's ID and the host, never the URI. A repeat against the same board checks it. Then run `maestro-ticket chief prepare` at the repo's root: it builds the indexes the chief's records use.
 
 ## 7. Subscriptions
 

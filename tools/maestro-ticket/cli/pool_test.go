@@ -21,6 +21,10 @@ func TestPoolModel(t *testing.T) {
 			t.Errorf("%s on %q: %+v; want %s high", c.harness, c.model, got, c.want)
 		}
 	}
+	native := []string{"maestro-ticket", "native-worker", "--profile", "pro", "--job", "build", "--model", codexSonnet, "--effort", effortHigh}
+	if got := resumeCommand(native, "S1", poolModel("codex", modelOpus).Model); flagValue(got, "--model") != codexOpus || !poolAllows("codex", flagValue(got, "--model"), flagValue(got, "--effort")) {
+		t.Fatalf("a Codex junior's --opus resume: %q", got)
+	}
 	if !poolAllows("codex", codexSonnet, "high") || poolAllows("codex", "opus", "high") || poolAllows("claude", "opus", "medium") {
 		t.Fatal("poolAllows lets through a model or effort the pool doesn't run")
 	}
@@ -111,33 +115,70 @@ func TestPacedCodexModel(t *testing.T) {
 	}
 }
 
-// A reading's rise teaches a job's cost only when one run explains it.
+// A run's own first and last readings teach its job's cost, shared with
+// the runs on its sub that ran beside it.
 func TestLearnEstimate(t *testing.T) {
-	from := time.Now().UTC().Add(-time.Hour)
-	to := from.Add(time.Hour)
-	end := from.Add(30 * time.Minute)
-	run := func(alias string, start time.Time, end *time.Time) runs.Record {
-		return runs.Record{Profile: alias, Harness: "claude", Job: "review", State: runs.Done, StartedAt: start, EndedAt: end, PID: 1}
-	}
+	start := time.Now().UTC().Add(-time.Hour)
+	reset := start.Add(5 * time.Hour)
+	r := runs.Record{ID: "R-aaaaaaaa", Profile: "max", Job: "review", State: runs.Running, StartedAt: start, PID: 1}
+	var span meterSpan
+	span.see(map[string]paceWindow{"five_hour": {Used: 10, Reset: reset, Read: start.Add(time.Minute)}})
+	span.see(map[string]paceWindow{"five_hour": {Used: 13, Reset: reset, Read: start.Add(20 * time.Minute)}})
+	span.see(map[string]paceWindow{"five_hour": {Used: 16, Reset: reset, Read: start.Add(40 * time.Minute)}})
 	e := estimates{}
-	learnEstimate(e, "max", "weekly", from, to, 6, []runs.Record{run("max", from.Add(time.Minute), &end)})
-	if e["claude/review/weekly"] != 6 {
-		t.Fatalf("first sample: %v", e)
+	learnEstimate(e, r, "claude", span, []runs.Record{r}, start.Add(time.Hour))
+	if e["claude/review/five_hour"] != 6 {
+		t.Fatalf("alone: %v; want the 6 points it saw rise", e)
 	}
-	learnEstimate(e, "max", "weekly", from, to, 2, []runs.Record{run("max", from.Add(time.Minute), &end)})
-	if got := e["claude/review/weekly"]; got != 4.8 {
-		t.Fatalf("moving average: %v; want 4.8", got)
+	// A second run on the sub at the same time takes half the next rise;
+	// a run on another sub, or one that ended before, takes none.
+	ended := start.Add(-time.Minute)
+	list := []runs.Record{r,
+		{ID: "R-bbbbbbbb", Profile: "max", State: runs.Running, StartedAt: start.Add(5 * time.Minute), PID: 2},
+		{ID: "R-cccccccc", Profile: "pro", State: runs.Running, StartedAt: start, PID: 3},
+		{ID: "R-dddddddd", Profile: "max", State: runs.Done, StartedAt: start.Add(-time.Hour), EndedAt: &ended, PID: 4},
 	}
-	before := e["claude/review/weekly"]
-	// Two runs, one still running, or one started before the first reading: no sample.
-	learnEstimate(e, "max", "weekly", from, to, 30, []runs.Record{run("max", from.Add(time.Minute), &end), run("max", from.Add(2*time.Minute), &end)})
-	learnEstimate(e, "max", "weekly", from, to, 30, []runs.Record{run("max", from.Add(time.Minute), nil)})
-	learnEstimate(e, "max", "weekly", from, to, 30, []runs.Record{run("max", from.Add(-time.Minute), &end)})
-	if e["claude/review/weekly"] != before {
-		t.Fatalf("learned from a reading no single run explains: %v", e)
+	learnEstimate(e, r, "claude", span, list, start.Add(time.Hour))
+	if got := e["claude/review/five_hour"]; got != 5.1 {
+		t.Fatalf("shared: %v; want 0.7*6 + 0.3*3 = 5.1", got)
+	}
+	// One reading, or a reset between them, teaches nothing.
+	var one meterSpan
+	one.see(map[string]paceWindow{"weekly": {Used: 10, Reset: reset, Read: start}})
+	var reset2 meterSpan
+	reset2.see(map[string]paceWindow{"weekly": {Used: 90, Reset: reset, Read: start}})
+	reset2.see(map[string]paceWindow{"weekly": {Used: 1, Reset: reset.Add(time.Hour), Read: start.Add(time.Minute)}})
+	learnEstimate(e, r, "claude", one, []runs.Record{r}, start.Add(time.Hour))
+	learnEstimate(e, r, "claude", reset2, []runs.Record{r}, start.Add(time.Hour))
+	if _, ok := e["claude/review/weekly"]; ok {
+		t.Fatalf("learned from no span: %v", e)
 	}
 	dir := t.TempDir()
 	if got := estimateFor(dir, "claude", "review"); got != defaultEstimate {
 		t.Fatalf("no readings: %v", got)
+	}
+	if err := writeWholeMode(filepath.Join(dir, estimatesFile), []byte(`{"claude/review/five_hour":5.1,"claude/review/weekly":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := estimateFor(dir, "claude", "review"); got != 5.1 {
+		t.Fatalf("learned: %v; want the costliest window", got)
+	}
+}
+
+// A native worker's end writes what it learned beside the store, where
+// the next admission reads it.
+func TestLearnSpanWrites(t *testing.T) {
+	h := newRouteHarness(t)
+	c := h.inProc("reviewer")
+	start := time.Now().UTC().Add(-time.Hour)
+	reset := start.Add(5 * time.Hour)
+	c.span.see(map[string]paceWindow{"five_hour": {Used: 10, Reset: reset, Read: start.Add(time.Minute)}})
+	c.span.see(map[string]paceWindow{"five_hour": {Used: 18, Reset: reset, Read: start.Add(30 * time.Minute)}})
+	r := runs.Record{ID: "R-aaaaaaaa", Profile: "pro", Job: "review", StartedAt: start}
+	if err := c.learnSpan(h.dir, r, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if got := estimateFor(h.dir, "codex", "review"); got != 8 {
+		t.Fatalf("estimate after the run: %v; want 8", got)
 	}
 }

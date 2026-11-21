@@ -98,7 +98,7 @@ if [ "$cmd" = chief ]; then
 	{
 		cat -- "$root/bot-profiles/chief-of-staff/t3.md"
 		# shellcheck disable=SC2016 # literal backticks
-		printf '\n## Where you work\n\nRun every `maestro-ticket` command from the team repo: `cd %s && maestro-ticket ...`.\n' "$repo"
+		printf '\n## Where you work\n\nRun every `maestro-ticket` command from the team repo: `cd %q && maestro-ticket ...`.\n' "$repo"
 	} >"$2/AGENTS.md"
 	cp -- "$2/AGENTS.md" "$2/CLAUDE.md"
 	echo "chief project at $(cd -- "$2" && pwd -P) for $repo: open it in T3"

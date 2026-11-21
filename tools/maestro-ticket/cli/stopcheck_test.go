@@ -198,7 +198,7 @@ func TestStopCheckWalksResumes(t *testing.T) {
 	inProgress(s)
 	note("Escalation: build: which API?")(s)
 	res := s.put(runs.Record{Job: "build", ResumeOf: s.r.ID, StartedAt: time.Now().Add(time.Second),
-		Command: resumeCommand(s.r.Command, "S1", false)})
+		Command: resumeCommand(s.r.Command, "S1", "")})
 	if s.stop(res.ID, stopIn("S1", "done", false)) {
 		t.Fatal("a resume whose session posted its note was blocked")
 	}
@@ -256,7 +256,7 @@ func TestStopCheckFailsOpen(t *testing.T) {
 			return p.ID, stopIn("S3", "done", false)
 		}},
 		{"its resume chain is cut", func(s *stopScene) (string, string) {
-			p := s.put(runs.Record{Job: "build", ResumeOf: "R-bbbbbbbb", Command: resumeCommand(s.r.Command, "S1", false)})
+			p := s.put(runs.Record{Job: "build", ResumeOf: "R-bbbbbbbb", Command: resumeCommand(s.r.Command, "S1", "")})
 			return p.ID, stopIn("S1", "done", false)
 		}},
 	} {

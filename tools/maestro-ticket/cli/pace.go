@@ -81,10 +81,6 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 	if err != nil {
 		return err
 	}
-	learned, err := readEstimates(dir)
-	if err != nil {
-		return err
-	}
 	for key, w := range windows {
 		previous, ok := state[alias][key]
 		if ok && !w.Read.After(previous.Read) {
@@ -102,7 +98,6 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 			// Split this observed delta once. Attribution to Maestro runs is
 			// an estimate; the unassigned portion includes owner and child turns.
 			delta := w.Used - previous.Used
-			learnEstimate(learned, alias, key, previous.Read, w.Read, delta, records)
 			w.Covered = map[string]float64{}
 			for _, r := range records {
 				if r.ID == beforeTurn || r.Profile != alias || r.Unspent || neverRan(r) || r.StartedAt.After(w.Read) || r.EndedAt != nil && !r.EndedAt.After(w.Since) {
@@ -124,14 +119,7 @@ func saveMeter(dir, alias string, windows map[string]paceWindow, beforeTurn stri
 	if err != nil {
 		return err
 	}
-	if err := writeWholeMode(path, data, 0600); err != nil {
-		return err
-	}
-	data, err = json.Marshal(learned)
-	if err != nil {
-		return err
-	}
-	return writeWholeMode(filepath.Join(dir, estimatesFile), data, 0600)
+	return writeWholeMode(path, data, 0600)
 }
 
 // estimatesFile holds what each job costs, learned from meter readings:
@@ -172,30 +160,74 @@ func estimateFor(dir, harness, job string) float64 {
 	return best
 }
 
-// learnEstimate moves a job's estimate toward one reading's rise when
-// one run on alias explains it: the run started and ended between the
-// two readings, and no other run on alias ran then. The rise may include
-// the owner's own use, which makes the estimate err high.
-func learnEstimate(e estimates, alias, window string, from, to time.Time, delta float64, list []runs.Record) {
-	var only *runs.Record
-	for i, r := range list {
-		if r.Profile != alias || r.Unspent || neverRan(r) || r.StartedAt.After(to) || r.EndedAt != nil && !r.EndedAt.After(from) {
-			continue
+// meterSpan is the first and last reading a native worker saw of each
+// window during its run: for Codex, before and after its turn; for Claude,
+// the first and last rate-limit event of its stream.
+type meterSpan map[string][2]paceWindow
+
+func (m *meterSpan) see(windows map[string]paceWindow) {
+	if *m == nil {
+		*m = meterSpan{}
+	}
+	for k, w := range windows {
+		s, ok := (*m)[k]
+		if !ok {
+			s[0] = w
 		}
-		if only != nil {
-			return
+		s[1] = w
+		(*m)[k] = s
+	}
+}
+
+// learnSpan moves r's job's estimate toward what its run spent: each
+// window's rise between the first and last reading it saw, split evenly
+// with the other runs on its sub that ran at the same time. The rise may
+// hold the owner's own use, which makes the estimate err high; a Claude
+// run's first call comes before its first reading, which makes it err low.
+func (c *call) learnSpan(dir string, r runs.Record, harness string) error {
+	if len(c.span) == 0 || r.Job == "" || r.Profile == "" {
+		return nil
+	}
+	unlock, err := lockBoard(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	list, err := runs.List(filepath.Join(dir, "runs"), time.Now(), true)
+	if err != nil {
+		return err
+	}
+	e, err := readEstimates(dir)
+	if err != nil {
+		return err
+	}
+	learnEstimate(e, r, harness, c.span, list, time.Now())
+	data, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	return writeWholeMode(filepath.Join(dir, estimatesFile), data, 0600)
+}
+
+func learnEstimate(e estimates, r runs.Record, harness string, span meterSpan, list []runs.Record, now time.Time) {
+	others := 0
+	for _, o := range list {
+		if o.ID != r.ID && o.Profile == r.Profile && !o.Unspent && !neverRan(o) && !o.StartedAt.After(now) && (o.EndedAt == nil || o.EndedAt.After(r.StartedAt)) {
+			others++
 		}
-		only = &list[i]
 	}
-	if only == nil || only.Job == "" || only.Harness == "" || only.StartedAt.Before(from) || only.EndedAt == nil || only.EndedAt.After(to) {
-		return
+	for window, s := range span {
+		first, last := s[0], s[1]
+		if !first.Reset.Equal(last.Reset) || !last.Read.After(first.Read) || last.Used < first.Used {
+			continue // one reading, or the window reset between them
+		}
+		sample := min(50, max(0.5, (last.Used-first.Used)/float64(1+others)))
+		k := harness + "/" + r.Job + "/" + window
+		if old, ok := e[k]; ok && old > 0 {
+			sample = 0.7*old + 0.3*sample
+		}
+		e[k] = math.Round(sample*100) / 100
 	}
-	sample := min(50, max(0.5, delta))
-	k := only.Harness + "/" + only.Job + "/" + window
-	if old, ok := e[k]; ok && old > 0 {
-		sample = 0.7*old + 0.3*sample
-	}
-	e[k] = math.Round(sample*100) / 100
 }
 
 func (c *call) recordUsage(alias, key, reset string, used float64) error {
@@ -224,6 +256,7 @@ func (c *call) copyNativeUsage(st profileStatus, beforeTurn string) error {
 	if len(windows) == 0 {
 		return errors.New("profile sample: no numeric allowance from the native meter")
 	}
+	c.span.see(windows)
 	dir, err := c.standingDir()
 	if err != nil {
 		return err
