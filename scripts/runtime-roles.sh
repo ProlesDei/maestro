@@ -5,8 +5,8 @@ set -euo pipefail
 case $2 in
 worker)
 	jq -n --arg db "$1" 'def p($c;$a): {resource:{db:$db,collection:$c},actions:$a};
-		[p("";["listCollections"]),p("goal_revisions";["find"]),p("planner_deliveries";["find","update","createIndex"])] +
-		(["meta","tickets","comments","events","idempotency","runs","launches","etas","marks"] |
+		[p("";["listCollections"]),p("events";["find","insert","createCollection","createIndex","listIndexes"]),p("goal_revisions";["find"]),p("planner_deliveries";["find","update","createIndex"])] +
+		(["meta","tickets","comments","idempotency","runs","launches","etas","marks"] |
 		map(p(.;["find","insert","update","remove","createCollection","createIndex","listIndexes"]))) +
 		(["goal_merges","goal_inbox"] | map(p(.;["find","update","insert","createIndex"])))'
 	;;
