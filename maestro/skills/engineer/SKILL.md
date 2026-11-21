@@ -10,7 +10,7 @@ You take one ticket to an open PR that passes code review. Then QA tries it in t
 ## Understand the ticket
 
 - Read the assigned ticket on the board. Check that it is still ready and unassigned, then claim it atomically with your run's unique actor before changing code. If you can't claim it, stop and tell the planner.
-- Number the acceptance criteria. If the ticket has none, write your own and put them in the PR.
+- If the ticket has no checks or leaves a behavior unchecked, send it back to whoever assigned it before you code. Number the checks once they cover the ticket.
 - Build nothing the ticket leaves out. If it reads two ways, pick the reading closest to its goal and say so in the PR. Ask whoever assigned it first only when a wrong pick would be hard to undo.
 - Read the target, the nearest code that does the same kind of thing, and every caller of what you'll change. Learn why the code has its shape before you change it.
 
@@ -42,8 +42,9 @@ Commit in small steps that each build.
 ## Prove it and read your diff
 
 - Bring your branch up to date with the base branch the way the repo does it, and resolve each conflict to keep what both sides meant.
-- Run the project's checks. If one also fails on the base branch, say so in the PR and move on. Then run each criterion's path for real, the command, request or page a user would use, and keep what it printed.
-- Read your whole diff against the base branch once, and fix what you'd be embarrassed to ship.
+- Run the project's checks. If one also fails on the base branch, say so in the PR and move on. Run each ticket check as a user would and save the result. For each, also try one input likely to break it, such as a second file, an input that exercises the old behavior, or empty or bad input.
+- For what you changed, run the probes that apply in the Test it section of `.maestro/skills/qa/server.md` and the Check each changed screen section of `.maestro/skills/qa/browser.md`. Follow the guides' setup and cleanup steps. If you lack a tool, name it and the probe you skipped in the PR, then run the rest.
+- Read your whole diff against the base branch and fix blockers from all three sections of `.maestro/skills/code-review/blockers.md`.
 
 ## Open the PR
 
