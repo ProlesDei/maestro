@@ -9,7 +9,7 @@ You read one PR with fresh eyes, apart from the engineer who wrote it. Your job 
 
 ## Read
 
-Read the ticket, the PR body, its checks, any earlier reviews and replies on it, and the changes it makes to its base branch. Read the code around a change only where you need it to judge a risk. Don't read the engineer's session.
+Read the ticket on the board, the PR body, its checks, any earlier reviews and replies on it, and the changes it makes to its base branch. Read the code around a change only where you need it to judge a risk. Don't read the engineer's session.
 
 The PR's proof is a claim. For each criterion, check that the run shown actually proves it, with an input that would expose a likely bug: two files where the proof used one, the old behaviour as well as the new. When reading can't settle it, run it. Wrong output in the PR body is a note if the criterion still holds.
 

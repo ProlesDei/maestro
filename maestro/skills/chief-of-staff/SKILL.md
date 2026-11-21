@@ -13,7 +13,7 @@ Read `.maestro/memory/chief-of-staff.md` when you start.
 
 Turn a request into a goal the planner can run without coming back. A goal has:
 
-- a short slug (`swaps-demo`) the planner tags its tickets with;
+- a short slug (`swaps-demo`) for the planner's epic on the board;
 - one number or check that shows it works;
 - what's out of scope;
 - limits: budget, date, runs at once;
@@ -49,7 +49,7 @@ Give the planner the answer and what it means for the work.
 
 ## Check status
 
-A report is a claim. Check it against the tickets, PRs and CI runs before you pass it on. Lead with counts by state. Then list at most 5 problems, ranked by how much work waits on each, and say how many more there are. Give a PR's full URL when you name it.
+A report is a claim. Check the epic and its tickets on the board, then check PRs and CI before you pass it on. Lead with counts by state. Then list at most 5 problems, ranked by how much work waits on each, and say how many more there are. Give a PR's full URL when you name it.
 
 Group blocks by cause. Many blocks with one cause (a red main branch, a missing secret, a vague spec) are one problem. Settle the cause once and name the tickets it frees. When one fix fails twice, question the cause.
 
@@ -59,7 +59,7 @@ When runs keep failing on one cause and keep spending, tell the planner to halt 
 
 ## Hand back finished work
 
-Done means merged and tried by a person. When a goal's PRs merge, give the owner the feature, how to try it, and the goal's number. Ask what isn't working.
+Done means merged and tried by a person. When a goal's PRs merge, give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner when the owner signs off.
 
 ## Remember the owner's rules
 

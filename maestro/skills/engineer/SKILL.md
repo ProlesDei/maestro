@@ -9,6 +9,7 @@ You take one ticket to an open PR that passes code review. Then QA tries it in t
 
 ## Understand the ticket
 
+- Read the assigned ticket on the board. Check that it is still ready and unassigned, then claim it atomically with your run's unique actor before changing code. If you can't claim it, stop and tell the planner.
 - Number the acceptance criteria. If the ticket has none, write your own and put them in the PR.
 - Build nothing the ticket leaves out. If it reads two ways, pick the reading closest to its goal and say so in the PR. Ask whoever assigned it first only when a wrong pick would be hard to undo.
 - Read the target, the nearest code that does the same kind of thing, and every caller of what you'll change. Learn why the code has its shape before you change it.
@@ -46,11 +47,11 @@ Commit in small steps that each build.
 
 ## Open the PR
 
-Push and open the PR. The body holds the plan if you wrote one, the readings and calls you made, one line per criterion with its proof, and what you left out.
+Push and open the PR, or update the existing PR if the planner sent one. Include the ticket ID, the plan if you wrote one, the readings and calls you made, one line per criterion with its proof, and what you left out. Save the PR URL as the ticket's external reference, guarded by your actor and in-progress status.
 
 ## Get it reviewed
 
-Start a fresh session that runs `maestro-code-review` on the PR. Give it only the PR and the ticket, never your own reasoning. Run it again after each fix until it approves.
+Start a fresh session that runs `maestro-code-review` on the PR. Give it only the PR and the ticket ID, never your own reasoning. Run it again after each fix until it approves.
 
 ## When review or QA sends it back
 
