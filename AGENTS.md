@@ -1,11 +1,13 @@
 # AGENTS.md
 
-Instructions for coding agents. CLAUDE.md imports this file; edit only this one, and keep it short.
+Instructions for agents working on Maestro. CLAUDE.md imports this file; edit only this one, and keep it short.
 
 ## General principles
 
 - Never create or edit `.md` files or add or edit code comments unless the user explicitly asks.
 - Start with the outcome you want. Work backward to what it would take to get there.
+- Treat token efficiency as a design priority. Ask for the smallest result that can settle the question. Stop once you have enough evidence. Count repeated reads and handoffs across agents.
+- Use `codebase-memory-mcp` to find relevant docs or trace code relationships in the current worktree. If we add Markdown rule files, use the graph to locate the relevant section. Read a known file directly. Refresh the index after unwatched changes.
 - Reason from first principles. Ask what facts set the limits and which assumptions you can test. Question familiar ways of doing things.
 - Question each requirement and name the need it serves. Cut unnecessary parts or steps. Simplify what remains, then make it faster. Automate last.
 - Compare the full cost of a result with the cost of its basic inputs. Find out what accounts for the gap before deciding what to cut.
