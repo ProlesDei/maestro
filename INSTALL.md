@@ -2,20 +2,22 @@
 
 Run these steps from the project you want to use in T3.
 
-## 1. Copy the project rules and chief-of-staff skill
+## 1. Copy the project rules and bot skills
 
 Copy [the Maestro principles](bots/root-principles.md) into the target project's root `AGENTS.md`. Create the file if needed. On updates, replace only the `## Maestro principles` section. For Claude Code, include `@AGENTS.md` in the root `CLAUDE.md` if it doesn't already import it.
 
-Set `bot` to the bot directory in your Maestro checkout. For Claude Code, use `.claude/skills` instead of `.agents/skills`.
+Set `bots` to the `bots` directory in your Maestro checkout. For Claude Code, use `.claude/skills` instead of `.agents/skills`.
 
 ```sh
-bot=/path/to/maestro/bots/chief-of-staff
+bots=/path/to/maestro/bots
 skills=.agents/skills
-dest="$skills/maestro-chief-of-staff"
-mkdir -p "$skills" && mkdir "$dest" && cp "$bot/SKILL.md" "$bot/memory.md" "$dest/"
+mkdir -p "$skills"
+for bot in chief-of-staff engineer code-review; do
+  mkdir "$skills/maestro-$bot" && cp "$bots/$bot/"* "$skills/maestro-$bot/"
+done
 ```
 
-If already installed, keep the project's `memory.md` when updating the skill.
+If already installed, replace each bot's files but keep the project's `chief-of-staff` `memory.md`.
 
 ## 2. Connect the code graph
 
