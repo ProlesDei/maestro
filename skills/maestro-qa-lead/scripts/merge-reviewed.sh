@@ -15,8 +15,11 @@ check_target() {
 detail=$(maestro-ticket get "$id" --json)
 direct=$(jq -er 'if .direct_qa == true then "yes" else "no" end' <<<"$detail")
 check_basis() {
-	maestro-ticket qa-basis "$id" --json |
-		jq -e --arg head "$head" '.head == $head and .passed == true and (.route == "direct" or .route == "review")' >/dev/null
+	local tested_base remote
+	tested_base=$(maestro-ticket qa-basis "$id" --json |
+		jq -er --arg head "$head" 'select(.head == $head and .passed == true and (.route == "direct" or .route == "review")) | .tested_base | strings | select(test("^[0-9a-f]{40}$"))')
+	remote=$(git ls-remote --exit-code origin "refs/heads/$base")
+	[[ ${remote%%$'\t'*} == "$tested_base" ]] || { echo 'base changed since QA pass' >&2; return 1; }
 }
 merge_now() {
 	gh api --include --method PUT "repos/{owner}/{repo}/pulls/$pr/merge" -f sha="$head" -f merge_method=merge

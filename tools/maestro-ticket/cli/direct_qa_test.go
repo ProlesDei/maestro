@@ -35,9 +35,17 @@ func TestPlannerDirectQARouteAndRereview(t *testing.T) {
 	h.env["MAESTRO_TICKET_ACTOR"] = "qa-lead"
 	holder = "qa-lead/check"
 	tok = h.claim("T-1", holder)
-	pass := "QA: pass at " + vsha + " (PR u)"
+	base := strings.Repeat("b", 40)
+	pass := "QA: pass at " + vsha + " (PR u), tier 0, on main at " + base
 	if code, out, errs := h.note("verdict", "T-1", holder, tok, "pass", pass); code != 0 {
 		t.Fatalf("QA pass: %d %s %s", code, out, errs)
+	}
+	var basis struct {
+		TestedBase string `json:"tested_base"`
+	}
+	h.ok(&basis, "qa-basis", "T-1")
+	if basis.TestedBase != base {
+		t.Fatalf("QA pass tested base %q, want %s", basis.TestedBase, base)
 	}
 	if code, out, errs := h.note("verdict", "T-1", holder, tok, "needs-review", "Rereview: QA at "+vsha+": the action also sends mail"); code != 0 {
 		t.Fatalf("rereview: %d %s %s", code, out, errs)

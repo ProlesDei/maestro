@@ -408,6 +408,13 @@ func directQAHandoff(d ticket.Detail) bool {
 // A planner answer to a QA escalation starts another QA run at the same review.
 func qaReceiptID(d ticket.Detail, review ticket.Comment, head string) string {
 	key := fmt.Sprintf("%s.review-%d.qa", d.ID, review.ID)
+	if d.DirectQA {
+		_, _, qa := recoveryProof(d)
+		if qa == head && (d.Criteria == nil || d.Criteria.QA == head) {
+			pass, _ := latestWith(d, "QA: pass at ")
+			return fmt.Sprintf("%s.finish-%d", key, pass.ID)
+		}
+	}
 	escalation, ok := latestWith(d, "Escalation:")
 	if retest, found := latestWith(d, "Retest: planner at "); found && retest.ID > review.ID && retest.ID > escalation.ID &&
 		ticket.HolderBot(retest.Author) == "planner" && shaIn(retest.Body) == head {

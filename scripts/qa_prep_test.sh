@@ -186,7 +186,10 @@ for record in '{"route":"none"}' "$(jq -n --arg h "$H" '{route:"direct",head:$h,
 	if "${attempt[@]}" >/dev/null; then fail "merge accepted invalid QA pass"; fi
 	cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted without current QA proof"
 done
-jq -n --arg h "$H" '{route:"direct",head:$h,passed:true}' >"$FX/basis-T-7.json"
+jq -n --arg h "$H" --arg g "$G0" '{route:"direct",head:$h,passed:true,tested_base:$g}' >"$FX/basis-T-7.json"
+if "${attempt[@]}" >/dev/null 2>&1; then fail "merge accepted a pass on an older base"; fi
+cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted on an untested base"
+jq -n --arg h "$H" --arg g "$G" '{route:"direct",head:$h,passed:true,tested_base:$g}' >"$FX/basis-T-7.json"
 if bash "$merge" T-7 7 "$H" qa-lead/test 2 qa-test main >/dev/null; then fail "merge accepted an outdated lease"; fi
 cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted with a stale lease"
 [[ $("${attempt[@]}") == "$H" ]] || fail "merge refused a current pass"

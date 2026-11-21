@@ -158,15 +158,23 @@ func runQABasis(ctx context.Context, c *call) error {
 			return err
 		}
 		result := struct {
-			Route     string `json:"route"`
-			Head      string `json:"head,omitempty"`
-			CommentID int64  `json:"comment_id,omitempty"`
-			Passed    bool   `json:"passed,omitempty"`
+			Route      string `json:"route"`
+			Head       string `json:"head,omitempty"`
+			CommentID  int64  `json:"comment_id,omitempty"`
+			Passed     bool   `json:"passed,omitempty"`
+			TestedBase string `json:"tested_base,omitempty"`
 		}{Route: "none"}
 		note, head, qa := recoveryProof(d)
 		if d.Status == ticket.StatusInReview && head != "" {
 			result.Head, result.CommentID, result.Route = head, note.ID, "review"
 			result.Passed = qa == head && (d.Criteria == nil || d.Criteria.QA == head)
+			if result.Passed {
+				pass, _ := latestWith(d, "QA: pass at ")
+				line := strings.Fields(firstLine(pass.Body))
+				if n := len(line); n >= 4 && line[n-4] == "on" && line[n-2] == "at" && len(line[n-1]) == 40 && hexSHA.MatchString(line[n-1]) {
+					result.TestedBase = line[n-1]
+				}
+			}
 			if strings.HasPrefix(firstLine(note.Body), "Handoff:") {
 				result.Route = "direct"
 			}
