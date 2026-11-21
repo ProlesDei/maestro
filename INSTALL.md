@@ -78,6 +78,8 @@ Skip this for `code-graph: none`.
 
 For `mcp`: codebase-memory-mcp is a third-party tool, so read its install steps before you run any, and run them with the person's yes. Put its binary on `PATH`, then register it for this repo only: a server named `codebase-memory-mcp`, run by that bare command, in `.mcp.json` at the repo's root (Claude Code's project scope), added beside any servers the team's file already lists, not in the user's settings. A headless `claude -p` session in all-permissions mode, as the bots run, loads a project's `.mcp.json` with no prompt.
 
+Keep Maestro's worktrees out of the graph: add the line `/.maestro/worktrees/` to `.cbmignore` at the repo's root, making the file if the team has none, and commit it. The tool doesn't read git's exclude file, where `install.sh` lists them, so without the line the main checkout's graph holds every function once per worktree. Index by hand only in `full` mode: `fast` and `moderate` skip folders such as `scripts/` as if they held no code. `install.sh check` reports a missing line.
+
 Leave its hooks out. Its installer may add hooks to the user's Claude Code settings: a reminder at every session start, and a gate on search tool calls (on every Bash call in some versions). They run in every session on the machine, the bots' too, where most calls are tests, git and ticket commands, and each one adds tokens that 300 sessions multiply. If it added them, remove them with the person's yes; a newer Maestro may ship a setup for them. `install.sh check` reports a missing registration and warns on any of its hooks it finds.
 
 ### Browser

@@ -487,6 +487,9 @@ if [ "$cmd" = check ]; then
 	if [ "$graph" = mcp ]; then
 		$graphed || problem "code-graph is mcp, but .mcp.json registers no codebase-memory-mcp server: INSTALL.md step 7"
 		command -v codebase-memory-mcp >/dev/null || problem "codebase-memory-mcp isn't on PATH: sessions can't start the code graph"
+		# It reads no git exclude file, so only this keeps worktrees out.
+		grep -qE '^/?\.maestro/worktrees/?[[:space:]]*$' "$target/.cbmignore" 2>/dev/null ||
+			warn ".cbmignore doesn't list /.maestro/worktrees/: the code graph indexes every worktree into the main checkout's graph: INSTALL.md step 7"
 	elif $graphed; then
 		warn "code-graph is none, but .mcp.json registers codebase-memory-mcp: set code-graph to mcp, or remove the server"
 	fi
