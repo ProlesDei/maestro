@@ -4,6 +4,7 @@ Instructions for coding agents. CLAUDE.md imports this file; edit only this one,
 
 ## General principles
 
+- Never create or edit `.md` files or add or edit code comments unless the user explicitly asks.
 - Start with the outcome you want. Work backward to what it would take to get there.
 - Reason from first principles. Ask what facts set the limits and which assumptions you can test. Question familiar ways of doing things.
 - Question each requirement and name the need it serves. Cut unnecessary parts or steps. Simplify what remains, then make it faster. Automate last.
