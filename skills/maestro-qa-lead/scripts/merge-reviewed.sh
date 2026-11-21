@@ -46,7 +46,7 @@ else
 fi
 view=$(gh pr view "$pr" --json state,headRefOid,baseRefName,mergeCommit)
 if [[ $criteria == null ]] && jq -e '.state == "OPEN"' <<<"$view" >/dev/null; then
-	gh pr merge "$pr" --disable-auto >&2
+	gh pr merge "$pr" --disable-auto >&2 || true
 	gh pr view "$pr" --json autoMergeRequest -q '"auto-merge off: \(.autoMergeRequest == null)"' >&2
 fi
 jq -er --arg base "$base" --arg head "$head" \
