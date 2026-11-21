@@ -5,7 +5,7 @@ An agent follows these steps at the root of the team's repo, with a Maestro chec
 ## 1. Place Maestro
 
 1. Before you write anything, check every path below. If one holds something Maestro didn't place, or `AGENTS.md` has a `## Maestro principles` section outside the markers, stop and report it.
-2. Copy the checkout's `maestro/` folder to `.maestro/` in the repo. On an update, replace everything in `.maestro/` except `memory.md`.
+2. Copy the checkout's `maestro/` folder to `.maestro/` in the repo. On an update, replace everything in `.maestro/` except `memory/`.
 3. For each folder in `.maestro/skills/`, make sure `.agents/skills/` and `.claude/skills/` each hold a relative symlink `maestro-<folder>` that points to it.
 4. Put the text of the checkout's [principles.md](principles.md) at the end of the root `AGENTS.md`, between the lines `<!-- maestro:start -->` and `<!-- maestro:end -->`. Create the file if needed. On an update, replace only what sits between the markers.
 5. Make sure the root `CLAUDE.md` imports `@AGENTS.md`. Create the file if needed.
