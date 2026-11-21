@@ -44,9 +44,10 @@ if [[ $criteria == null ]]; then
 else
 	merge_versioned
 fi
-view=$(gh pr view "$pr" --json state,headRefOid,baseRefName,mergeCommit,autoMergeRequest)
-if [[ $criteria == null ]] && jq -e '.state == "OPEN" and .autoMergeRequest != null' <<<"$view" >/dev/null; then
+view=$(gh pr view "$pr" --json state,headRefOid,baseRefName,mergeCommit)
+if [[ $criteria == null ]] && jq -e '.state == "OPEN"' <<<"$view" >/dev/null; then
 	gh pr merge "$pr" --disable-auto >&2
+	gh pr view "$pr" --json autoMergeRequest -q '"auto-merge off: \(.autoMergeRequest == null)"' >&2
 fi
 jq -er --arg base "$base" --arg head "$head" \
 	'select(.state == "MERGED" and .baseRefName == $base and .headRefOid == $head) | .mergeCommit.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<<"$view"
