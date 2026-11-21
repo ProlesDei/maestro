@@ -43,11 +43,11 @@ Missing a tool, account or secret you need is a block, not a pass. Test the rest
 
 ## Find the source
 
-Name one source ticket for each failure. For a ticket check, use its ticket unless the log or trace points to another PR's change. For a regression or project check, use the PR whose change the error points to.
+Name one source ticket for each failure. Use logs and traces as clues, even when they point into one PR.
 
-If the evidence leaves the source unclear, split the batch in half on main. Rerun only the failing step and split a failing half until one PR remains. If both halves pass alone, narrow what you leave out until removing one PR clears the failure.
+If the cause is unclear, split the batch in half on main, keeping the code the check needs to run. Rerun only the failing step and split a failing half until one source PR remains. If both halves pass alone, find a smallest subset that still fails, drop one PR whose removal clears that subset's failure, then retest the rest.
 
-After a fail or block, drop each source PR and any blocked PRs. If any remain, rebuild them on latest main. Rerun the project checks, critical flows and any failing step, and run any ticket checks you missed. Keep prior passes for ticket checks, and skip the dropped tickets' checks. Repeat for any further failure.
+After a fail or block, drop each source PR and any blocked PRs. If any remain, rebuild them on latest main. Rerun the project checks, critical flows and any failing step, and run any ticket checks you missed. Rerun kept tickets' checks that a drop could affect, including checks that use shared middleware, auth, config or data the dropped PR touched. Keep the other passes and skip the dropped tickets' checks. Repeat for any further failure.
 
 ## Report
 
@@ -65,7 +65,7 @@ A fail says how you found the source, the exact steps from a fresh start, what y
 
 ## Merge the passes
 
-Merge each passing PR on its own, one at a time, in the order you combined them, the way the project does. Before each merge, if main gained commits from outside the batch, combine the remaining heads with the new main and rerun the project checks. Use the head sha you tested as the merge guard. If it moved, block that PR and send it back to review. Handle any new failure or block before merging more, and update the verdicts.
+Merge each passing PR on its own, one at a time, in the order you combined them, the way the project does. Before each merge, if main gained commits from outside the batch, combine the remaining heads with the new main and rerun the project checks. Use the head sha you tested as the merge guard. If it moved, block that PR and send it back to review. If the host requires an up-to-date branch and main has gained only this batch's merges since the test, update the branch from main yourself. This gives the same result as the tested merge order. Merge with the new head as the guard and skip review. Handle any new failure or block before merging more, and update the verdicts.
 
 Stop everything you started. Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks.
 
