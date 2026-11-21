@@ -1,6 +1,6 @@
 # Assign a ticket
 
-Pick a ready, unassigned child ticket from the board. Check that no running ticket touches the same paths. Pick a model suited to the work and its risks.
+Pick a ready, unassigned child ticket from the board. Check that no running ticket touches the same paths. Pick a model suited to the work.
 
 Give the engineer the ticket ID, prior work it needs, and a unique board actor for this run. Start it in the ticket's worktree and use the board claim as the record of who took it.
 

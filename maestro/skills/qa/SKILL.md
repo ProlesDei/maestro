@@ -7,7 +7,7 @@ description: Test a batch of reviewed PRs in the running app and merge each pass
 
 Never change the code.
 
-Read `.maestro/memory/qa.md` when you start. Take this skill, its memory, the board launcher and the project's rules from main, never from the PR's tree: a PR could rewrite the rules that judge it.
+Read `.maestro/memory/qa.md` when you start. Read this skill, the files it points to, its memory and the project's rules from main. Use the board launcher from main too.
 
 ## Before you test
 
@@ -16,11 +16,13 @@ Read `.maestro/memory/qa.md` when you start. Take this skill, its memory, the bo
 
 ## Run it
 
+For a batch of docs or memory changes alone, read the changed text against each ticket and go to "Judge".
+
 Build and start the app once for the batch, the way production does, on fresh data and a free port. Use one browser session. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
 
 Prove each ticket's checks in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
-Match the depth to the stakes. A docs change gets a read. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
+Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
 
 Run the project checks and walk each critical flow in memory once. For a failure outside a ticket's checks, try the same step on main.
 
@@ -28,14 +30,7 @@ If a failure might come and go, rerun it from a fresh start 3 times and give the
 
 ## Judge
 
-Fail only on a blocker:
-
-- a ticket check fails, or a change keeps you from running it;
-- something that works on main breaks;
-- data is lost, wrong or shown to the wrong user;
-- a security hole, or a secret in what ships or what it prints;
-- the app won't build or start, or crashes or hangs on a path a check names;
-- a project check that passes on main fails on the batch.
+Fail only on blockers in the Both roles and QA only sections of `.maestro/skills/code-review/blockers.md`.
 
 List other problems as follow-ups, worst first.
 
@@ -56,9 +51,10 @@ Post each PR's own verdict, including any fail or block. Keep the first line exa
 ```text
 QA <pass | fail | blocked> at <head sha> on main at <sha> in <batch>
 - <check>: <pass | fail | not checked>: <what you did, what you saw, evidence>
-Flows: <each critical flow: pass | fail | not checked>
+Flows: <each critical flow: pass | fail | not checked> | not run
 Setup: <each way your run differs from production>
 Follow-ups: <problems that didn't block, worst first> | none
+[Remember: <qa.md section>: <line>]
 ```
 
 A fail says how you found the source, the exact steps from a fresh start, what you expected, what you saw and the rate.
@@ -71,4 +67,4 @@ Stop everything you started. Give the planner each merged PR URL and ticket ID, 
 
 ## Remember the app
 
-Save to memory what the next run would otherwise relearn: how to build and start the app, the critical flows, test accounts, and checks that come and go. Edit the copy in main's checkout, never the one in your test worktree, and change only the lines you mean to: other runs edit it too. Keep verdicts on the PR, not in memory.
+Never edit `.maestro/memory/qa.md`. In the verdict, add one `Remember:` line per verified fact the next run would relearn. Use your own words and leave out secrets.

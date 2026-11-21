@@ -33,7 +33,7 @@ Risk: low | high: <why>
 - tests one behavior, so a failure says what broke;
 - starts from a state QA can set up in its test build, and says how when it isn't obvious;
 - names the input and the exact result, with numbers instead of adjectives: "responds within 2 s", not "fast";
-- runs in the app or as a command, so QA gets a clear yes or no;
+- runs in the app or as a command, or names the exact text to check for a docs change, so QA gets a clear yes or no;
 - gives the same answer on every run, with no result that hangs on timing or order;
 - for behavior the ticket changes, fails on today's code and passes once the change lands; for behavior that must stay, passes on both.
 
@@ -47,7 +47,7 @@ Write one for the main path, then one for each case that must hold: the empty st
 
 **Touches.** The paths the change edits, as narrow as you can. Tickets whose paths overlap don't run at the same time: `steps/assign-ticket.md` holds one back. That isn't a reason to wait on it.
 
-**Risk.** High for auth, money, data loss or migrations, public APIs, concurrency, or scope you couldn't pin down. Low otherwise. Risk sets the engineer's model and how deep review goes.
+**Risk.** High for auth, money, data loss or migrations, public APIs, concurrency, or scope you couldn't pin down. Low otherwise. Risk sets how deep review and QA go.
 
 **Size.** One PR a reviewer can read in one sitting. Split by behavior when it grows past that. Say each thing once: Context doesn't repeat what a check shows.
 
