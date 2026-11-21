@@ -44,6 +44,11 @@ case "${args[0]} ${args[1]}" in
 "api repos/{owner}/{repo}/issues/"*)
 	n=${args[1]#*issues/}; f=$FX/comments-${n%%/*}.json ;;
 "pr view") f=$FX/pr-${args[2]}.json ;;
+"pr merge")
+	f=$FX/pr-${args[2]}.json
+	[[ ${args[3]} == --merge && ${args[4]} == --match-head-commit ]] || exit 9
+	jq -e --arg h "${args[5]}" 'select(.headRefOid == $h) | .state="MERGED" | .mergeCommit={oid:$h}' "$f" >"$f.merged" || exit 9
+	mv "$f.merged" "$f"; exit 0 ;;
 *) echo "gh stand-in: ${args[*]}" >&2; exit 9 ;;
 esac
 [ -f "$f" ] || { [ "${args[0]}" = api ] && f=$FX/empty.json; }
@@ -53,6 +58,8 @@ EOF
 cat >"$tmp/bin/maestro-ticket" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = branch ]; then echo "${BOARD_PREFIX:-maestro/}${2-}"; exit 0; fi
+if [ "$1 $3" = "qa-basis --json" ]; then cat "$FX/basis-$2.json"; exit $?; fi
+if [ "$1 $2" = "criteria status" ]; then echo null; exit 0; fi
 [ "$1 $3" = "get --json" ] || exit 9
 [ -z "${MT_FAIL-}" ] || exit 1
 cat "$FX/ticket-$2.json"
@@ -146,6 +153,35 @@ env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTE
 has merged=yes
 [ "$(git -C "$(val R)" rev-parse HEAD^2)" = "$G" ] || fail "no identity: G isn't merged"
 git config --unset user.useConfigOnly
+
+# Direct tickets use the store's current basis even if the trail has an old GO.
+jq '.direct_qa = true' "$FX/ticket-T-7.json" >"$tmp/direct.json"
+mv "$tmp/direct.json" "$FX/ticket-T-7.json"
+jq -n --arg h "$H" '{route:"direct",head:$h}' >"$FX/basis-T-7.json"
+qa 7
+has "direct_head=$H"
+has review_go=none
+echo '{"route":"none"}' >"$FX/basis-T-7.json"
+qa 7
+has direct_head=none
+has review_go=none
+jq -n --arg h "$H" '{route:"review",head:$h}' >"$FX/basis-T-7.json"
+qa 7
+has direct_head=none
+has "review_go=$H"
+
+# The merge helper accepts only the board's current QA pass at the PR head.
+merge=$here/skills/maestro-qa-lead/scripts/merge-reviewed.sh
+attempt=(bash "$merge" T-7 7 "$H" qa-lead/test 1 qa-test main)
+cp "$FX/pr-7.json" "$tmp/open.json"
+for record in '{"route":"none"}' "$(jq -n --arg h "$H" '{route:"direct",head:$h,passed:false}')" "$(jq -n --arg h "$K" '{route:"direct",head:$h,passed:true}')"; do
+	echo "$record" >"$FX/basis-T-7.json"
+	if "${attempt[@]}" >/dev/null; then fail "merge accepted invalid QA pass"; fi
+	cmp "$FX/pr-7.json" "$tmp/open.json" || fail "merge attempted without current QA proof"
+done
+jq -n --arg h "$H" '{route:"direct",head:$h,passed:true}' >"$FX/basis-T-7.json"
+[[ $("${attempt[@]}") == "$H" ]] || fail "merge refused a current pass"
+mv "$tmp/open.json" "$FX/pr-7.json"
 
 # What review passed: its latest Review: comment, and only a GO. A GO at
 # another sha is that sha, which isn't H.

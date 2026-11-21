@@ -806,7 +806,9 @@ func (c *call) look(ctx context.Context, s ticket.Store, o lookOpts) (lookOut, e
 				if !ok {
 					continue
 				}
-				if answerAfterKickback(d) {
+				if directQAHandoff(d) {
+					hand("qa-lead", "qa "+id.String(), id)
+				} else if answerAfterKickback(d) {
 					judgeIt(t, "rerun", "back in review after a ruling: "+firstLine(latest(d).Body), fmt.Sprint(latest(d).ID))
 				} else {
 					hand("reviewer", "review "+id.String(), id)

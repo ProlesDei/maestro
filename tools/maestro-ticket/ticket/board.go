@@ -42,6 +42,7 @@ type BoardTicket struct {
 	Parked        string      `json:"parked"`
 	Goal          string      `json:"goal"`
 	Tier          string      `json:"tier"`
+	DirectQA      bool        `json:"direct_qa,omitempty"`
 	Version       int64       `json:"version"`
 	Lease         *BoardLease `json:"lease"`
 	Token         int64       `json:"token"`

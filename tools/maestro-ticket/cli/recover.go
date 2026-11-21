@@ -357,24 +357,52 @@ var passedHead = regexp.MustCompile(`^QA: pass at ([0-9a-f]{40})(?: |$)`)
 
 // Read proof in ticket order. A later kickback, new handoff or retest invalidates it.
 func recoveryProof(d ticket.Detail) (review ticket.Comment, head, qa string) {
+	direct := d.DirectQA && d.Tries == 0
 	for _, note := range d.Comments {
 		line := firstLine(note.Body)
 		switch {
-		case strings.HasPrefix(line, "Kickback:"), strings.HasPrefix(line, "Rereview:"), strings.HasPrefix(line, "Handoff:"):
+		case strings.HasPrefix(line, "Handoff:"):
+			review, head, qa = ticket.Comment{}, "", ""
+			actor := ticket.HolderBot(note.Author)
+			if direct && (actor == "senior-engineer" || actor == "junior-engineer") {
+				if sha := hexSHA.FindString(line); sha != "" {
+					review, head = note, sha
+				}
+			}
+		case strings.HasPrefix(line, "Kickback:"), strings.HasPrefix(line, "Rereview:"), strings.HasPrefix(line, "Escalation: review"):
+			direct = false
 			review, head, qa = ticket.Comment{}, "", ""
 		case strings.HasPrefix(line, "Review:"):
+			direct = false
 			review, head, qa = ticket.Comment{}, "", ""
 			if m := reviewedHead.FindStringSubmatch(line); m != nil && ticket.HolderBot(note.Author) == "reviewer" {
 				review, head = note, m[1]
 			}
-		case strings.HasPrefix(line, "QA:"), strings.HasPrefix(line, "Retest:"):
+		case strings.HasPrefix(line, "QA:"), strings.HasPrefix(line, "Retest:"), strings.HasPrefix(line, "Escalation: QA"):
 			qa = ""
 			if m := passedHead.FindStringSubmatch(line); m != nil && ticket.HolderBot(note.Author) == "qa-lead" {
 				qa = m[1]
 			}
 		}
 	}
+	if head != "" && d.Criteria != nil {
+		proof := d.Criteria.Review
+		if strings.HasPrefix(review.Body, "Handoff:") {
+			proof = d.Criteria.Direct
+		}
+		if proof != head {
+			return ticket.Comment{}, "", ""
+		}
+	}
 	return
+}
+
+func directQAHandoff(d ticket.Detail) bool {
+	if !d.DirectQA {
+		return false
+	}
+	note, head, _ := recoveryProof(d)
+	return head != "" && strings.HasPrefix(note.Body, "Handoff:")
 }
 
 // A planner answer to a QA escalation starts another QA run at the same review.
@@ -453,7 +481,7 @@ func (c *call) recoverReviews(ctx context.Context, s ticket.Store, dir, board st
 			return err
 		}
 		note, head, qa := recoveryProof(d)
-		if head == "" || d.Criteria != nil && d.Criteria.Review != head {
+		if head == "" {
 			continue
 		}
 		key := qaReceiptID(d, note, head)

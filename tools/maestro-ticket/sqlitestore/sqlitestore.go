@@ -36,7 +36,7 @@ const (
 // migrations[i] moves the schema from version i to i+1. A new store runs
 // every step in order, so fresh and upgraded stores share one path. Never
 // edit a step that has shipped; add a new one.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10}
+var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11}
 
 // schemaVersion is the version this build writes.
 var schemaVersion = len(migrations)
@@ -274,6 +274,8 @@ ALTER TABLE tickets ADD COLUMN tier TEXT NOT NULL DEFAULT '';
 const schemaV10 = `
 CREATE INDEX IF NOT EXISTS idempotency_created ON idempotency(created_at);
 `
+
+const schemaV11 = `ALTER TABLE tickets ADD COLUMN direct_qa INTEGER NOT NULL DEFAULT 0;`
 
 // Options tune a Store. The zero value is fine for production.
 type Options struct {
@@ -518,7 +520,7 @@ func (s *Store) clock(ctx context.Context, q querier) (int64, error) {
 func msTime(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 
 const ticketCols = `id, title, body, type, status, role, priority, created_by, owner, tries, lease_expiries,
-	blocked_from, parked, goal, tier, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at,
+	blocked_from, parked, goal, tier, direct_qa, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at,
 	(SELECT group_concat(depends_on, ',' ORDER BY depends_on) FROM deps WHERE deps.ticket_id = tickets.id),
 	(SELECT group_concat(area, char(10) ORDER BY area) FROM areas WHERE areas.ticket_id = tickets.id),
 	CASE WHEN lease_holder IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM events
@@ -541,7 +543,7 @@ func (s *Store) scanTicket(row scanner, nowMS int64) (ticket.Ticket, error) {
 		revivals         int
 	)
 	err := row.Scan(&t.ID, &t.Title, &t.Body, &typ, &status, &t.Role, &t.Priority, &t.CreatedBy, &t.Owner,
-		&t.Tries, &t.LeaseExpiries, &blockedFrom, &parked, &t.Goal, &t.Tier, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas, &revivals)
+		&t.Tries, &t.LeaseExpiries, &blockedFrom, &parked, &t.Goal, &t.Tier, &t.DirectQA, &t.Version, &holder, &token, &expires, &created, &updated, &deps, &areas, &revivals)
 	if err != nil {
 		return t, err
 	}
@@ -825,10 +827,10 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 				}
 			}
 			res, err := tx.ExecContext(ctx, `INSERT INTO tickets
-				(title, body, type, status, role, priority, created_by, owner, blocked_from, parked, goal, tier, tries, version, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+				(title, body, type, status, role, priority, created_by, owner, blocked_from, parked, goal, tier, direct_qa, tries, version, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 				req.Title, req.Body, req.Type, req.Status, req.Role, *req.Priority, req.Actor, req.Owner, blockedFrom,
-				req.Parked, goal, tier, tries, now, now)
+				req.Parked, goal, tier, req.DirectQA, tries, now, now)
 			if err != nil {
 				return ticket.Ticket{}, err
 			}
@@ -1651,7 +1653,7 @@ func (s *Store) applyTransition(ctx context.Context, tx *sql.Tx, req ticket.Tran
 	}
 	data := map[string]any{"from": t.Status, "to": req.To}
 	if req.Note != "" {
-		data["note"] = req.Note
+		data["note"] = req.EventNote()
 	}
 	if parked != "" && parked != t.Parked {
 		data["parked"] = parked

@@ -40,6 +40,7 @@ type ticketDoc struct {
 	Parked        string           `bson:"parked"`
 	Goal          string           `bson:"goal"`
 	Tier          string           `bson:"tier"`
+	DirectQA      bool             `bson:"direct_qa,omitempty"`
 	Version       int64            `bson:"version"`
 	Lease         *leaseDoc        `bson:"lease"`
 	Token         int64            `bson:"token"`
@@ -93,7 +94,7 @@ func toTicket(d ticketDoc, now int64, revivals int) ticket.Ticket {
 		ID: ticket.ID(d.ID), Title: d.Title, Body: d.Body, Type: ticket.Type(d.Type), Status: ticket.Status(d.Status),
 		Role: d.Role, Priority: d.Priority, CreatedBy: d.CreatedBy, Owner: d.Owner, Tries: d.Tries,
 		LeaseExpiries: d.LeaseExpiries, BlockedFrom: ticket.Status(d.BlockedFrom), Parked: ticket.Parked(d.Parked),
-		Goal: d.Goal, Tier: d.Tier, Version: d.Version,
+		Goal: d.Goal, Tier: d.Tier, DirectQA: d.DirectQA, Version: d.Version,
 		DependsOn: []ticket.ID{}, Areas: []string{},
 		CreatedAt: msTime(int64(d.CreatedAt)), UpdatedAt: msTime(int64(d.UpdatedAt)),
 	}
@@ -443,7 +444,7 @@ func (s *Store) Create(ctx context.Context, req ticket.CreateRequest) (ticket.Ti
 			doc := ticketDoc{
 				ID: int64(id), Title: req.Title, Body: req.Body, Type: string(req.Type), Status: string(req.Status),
 				Role: req.Role, Priority: *req.Priority, CreatedBy: req.Actor, Owner: req.Owner, Tries: tries,
-				BlockedFrom: blockedFrom, Parked: string(req.Parked), Goal: goal, Tier: tier, Version: 1,
+				BlockedFrom: blockedFrom, Parked: string(req.Parked), Goal: goal, Tier: tier, DirectQA: req.DirectQA, Version: 1,
 				Deps: deps, Areas: nonNil(req.Areas), CreatedAt: dt(tx.now), UpdatedAt: dt(tx.now),
 			}
 			if s.boardID != "" && goal != "" {
@@ -1406,7 +1407,7 @@ func (tx *txn) moveTicket(req ticket.TransitionRequest, clarification bool) (tic
 	}
 	data := map[string]any{"from": t.Status, "to": req.To}
 	if req.Note != "" {
-		data["note"] = req.Note
+		data["note"] = req.EventNote()
 	}
 	if parked != "" && parked != t.Parked {
 		data["parked"] = parked

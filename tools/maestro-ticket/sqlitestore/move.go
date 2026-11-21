@@ -115,13 +115,13 @@ func (m *Mover) Board() (ticket.Board, error) {
 		Idempotency: []ticket.BoardIdem{}, Runs: []ticket.BoardRun{}, Launches: []ticket.BoardLaunch{}, ETAs: []ticket.BoardETA{}}
 	byID := map[int64]int{}
 	err := m.each(`SELECT id, title, body, type, status, role, priority, created_by, owner, tries, lease_expiries,
-		COALESCE(blocked_from, ''), parked, goal, tier, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at
+		COALESCE(blocked_from, ''), parked, goal, tier, direct_qa, version, lease_holder, lease_token, lease_expires_at, created_at, updated_at
 		FROM tickets ORDER BY id`, func(r *sql.Rows) error {
 		var t ticket.BoardTicket
 		var holder sql.NullString
 		var expires sql.NullInt64
 		err := r.Scan(&t.ID, &t.Title, &t.Body, &t.Type, &t.Status, &t.Role, &t.Priority, &t.CreatedBy, &t.Owner, &t.Tries,
-			&t.LeaseExpiries, &t.BlockedFrom, &t.Parked, &t.Goal, &t.Tier, &t.Version, &holder, &t.Token, &expires, &t.CreatedAt, &t.UpdatedAt)
+			&t.LeaseExpiries, &t.BlockedFrom, &t.Parked, &t.Goal, &t.Tier, &t.DirectQA, &t.Version, &holder, &t.Token, &expires, &t.CreatedAt, &t.UpdatedAt)
 		if holder.Valid {
 			t.Lease = &ticket.BoardLease{Holder: holder.String, Expires: expires.Int64}
 		}
@@ -302,10 +302,10 @@ func (m *Mover) Replace(b ticket.Board) error {
 			holder, expires = t.Lease.Holder, t.Lease.Expires
 		}
 		_, err := m.tx.ExecContext(m.ctx, `INSERT INTO tickets (id, title, body, type, status, role, priority, created_by, owner,
-			tries, lease_expiries, blocked_from, parked, goal, tier, version, lease_holder, lease_token, lease_expires_at,
-			created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tries, lease_expiries, blocked_from, parked, goal, tier, direct_qa, version, lease_holder, lease_token, lease_expires_at,
+			created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			t.ID, t.Title, t.Body, t.Type, t.Status, t.Role, t.Priority, t.CreatedBy, t.Owner, t.Tries, t.LeaseExpiries,
-			nullText(t.BlockedFrom), t.Parked, t.Goal, t.Tier, t.Version, holder, t.Token, expires, t.CreatedAt, t.UpdatedAt)
+			nullText(t.BlockedFrom), t.Parked, t.Goal, t.Tier, t.DirectQA, t.Version, holder, t.Token, expires, t.CreatedAt, t.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("write %s: %w", ticket.ID(t.ID), err)
 		}

@@ -207,7 +207,7 @@ func (s *Store) load(ctx context.Context, b ticket.Board) error {
 	for i, t := range b.Tickets {
 		d := ticketDoc{ID: t.ID, Title: t.Title, Body: t.Body, Type: t.Type, Status: t.Status, Role: t.Role, Priority: t.Priority,
 			CreatedBy: t.CreatedBy, Owner: t.Owner, Tries: t.Tries, LeaseExpiries: t.LeaseExpiries, BlockedFrom: t.BlockedFrom,
-			Parked: t.Parked, Goal: t.Goal, Tier: t.Tier, Version: t.Version, Token: t.Token,
+			Parked: t.Parked, Goal: t.Goal, Tier: t.Tier, DirectQA: t.DirectQA, Version: t.Version, Token: t.Token,
 			Deps: nonNil(slices.Clone(t.Deps)), Areas: nonNil(slices.Clone(t.Areas)),
 			CreatedAt: dt(t.CreatedAt), UpdatedAt: dt(t.UpdatedAt)}
 		slices.Sort(d.Deps)
@@ -391,7 +391,7 @@ func (s *Store) board(ctx context.Context) (ticket.Board, error) {
 	for _, d := range ts {
 		t := ticket.BoardTicket{ID: d.ID, Title: d.Title, Body: d.Body, Type: d.Type, Status: d.Status, Role: d.Role, Priority: d.Priority,
 			CreatedBy: d.CreatedBy, Owner: d.Owner, Tries: d.Tries, LeaseExpiries: d.LeaseExpiries, BlockedFrom: d.BlockedFrom,
-			Parked: d.Parked, Goal: d.Goal, Tier: d.Tier, Version: d.Version, Token: d.Token,
+			Parked: d.Parked, Goal: d.Goal, Tier: d.Tier, DirectQA: d.DirectQA, Version: d.Version, Token: d.Token,
 			Deps: nonNil(slices.Clone(d.Deps)), Areas: nonNil(slices.Clone(d.Areas)),
 			CreatedAt: int64(d.CreatedAt), UpdatedAt: int64(d.UpdatedAt)}
 		slices.Sort(t.Deps)

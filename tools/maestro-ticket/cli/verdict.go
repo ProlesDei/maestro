@@ -146,6 +146,35 @@ func runHandoff(ctx context.Context, c *call) error {
 	})
 }
 
+// runQABasis reports which exact head has current authority to enter QA.
+func runQABasis(ctx context.Context, c *call) error {
+	return c.withStore(ctx, func(s ticket.Store) error {
+		id, err := c.idArg()
+		if err != nil {
+			return err
+		}
+		d, err := s.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		result := struct {
+			Route     string `json:"route"`
+			Head      string `json:"head,omitempty"`
+			CommentID int64  `json:"comment_id,omitempty"`
+			Passed    bool   `json:"passed,omitempty"`
+		}{Route: "none"}
+		note, head, qa := recoveryProof(d)
+		if d.Status == ticket.StatusInReview && head != "" {
+			result.Head, result.CommentID, result.Route = head, note.ID, "review"
+			result.Passed = qa == head && (d.Criteria == nil || d.Criteria.QA == head)
+			if strings.HasPrefix(note.Body, "Handoff:") {
+				result.Route = "direct"
+			}
+		}
+		return c.out(result, func(w io.Writer) { fmt.Fprintln(w, strings.TrimSpace(result.Route+" "+result.Head)) })
+	})
+}
+
 type posted struct {
 	Kind    string         `json:"kind"`
 	Comment ticket.Comment `json:"comment"`
@@ -195,6 +224,12 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 		if d.Status != k.from && !replay {
 			return fmt.Errorf("%w: %s is %s, and this note goes on a ticket in %s: post nothing", ticket.ErrStatusConflict, id, d.Status, k.from)
 		}
+		if d.DirectQA && d.Criteria == nil && k.name == "qa-pass" && !replay {
+			_, head, _ := recoveryProof(d)
+			if head != shaIn(b) || c.actor != ticket.RoleQALead || ticket.HolderBot(*holder) != c.actor {
+				return fmt.Errorf("%w: QA needs its claim and the current handoff or review at this head", ticket.ErrForbidden)
+			}
+		}
 		cm, err := c.postProof(ctx, s, d, k, ticket.CommentRequest{
 			ID: id, Body: b, Holder: *holder, Token: *token, Actor: c.actor, IdempotencyKey: c.idemKey,
 		}, *ac, *brief)
@@ -207,8 +242,16 @@ func (c *call) postNote(ctx context.Context, cmd string, kindOf func(string) (no
 			if sha := shaIn(b); sha != "" {
 				note += " " + sha
 			}
+			directQA := false
+			if k.name == "handoff" && d.DirectQA {
+				current, err := s.Get(ctx, id)
+				if err != nil {
+					return err
+				}
+				directQA = directQAHandoff(current)
+			}
 			t, err := s.Transition(ctx, ticket.TransitionRequest{
-				ID: id, From: k.from, To: k.to, Holder: *holder, Token: *token, Note: note, Release: k.release,
+				ID: id, DirectQAHandoff: directQA, From: k.from, To: k.to, Holder: *holder, Token: *token, Note: note, Release: k.release,
 				Actor: c.actor, IdempotencyKey: c.idemKey + "-move",
 			})
 			if err != nil {

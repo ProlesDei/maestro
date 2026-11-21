@@ -376,6 +376,7 @@ type Claim struct {
 
 // Ticket is one unit of work.
 type Ticket struct {
+	DirectQA  bool      `json:"direct_qa,omitempty"`
 	Criteria  *Criteria `json:"criteria,omitempty"`
 	ID        ID        `json:"id"`
 	Title     string    `json:"title"`
@@ -540,6 +541,7 @@ type Event struct {
 // backlog, todo (default) or blocked; a ticket created blocked returns to
 // todo. Owner defaults to the actor.
 type CreateRequest struct {
+	DirectQA      bool     `json:"direct_qa,omitempty"`
 	BriefRevision int      `json:"brief_revision,omitempty"`
 	Title         string   `json:"title"`
 	Body          string   `json:"body"`
@@ -615,6 +617,9 @@ func (r *CreateRequest) Validate() error {
 		return err
 	}
 	r.Actor = actorFor(r.Actor, "")
+	if r.DirectQA && (r.Actor != RolePlanner || r.Type != TypeShip || r.Role != RoleEngineer) {
+		return fmt.Errorf("%w: only the planner can choose direct QA for an engineer ship ticket", ErrInvalid)
+	}
 	r.Owner = actorFor(r.Owner, r.Actor)
 	if HasControl(r.Owner) {
 		return fmt.Errorf("%w: owner must be one line", ErrInvalid)
@@ -970,6 +975,17 @@ type TransitionRequest struct {
 	Release        bool   `json:"release,omitempty"`
 	Actor          string `json:"actor"`
 	IdempotencyKey string `json:"-"`
+
+	// DirectQAHandoff adds the route observed at handoff to the event. Later
+	// changes to the route cannot change the move or its idempotency key.
+	DirectQAHandoff bool `json:"-"`
+}
+
+func (r TransitionRequest) EventNote() string {
+	if r.DirectQAHandoff {
+		return r.Note + " (direct QA)"
+	}
+	return r.Note
 }
 
 // Keyed is what a transition's idempotency key covers. With Release it

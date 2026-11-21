@@ -87,3 +87,31 @@ func TestCheckFreshFailDropsPass(t *testing.T) {
 		t.Fatalf("a pass carried after a failing --fresh run: %s", out)
 	}
 }
+
+func TestCheckMergeCandidate(t *testing.T) {
+	root, env := checkRepo(t)
+	head, base := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	dir := filepath.Join(root, "good")
+	for _, check := range []struct {
+		name, head, base, environment string
+		carry                         bool
+	}{
+		{"first", head, base, "image-A", false},
+		{"same inputs", head, base, "image-A", true},
+		{"different base", head, head, "image-A", false},
+		{"different head", base, base, "image-A", false},
+		{"different environment", head, base, "image-B", false},
+		{"unspecified environment", head, base, "", false},
+		{"live state still runs", head, base, "", false},
+		{"incomplete sha", head, "bad", "image-A", false},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			env["MAESTRO_CHECK_CANDIDATE"] = check.head + "/" + check.base
+			env["MAESTRO_CHECK_ENVIRONMENT"] = check.environment
+			code, out := runCheckIn(env, dir, append([]string{"test"}, okCmd...)...)
+			if code != 0 || strings.Contains(out, "carried") != check.carry {
+				t.Fatalf("exit %d, want carry=%v: %s", code, check.carry, out)
+			}
+		})
+	}
+}

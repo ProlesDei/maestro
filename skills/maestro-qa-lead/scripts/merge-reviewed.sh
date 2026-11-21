@@ -10,6 +10,13 @@ check_target() {
 	gh pr view "$pr" --json headRefName,headRefOid,baseRefName,isCrossRepository,state |
 		jq -e --arg branch "$branch" --arg head "$head" --arg base "$base" '.baseRefName == $base and .state == "OPEN" and (.isCrossRepository == false) and .headRefName == $branch and .headRefOid == $head' >/dev/null
 }
+# Legacy tickets may have a GO from before structured handoffs existed.
+# An opted-in ticket must still have a current basis and QA pass at this head.
+detail=$(maestro-ticket get "$id" --json)
+if jq -e '.direct_qa == true' <<<"$detail" >/dev/null; then
+	maestro-ticket qa-basis "$id" --json |
+		jq -e --arg head "$head" '.head == $head and .passed == true and (.route == "direct" or .route == "review")' >/dev/null
+fi
 criteria=$(maestro-ticket criteria status "$id")
 merge_versioned() {
 	common=$(git rev-parse --path-format=absolute --git-common-dir)
