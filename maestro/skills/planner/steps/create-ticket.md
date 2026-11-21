@@ -13,7 +13,7 @@ An engineer builds from the ticket in a fresh session, a reviewer checks the PR 
 
 ```
 Title: <verb> <object>, under 70 characters
-Goal: <the goal's name, as the chief of staff gave it>: why this matters to the user, in one or two sentences
+Goal: <the goal's slug, as the chief of staff gave it>: why this matters to the user, in one or two sentences
 Outcome: what someone can do once this merges, in one sentence
 Checks:
 1. <starting state>, <input or step> → <exact result>

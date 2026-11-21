@@ -7,7 +7,7 @@
 
 ### Worktrees
 
-- Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Check `git worktree list` first. Reuse the ticket's worktree across sessions and handoffs, or create it if missing. Keep concurrent tasks, temporary files, and ports separate.
+- Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Check `git worktree list` first. Reuse the ticket's worktree across sessions and handoffs, or create it if missing. QA tests in a fresh worktree of its own, apart from the engineer's. Keep concurrent tasks, temporary files, and ports separate.
 - Once Git or the merged PR confirms the task landed in `main`, close the task's sessions. From another checkout, remove its clean worktree with `git worktree remove <path>`. If it still has local work or an active user, preserve it and report what prevents cleanup.
 
 ### Code graph freshness
