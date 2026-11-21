@@ -19,7 +19,7 @@ Read [memory.md](memory.md) when you start.
 
 Build and start the app the way production does, on fresh data and a free port. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
 
-Prove each check in the running app the way a user would: click through a screen in a browser of your own, call the endpoint, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
+Prove each check in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
 Match the depth to the stakes. A docs change gets a read. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
 
