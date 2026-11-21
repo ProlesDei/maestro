@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -232,9 +233,41 @@ func (c *call) reconcile(ctx context.Context, s ticket.Store, dir, board string)
 		if err != nil {
 			return out, err
 		}
+		failing := map[string]bool{}
 		for _, d := range pending {
 			if _, err = c.deliver(ctx, b, d.ID, ""); err != nil {
 				out.Findings = append(out.Findings, d.Goal+": "+err.Error())
+				switch d.Job {
+				case "stop", "start", "rules":
+					// Each failed replay of one control doubles its wait, from a minute up to an hour.
+					name := d.Hash()
+					failing[name] = true
+					tries := 0
+					m, err := co.s.read("control-retries", name)
+					if err == nil {
+						tries, _ = strconv.Atoi(m.body)
+					} else if !errors.Is(err, os.ErrNotExist) {
+						return out, err
+					}
+					if err := co.s.write("control-retries", name, strconv.Itoa(tries+1)); err != nil {
+						return out, err
+					}
+					wait := min(time.Minute<<min(tries, 6), time.Hour)
+					if err := c.scheduleReconsider(filepath.Dir(dir), time.Now().Add(wait)); err != nil {
+						return out, err
+					}
+				}
+			}
+		}
+		retries, err := co.s.list("control-retries")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return out, err
+		}
+		for _, m := range retries {
+			if !failing[m.name] {
+				if err := co.s.remove("control-retries", m.name); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return out, err
+				}
 			}
 		}
 	}

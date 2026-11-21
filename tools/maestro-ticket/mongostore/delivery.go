@@ -40,7 +40,7 @@ func (s *Store) PendingDeliveries(ctx context.Context, goal string) ([]PlannerDe
 	if goal != "" {
 		filter["goal"] = goal
 	}
-	cur, err := db.Collection("planner_deliveries").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "_id", Value: 1}}))
+	cur, err := db.Collection("planner_deliveries").Find(ctx, filter, options.Find().SetSort(bson.D{{Key: "revision", Value: 1}, {Key: "_id", Value: 1}}))
 	if err != nil {
 		return nil, s.markErr(err)
 	}
