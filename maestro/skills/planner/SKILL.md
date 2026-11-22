@@ -29,7 +29,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | The chief of staff says the outside cause cleared | Set the stop's `outside_cause` to null. Check whether to lift the stop, recheck the QA queue and assign ready work |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done or the owner reports a failure | `steps/close-goal.md` |
-| The owner signs off, or a ticket closes under a signed-off epic | Record the sign-off on the epic. Close the epic once every ticket under it is closed |
+| The owner signs off, or a ticket closes under a signed-off epic | Record the sign-off on the epic. Close the epic once every ticket under it or blocking it is closed |
 
 ## Send a batch to QA
 
@@ -41,20 +41,20 @@ On a QA report, QA session end or restart, route only the latest QA verdict for 
 
 Record routing after handling the verdict. Record a clearance when a fail or block clears on the same head. See “Ticket board” for both. Before each queue rebuild, clear the `base broken` blocks of any base whose repair has merged, since QA merged the exact tree it proved starts.
 
-Rebuild the queue after recovery or when an engineer, review or QA session ends. On each rebuild, recheck the host's required checks for open PRs whose current head still has a QA block for missing results. While results are missing, watch for them and rebuild when they arrive. Record `QA clearance` once all required checks pass on that head.
+Rebuild the queue after recovery or when an engineer, review or QA session ends. On each rebuild, recheck the host's required checks for open PRs whose current head still has a QA block for missing results. While results are missing, watch for them and rebuild when they arrive. Record `QA clearance` once all required checks pass on that head. If one fails, route it as a QA fail on that head.
 
 Queue open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`. Skip a PR whose latest QA verdict for its current head is a fail or block with no later clearance. Give `qa:first` tickets and their unmerged prerequisites priority, even before the fix PR exists. Send them alone in dependency order. Until a base's `base broken` blocks clear, send only its repair and its unmerged prerequisites for that base. Send stop fixes alone.
 
 Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again.
 
-The board ticket `maestro-qa-slot` is free when it is blocked and unassigned. It never goes to open, so engineers never see it as ready. Before starting QA, claim the free slot atomically with your planner thread ID, setting it to in progress. If the slot is held, check it and recheck the queue when it frees up. Only after you win the claim, start a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs, PR URLs and “Rules for review and QA” from the Maestro principles. Record its `qa_thread_id` on the slot, guarded by your assignee and in-progress status.
+The board ticket `maestro-qa-slot` is free when it is blocked and unassigned. It never goes to open, so engineers never see it as ready. Before starting QA, claim the free slot atomically with your planner thread ID, setting it to in progress. If the slot is held, use “Check the QA slot”. While it has a live QA thread, wait on that thread in T3 and recheck the queue when it ends. If it has no QA thread yet, recheck on your next event. Only after you win the claim, start a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs, PR URLs and “Rules for review and QA” from the Maestro principles. Record its `qa_thread_id` on the slot, guarded by your assignee and in-progress status.
 
 ### Check the QA slot
 
-If the slot is free, return. If it has no QA thread and another live planner holds it, let that planner finish the launch. If it has no QA thread and the planner ended or your own launch failed, look in T3 for a QA child launched since the current claim. If you hold the claim, save any thread ID you find. Release the slot with the guard below only once T3 confirms the launch settled and there is no QA child. If you have a QA thread, leave the slot held while QA is live or use “A QA session ends” once it ends.
+If the slot is free, return. If it has no QA thread and another live planner holds it, let that planner finish the launch. If it has no QA thread and the planner ended or your own launch failed, look in T3 for a QA child launched since the current claim. If you hold the claim, save any thread ID you find. If T3 confirms the holder ended, take over its claim and save any thread ID you find in one update guarded by the old assignee and in-progress status. Release the slot with the guard below only once T3 confirms the launch settled and there is no QA child. If you have a QA thread, leave the slot held while QA is live or use “A QA session ends” once it ends.
 
 ## A QA session ends
 
 Once T3 confirms QA ended, check that the slot still points to that session, including a launch recovered under “Check the QA slot”. If it does not, skip cleanup. Only the holder cleans up. If that planner ended, take over its claim and save the QA thread ID in the same update, guarded by the old assignee and in-progress status. If the guard fails, reread the slot before doing anything else.
 
-Read the batch from the QA launch brief and stop anything still running under its [QA name prefix](../qa/server.md#start-it). Close verified merges and route verdicts. Release the slot by clearing the assignee and `qa_thread_id` and setting it back to blocked in one update guarded by the observed assignee and in-progress status. If the guard fails, reread the slot. Then check the stop and QA queue and assign ready work.
+Read the batch from the QA launch brief and stop anything still running under its run prefix (see “Worktrees” in the Maestro principles). Close verified merges and route verdicts. Release the slot by clearing the assignee and `qa_thread_id` and setting it back to blocked in one update guarded by the observed assignee and in-progress status. If the guard fails, reread the slot. Then check the stop and QA queue and assign ready work.

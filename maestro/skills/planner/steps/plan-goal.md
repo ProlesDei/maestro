@@ -8,4 +8,4 @@ Read the repo and the owner calls on the epic. Use recorded answers and send new
 
 Group each feature's tickets you expect to be ready for QA together into a batch with a unique name. Reuse batches already filed for the same work. Put a ticket in a later batch than any ticket it waits on. Put tickets with overlapping Touches paths in different batches.
 
-Reuse tickets already on the epic and file only missing work with `steps/create-ticket.md`. Count tickets reused from other epics when checking that the work covers the goal. Then mark planning complete on the epic.
+Reuse tickets already on the epic and file only missing work with `steps/create-ticket.md`. Set each ticket you reuse from another epic to block this epic, and count it when checking that the work covers the goal. Then mark planning complete on the epic.

@@ -52,7 +52,7 @@ Push and open the PR, or update the existing PR if the planner sent one. Include
 
 ## Get it reviewed
 
-Use “Sessions” in the Maestro principles for handoffs. Start a fresh `maestro-code-review` run with only the PR, the ticket ID and “Rules for review and QA” from the Maestro principles. Start one after each round of fixes or evidence-only replies to blockers, up to the cap below.
+Use “Sessions” in the Maestro principles for handoffs. Start a fresh `maestro-code-review` session in the primary checkout with only the PR, the ticket ID and “Rules for review and QA” as the primary checkout's `AGENTS.md` states it. Start one after each round of fixes or evidence-only replies to blockers, up to the cap below.
 
 ## When review or QA sends it back
 
