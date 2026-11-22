@@ -18,7 +18,9 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | When | Do |
 |---|---|
 | A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` once planning is complete |
-| A ticket is ready, an engineer or orphaned review ends, or you restart | `steps/assign-ticket.md` |
+| A ticket is ready, an engineer ends, or you restart | `steps/assign-ticket.md` |
+| An engineer asks for review | Start a fresh `maestro-code-review` child in your checkout with only the PR, ticket ID and “Rules for review and QA”. Save its IDs on the ticket |
+| A review ends | Send its verdict to the live claim holder, or use `steps/assign-ticket.md` if the engineer ended |
 | An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |

@@ -4,7 +4,7 @@ On restart, defer all engineer, review and QA starts and handoffs that trigger t
 
 On a T3 finish notice or QA send-back, check only the affected tickets. Check engineer and review sessions in T3 by the claim's actor and the ticket's `review_thread_id`.
 
-For an ended engineer, release the claim if the ticket needs more engineering. Otherwise, if the claimed ticket has an open PR with no live review, queue a fresh review if the current head has no review verdict or the latest verdict predates a ruling. Use “Get it reviewed” in `.maestro/skills/engineer/SKILL.md`.
+For an ended engineer, release the claim if the ticket needs more engineering. Otherwise, if the claimed ticket has an open PR with no live review, queue a fresh review if the current head has no review verdict or the latest verdict predates a ruling. Start it as the [planner skill](../SKILL.md) directs.
 
 To release a claim, clear the assignee and set the status to open, or to blocked if it is already blocked or awaits an owner answer. Guard that one update by its actor and observed status (in progress or blocked). If the guard fails, reread the ticket. The planner waits for T3 to confirm the engineer, child work and any review ended before releasing a claim.
 

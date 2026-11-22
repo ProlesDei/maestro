@@ -127,6 +127,6 @@ case ${!index-} in
     done
     [[ -z $json || -n $full ]] || extra+=(--brief)
     set -- "${@:1:index}" "${extra[@]}" "${@:index+1}" ;;
-  create) exec flock -- "$board/create.lock" "${driver[@]}" "$@" ;;
+  create|new) exec 9>>create.lock; flock 9 ;;
 esac
 exec "${driver[@]}" "$@"

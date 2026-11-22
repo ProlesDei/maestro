@@ -54,12 +54,12 @@ Push and open the PR, or update the existing PR if the planner sent one. Include
 
 ## Get it reviewed
 
-Start a fresh `maestro-code-review` child in your T3 checkout with only the PR, ticket ID and “Rules for review and QA” as the primary checkout's `.maestro/principles.md` states it. Start one after each round of fixes or replies with evidence, up to the cap below.
+Tell whoever assigned the ticket the PR is ready for review. Ask again after each round of fixes or replies with evidence, up to the cap below.
 
 ## When review or QA sends it back
 
 Count the ticket's PR verdicts across all engineers since the last retry approval (see “Ticket board”), or since work began. QA's 3 reruns of one failure count as one verdict. On the third `Review changes needed` verdict or third QA fail verdict, stop and give the planner the ticket, PR and open blockers.
 
-Answer each blocker in the PR. Fix what it asks and nothing more, or say in a sentence or two, with evidence, why it's wrong. A blocker that adds work the ticket didn't ask for is a new ticket; say so. Notes need no fix or answer. If you changed code, rerun “Prove it and read your diff” for what you touched and push. If you and the reviewer still disagree after one round, take it to whoever assigned the ticket. If the planner rules out a blocker, post the ruling on the PR and start a fresh review. Ignore a ruling you already acted on.
+Answer each blocker in the PR. Fix what it asks and nothing more, or say in a sentence or two, with evidence, why it's wrong. A blocker that adds work the ticket didn't ask for is a new ticket; say so. Notes need no fix or answer. If you changed code, rerun “Prove it and read your diff” for what you touched and push. If you and the reviewer still disagree after one round, take it to whoever assigned the ticket. If the planner rules out a blocker, post the ruling on the PR and ask for a fresh review. Ignore a ruling you already acted on.
 
 **Reply** to whoever assigned the ticket once review approves, and after each later push: the PR URL, the worktree and branch, and one line saying it's ready for QA or what's left.
