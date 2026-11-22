@@ -11,10 +11,15 @@
 - From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Use JSON for queries. If the board is down, report the block to whoever assigned the work.
 - Tickets go from open to in progress to closed. Keep review and QA verdicts in PR comments.
 
+### Sessions
+
+- Start each role you assign as a T3 child session running its Maestro skill. Record each T3 thread ID on the board, the planner's on the goal epic and the engineer's as ticket assignee. Reach a live session through its thread. Record decisions on the epic or ticket before sending them. If a session ended, start the same role in a fresh session from the board's state.
+- Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended, then pass any child results it missed to the replacement, including results that arrive later.
+
 ### Worktrees
 
-- Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Check `git worktree list` first. Reuse the ticket's worktree across sessions and handoffs, or create it if missing. QA tests in a fresh worktree of its own, apart from the engineer's. Keep concurrent tasks, temporary files, and ports separate.
-- Once Git or the merged PR confirms the task landed in its base branch, close the task's sessions. Remove its clean worktree from another checkout. If it still has local work or an active user, preserve it and report what prevents cleanup.
+- Make every repo change in a worktree dedicated to its task. Give each ticket one branch and one worktree. Look for the ticket's worktree first. Reuse it across sessions and handoffs, or create it if missing. QA tests in a fresh worktree of its own, apart from the engineer's. Keep concurrent tasks, temporary files, and ports separate.
+- Once Git or the merged PR confirms the task landed in its base branch, close the task's sessions. Check for local work, active users and ignored files the repo can't rebuild. Keep the worktree and report anything that blocks cleanup. Otherwise remove it from another checkout.
 
 ### Code graph freshness
 

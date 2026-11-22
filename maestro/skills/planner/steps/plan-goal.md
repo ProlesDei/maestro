@@ -1,8 +1,8 @@
 # Plan a goal
 
-Read the repo and use `steps/unblock.md` to settle calls the goal leaves open.
+Find or create the board epic `maestro-goal-<slug>` and save the full goal brief in its description. Read the repo and use `steps/unblock.md` to settle calls the goal leaves open.
 
-Find or create the board epic `maestro-goal-<slug>` for the goal. Group each feature's tickets you expect to be ready for QA together into a batch with a unique name. Put a ticket in a later batch than any ticket it waits on. Put tickets with overlapping Touches paths in different batches.
+Group each feature's tickets you expect to be ready for QA together into a batch with a unique name. Put a ticket in a later batch than any ticket it waits on. Put tickets with overlapping Touches paths in different batches.
 
 Use `steps/create-ticket.md` to file each part of the goal with its batch. Check that the tickets together cover the goal.
 

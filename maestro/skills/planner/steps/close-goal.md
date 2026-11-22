@@ -1,6 +1,6 @@
 # Close a goal
 
-Run the goal's success check in the running app. Record what you did and what you saw. If the check fails, keep the goal open and file the fix as a new ticket with `steps/create-ticket.md`, since the engineers' sessions end when their tickets merge.
+If the owner reports a failure, use it as the failed check. Otherwise run the goal's success check in the running app and record what you did and saw. On failure, keep the goal open and file a fix ticket under its epic with `steps/create-ticket.md`.
 
 When the check passes, give the chief of staff the goal and the results for owner sign-off.
 
