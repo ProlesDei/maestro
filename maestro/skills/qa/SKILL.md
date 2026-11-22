@@ -69,7 +69,7 @@ A fail says how you found the source, the exact steps from a fresh start, what y
 
 Take the passing PRs in batch order. Before each merge, build the exact tree the project's merge method would land from that PR's current base and reviewed head. If the head moved, block and tell the planner. Reuse a pass only for the tree and checks it covered. If the tree changed, rerun the project checks and affected critical flows and ticket checks. Run every added or edited ticket check even if the tree is unchanged. Update the verdict after a rerun. On a build or start failure, follow [Find the source](#find-the-source).
 
-Wait for the host's required checks on the tested head to pass. If any fail, post a `QA fail` verdict, tell the planner and skip the merge.
+Wait up to one hour for the host's required checks on the tested head to pass. If any fail, post `QA fail`. If any still lack a result after an hour, post `QA blocked` and name the missing checks. In either case, tell the planner and skip the merge.
 
 Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
 
