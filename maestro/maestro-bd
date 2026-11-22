@@ -1,14 +1,84 @@
 #!/usr/bin/env bash
 set -eu
-IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
-primary=${worktree#worktree }
-cd "$primary/.maestro/maestro-board"
-export GIT_CEILING_DIRECTORIES="$primary"
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
-export BEADS_DIR="$PWD/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
-export DOLT_ROOT_PATH="$PWD" DOLT_DISABLE_EVENT_FLUSH=1
-if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
-  echo "Maestro board setup is missing in $BEADS_DIR" >&2
+
+fail() {
+  echo "Maestro: $*" >&2
   exit 1
+}
+
+IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
+primary=$(cd "${worktree#worktree }" && pwd -P)
+digest=$(printf '%s' "$primary" | sha256sum)
+store="$HOME/.local/share/maestro-board"
+board="$store/${primary##*/}-${digest:0:12}"
+export GIT_CEILING_DIRECTORIES="$store"
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
+export BEADS_DIR="$board/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
+export DOLT_ROOT_PATH="$board" DOLT_DISABLE_EVENT_FLUSH=1
+
+if [[ ${1-} == maestro-setup ]]; then
+  shift
+  (( $# <= 1 )) || fail "Usage: maestro-bd maestro-setup [port]"
+  umask 077
+  bd=$(type -P bd) && bd=$(realpath -- "$bd") &&
+    "$bd" --version | grep -Eq '^bd version 1\.3\.4( |$)' || fail "Need bd 1.3.4 on PATH"
+  command -v ss >/dev/null || fail "Need ss on PATH"
+
+  mkdir -p -- "$store"
+  version=$(DOLT_ROOT_PATH="$store" DOLT_DISABLE_VERSION_CHECKS=true dolt version) ||
+    fail "Need Dolt 2.2.0 on PATH"
+  version=${version%%$'\n'*}
+  [[ "$version" == "dolt version 2.2.0" ]] || fail "Need Dolt 2.2.0 on PATH. Found $version"
+
+  port=${1-3307}
+  if [[ -f "$BEADS_DIR/metadata.json" ]]; then
+    [[ -f "$BEADS_DIR/dolt-server.port" ]] || fail "Missing $BEADS_DIR/dolt-server.port"
+    port=$(<"$BEADS_DIR/dolt-server.port")
+    [[ ${1-$port} == "$port" ]] || fail "Existing board uses port $port"
+  fi
+  [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) ||
+    fail "Invalid board port: $port"
+  listeners=$(ss -Hltpn "sport = :$port")
+  if [[ -f "$board/server.pid" ]]; then
+    pid=$(<"$board/server.pid")
+    [[ -n "$pid" && "$listeners" == *"pid=$pid,"* ]] &&
+      fail "Board is already running on port $port (PID $pid)"
+    rm -- "$board/server.pid"
+  fi
+  [[ -z "$listeners" ]] || fail "Port $port is already in use"
+
+  mkdir -p -- "$board/sql"
+  cd "$board"
+  dolt config --global --add metrics.disabled true
+  dolt config --global --add versioncheck.disabled true
+  nohup dolt sql-server --host 127.0.0.1 --port "$port" --data-dir "$board/sql" \
+    </dev/null >>server.log 2>&1 &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+  for (( attempt=0; attempt<100; attempt++ )); do
+    listeners=$(ss -Hltpn "sport = :$port")
+    [[ "$listeners" == *"pid=$pid,"* ]] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [[ "$listeners" == *"pid=$pid,"* ]] ||
+    fail "Dolt failed to listen on port $port. See $board/server.log"
+
+  if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
+    "$bd" --sandbox init --server --external --server-host 127.0.0.1 --server-port "$port" \
+      --server-user root --prefix maestro --skip-agents --skip-hooks --non-interactive
+    printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
+  fi
+  printf '%s\n' "$bd" > bd.path
+  printf '%s\n' "$pid" > server.pid
+  trap - EXIT
+  echo "Maestro board started at $board (port $port, PID $pid)"
+  exit 0
 fi
-exec bd --sandbox --dolt-auto-commit on "$@"
+
+[[ -f "$BEADS_DIR/metadata.json" && -f "$board/bd.path" ]] ||
+  fail "Run .maestro/maestro-bd maestro-setup to set up the board at $board"
+cd "$board"
+read -r bd < bd.path
+[[ "$bd" == /* && -x "$bd" ]] || fail "Verified bd is missing at $bd. Rerun board setup"
+exec "$bd" --sandbox --dolt-auto-commit on "$@"
