@@ -32,8 +32,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 On a QA report, QA session end or restart, route only the latest QA verdict for the PR's current head if it is a fail or block with no later clearance or routing note for that verdict. Remove the affected tickets' batch labels. Send a fail, stale head, missing review pass or required branch update to the engineer who holds the claim, or use `steps/assign-ticket.md` if it ended. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks, with these exceptions:
 
-- For `base broken` on the repair itself, route it as a fail to the repair's engineer and keep the other PRs blocked.
-- For other `base broken` verdicts, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
+- For `base broken` blocks, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
 - For a failure found after a merge, use `steps/create-ticket.md` to file one fix per cause, with the base in Context and `qa:first`.
 
 Record routing after handling the verdict. Record a clearance when a fail or block clears on the same head. See “Ticket board” for both. Before each queue rebuild, clear the `base broken` blocks of any base whose repair has merged, since QA merged the exact tree it proved starts.

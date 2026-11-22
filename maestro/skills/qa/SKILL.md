@@ -40,7 +40,7 @@ Missing a tool, account or secret you need is a block, not a pass. Test the rest
 
 ## Find the source
 
-If the app won't build or start, try the base alone with the same setup. If it fails there, post `QA blocked` with the reason `base broken` on every PR in the batch. Stop the batch and report one shared block with the base SHA and affected PRs to the planner.
+If the app won't build or start, try the base alone with the same setup. If it fails there, post `QA fail` on its repair PR if it's in the batch and `QA blocked` with reason `base broken` on the rest. Stop the batch and report the base SHA and affected PRs to the planner.
 
 For other failures, name one source ticket. Use logs and traces as clues, even when they point into one PR.
 
