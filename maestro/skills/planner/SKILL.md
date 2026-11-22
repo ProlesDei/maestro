@@ -19,7 +19,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
-| QA reports a failed or blocked ticket | Remove its batch label. Send a failure back through `steps/assign-ticket.md`. For a stale head, missing review pass or required branch update, ask the engineer who holds the claim for a fresh review, or use the same step if that session ended. Use `steps/unblock.md` for other blocks. For a failure QA found after a merge, file a fix ticket with `steps/create-ticket.md` and hold the next QA group until it merges |
+| QA reports a failed or blocked ticket | Remove its batch label. Send a failure back through `steps/assign-ticket.md`. For a stale head, missing review pass or required branch update, ask the engineer who holds the claim for a fresh review, or use the same step if that session ended. Use `steps/unblock.md` for other blocks. For a failure QA found after a merge, file a fix ticket with `steps/create-ticket.md`. Send it to QA alone, ahead of the queue, and hold other groups until it merges |
 | QA merges a PR | Check that the PR merged. Set its ticket to closed with an update guarded by its assignee, since a plain close refuses a ticket someone else holds. Hand out the tickets it frees |
 | A QA session ends | If there's no report, check which PRs merged, close their tickets as above and queue the rest for fresh QA. Take the next group from the queue |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
@@ -32,6 +32,6 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 Hold the batch until every ticket in it has an open PR that meets the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`.
 
-If a ticket is stuck, including when an open PR in another batch holds its paths, remove its batch label and check the rest again. Queue ready PRs by base branch. Run one merging QA session per repo at a time. Check existing QA sessions before starting one. On restart, rebuild the queue from open tickets whose PRs meet the review gate and aren't in a running QA session. Send each group once to a fresh `maestro-qa` session with the batch name, ticket IDs and PR URLs.
+If a ticket is stuck, including when an open PR in another batch holds its paths, remove its batch label and check the rest again. Queue ready PRs by base branch. Run one merging QA session per repo at a time. Check existing QA sessions before starting one. On restart, rebuild the queue from open tickets whose PRs meet the review gate, have no QA fail or block on their current head, and aren't in a running QA session. Send each group once to a fresh `maestro-qa` session with the batch name, ticket IDs and PR URLs.
 
 Use the same review gate for a ticket without a batch. Queue it alone with its ID as the batch name. After a QA fix, send the ticket this way or add it to a batch that has yet to go to QA.
