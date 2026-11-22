@@ -24,7 +24,7 @@ Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port 
 
 To move an old board, stop its Dolt server and move `.maestro/maestro-board/` by hand to that folder, and if `.beads/dolt-server.port` is missing, write the old port there before running setup.
 
-Run setup again after a reboot or stop. On update, leave a running board alone.
+Run setup again after a reboot or stop, or after `bd` moves. If its port is taken, pass a free one. To move the primary checkout, stop Dolt, move the checkout, repair its worktrees, then move the board folder to the new path's name before running setup.
 
 ## 4. Connect the code graph and commit
 

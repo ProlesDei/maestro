@@ -33,22 +33,27 @@ if [[ ${1-} == maestro-setup ]]; then
   version=${version%%$'\n'*}
   [[ "$version" == "dolt version 2.2.0" ]] || fail "Need Dolt 2.2.0 on PATH. Found $version"
 
-  port=${1-3307}
+  saved=
   if [[ -f "$BEADS_DIR/metadata.json" ]]; then
     [[ -f "$BEADS_DIR/dolt-server.port" ]] || fail "Missing $BEADS_DIR/dolt-server.port"
-    port=$(<"$BEADS_DIR/dolt-server.port")
-    [[ ${1-$port} == "$port" ]] || fail "Existing board uses port $port"
+    saved=$(<"$BEADS_DIR/dolt-server.port")
   fi
+  if [[ -f "$board/server.pid" ]]; then
+    pid=$(<"$board/server.pid")
+    if [[ -n "$pid" && -n "$saved" && "$(ss -Hltpn "sport = :$saved")" == *"pid=$pid,"* ]]; then
+      [[ ${1-$saved} == "$saved" ]] || fail "Board is running on port $saved. Stop it before changing ports"
+      printf '%s\n' "$bd" > "$board/bd.path"
+      echo "Maestro board already running at $board (port $saved, PID $pid)"
+      exit 0
+    fi
+    rm -- "$board/server.pid"
+  fi
+  port=${1-${saved:-3307}}
   [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) ||
     fail "Invalid board port: $port"
   listeners=$(ss -Hltpn "sport = :$port")
-  if [[ -f "$board/server.pid" ]]; then
-    pid=$(<"$board/server.pid")
-    [[ -n "$pid" && "$listeners" == *"pid=$pid,"* ]] &&
-      fail "Board is already running on port $port (PID $pid)"
-    rm -- "$board/server.pid"
-  fi
-  [[ -z "$listeners" ]] || fail "Port $port is already in use"
+  [[ -z "$listeners" ]] ||
+    fail "Port $port is already in use. Pass a free port: .maestro/maestro-bd maestro-setup <port>"
 
   mkdir -p -- "$board/sql"
   cd "$board"
@@ -70,8 +75,8 @@ if [[ ${1-} == maestro-setup ]]; then
   if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
     "$bd" --sandbox init --server --external --server-host 127.0.0.1 --server-port "$port" \
       --server-user root --prefix maestro --skip-agents --skip-hooks --non-interactive
-    printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
   fi
+  printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
   printf '%s\n' "$bd" > bd.path
   printf '%s\n' "$pid" > server.pid
   trap - EXIT

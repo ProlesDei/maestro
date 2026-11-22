@@ -7,7 +7,7 @@ description: Test a batch of reviewed PRs in the running app and merge each pass
 
 Never change the code.
 
-Read this skill, its linked files, `.maestro/memory/qa.md` and the project's rules from the PR's base branch. Use the board launcher from that branch.
+Read this skill, its linked files, `.maestro/memory/qa.md` and the project's rules from the PR's base branch. Use the board launcher from the primary checkout.
 
 ## Before you test
 
