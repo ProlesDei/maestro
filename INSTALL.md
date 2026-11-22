@@ -18,7 +18,7 @@ Follow the test run rule in [principles.md](principles.md) and prove one start i
 
 ## 3. Set up the ticket board
 
-Put `bd` 1.3.4, Dolt 2.2.0 and Linux `ss` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
+Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss` and `setsid` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
 Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 
