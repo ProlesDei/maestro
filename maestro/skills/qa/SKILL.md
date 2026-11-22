@@ -5,9 +5,11 @@ description: Run ticket checks on a batch of reviewed PRs and merge each pass. U
 
 # QA
 
+Read `.maestro/principles.md` when you start.
+
 Never change the code.
 
-Load this skill, its guides, `blockers.md` and `.maestro/memory/qa.md` under “Rules for review and QA” in the Maestro principles.
+Load this skill, its guides, `blockers.md` and `.maestro/memory/qa.md` under “Rules for review and QA” in `.maestro/principles.md`.
 
 ## Before you test
 

@@ -36,7 +36,7 @@ if [[ ${1-} == maestro-setup ]]; then
   umask 077
   bd=$(type -P bd) && bd=$(realpath -- "$bd") &&
     "$bd" --version | grep -Eq '^bd version 1\.3\.4( |$)' || fail "Need bd 1.3.4 on PATH"
-  for tool in ss setsid; do command -v "$tool" >/dev/null || fail "Need $tool on PATH"; done
+  for tool in ss setsid flock; do command -v "$tool" >/dev/null || fail "Need $tool on PATH"; done
 
   mkdir -p -- "$store"
   version=$(DOLT_ROOT_PATH="$store" DOLT_DISABLE_VERSION_CHECKS=true dolt version) ||
@@ -111,8 +111,22 @@ for (( index=1; index<=$#; index++ )); do
     --*=*|--cpu-profile|--global|--help|-h|--ignore-schema-skew|--json|--no-color|-q|--quiet|--readonly|--sandbox|-v|--verbose|-V|--version) ;;
     --*|-?) (( index+=1 )) ;;
     -??*) ;;
-    ready) set -- "${@:1:index}" --limit 0 "${@:index+1}"; break ;;
     *) break ;;
   esac
 done
-exec "$bd" --sandbox --dolt-auto-commit on "$@"
+driver=("$bd" --sandbox --dolt-auto-commit on)
+
+case ${!index-} in
+  ready)
+    extra=(--limit 0) json= full=
+    for arg; do
+      case $arg in
+        --json|--json=true) json=1 ;;
+        --brief|--brief=*|--claim|--claim=*|--gated|--gated=*|--mol|--mol=*|--explain|--explain=*) full=1 ;;
+      esac
+    done
+    [[ -z $json || -n $full ]] || extra+=(--brief)
+    set -- "${@:1:index}" "${extra[@]}" "${@:index+1}" ;;
+  create|new) exec 9>>create.lock; flock 9 ;;
+esac
+exec "${driver[@]}" "$@"

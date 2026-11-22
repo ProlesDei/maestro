@@ -4,7 +4,7 @@ Read this for any change a server runs: an endpoint, a worker, a job, a migratio
 
 ## Start it
 
-Name what you start with the run prefix in “Worktrees” in the Maestro principles. Add a suffix when resources need distinct names.
+Use the “Worktrees” run prefix in `.maestro/principles.md`. Add a suffix when resources need distinct names.
 
 - Use a free port no other run holds, and pass it the way the app reads it. If you had to learn how, record it in a `Remember:` line in the verdict.
 - Start it so you can stop it and every process it spawns, and log to a folder of your own for this run.
