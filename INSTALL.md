@@ -4,7 +4,7 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 ## 1. Place Maestro
 
-1. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
+1. Before writing, resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes, including their parents. If any resolve outside the checkout, stop and ask the owner. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
 2. Copy the checkout's `maestro/` files into `.maestro/`. On an update, keep existing memory and any old board.
 3. For each folder in `.maestro/skills/`, make sure `.agents/skills/` and `.claude/skills/` each hold a relative symlink `maestro-<folder>` that points to it.
 4. Put the text of the checkout's [principles.md](principles.md) at the end of the root `AGENTS.md`, between the lines `<!-- maestro:start -->` and `<!-- maestro:end -->`. Create the file if needed. On an update, replace only what sits between the markers.
