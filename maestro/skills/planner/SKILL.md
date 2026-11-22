@@ -21,9 +21,9 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
 | QA reports a failed or blocked ticket | Route as below |
 | QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Check the stop and QA queue, then assign ready work |
-| A QA session ends | Once T3 confirms it ended, stop anything still running under its [QA name prefix](../qa/server.md#start-it). Close merged tickets, route verdicts, check the stop and QA queue, then assign ready work |
+| A QA session ends | See “A QA session ends” below |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
-| The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Use the claim actor, `review_thread_id` and `qa_thread_id` to find and halt every live engineer, review and QA session working outside those fixes. Once T3 confirms they ended, release their claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Start work only on the recorded fixes. While the stop lasts, add any base repair to the recorded fixes. Clear the stop record only once all recorded fixes have merged and any outside cause has cleared |
+| The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Use the claim actor and `review_thread_id` to find and halt live engineers and reviews on the epic outside those fixes. Read the QA slot and halt live QA if its batch includes such work. Once T3 confirms they ended, release affected ticket claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Use “A QA session ends” for QA cleanup. Start work only on the recorded fixes. While the stop lasts, add any base repair to the recorded fixes. Clear the stop record only once all recorded fixes have merged and any outside cause has cleared |
 | The chief of staff says the outside cause cleared | Set the stop's `outside_cause` to null. Check whether to lift the stop, recheck the QA queue and assign ready work |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done or the owner reports a failure | `steps/close-goal.md` |
@@ -40,4 +40,16 @@ Record routing after handling the verdict. Record a clearance when a fail or blo
 
 Rebuild the queue after recovery or when an engineer, review or QA session ends. Queue open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`. Skip a PR whose latest QA verdict for its current head is a fail or block with no later clearance. Give `qa:first` tickets and their unmerged prerequisites priority, even before the fix PR exists. Send them alone in dependency order. Until a base's `base broken` blocks clear, send only its repair and its unmerged prerequisites for that base. Send stop fixes alone.
 
-Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again. Before starting a batch, check the repo's recorded `qa_thread_id` values in T3. For each ended session, use the cleanup in “A QA session ends”. If QA is live, wait on its thread in T3 and recheck the queue when it ends. Start only when no QA session is live. Start fresh `maestro-qa` sessions in the primary checkout with the batch name, ticket IDs and PR URLs.
+Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again.
+
+Before starting QA, atomically claim the open, unassigned board ticket `maestro-qa-slot` with your planner thread ID. If the slot is held, check it and recheck the queue when it frees up. Only after you win the claim, start a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs and PR URLs. Record its `qa_thread_id` on the slot, guarded by your assignee and in-progress status.
+
+### Check the QA slot
+
+If the slot is open, return. If it has no QA thread and another live planner holds it, let that planner finish the launch. If it has no QA thread and the planner ended or your own launch failed, look in T3 for a QA child launched since the current claim. If you hold the claim, save any thread ID you find. Release the slot with the guard below only once T3 confirms the launch settled and there is no QA child. If you have a QA thread, leave the slot held while QA is live or use “A QA session ends” once it ends.
+
+## A QA session ends
+
+Once T3 confirms QA ended, check that the slot still points to that session, including a launch recovered under “Check the QA slot”. If it does not, skip cleanup. Only the holder cleans up. If that planner ended, take over its claim and save the QA thread ID in the same update, guarded by the old assignee and in-progress status. If the guard fails, reread the slot before doing anything else.
+
+Read the batch from the QA launch brief and stop anything still running under its [QA name prefix](../qa/server.md#start-it). Close verified merges and route verdicts. Release the slot by clearing the assignee and `qa_thread_id` and setting it to open in one update guarded by the observed assignee and in-progress status. If the guard fails, reread the slot. Then check the stop and QA queue and assign ready work.
