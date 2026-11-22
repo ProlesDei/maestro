@@ -7,12 +7,12 @@ description: Test a batch of reviewed PRs in the running app and merge each pass
 
 Never change the code.
 
-Read `.maestro/memory/qa.md` when you start. Read this skill, the files it points to, its memory and the project's rules from main. Use the board launcher from main too.
+Read this skill, its linked files, `.maestro/memory/qa.md` and the project's rules from the PR's base branch. Use the board launcher from that branch.
 
 ## Before you test
 
-- Read each PR and its board ticket for the goal, checks, scope and review notes. Record each current head sha and check that the latest review comment opens `Review pass at <sha>` for that head. Block any PR without that pass and send it back to review.
-- In one fresh worktree of your own, record the latest main sha and merge the reviewed heads into it in ticket filing order. For a conflict, try the PR on main alone. If it conflicts there, fail that PR. Otherwise fail the later-filed ticket and tell the planner which paths overlap.
+- Read each PR and its board ticket for the goal, checks, scope and review notes. Record each current head sha and check that the latest review comment opens `Review pass at <sha>` for that head. Block any PR without that pass and report it to the planner.
+- In one fresh worktree of your own, record the latest base SHA and merge the reviewed heads into it in ticket filing order. For a conflict, try the PR on the base alone. If it conflicts there, fail that PR. Otherwise fail the later-filed ticket and tell the planner which paths overlap.
 
 ## Run it
 
@@ -22,13 +22,15 @@ Build and start the app once for the batch, the way production does, on fresh da
 
 Prove each ticket's checks in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
-Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets old data from main, a second user, and a rollback to main.
+Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets test data made on the base, a second user, and a rollback to the base.
 
-Run the project checks and walk each critical flow in memory once. For a failure outside a ticket's checks, try the same step on main.
+Run the project checks and walk each critical flow in memory once. For a failure outside a ticket's checks, try the same step on the base.
 
 If a failure might come and go, rerun it from a fresh start 3 times and give the rate. Skip reruns for failures that always happen the same way, such as build errors. A failure that comes and goes still fails.
 
 ## Judge
+
+Record the Git tree ID for each pass.
 
 Fail only on blockers in the Both roles and QA only sections of `.maestro/skills/code-review/blockers.md`.
 
@@ -40,16 +42,16 @@ Missing a tool, account or secret you need is a block, not a pass. Test the rest
 
 Name one source ticket for each failure. Use logs and traces as clues, even when they point into one PR.
 
-If the cause is unclear, split the batch in half on main, keeping the code the check needs to run. Rerun only the failing step and split a failing half until one source PR remains. If both halves pass alone, find a smallest subset that still fails, drop one PR whose removal clears that subset's failure, then retest the rest.
+If the cause is unclear, split the batch in half on the base, keeping the code the check needs to run. Rerun only the failing step and split a failing half until one source PR remains. If both halves pass alone, find a smallest subset that still fails, drop one PR whose removal clears that subset's failure, then retest the rest.
 
-After a fail or block, drop each source PR and any blocked PRs. If any remain, rebuild them on latest main. Rerun the project checks, critical flows and any failing step, and run any ticket checks you missed. Rerun kept tickets' checks that a drop could affect, including checks that use shared middleware, auth, config or data the dropped PR touched. Keep the other passes and skip the dropped tickets' checks. Repeat for any further failure.
+After a fail or block, drop each source PR and any blocked PRs. If any remain, rebuild them on the latest base. Rerun the project checks, critical flows and any failing step, and run any ticket checks you missed. Rerun kept tickets' checks that a drop could affect, including checks that use shared middleware, auth, config or data the dropped PR touched. Keep the other passes and skip the dropped tickets' checks. Repeat for any further failure.
 
 ## Report
 
 Post each PR's own verdict, including any fail or block. Keep the first line exact so code can sort on it.
 
 ```text
-QA <pass | fail | blocked> at <head sha> on main at <sha> in <batch>
+QA <pass | fail | blocked> at <head sha> on <base branch> at <base sha> in <batch>
 - <check>: <pass | fail | not checked>: <what you did, what you saw, evidence>
 Flows: <each critical flow: pass | fail | not checked> | not run
 Setup: <each way your run differs from production>
@@ -61,7 +63,9 @@ A fail says how you found the source, the exact steps from a fresh start, what y
 
 ## Merge the passes
 
-Merge each passing PR on its own, one at a time, in the order you combined them, the way the project does. Before each merge, if main gained commits from outside the batch, combine the remaining heads with the new main and rerun the project checks. Use the head sha you tested as the merge guard. If it moved, block that PR and send it back to review. If the host requires an up-to-date branch and main has gained only this batch's merges since the test, update the branch from main yourself. This gives the same result as the tested merge order. Merge with the new head as the guard and skip review. Handle any new failure or block before merging more, and update the verdicts.
+Take the passing PRs in batch order. Before each merge, build the exact tree the project's merge method would land from that PR's current base and reviewed head. If the head moved, block and tell the planner. Reuse a QA pass if it covered that tree. Otherwise run the project checks and all ticket checks the tree change could affect, then update the verdict.
+
+Merge only if the merge itself guards both the tested base and head SHAs. On a base change, rebuild and check the new tree first. Report a required branch update to the planner. Block if the host can't guard both SHAs. Handle any fail or block before the next merge.
 
 Stop everything you started. Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks.
 
