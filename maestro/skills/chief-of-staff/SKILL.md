@@ -62,7 +62,7 @@ When runs keep failing on one cause and keep spending, tell the planner to halt 
 
 ## Hand back finished work
 
-Done means merged and tried by a person. When a goal's PRs merge, give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner when the owner signs off.
+Done means merged and tried by a person. When the planner reports the goal's success check passed, give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner when the owner signs off.
 
 ## Remember the owner's rules
 

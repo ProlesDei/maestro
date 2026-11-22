@@ -1,7 +1,9 @@
 # Assign a ticket
 
-Pick a ready, unassigned child ticket from the board. Check that no running ticket touches the same paths. Pick a model suited to the work.
+On a T3 finish notice or when QA sends a ticket back, read the engineer thread's state and result. On restart, do this for each engineering claim using its actor as the thread ID. If a report is missing, check the ticket and PR. If more engineering is needed and T3 confirms the session and its child work ended, reopen the ticket and clear the assignee in one update guarded by its actor and in-progress status. If the guard fails, reread the ticket.
 
-Give the engineer the ticket ID, prior work it needs, and a unique board actor for this run. Start it in the ticket's worktree and use the board claim as the record of who took it.
+Pick a ready, unassigned child ticket. Check that no running ticket touches the same paths. Check the retry cap in “When review or QA sends it back” in `.maestro/skills/engineer/SKILL.md`.
 
-If work must resume after a run ends, confirm the session ended. In one update guarded by its actor and in-progress status, set the ticket to open and clear the assignee. If the guard fails, reread the ticket. Assign it afresh when ready, with any existing PR. Never release a claim based on lease expiry alone.
+At the cap, check whether the spec is wrong, the ticket is too big, or a call is missing. Settle missing calls with `steps/unblock.md`. Fix the ticket with `steps/update-ticket.md` or split it with `steps/create-ticket.md`. Record what changed and approve the retry on the ticket before assigning again. When you split, file the new tickets with the original's labels, point its dependents at them, then close the original ticket and its PR.
+
+Pick a model suited to the work. Start a fresh T3 child in the ticket's worktree with the ticket ID, any prior work and any existing PR. Let T3 notify you when it finishes.
