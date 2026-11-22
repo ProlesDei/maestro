@@ -20,7 +20,7 @@ Follow the test run rule in [principles.md](principles.md) and prove one start i
 
 Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss` and `setsid` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
-On an update, wait until no QA session is live before running setup, since setup adds the QA slot that later planners claim. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
+On an update, end every planner and QA session before running setup, since setup adds the QA slot that planners claim. The chief of staff restarts the planners after the update merges. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 
 To move an old board, stop its Dolt server and move `.maestro/maestro-board/` by hand to that folder, and if `.beads/dolt-server.port` is missing, write the old port there before running setup.
 

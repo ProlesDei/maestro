@@ -8,7 +8,7 @@
 
 ### Ticket board
 
-- From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Use JSON for queries. If the board is down, report the block to whoever assigned the work.
+- From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Review and QA use the primary checkout's launcher instead (see “Rules for review and QA”). Use JSON for queries. If the board is down, report the block to whoever assigned the work.
 - Tickets go from open to in progress to closed, with blocked for work that must wait. Keep review and QA verdicts in PR comments.
 - On the epic, keep metadata `planner_thread_id` and `planning_complete`. Store `active_stop` as a JSON object with `fixes` (an array of ticket IDs) and `outside_cause` (the cause outside the code, or null). Remove the key when the stop clears.
 - Read these comments with the ticket. Start each with the fixed words below, then give the named facts.
