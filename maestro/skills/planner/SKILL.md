@@ -15,7 +15,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 |---|---|
 | A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` |
 | A ticket is ready, an engineer or orphaned review ends, or you restart | `steps/assign-ticket.md` |
-| An agent is blocked or there's a call you can't settle | `steps/unblock.md` |
+| An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
