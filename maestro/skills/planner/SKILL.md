@@ -14,12 +14,12 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | When | Do |
 |---|---|
 | A goal arrives | `steps/plan-goal.md` |
-| A ticket is ready to start | `steps/assign-ticket.md` |
-| An agent is blocked or has a question | `steps/unblock.md` |
+| A ticket is ready, an engineer reports a finish, or you restart | `steps/assign-ticket.md` |
+| An agent is blocked or there's a call you can't settle | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
-| QA reports a failed or blocked ticket | Remove its batch label. Send a failure to its engineer. Send a stale head, missing review pass or required branch update to its engineer for fresh review. Use `steps/unblock.md` for other blocks |
+| QA reports a failed or blocked ticket | Remove its batch label. Send a failure back through `steps/assign-ticket.md`. Use the same step for a stale head, missing review pass or required branch update and ask for fresh review. Use `steps/unblock.md` for other blocks |
 | QA merges a PR | Check that the PR merged. Set its ticket to closed with an update guarded by its assignee, since a plain close refuses a ticket someone else holds. Hand out the tickets it frees |
 | A QA session ends | If there's no report, check which PRs merged, close their tickets as above and queue the rest for fresh QA. Take the next group from the queue |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
