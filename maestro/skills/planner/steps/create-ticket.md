@@ -64,4 +64,4 @@ Read the ticket as an engineer who has seen nothing else. File it only if each h
 - The outcome serves the goal.
 - Nothing in it guesses at code you didn't read.
 
-File it on the board under the epic keyed by the goal slug. Put Checks in acceptance, each Waits on in a blocks dependency pointing to the prerequisite, and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design.
+File it on the board under the epic keyed by the goal slug. Put Checks in acceptance and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design. Set each prerequisite to block the new ticket. If any prerequisite is open, check that the new ticket is absent from the ready list.
