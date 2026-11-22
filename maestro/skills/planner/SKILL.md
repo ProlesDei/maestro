@@ -13,7 +13,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 | When | Do |
 |---|---|
-| A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` |
+| A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` once planning is complete |
 | A ticket is ready, an engineer or orphaned review ends, or you restart | `steps/assign-ticket.md` |
 | An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
