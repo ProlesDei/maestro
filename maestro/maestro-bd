@@ -111,8 +111,45 @@ for (( index=1; index<=$#; index++ )); do
     --*=*|--cpu-profile|--global|--help|-h|--ignore-schema-skew|--json|--no-color|-q|--quiet|--readonly|--sandbox|-v|--verbose|-V|--version) ;;
     --*|-?) (( index+=1 )) ;;
     -??*) ;;
-    ready) set -- "${@:1:index}" --limit 0 "${@:index+1}"; break ;;
     *) break ;;
   esac
 done
-exec "$bd" --sandbox --dolt-auto-commit on "$@"
+driver=("$bd" --sandbox --dolt-auto-commit on)
+args=" $* "
+
+case ${!index-} in
+  ready)
+    extra=(--limit 0)
+    full='--(brief|claim|gated|mol|explain)[ =]'
+    [[ $args != *" --json "* || $args =~ $full ]] || extra+=(--brief)
+    set -- "${@:1:index}" "${extra[@]}" "${@:index+1}" ;;
+  update)
+    for (( i=index+1; i<=$#; i++ )); do
+      case ${!i} in
+        --set-metadata) (( j=i+1 )); pair=${!j-} ;;
+        --set-metadata=*) j=$i; pair=${!i#*=} ;;
+        *) continue ;;
+      esac
+      key=${pair%%=*} value=${pair#*=}
+      [[ $pair == *=* && $value == [{[]* ]] || continue
+      [[ $key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "Use a plain metadata key: $key"
+      [[ $args != *" --metadata"* && $(grep -o -- ' --set-metadata' <<< "$args" | wc -l) == 1 ]] ||
+        fail "Set a JSON metadata value in its own update"
+      set -- "${@:1:i-1}" "--metadata={\"$key\":$value}" "${@:j+1}"
+      break
+    done ;;
+  create)
+    if [[ $args =~ \ --parent[\ =] && $args != *" --stdin "* && $args != *" --body-file - "* ]]; then
+      err=$(mktemp)
+      trap 'rm -f -- "$err"' EXIT
+      clash='^Error: [^ ]+\.[0-9]+ already exists'
+      for attempt in 1 2 3 4; do
+        code=0
+        "${driver[@]}" "$@" 2>"$err" || code=$?
+        [[ $code != 0 && $attempt != 4 && $(<"$err") =~ $clash ]] || break
+      done
+      cat -- "$err" >&2
+      exit "$code"
+    fi ;;
+esac
+exec "${driver[@]}" "$@"
