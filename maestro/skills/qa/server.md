@@ -12,7 +12,7 @@ Prefix every server, service, container, Compose project and volume you start or
 - Wait until it answers, on its health check if it has one, before you test. Check that your own process holds the port and its log shows it bound there. If another run took the port first, pick a new one.
 - If startup fails, quote the log lines that show why.
 
-Use memory for app-specific start steps, including services such as a database or queue.
+Start a service the app needs (a database, a queue) the same way, or the way memory says.
 
 ## Test it
 
