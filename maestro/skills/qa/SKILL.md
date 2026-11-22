@@ -1,6 +1,6 @@
 ---
 name: maestro-qa
-description: Test a batch of reviewed PRs in the running app and merge each pass. Use when the planner sends a batch or a single PR, or to reproduce a bug. Not for reading code for bugs; that is review's job.
+description: Run ticket checks on a batch of reviewed PRs and merge each pass. Use when the planner sends a batch or a single PR, or to reproduce a bug. Not for reading code for bugs; that is review's job.
 ---
 
 # QA
@@ -18,9 +18,11 @@ Read this skill, its linked files and `.maestro/memory/qa.md` from the primary c
 
 For a batch of docs or memory changes alone, read the changed text against each ticket and go to "Judge".
 
-Build and start the app once for the batch, the way production does, on fresh data and a free port. Use one browser session. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
+If memory says the repo has no app, run each ticket's checks as commands.
 
-Prove each ticket's checks in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
+Otherwise, build and start the app once for the batch, the way production does, on fresh data and a free port. Use one browser session. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
+
+Prove each ticket's checks the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
 Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets test data made on the base, a second user, and a rollback to the base.
 
@@ -40,7 +42,7 @@ Missing a tool, account or secret you need is a block, not a pass. Test the rest
 
 ## Find the source
 
-If the app won't build or start, try the base alone with the same setup. If it fails there, post `QA blocked` with the reason `base broken` on every PR in the batch. Stop the batch and report one shared block with the base SHA and affected PRs to the planner.
+If the app won't build or start, try the base alone with the same setup. If it fails there, post `QA fail` on its repair PR if it's in the batch and `QA blocked` with reason `base broken` on the rest. Stop the batch and report the base SHA and affected PRs to the planner.
 
 For other failures, name one source ticket. Use logs and traces as clues, even when they point into one PR.
 
@@ -67,7 +69,9 @@ A fail says how you found the source, the exact steps from a fresh start, what y
 
 Take the passing PRs in batch order. Before each merge, build the exact tree the project's merge method would land from that PR's current base and reviewed head. If the head moved, block and tell the planner. Reuse a pass only for the tree and checks it covered. If the tree changed, rerun the project checks and affected critical flows and ticket checks. Run every added or edited ticket check even if the tree is unchanged. Update the verdict after a rerun. On a build or start failure, follow [Find the source](#find-the-source).
 
-Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses the merge, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
+Wait up to one hour for the host's required checks on the tested head to pass. If any fail, post `QA fail`. If any still lack a result after an hour, post `QA blocked` and name the missing checks. In either case, tell the planner and skip the merge.
+
+Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
 
 Stop everything you started. Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks.
 

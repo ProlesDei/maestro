@@ -9,8 +9,8 @@
 ### Ticket board
 
 - From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Use JSON for queries. If the board is down, report the block to whoever assigned the work.
-- Tickets go from open to in progress to closed. Keep review and QA verdicts in PR comments.
-- On the epic, keep metadata `planner_thread_id`, `active_stop` with its fix ticket IDs (empty for a cause outside the code), and `planning_complete`.
+- Tickets go from open to in progress to closed, with blocked for work that must wait. Keep review and QA verdicts in PR comments.
+- On the epic, keep metadata `planner_thread_id` and `planning_complete`. Store `active_stop` as a JSON object with `fixes` (an array of ticket IDs) and `outside_cause` (the cause outside the code, or null). Remove the key when the stop clears.
 - Read these comments with the ticket. Start each with the fixed words below, then give the named facts.
   - `Ruling` — PR, head SHA, blocker, decision.
   - `QA clearance` — PR, head SHA, reason.
@@ -19,7 +19,7 @@
 
 ### Sessions
 
-- Start each role you assign as a T3 child session running its Maestro skill. Record each T3 thread ID on the board (see “Ticket board” for the planner). The engineer claims with its thread ID. Reach a live session through its thread. Record decisions on the epic or ticket before sending them. If a session ended and you still need its role, start a fresh session from the board's state.
+- Start each role you assign as a T3 child session running its Maestro skill. Record the planner's thread ID on the epic (see “Ticket board”). The engineer claims with its thread ID. When you start review or QA, record its thread ID in ticket metadata as `review_thread_id` on the review ticket or `qa_thread_id` on every ticket in the QA batch. Reach a live session through its thread. Record decisions on the epic or ticket before sending them. If a session ended and you still need its role, start a fresh session from the board's state.
 - Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended, then pass any child results it missed to the replacement, including results that arrive later.
 
 ### Worktrees

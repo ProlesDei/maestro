@@ -89,4 +89,15 @@ fi
 cd "$board"
 read -r bd < bd.path
 [[ "$bd" == /* && -x "$bd" ]] || fail "Verified bd is missing at $bd. Rerun board setup"
+
+for (( index=1; index<=$#; index++ )); do
+  case ${!index} in
+    --) break ;;
+    --*=*|--cpu-profile|--global|--help|-h|--ignore-schema-skew|--json|--no-color|-q|--quiet|--readonly|--sandbox|-v|--verbose|-V|--version) ;;
+    --*|-?) (( index+=1 )) ;;
+    -??*) ;;
+    ready) set -- "${@:1:index}" --limit 0 "${@:index+1}"; break ;;
+    *) break ;;
+  esac
+done
 exec "$bd" --sandbox --dolt-auto-commit on "$@"
