@@ -34,11 +34,14 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 On a QA report, QA session end or restart, route only the latest QA verdict for the PR's current head if it is a fail or block with no later clearance or routing note for that verdict. Remove the affected tickets' batch labels. Send a fail, stale head, missing review pass or required branch update to the engineer who holds the claim, or use `steps/assign-ticket.md` if it ended. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks, with these exceptions:
 
 - For `base broken` blocks, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
+- For `QA blocked` verdicts from missing required check results, leave the ticket in progress and check again when rebuilding the queue.
 - For a failure found after a merge, use `steps/create-ticket.md` to file one fix per cause, with the base in Context and `qa:first`.
 
 Record routing after handling the verdict. Record a clearance when a fail or block clears on the same head. See “Ticket board” for both. Before each queue rebuild, clear the `base broken` blocks of any base whose repair has merged, since QA merged the exact tree it proved starts.
 
-Rebuild the queue after recovery or when an engineer, review or QA session ends. Queue open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`. Skip a PR whose latest QA verdict for its current head is a fail or block with no later clearance. Give `qa:first` tickets and their unmerged prerequisites priority, even before the fix PR exists. Send them alone in dependency order. Until a base's `base broken` blocks clear, send only its repair and its unmerged prerequisites for that base. Send stop fixes alone.
+Rebuild the queue after recovery or when an engineer, review or QA session ends. On each rebuild, recheck the host's required checks for open PRs whose current head still has a QA block for missing results. While results are missing, watch for them and rebuild when they arrive. Record `QA clearance` once all required checks pass on that head.
+
+Queue open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`. Skip a PR whose latest QA verdict for its current head is a fail or block with no later clearance. Give `qa:first` tickets and their unmerged prerequisites priority, even before the fix PR exists. Send them alone in dependency order. Until a base's `base broken` blocks clear, send only its repair and its unmerged prerequisites for that base. Send stop fixes alone.
 
 Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again.
 
