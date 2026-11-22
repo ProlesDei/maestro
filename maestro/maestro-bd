@@ -92,9 +92,10 @@ read -r bd < bd.path
 
 for (( index=1; index<=$#; index++ )); do
   case ${!index} in
-    --actor|--database|--db|-C|--directory|--dolt-auto-commit|--mem-profile) (( index+=1 )) ;;
     --) break ;;
-    -*) ;;
+    --*=*|--cpu-profile|--global|--help|-h|--ignore-schema-skew|--json|--no-color|-q|--quiet|--readonly|--sandbox|-v|--verbose|-V|--version) ;;
+    --*|-?) (( index+=1 )) ;;
+    -??*) ;;
     ready) set -- "${@:1:index}" --limit 0 "${@:index+1}"; break ;;
     *) break ;;
   esac
