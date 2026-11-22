@@ -90,33 +90,7 @@ cd "$board"
 read -r bd < bd.path
 [[ "$bd" == /* && -x "$bd" ]] || fail "Verified bd is missing at $bd. Rerun board setup"
 
-ready_at=0
-for (( i=1; i <= $#; i++ )); do
-  arg=${!i}
-  case $arg in
-    --) break ;;
-    --limit|--limit=*|-n) ready_at=0; break ;;
-    --actor|--database|--db|--directory|--dolt-auto-commit|--mem-profile|\
-    --assignee|--exclude-label|--exclude-type|--has-metadata-key|--label|--label-any|\
-    --label-pattern|--label-regex|--max-rows|--metadata-field|--mol|--mol-type|\
-    --offset|--parent|--priority|--sort|--type|-[Calpst]) (( i += 1 )) ;;
-    --*=*|--cpu-profile|--global|--help|--ignore-schema-skew|--json|--no-color|\
-    --quiet|--readonly|--sandbox|--verbose|--version|-[hqvVu]|-) ;;
-    --*|-?)
-      if (( ! ready_at )); then
-        next=$(( i + 1 ))
-        if [[ ${!next-} != -* ]]; then (( i += 1 )); fi
-      fi
-      ;;
-    -?*)
-      if [[ $arg =~ ^-[hqvVu]*n ]]; then ready_at=0; break; fi
-      if [[ $arg =~ ^-[hqvVu]*[Calpst]$ ]]; then (( i += 1 )); fi
-      ;;
-    ready) if (( ! ready_at )); then ready_at=$i; fi ;;
-    *) if (( ! ready_at )); then break; fi ;;
-  esac
-done
-if (( ready_at )); then
-  set -- "${@:1:ready_at}" --limit 0 "${@:ready_at+1}"
+if [[ ${1-} == ready ]]; then
+  set -- ready --limit 0 "${@:2}"
 fi
 exec "$bd" --sandbox --dolt-auto-commit on "$@"
