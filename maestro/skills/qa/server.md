@@ -4,6 +4,8 @@ Read this for any change a server runs: an endpoint, a worker, a job, a migratio
 
 ## Start it
 
+In QA, name every server, service, container and Compose project you start with the prefix `maestro-qa-<batch>-<thread-id>`.
+
 - Use a free port no other run holds, and pass it the way the app reads it. If you had to learn how, record it in a `Remember:` line in the verdict.
 - Start it so you can stop it and every process it spawns, and log to a folder of your own for this run.
 - Use fresh state for this run. Run migrations the way production does.

@@ -21,7 +21,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
 | QA reports a failed or blocked ticket | Route as below |
 | QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Check the stop and QA queue, then assign ready work |
-| A QA session ends | Close merged tickets, route verdicts, check the stop and QA queue, then assign ready work |
+| A QA session ends | Once T3 confirms it ended, stop anything still running under its [QA name prefix](../qa/server.md#start-it). Close merged tickets, route verdicts, check the stop and QA queue, then assign ready work |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
 | The chief of staff calls a stop | Record the stop and fix tickets first (see “Ticket board”). Halt every engineer, review and QA session working outside those fixes. Once T3 confirms they ended, reopen their claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Start work only on the recorded fixes. While the stop lasts, add any base repair and its unmerged prerequisites to the recorded fixes. Clear the stop record once all recorded fixes merge or the cause outside the code clears |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
