@@ -26,7 +26,7 @@ A blocker needs a concrete failure. Name the input, what happens and who sees it
 
 Post the review on the PR as a comment. Its first line is exactly `Review pass at <sha>` or `Review changes needed at <sha>`, with the commit you reviewed, so QA can gate on it. Then what you ran and saw, each blocker with its `file:line` on the PR branch, the failure and the smallest fix, then up to five notes, one line each. Notes need no fix or answer; whoever assigned the ticket decides whether to file them. Don't edit the code.
 
-Drop a blocker under a ruling on the board only if it covers this ticket, PR and blocker and still holds against the current head and spec.
+Drop a blocker under a ruling (see “Ticket board”) only if it covers this PR and blocker and still holds against the current head and spec.
 
 On a later review of the same PR for a low-risk ticket, check only the earlier blockers and the code changed since the last reviewed commit, and rerun the proof of any criterion that code touches. Drop a blocker the engineer's reply disproves with evidence. Don't repeat earlier notes, and raise nothing new unless the change caused it.
 

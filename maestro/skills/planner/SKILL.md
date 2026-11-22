@@ -13,25 +13,30 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 | When | Do |
 |---|---|
-| A goal arrives | `steps/plan-goal.md` |
+| A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` |
 | A ticket is ready, an engineer or orphaned review ends, or you restart | `steps/assign-ticket.md` |
 | An agent is blocked or there's a call you can't settle | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
-| QA reports a failed or blocked ticket | Remove the affected tickets' batch labels. For a broken base or a failure found after a merge, use `steps/create-ticket.md` to file one fix per cause. Name the base branch in its Context and label it `qa:first`. For a broken base, stop the line as below. Otherwise send a failure, stale head, missing review pass or required branch update to the engineer who holds the claim. If that engineer ended, use `steps/assign-ticket.md`. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks |
-| QA merges a PR | Check that the PR merged. If it is a fix named in the epic's stop and every fix named there has now merged, clear the QA blocks they fixed under [Send a batch to QA](#send-a-batch-to-qa), then lift the stop. Set the ticket to closed with an update guarded by its assignee. Hand out the tickets it frees |
-| A QA session ends | Check which PRs merged and close their tickets as above. Route any `QA fail` or `QA blocked` verdict the report missed as in “QA reports a failed or blocked ticket.” Rebuild the queue under [Send a batch to QA](#send-a-batch-to-qa) |
+| QA reports a failed or blocked ticket | Route as below |
+| QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Check the stop and QA queue, then assign ready work |
+| A QA session ends | Close merged tickets, route verdicts, check the stop and QA queue, then assign ready work |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
-| The chief of staff or a broken base stops the line | Record the stop and its fix tickets on the epic. Halt the other runs and reopen their tickets with the guard in `steps/assign-ticket.md`. Assign only the stop's fixes until they all merge, or until you confirm a cause outside the code has cleared. If you split a fix, name the new tickets in the stop |
+| The chief of staff calls a stop | Record the stop and fix tickets first (see “Ticket board”). Halt every engineer, review and QA session working outside those fixes. Once T3 confirms they ended, reopen their claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Start work only on the recorded fixes. Clear the stop record once all recorded fixes merge or the cause outside the code clears |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done or the owner reports a failure | `steps/close-goal.md` |
 | The owner signs off, or a ticket closes under a signed-off epic | Record the sign-off on the epic. Close the epic once every ticket under it is closed |
 
 ## Send a batch to QA
 
-Hold a batch until each unclosed ticket can go to QA. If a ticket gets stuck, including when a PR in another batch holds its paths or it waits for a run slot, remove its batch label and check the rest again.
+On a QA report, QA session end or restart, route only the latest QA verdict for the PR's current head if it is a fail or block with no later clearance or routing note for that verdict. Remove the affected tickets' batch labels. Send a fail, stale head, missing review pass or required branch update to the engineer who holds the claim, or use `steps/assign-ticket.md` if it ended. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks, with these exceptions:
 
-When a QA fail or block clears without a new head, such as a block resolved or a wrong check corrected, record its clearance and PR head SHA on the ticket, then check the queue again. Queue only open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md` and aren't in a running QA session. Skip a PR if its latest QA verdict for the current head is a fail or block with no later clearance for that head.
+- For `base broken`, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
+- For a failure found after a merge, use `steps/create-ticket.md` to file one fix per cause, with the base in Context and `qa:first`.
 
-Rebuild the queue on restart and when an engineer, orphaned review or QA session ends. Group PRs by base branch. Queue a ticket without a batch alone with its ID as the batch name. While the line is stopped, send only the stop's fixes, one at a time. Otherwise, while a `qa:first` ticket is unclosed, send it alone and nothing else. Check existing QA sessions and run one merging session per repo at a time. Send each group once to a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs and PR URLs.
+Record routing after handling the verdict. Record a clearance when a fail or block clears on the same head. See “Ticket board” for both. Clear a base's `base broken` blocks once its repair merges, since QA merged the exact tree it proved starts.
+
+Rebuild the queue after recovery or when an engineer, review or QA session ends. Queue open PRs for in-progress tickets that meet the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`. Skip a PR whose latest QA verdict for its current head is a fail or block with no later clearance. Give `qa:first` tickets and their unmerged prerequisites priority, even before the fix PR exists. Send them alone in dependency order. Until a base's `base broken` blocks clear, send only its repair and its unmerged prerequisites for that base. Send stop fixes alone.
+
+Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again. Run one QA session per repo at a time. Start fresh `maestro-qa` sessions in the primary checkout with the batch name, ticket IDs and PR URLs.

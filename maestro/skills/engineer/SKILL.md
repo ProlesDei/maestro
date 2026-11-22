@@ -9,7 +9,7 @@ You take one ticket to an open PR that passes code review. Then QA tries it in t
 
 ## Understand the ticket
 
-- Read the assigned ticket on the board. Check that it is still ready and unassigned, then claim it atomically with your T3 thread ID (`T3CODE_THREAD_ID`) as the board actor before changing code. If you can't claim it, stop and tell the planner.
+- Read the ticket. Check that it is ready and unassigned, then claim it atomically with your T3 thread ID (`T3CODE_THREAD_ID`) as board actor. If you can't claim it, stop and tell the planner. Right after claiming, recheck its dependencies. If blocked, release the claim with the guard in “Assign a ticket” in `.maestro/skills/planner/steps/assign-ticket.md`, tell the planner and stop.
 - If the ticket has no checks or leaves a behavior unchecked, send it back to whoever assigned it before you code. Number the checks once they cover the ticket.
 - Build nothing the ticket leaves out. If it reads two ways, pick the reading closest to its goal and say so in the PR. Ask whoever assigned it first only when a wrong pick would be hard to undo or the call is the owner's under “Whose call” in `.maestro/skills/chief-of-staff/SKILL.md`.
 - Read the target, the nearest code that does the same kind of thing, and every caller of what you'll change. Learn why the code has its shape before you change it.
@@ -52,11 +52,11 @@ Push and open the PR, or update the existing PR if the planner sent one. Include
 
 ## Get it reviewed
 
-Use “Sessions” in the Maestro principles for handoffs. Start a fresh `maestro-code-review` run with only the PR and ticket ID. Start one after each fix, up to the cap below.
+Use “Sessions” in the Maestro principles for handoffs. Start a fresh `maestro-code-review` run with only the PR and ticket ID. Start one after each round of fixes or evidence-only replies to blockers, up to the cap below.
 
 ## When review or QA sends it back
 
-Count the ticket's PR verdicts across all engineers since the last retry the planner approved on the ticket, or since work began. QA's 3 reruns of one failure count as one verdict. On the third `Review changes needed` verdict or third QA fail verdict, stop and give the planner the ticket, PR and open blockers.
+Count the ticket's PR verdicts across all engineers since the last retry approval (see “Ticket board”), or since work began. QA's 3 reruns of one failure count as one verdict. On the third `Review changes needed` verdict or third QA fail verdict, stop and give the planner the ticket, PR and open blockers.
 
 Answer each blocker in the PR. Fix what it asks and nothing more, or say in a sentence or two, with evidence, why it's wrong. A blocker that adds work the ticket didn't ask for is a new ticket; say so. Notes need no fix or answer. If you changed code, rerun “Prove it and read your diff” for what you touched and push. If you and the reviewer still disagree after one round, take it to whoever assigned the ticket. If the planner rules out a blocker, post the ruling on the PR and start a fresh review.
 

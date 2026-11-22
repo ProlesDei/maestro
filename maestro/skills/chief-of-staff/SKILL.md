@@ -58,7 +58,7 @@ Group blocks by cause. Many blocks with one cause (a red main branch, a missing 
 
 ## Stop the line
 
-When runs keep failing on one cause and keep spending, tell the planner to stop the line.
+When runs keep failing on one cause and keep spending, call a stop. See “The chief of staff calls a stop” in the [planner skill](../planner/SKILL.md).
 
 ## Hand back finished work
 
