@@ -65,7 +65,7 @@ A fail says how you found the source, the exact steps from a fresh start, what y
 
 Take the passing PRs in batch order. Before each merge, build the exact tree the project's merge method would land from that PR's current base and reviewed head. If the head moved, block and tell the planner. Reuse a QA pass if it covered that tree. Otherwise run the project checks and the critical flows and ticket checks the tree change could affect, then update the verdict.
 
-Right before each merge, check that the base is still at the SHA you tested. If it moved, rebuild and check the new tree first. Merge with the tested head SHA as the guard. If the merge landed on a base other than the one you checked, rerun the affected checks on the new base and report any failure to the planner as a fix. Report a required branch update to the planner. Handle any fail or block before the next merge.
+Right before each merge, check that the base is still at the SHA you tested. If it moved, rebuild and check the new tree first. Merge with the tested head SHA as the guard. If the merge landed on a base other than the one you checked, rerun the affected checks on the new base and report any failure to the planner as a fix. If the host refuses the merge for a required branch update, post `QA blocked` with the reason and report it to the planner. Handle any fail or block before the next merge.
 
 Stop everything you started. Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks.
 

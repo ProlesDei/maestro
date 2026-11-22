@@ -4,6 +4,6 @@ On a T3 finish notice or when QA sends a ticket back, read the engineer thread's
 
 Pick a ready, unassigned child ticket. Check that no running ticket touches the same paths. Check the retry cap in “When review or QA sends it back” in `.maestro/skills/engineer/SKILL.md`.
 
-At the cap, check whether the spec is wrong, the ticket is too big, or a call is missing. Settle missing calls with `steps/unblock.md`. Fix the ticket with `steps/update-ticket.md` or split it with `steps/create-ticket.md`. Record what changed and approve the retry on the ticket before assigning again. When you split, close the original ticket and its PR, and point its dependents at the new tickets.
+At the cap, check whether the spec is wrong, the ticket is too big, or a call is missing. Settle missing calls with `steps/unblock.md`. Fix the ticket with `steps/update-ticket.md` or split it with `steps/create-ticket.md`. Record what changed and approve the retry on the ticket before assigning again. When you split, file the new tickets with the original's labels, point its dependents at them, then close the original ticket and its PR.
 
 Pick a model suited to the work. Start a fresh T3 child in the ticket's worktree with the ticket ID, any prior work and any existing PR. Let T3 notify you when it finishes.
