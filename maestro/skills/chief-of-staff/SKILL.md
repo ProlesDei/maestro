@@ -60,7 +60,7 @@ Group blocks by cause. Many blocks with one cause (a red main branch, a missing 
 
 ## Stop the line
 
-When runs keep failing on one cause and keep spending, call a stop. Tell the planner when an outside cause clears. See the stop events in the [planner skill](../planner/SKILL.md).
+When runs keep failing on one cause and keep spending, call a stop. Tell the planner when an outside cause clears. See the stop events in `.maestro/skills/planner/SKILL.md`.
 
 ## Hand back finished work
 

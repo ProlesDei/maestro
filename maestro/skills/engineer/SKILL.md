@@ -54,7 +54,7 @@ Push and open the PR, or update the existing PR if the planner sent one. Include
 
 ## Get it reviewed
 
-Start a fresh `maestro-code-review` child in your T3 checkout with only the PR, ticket ID and “Rules for review and QA” from `.maestro/principles.md`. Start one after each round of fixes or replies with evidence, up to the cap below.
+Start a fresh `maestro-code-review` child in your T3 checkout with only the PR, ticket ID and “Rules for review and QA” as the primary checkout's `.maestro/principles.md` states it. Start one after each round of fixes or replies with evidence, up to the cap below.
 
 ## When review or QA sends it back
 
