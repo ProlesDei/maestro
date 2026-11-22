@@ -7,12 +7,12 @@ description: Run ticket checks on a batch of reviewed PRs and merge each pass. U
 
 Never change the code.
 
-Read this skill, its linked files and `.maestro/memory/qa.md` from the primary checkout, and use its board launcher. Read the project's rules from the PR's base branch.
+Load this skill, its guides and `blockers.md` under “Rules for review and QA” in the Maestro principles.
 
 ## Before you test
 
 - Read each PR and its board ticket for the goal, checks, scope and review notes. Record each current head sha and check that the latest review comment opens `Review pass at <sha>` for that head. Block any PR without that pass and report it to the planner.
-- In one fresh worktree of your own, record the latest base SHA and merge the reviewed heads into it in ticket filing order. For a conflict, try the PR on the base alone. If it conflicts there, fail that PR. Otherwise fail the later-filed ticket and tell the planner which paths overlap.
+- In one fresh worktree of your own, start at the recorded base SHA and merge the reviewed heads into it in ticket filing order. For a conflict, try the PR on the base alone. If it conflicts there, fail that PR. Otherwise fail the later-filed ticket and tell the planner which paths overlap.
 
 ## Run it
 
