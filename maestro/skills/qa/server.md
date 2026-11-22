@@ -4,7 +4,7 @@ Read this for any change a server runs: an endpoint, a worker, a job, a migratio
 
 ## Start it
 
-In QA, name every server, service, container and Compose project you start with the prefix `maestro-qa-<batch>-<thread-id>`.
+Prefix every server, service, container, Compose project and volume you start or create with `maestro-<role>-<ticket or batch>-<thread-id>`. Add a suffix when resources need distinct names.
 
 - Use a free port no other run holds, and pass it the way the app reads it. If you had to learn how, record it in a `Remember:` line in the verdict.
 - Start it so you can stop it and every process it spawns, and log to a folder of your own for this run.
@@ -12,7 +12,7 @@ In QA, name every server, service, container and Compose project you start with 
 - Wait until it answers, on its health check if it has one, before you test. Check that your own process holds the port and its log shows it bound there. If another run took the port first, pick a new one.
 - If startup fails, quote the log lines that show why.
 
-Start a service the app needs (a database, a queue) the same way, or the way memory says.
+Use memory for app-specific start steps, including services such as a database or queue.
 
 ## Test it
 
