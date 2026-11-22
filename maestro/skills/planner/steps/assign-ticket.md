@@ -1,6 +1,6 @@
 # Assign a ticket
 
-On restart, defer all engineer, review and QA starts and handoffs that trigger them. Close verified merges, apply any recorded stop, check whether to lift it, and route QA verdicts under the [planner skill](../SKILL.md). Resume tickets blocked on owner calls with answers already on the ticket, as in `steps/unblock.md`. Check claims and PRs below. Queue rulings that still need review for live engineers whose tickets have no live review. Resume incomplete planning before dispatch.
+On restart, defer all engineer, review and QA starts and handoffs that trigger them. Close verified merges, apply any recorded stop, check whether to lift it, and route QA verdicts under the [planner skill](../SKILL.md). Resend recorded owner questions that lack answers. Resume tickets whose owner calls all have answers, as in `steps/unblock.md`. Check claims and PRs below. Queue rulings that still need review for live engineers whose tickets have no live review. Resume incomplete planning before dispatch.
 
 On a T3 finish notice or QA send-back, check only the affected tickets. Check engineer and review sessions in T3 by the claim's actor and the ticket's `review_thread_id`.
 
