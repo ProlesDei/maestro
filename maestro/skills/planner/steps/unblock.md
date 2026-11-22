@@ -6,4 +6,4 @@ If the spec needs a fix, use `steps/update-ticket.md`. Keep a broken-base repair
 
 Record the question and set each waiting ticket to blocked in one update guarded by its assignee and status. Then send the owner call to the chief of staff with what you tried, which work must wait, and the decision you need.
 
-Record the answer on each affected ticket. Once all its owner calls have answers, reopen the ticket if unassigned or return it to in progress if claimed. Guard the update by the assignee and blocked status. Then recheck the QA queue and assign ready work.
+Record the answer on each affected ticket. Once all its owner calls have answers, reopen a blocked ticket if unassigned or return it to in progress if claimed. Guard that update by the assignee and blocked status. If the guard fails, reread the ticket. Send the recorded answers to the live claim holder's thread for in-progress tickets. If the holder ended, use the guarded release in `steps/assign-ticket.md` and reassign the ticket. Then recheck the QA queue and assign ready work.
