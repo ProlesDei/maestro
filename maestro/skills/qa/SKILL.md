@@ -71,7 +71,7 @@ Take the passing PRs in batch order. Before each merge, build the exact tree the
 
 Wait for the host's required checks on the tested head to pass. If any fail, post a `QA fail` verdict, tell the planner and skip the merge.
 
-Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
+Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
 
 Stop everything you started. Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks.
 
