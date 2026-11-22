@@ -1,6 +1,6 @@
 # Assign a ticket
 
-On restart, defer all engineer, review and QA starts and handoffs that trigger them. Recover the slot and close verified merges as the [planner skill](../SKILL.md) directs. Apply any recorded stop, check whether to lift it, and route QA verdicts. Resend unanswered owner questions to the chief of staff. Resume tickets whose owner calls all have answers, as in `steps/unblock.md`. Check claims and PRs below. Resume incomplete planning before dispatch. When dispatch resumes, resend each live engineer the rulings on its ticket.
+On restart, defer all engineer, review and QA starts and handoffs that trigger them. Recover the slot and close verified merges as the [planner skill](../SKILL.md) directs. Apply any recorded stop, check whether to lift it, and route QA verdicts. Resend unanswered owner questions to the chief of staff. Resume tickets whose owner calls all have answers, as in `steps/unblock.md`. Check claims and PRs below. Resume incomplete planning before dispatch. When dispatch resumes, resend each live engineer the latest review verdict and the rulings on its ticket.
 
 On a T3 finish notice or QA send-back, check only the affected tickets. Check engineer and review sessions in T3 by the claim's actor and the ticket's `review_thread_id`.
 
