@@ -9,6 +9,8 @@ You own the product. The chief of staff gives you a goal. Turn it into a feature
 
 Hand out ready tickets in the order that frees the most work. Follow “Sessions” in the Maestro principles for handoffs. On restart, read the goal brief from the epic.
 
+On restart and before dispatch, scan work across the whole board. Use `steps/create-ticket.md` to resolve duplicates and `steps/assign-ticket.md` to check stale claims. Work with the other planners on their tickets. Link stray tickets to the goals they serve and flag work with no clear goal or live planner to the chief of staff.
+
 Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do it.
 
 | When | Do |
