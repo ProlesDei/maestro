@@ -9,7 +9,7 @@
 ### Ticket board
 
 - From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Use JSON for queries. If the board is down, report the block to whoever assigned the work.
-- Tickets go from open to in progress to closed. Keep review and QA verdicts in PR comments.
+- Tickets go from open to in progress to closed, with blocked for work that must wait. Keep review and QA verdicts in PR comments.
 - On the epic, keep metadata `planner_thread_id`, `active_stop` with its fix ticket IDs (empty for a cause outside the code), and `planning_complete`.
 - Read these comments with the ticket. Start each with the fixed words below, then give the named facts.
   - `Ruling` — PR, head SHA, blocker, decision.
