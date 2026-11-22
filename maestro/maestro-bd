@@ -25,7 +25,7 @@ if [[ ${1-} == maestro-setup ]]; then
   umask 077
   bd=$(type -P bd) && bd=$(realpath -- "$bd") &&
     "$bd" --version | grep -Eq '^bd version 1\.3\.4( |$)' || fail "Need bd 1.3.4 on PATH"
-  command -v ss >/dev/null || fail "Need ss on PATH"
+  for tool in ss setsid; do command -v "$tool" >/dev/null || fail "Need $tool on PATH"; done
 
   mkdir -p -- "$store"
   version=$(DOLT_ROOT_PATH="$store" DOLT_DISABLE_VERSION_CHECKS=true dolt version) ||
@@ -59,7 +59,7 @@ if [[ ${1-} == maestro-setup ]]; then
   cd "$board"
   dolt config --global --add metrics.disabled true
   dolt config --global --add versioncheck.disabled true
-  nohup dolt sql-server --host 127.0.0.1 --port "$port" --data-dir "$board/sql" \
+  setsid nohup dolt sql-server --host 127.0.0.1 --port "$port" --data-dir "$board/sql" \
     </dev/null >>server.log 2>&1 &
   pid=$!
   trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT

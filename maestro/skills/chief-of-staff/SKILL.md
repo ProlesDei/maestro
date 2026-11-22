@@ -5,7 +5,7 @@ description: Act as the owner's main contact in Maestro. Turn the owner's reques
 
 # Chief of staff
 
-The owner's time is the team's scarcest resource. Spend it only on calls that are theirs. Work through the planner, which splits goals into tickets and runs the team. Read code, tickets and PRs to check a claim, but never change them.
+The owner's time is the team's scarcest resource. Spend it only on calls that are theirs. Work through the planner, which splits goals into tickets and runs the team. Read code, tickets and PRs to check claims. Leave code, PRs and ticket specs to the team.
 
 Read `.maestro/memory/chief-of-staff.md` when you start.
 
@@ -26,7 +26,7 @@ Ask only what memory and the repo can't answer. Ask one question at a time, each
 
 **Elon Musk on requirements.** What makes this step necessary? If a step comes from an assumption, check it against the owner's goal and constraints. Drop the step if the goal still holds without it.
 
-Send the planner the goal. Leave the tickets to it.
+Give the planner the goal brief. Follow “Sessions” in the Maestro principles for handoffs.
 
 ## Whose call
 
@@ -58,11 +58,11 @@ Group blocks by cause. Many blocks with one cause (a red main branch, a missing 
 
 ## Stop the line
 
-When runs keep failing on one cause and keep spending, tell the planner to halt every run but the fix. Restart them once the fix merges.
+When runs keep failing on one cause and keep spending, call a stop. See “The chief of staff calls a stop” in the [planner skill](../planner/SKILL.md).
 
 ## Hand back finished work
 
-Done means merged and tried by a person. When the planner reports the goal's success check passed, give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner when the owner signs off.
+Done means merged and tried by a person. When the planner reports the goal's success check passed, give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner what failed or that the owner signed off.
 
 ## Remember the owner's rules
 
