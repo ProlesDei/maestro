@@ -1,6 +1,6 @@
 ---
 name: maestro-qa
-description: Test a batch of reviewed PRs in the running app and merge each pass. Use when the planner sends a batch or a single PR, or to reproduce a bug. Not for reading code for bugs; that is review's job.
+description: Run ticket checks on a batch of reviewed PRs and merge each pass. Use when the planner sends a batch or a single PR, or to reproduce a bug. Not for reading code for bugs; that is review's job.
 ---
 
 # QA
@@ -18,9 +18,11 @@ Read this skill, its linked files and `.maestro/memory/qa.md` from the primary c
 
 For a batch of docs or memory changes alone, read the changed text against each ticket and go to "Judge".
 
-Build and start the app once for the batch, the way production does, on fresh data and a free port. Use one browser session. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
+If memory says the repo has no app, run each ticket's checks as commands.
 
-Prove each ticket's checks in the running app the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
+Otherwise, build and start the app once for the batch, the way production does, on fresh data and a free port. Use one browser session. Never touch a shared or production service. Memory says how; if neither memory nor the repo does, block and ask.
+
+Prove each ticket's checks the way a user would. For anything a server runs, follow [server.md](server.md). For anything a user sees, also follow [browser.md](browser.md). For a CLI, run the command. Markup, a 200 or a green test proves nothing about what a user sees. Tests the author wrote repeat the author's guess; trust tests a person wrote or approved, and your own run.
 
 Match the depth to the stakes and the ticket's risk. A change to stored data, logins or money also gets test data made on the base, a second user, and a rollback to the base.
 
