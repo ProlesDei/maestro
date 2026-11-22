@@ -6,7 +6,7 @@ Read this for any change a user sees: a page, a form, a chart, an email preview.
 
 Use Playwright CLI, unless memory names another browser tool.
 
-- Use the run prefix from “Worktrees” in the Maestro principles as your browser session name on every command. Never use the default session.
+- Use the “Worktrees” run prefix in `.maestro/principles.md` as your browser session name on every command. Never use the default session.
 - Open it headless, with a fresh profile: no saved logins or storage.
 - Keep its screenshots and logs in your run's folder, not the checkout.
 - When you finish, on every way out, close your session and only yours. Never close every session: that ends other runs' tests.

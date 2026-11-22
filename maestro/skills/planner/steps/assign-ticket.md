@@ -1,6 +1,6 @@
 # Assign a ticket
 
-On restart, defer all engineer, review and QA starts and handoffs that trigger them. Use “Check the QA slot” in the [planner skill](../SKILL.md) to recover the slot. Close verified merges, apply any recorded stop, check whether to lift it, and route QA verdicts. Resend unanswered owner questions from the epic and its tickets to the chief of staff. Resume tickets whose owner calls all have answers, as in `steps/unblock.md`. Check claims and PRs below. Queue rulings that still need review for live engineers whose tickets have no live review. Resume incomplete planning before dispatch.
+On restart, defer all engineer, review and QA starts and handoffs that trigger them. Recover the slot and close verified merges as the [planner skill](../SKILL.md) directs. Apply any recorded stop, check whether to lift it, and route QA verdicts. Resend unanswered owner questions to the chief of staff. Resume tickets whose owner calls all have answers, as in `steps/unblock.md`. Check claims and PRs below. Resume incomplete planning before dispatch. When dispatch resumes, resend each live engineer the latest ruling on its ticket.
 
 On a T3 finish notice or QA send-back, check only the affected tickets. Check engineer and review sessions in T3 by the claim's actor and the ticket's `review_thread_id`.
 
@@ -14,4 +14,4 @@ Pick a ready, unassigned child ticket whose paths no running ticket touches. Che
 
 At the cap, check the spec, size and open calls. Fix or split the ticket with `steps/unblock.md`. Approve the first retry and ask the chief of staff to approve later ones. Record each approval before assigning (see “Ticket board”).
 
-Pick a model suited to the work. Start the engineer in the ticket's worktree. Give it the worktree path, ticket ID, prior work and any existing PR. Let T3 notify you when it finishes.
+Pick a model suited to the work. If the ticket's worktree exists, start the engineer child in your checkout and give it that path. Otherwise start it in a new T3 worktree. Give it the ticket ID, prior work and any existing PR. Save its task ID as “Sessions” directs. Let T3 notify you when it finishes.

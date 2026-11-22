@@ -4,17 +4,17 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 ## 1. Place Maestro
 
-1. Before writing, resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes in the checkout, including their parents. The board under `~/.local/share/maestro-board/` is the one write outside it. If any resolve outside the checkout, stop and ask the owner. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
+1. Before writing, find a remote that can take PRs and its default branch. If you can't find both, stop and ask the owner. Resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes in the checkout, including their parents. The board under `~/.local/share/maestro-board/` is the one write outside it. If any resolve outside the checkout, stop and ask the owner. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
 2. Copy the checkout's `maestro/` files into `.maestro/`. On an update, keep existing memory and any old board.
 3. For each folder in `.maestro/skills/`, make sure `.agents/skills/` and `.claude/skills/` each hold a relative symlink `maestro-<folder>` that points to it.
-4. Put the text of the checkout's [principles.md](principles.md) at the end of the root `AGENTS.md`, between the lines `<!-- maestro:start -->` and `<!-- maestro:end -->`. Create the file if needed. On an update, replace only what sits between the markers.
+4. Put one line at the end of the root `AGENTS.md` between `<!-- maestro:start -->` and `<!-- maestro:end -->`: “Maestro roles read `.maestro/principles.md` when they start.” Create the file if needed. On an update, replace only what sits between the markers.
 5. Add `@AGENTS.md` to the root `CLAUDE.md` if missing. Create the file if needed.
 
 ## 2. Set up QA
 
 If QA memory lacks a verified start, read the README, package scripts, Makefile, compose files and docs. Draft steps to start the app with fresh test data. Ask the owner only to confirm the steps or fill gaps.
 
-Follow the test run rule in [principles.md](principles.md) and prove one start in a scratch worktree on a free port. Check that the app answers, then stop what you started. Record the run steps, readiness check and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that. If the start fails, report what blocks QA.
+Follow the test run rule in [principles.md](maestro/principles.md) and prove one start in a scratch worktree on a free port. Check that the app answers, then stop what you started. Record the run steps, readiness check and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that. If the start fails, report what blocks QA.
 
 ## 3. Set up the ticket board
 
@@ -45,11 +45,11 @@ claude mcp add --scope project --transport stdio codebase-memory-mcp -- codebase
 
 Keep the rest of each config. Keep a matching entry. If an entry uses the same name with different settings, ask the owner before changing it. Commit the Maestro install files, QA memory and MCP config so new worktrees get them.
 
-Check that the install commit's tree contains every install file and skill link. If Git ignores any, stop and ask the owner. Open an install PR to the default branch. Post verdicts as plain PR comments, wait for required checks to pass, and merge with this session's account and the merge method QA will use. If the host refuses, stop and ask the owner. A successful merge proves QA's merge path.
+Check that the install commit's tree contains every install file and skill link. If Git ignores any, stop and ask the owner. Open an install PR to the remote's default branch from step 1. Post verdicts as plain PR comments, wait for required checks to pass, and merge with this session's account and the merge method QA will use. If the host refuses, stop and ask the owner. A successful merge proves QA's merge path.
 
 ## 5. Verify in T3
 
-Create a fresh linked worktree from the remote default branch, as T3 does for tickets. Use `.maestro/maestro-bd` there to list ready, unassigned tickets as JSON. Expect an array, empty on a new board.
+Create a fresh linked worktree from the remote's default branch from step 1, as T3 does for tickets. Use `.maestro/maestro-bd` there to list ready, unassigned tickets as JSON. Expect an array, empty on a new board.
 
 Use `.maestro/maestro-bd` to create a throwaway ticket on the board. Claim it atomically as one actor. Check that a second actor gets an already-claimed error. Close it with an update guarded by the first actor as assignee and `in_progress` status, then delete it. Stop if any check fails.
 
