@@ -1,6 +1,6 @@
 # Assign a ticket
 
-On a T3 finish notice, read the thread's state and result. On restart, do this for each engineering claim using its actor as the thread ID. If a report is missing, check the ticket and PR. If more engineering is needed and T3 confirms the session and its child work ended, reopen the ticket and clear the assignee in one update guarded by its actor and in-progress status. If the guard fails, reread the ticket.
+On a T3 finish notice or when QA sends a ticket back, read the engineer thread's state and result. On restart, do this for each engineering claim using its actor as the thread ID. If a report is missing, check the ticket and PR. If more engineering is needed and T3 confirms the session and its child work ended, reopen the ticket and clear the assignee in one update guarded by its actor and in-progress status. If the guard fails, reread the ticket.
 
 Pick a ready, unassigned child ticket. Check that no running ticket touches the same paths. Check the retry cap in “When review or QA sends it back” in `.maestro/skills/engineer/SKILL.md`.
 

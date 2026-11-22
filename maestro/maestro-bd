@@ -11,6 +11,9 @@ primary=$(cd "${worktree#worktree }" && pwd -P)
 digest=$(printf '%s' "$primary" | sha256sum)
 store="$HOME/.local/share/maestro-board"
 board="$store/${primary##*/}-${digest:0:12}"
+for var in $(compgen -e); do
+  if [[ $var == BEADS_* && $var != BEADS_ACTOR ]]; then unset "$var"; fi
+done
 export GIT_CEILING_DIRECTORIES="$store"
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
 export BEADS_DIR="$board/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
