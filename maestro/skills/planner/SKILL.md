@@ -24,6 +24,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | A QA session ends | Once T3 confirms it ended, stop anything still running under its [QA name prefix](../qa/server.md#start-it). Close merged tickets, route verdicts, check the stop and QA queue, then assign ready work |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
 | The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites whenever you record a fix. Use the claim actor, `review_thread_id` and `qa_thread_id` to find and halt every live engineer, review and QA session working outside those fixes. Once T3 confirms they ended, release their claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Start work only on the recorded fixes. While the stop lasts, add any base repair to the recorded fixes. Clear the stop record only once all recorded fixes have merged and any outside cause has cleared |
+| The chief of staff says the outside cause cleared | Set the stop's `outside_cause` to null. Check whether to lift the stop, recheck the QA queue and assign ready work |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done or the owner reports a failure | `steps/close-goal.md` |
 | The owner signs off, or a ticket closes under a signed-off epic | Record the sign-off on the epic. Close the epic once every ticket under it is closed |
