@@ -6,6 +6,11 @@ fail() {
   exit 1
 }
 
+check_board() {
+  "$bd" --sandbox --dolt-auto-commit on ready --json >/dev/null ||
+    fail "Board query failed at $board (port $port)"
+}
+
 IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
 primary=$(cd "${worktree#worktree }" && pwd -P)
 digest=$(printf '%s' "$primary" | sha256sum)
@@ -42,6 +47,9 @@ if [[ ${1-} == maestro-setup ]]; then
     pid=$(<"$board/server.pid")
     if [[ -n "$pid" && -n "$saved" && "$(ss -Hltpn "sport = :$saved")" == *"pid=$pid,"* ]]; then
       [[ ${1-$saved} == "$saved" ]] || fail "Board is running on port $saved. Stop it before changing ports"
+      port=$saved
+      cd "$board"
+      check_board
       printf '%s\n' "$bd" > "$board/bd.path"
       echo "Maestro board already running at $board (port $saved, PID $pid)"
       exit 0
@@ -77,6 +85,7 @@ if [[ ${1-} == maestro-setup ]]; then
       --server-user root --prefix maestro --skip-agents --skip-hooks --non-interactive
   fi
   printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
+  check_board
   printf '%s\n' "$bd" > bd.path
   printf '%s\n' "$pid" > server.pid
   trap - EXIT
