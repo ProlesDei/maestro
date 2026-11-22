@@ -1,6 +1,6 @@
 # Unblock work
 
-Group blocks that share a cause. Check each call against “Whose call” in `.maestro/skills/chief-of-staff/SKILL.md` first, and send any that belong to the owner to the chief of staff. Use the goal and current specs to answer the rest. Give the answer to each affected agent.
+Group blocks by cause. First use “Whose call” in `.maestro/skills/chief-of-staff/SKILL.md` to route owner calls to the chief of staff. Answer the rest from the goal and specs, and tell each affected agent.
 
 If the spec needs a fix, use `steps/update-ticket.md`. If part of the work can proceed on its own, split the ticket with `steps/create-ticket.md` and `steps/update-ticket.md`.
 

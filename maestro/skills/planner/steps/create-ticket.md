@@ -5,7 +5,7 @@ An engineer builds from the ticket in a fresh session, a reviewer checks the PR 
 ## Before you write
 
 - Search the board for any ticket still in play that covers the work. Wait on it, or change it with `steps/update-ticket.md`, instead of filing a second one.
-- Read the code the ticket touches on the main branch. Name only paths and symbols you saw, and check each decision you settle against that code.
+- Read the code the ticket touches on its base branch. Name only paths and symbols you saw, and check each decision you settle against that code.
 - Search for code that already does part of the work. Have the ticket build on it, or say why not.
 - Find what reads the behavior you change: other commands, alerts, stored state, other agents. Decide what each should do once the change lands.
 

@@ -19,19 +19,19 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
-| QA reports a failed or blocked ticket | Remove its batch label. Send a failure back through `steps/assign-ticket.md`. For a stale head, missing review pass or required branch update, ask the engineer who holds the claim for a fresh review, or use the same step if that session ended. Use `steps/unblock.md` for other blocks. For a failure QA found after a merge, file a fix ticket with `steps/create-ticket.md` and label it `qa:first`. Send it to QA alone, ahead of the queue, and hold other groups until it merges |
+| QA reports a failed or blocked ticket | Remove its batch label. Send a failure, stale head or missing review pass to the engineer who holds the claim, or through `steps/assign-ticket.md` if that session ended. For a required branch update, also ask it to update the branch and rerun "Prove it" before fresh review. Use `steps/unblock.md` for other blocks, and queue fresh QA once one clears. For a failure QA found after a merge, file a fix ticket on that PR's base branch with `steps/create-ticket.md` and label it `qa:first` |
 | QA merges a PR | Check that the PR merged. Set its ticket to closed with an update guarded by its assignee, since a plain close refuses a ticket someone else holds. Hand out the tickets it frees |
-| A QA session ends | If there's no report, check which PRs merged, close their tickets as above and queue the rest for fresh QA. Take the next group from the queue |
+| A QA session ends | Check which PRs merged and close their tickets as above. Route each posted QA verdict the report didn't cover as in the row above. Queue the rest for fresh QA and take the next group |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
 | The chief of staff stops the line | Halt every run but the fix, and restart them once it merges |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done | `steps/close-goal.md` |
-| The owner signs off and no ticket under the epic is open | Close the epic on the board |
+| The owner signs off, or a ticket closes under a signed-off epic | Record the sign-off on the epic. Close the epic once no ticket under it is open |
 
 ## Send a batch to QA
 
 Hold the batch until every ticket in it has an open PR that meets the review gate in “Before you test” in `.maestro/skills/qa/SKILL.md`.
 
-If a ticket is stuck, including when an open PR in another batch holds its paths, remove its batch label and check the rest again. Queue ready PRs by base branch. Run one merging QA session per repo at a time. Check existing QA sessions before starting one. On restart, rebuild the queue from open tickets whose PRs meet the review gate, have no QA fail on their current head, and aren't in a running QA session, with any open `qa:first` ticket alone at the front. Send each group once to a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs and PR URLs.
+If a ticket is stuck, including when an open PR in another batch holds its paths, remove its batch label and check the rest again. Queue ready PRs by base branch. Run one merging QA session per repo at a time. Check existing QA sessions before starting one. On restart or an engineer finish, rebuild the queue from unclosed tickets whose PRs meet the review gate, have no QA fail on their current head, and aren't in a running QA session. While a `qa:first` ticket is unmerged, send it alone and nothing else. Send each group once to a fresh `maestro-qa` session in the primary checkout with the batch name, ticket IDs and PR URLs.
 
 Use the same review gate for a ticket without a batch. Queue it alone with its ID as the batch name. After a QA fix, send the ticket this way or add it to a batch that has yet to go to QA.

@@ -11,7 +11,7 @@ You take one ticket to an open PR that passes code review. Then QA tries it in t
 
 - Read the assigned ticket on the board. Check that it is still ready and unassigned, then claim it atomically with your T3 thread ID (`T3CODE_THREAD_ID`) as the board actor before changing code. If you can't claim it, stop and tell the planner.
 - If the ticket has no checks or leaves a behavior unchecked, send it back to whoever assigned it before you code. Number the checks once they cover the ticket.
-- Build nothing the ticket leaves out. If it reads two ways, pick the reading closest to its goal and say so in the PR. Ask whoever assigned it first only when a wrong pick would be hard to undo.
+- Build nothing the ticket leaves out. If it reads two ways, pick the reading closest to its goal and say so in the PR. Ask whoever assigned it first only when a wrong pick would be hard to undo or the call is the owner's under “Whose call” in `.maestro/skills/chief-of-staff/SKILL.md`.
 - Read the target, the nearest code that does the same kind of thing, and every caller of what you'll change. Learn why the code has its shape before you change it.
 
 ## Plan
