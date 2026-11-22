@@ -4,7 +4,7 @@ An engineer builds from the ticket in a fresh session, a reviewer checks the PR 
 
 ## Before you write
 
-- Search the board for any ticket still in play that covers the work. Wait on it, or change it with `steps/update-ticket.md`, instead of filing a second one, unless you are splitting it.
+- Search the whole board across epics for tickets still in play that cover the same work. Reuse the match or change it with `steps/update-ticket.md`. Leave out the original when filing parts of a split.
 - Read the code the ticket touches on its base branch. Name only paths and symbols you saw, and check each decision you settle against that code.
 - Search for code that already does part of the work. Have the ticket build on it, or say why not.
 - Find what reads the behavior you change: other commands, alerts, stored state, other agents. Decide what each should do once the change lands.
@@ -65,3 +65,5 @@ Read the ticket as an engineer who has seen nothing else. File it only if each h
 - Nothing in it guesses at code you didn't read.
 
 File it on the board under the epic keyed by the goal slug. Put Checks in acceptance and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design. Set each prerequisite to block the new ticket. If any prerequisite is open, check that the new ticket is absent from the ready list.
+
+Search again as soon as you file. If tickets cover the same work, keep the first by ticket ID. Point dependents to the kept ticket, and set it to block the duplicate's epic. If work has started on a duplicate, have its planner stop the sessions and save any work the kept ticket needs. Once those sessions end, close each later ID as a duplicate with its assignee and status as guards.

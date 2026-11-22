@@ -4,7 +4,7 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 ## 1. Place Maestro
 
-1. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
+1. Before writing, resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes in the checkout, including their parents. The board under `~/.local/share/maestro-board/` is the one write outside it. If any resolve outside the checkout, stop and ask the owner. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
 2. Copy the checkout's `maestro/` files into `.maestro/`. On an update, keep existing memory and any old board.
 3. For each folder in `.maestro/skills/`, make sure `.agents/skills/` and `.claude/skills/` each hold a relative symlink `maestro-<folder>` that points to it.
 4. Put the text of the checkout's [principles.md](principles.md) at the end of the root `AGENTS.md`, between the lines `<!-- maestro:start -->` and `<!-- maestro:end -->`. Create the file if needed. On an update, replace only what sits between the markers.
@@ -20,7 +20,7 @@ Follow the test run rule in [principles.md](principles.md) and prove one start i
 
 Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss` and `setsid` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
-Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
+On an update, end every planner and QA session before running setup, since setup adds the QA slot that planners claim. The chief of staff restarts the planners after the update merges. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 
 To move an old board, stop its Dolt server and move `.maestro/maestro-board/` by hand to that folder, and if `.beads/dolt-server.port` is missing, write the old port there before running setup.
 

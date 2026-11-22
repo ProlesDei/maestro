@@ -6,6 +6,17 @@ fail() {
   exit 1
 }
 
+ensure_qa_slot() {
+  local slot
+  slot=$("$bd" --sandbox --dolt-auto-commit on list --all --id maestro-qa-slot --json) ||
+    fail "Board query failed at $board (port $port)"
+  if [[ "$slot" == '[]' ]]; then
+    "$bd" --sandbox --dolt-auto-commit on create "Maestro QA slot" --id maestro-qa-slot \
+      --type task --status blocked --description "Only one QA session can run at a time." >/dev/null ||
+      fail "Could not create maestro-qa-slot at $board (port $port)"
+  fi
+}
+
 IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
 primary=$(cd "${worktree#worktree }" && pwd -P)
 digest=$(printf '%s' "$primary" | sha256sum)
@@ -42,6 +53,9 @@ if [[ ${1-} == maestro-setup ]]; then
     pid=$(<"$board/server.pid")
     if [[ -n "$pid" && -n "$saved" && "$(ss -Hltpn "sport = :$saved")" == *"pid=$pid,"* ]]; then
       [[ ${1-$saved} == "$saved" ]] || fail "Board is running on port $saved. Stop it before changing ports"
+      port=$saved
+      cd "$board"
+      ensure_qa_slot
       printf '%s\n' "$bd" > "$board/bd.path"
       echo "Maestro board already running at $board (port $saved, PID $pid)"
       exit 0
@@ -77,6 +91,7 @@ if [[ ${1-} == maestro-setup ]]; then
       --server-user root --prefix maestro --skip-agents --skip-hooks --non-interactive
   fi
   printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
+  ensure_qa_slot
   printf '%s\n' "$bd" > bd.path
   printf '%s\n' "$pid" > server.pid
   trap - EXIT
