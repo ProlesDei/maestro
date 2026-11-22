@@ -28,7 +28,7 @@ Run setup once at a time per board. If the first setup stops partway, stop any b
 
 ## 4. Connect the code graph and commit
 
-Put the `codebase-memory-mcp` executable on T3's `PATH`. If you need the binary, download the archive for your platform and verify it against the release's `checksums.txt` before extracting it. [Download v0.12.1](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1)
+Put `codebase-memory-mcp` 0.12.1 or later on T3's `PATH`. If you need the binary, download the archive for your platform and verify it against the release's `checksums.txt` before extracting it. [Download v0.12.1](https://github.com/DeusData/codebase-memory-mcp/releases/tag/v0.12.1)
 
 **Codex** — Add this entry to the project's `.codex/config.toml`.
 
@@ -45,9 +45,13 @@ claude mcp add --scope project --transport stdio codebase-memory-mcp -- codebase
 
 Keep the rest of each config. Keep a matching entry. If an entry uses the same name with different settings, ask the owner before changing it. Commit the Maestro install files, QA memory and MCP config so new worktrees get them.
 
+Check that the install commit's tree contains every install file and skill link. If Git ignores any, stop and ask the owner. Push that commit to the repo's default branch or merge it there by PR before step 5.
+
 ## 5. Verify in T3
 
-From a fresh linked worktree, run `.maestro/maestro-bd --json ready --unassigned`. Expect a JSON array, empty on a new board.
+Create a fresh linked worktree from the remote default branch, as T3 does for tickets. Use `.maestro/maestro-bd` there to list ready, unassigned tickets as JSON. Expect an array, empty on a new board.
+
+Use `.maestro/maestro-bd` to create a throwaway ticket on the board. Claim it atomically as one actor. Check that a second actor gets an already-claimed error. Close it with an update guarded by the first actor as assignee and `in_progress` status, then delete it. Stop if any check fails.
 
 Open a fresh session there. Trust the project in Codex or approve the project MCP server in Claude Code if it is pending. Invoke `$maestro-chief-of-staff` in Codex or `/maestro-chief-of-staff` in Claude Code. Replace `<symbol>` with a function or class you know.
 
