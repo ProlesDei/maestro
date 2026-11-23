@@ -1,6 +1,6 @@
 # Plan a goal
 
-Find the epic by the ID in your brief and read its description for the goal. If the epic is missing, ask your T3 parent to recover it before planning.
+Find the epic by the ID in your brief, or else by `maestro-goal-<slug>`, and read its description for the goal. If both fail, ask your T3 parent to recover it before planning.
 
 If the epic marks planning complete, stop here (see “Ticket board”).
 

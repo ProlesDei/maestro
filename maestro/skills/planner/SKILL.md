@@ -37,7 +37,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 ## Recover a review
 
-Treat a verdict that predates the ticket's latest ruling as missing. For an open PR with no live review and a missing verdict on its current head, use T3 launch briefs to count reviews for that head that ended since that ruling. If there is no ruling, count all ended reviews for that head. Start a fresh review as above if fewer than two ended. Otherwise use `steps/unblock.md`.
+Treat a verdict that predates the ticket's latest ruling as missing. For an open PR with no live review and a missing verdict on its current head, use T3 launch briefs to count reviews for that head that ended without a verdict since the latest ruling or usable verdict. Start a fresh review as above if fewer than two ended. Otherwise use `steps/unblock.md`.
 
 ## Send a batch to QA
 
