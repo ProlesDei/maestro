@@ -101,42 +101,6 @@ fi
 
 [[ -f "$BEADS_DIR/metadata.json" && -f "$board/bd.path" ]] ||
   fail "Run .maestro/maestro-bd maestro-setup to set up the board at $board"
-args=()
-caller=$(pwd -P)
-while (( $# )); do
-  arg=$1
-  flag=${arg%%=*}
-  shift
-  [[ $arg != -- ]] || { args+=("$arg" "$@"); break; }
-  case $flag in
-    --body-file|--design-file|-f|--file|--graph|--metadata)
-      prefix=
-      if [[ $arg == *=* ]]; then
-        prefix=$flag=
-        path=${arg#*=}
-      else
-        args+=("$arg")
-        (( $# )) || break
-        path=$1
-        shift
-      fi
-      if [[ $flag == --metadata ]]; then
-        if [[ $path != @* ]]; then
-          args+=("$prefix$path")
-          continue
-        fi
-        prefix+=@
-        path=${path#@}
-      fi
-      case $path in
-        ''|-|/*) ;;
-        *) path=$caller/$path ;;
-      esac
-      args+=("$prefix$path") ;;
-    *) args+=("$arg") ;;
-  esac
-done
-set -- "${args[@]}"
 cd "$board"
 read -r bd < bd.path
 [[ "$bd" == /* && -x "$bd" ]] || fail "Verified bd is missing at $bd. Rerun board setup"

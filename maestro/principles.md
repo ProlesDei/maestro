@@ -8,7 +8,7 @@
 
 ### Ticket board
 
-- From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Review and QA use the primary checkout's launcher instead (see “Rules for review and QA”). Use JSON for queries. If the board is down, report the block to whoever assigned the work.
+- From the root of any worktree, use the `.maestro/maestro-bd` launcher to reach the shared Beads board. Review and QA use the primary checkout's launcher instead (see “Rules for review and QA”). Use JSON for queries. Give it absolute paths for files it reads or writes. If the board is down, report the block to whoever assigned the work.
 - Tickets go from open to in progress to closed, with blocked for work that must wait. Keep review and QA verdicts in PR comments.
 - On the epic, keep `planning_complete`. During a stop, keep `active_stop` as a JSON object, not a string, with `fixes` (array of ticket IDs) and `outside_cause` (cause outside the code or null). Remove the key when the stop clears.
 - Read these comments with the ticket. Start each with the fixed words below, then give the named facts.
@@ -19,7 +19,7 @@
 
 ### Sessions
 
-- Keep the current chief of staff's thread ID on the epic as `chief_thread_id`.
+- Keep the current chief of staff's thread ID on the epic as `chief_thread_id`. For every handoff to the chief of staff, reread the epic and send to that thread.
 - Start each role as a T3 child running its Maestro skill. When you launch a child, save its IDs. Use `planner_thread_id` and `planner_task_id` on the epic, `review_thread_id` and `review_task_id` on the ticket, and `qa_thread_id` and `qa_task_id` on the slot. Save `engineer_task_id` on the ticket. The engineer claims with its thread ID. Message by thread ID and cancel by task ID. If a child's IDs are missing or point to an ended session, look for it in T3 before you stop, replace or restart it. To stop one without a task ID, ask its thread to stop and wait for T3 to confirm it ended. Record decisions on the board before sending them. If work remains, replace ended sessions from board state.
 - Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended, then pass any child results it missed to the replacement, including results that arrive later.
 

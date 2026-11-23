@@ -20,7 +20,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` once planning is complete |
 | A ticket is ready, an engineer ends, or you restart | `steps/assign-ticket.md` |
 | An engineer asks for review | Start a fresh `maestro-code-review` child in your checkout with only the PR, head SHA, ticket ID and “Rules for review and QA”. Save its IDs per “Sessions” |
-| A review ends | If the PR's current head lacks a verdict, see “Recover a review”. Otherwise send its verdict to the live claim holder, or use `steps/assign-ticket.md` if the engineer ended |
+| A review ends | Check the PR's current head per “Recover a review” and follow that step if its verdict is missing. Otherwise send the verdict to the live claim holder, or use `steps/assign-ticket.md` if the engineer ended |
 | An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
@@ -37,10 +37,7 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 
 ## Recover a review
 
-For an open PR with no live review:
-
-- If the current verdict predates a ruling, start a fresh review as above.
-- If the current head lacks a verdict, count ended reviews for that head by their T3 launch briefs. Start a fresh review if fewer than two ended. Otherwise use `steps/unblock.md`.
+Treat a verdict that predates the ticket's latest ruling as missing. For an open PR with no live review and a missing verdict on its current head, use T3 launch briefs to count reviews for that head that ended since that ruling. If there is no ruling, count all ended reviews for that head. Start a fresh review as above if fewer than two ended. Otherwise use `steps/unblock.md`.
 
 ## Send a batch to QA
 
@@ -48,7 +45,7 @@ On a QA report, QA session end or restart, route only the latest QA verdict for 
 
 - For `base broken` blocks, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
 - For `QA blocked` verdicts from missing required check results, leave the ticket in progress and check again when rebuilding the queue.
-- For the first `QA ended without a verdict` block on a head, you may record `QA clearance` and requeue once. Send a second such block on that head to `steps/unblock.md`.
+- For the first `QA ended without a verdict` block on a head, record `QA clearance` and requeue. Send a second such block on that head to `steps/unblock.md`.
 - For a failure found after a merge, use `steps/create-ticket.md` to file one fix per cause, with the base in Context and `qa:first`.
 
 Record routing after handling the verdict. Record a clearance when a fail or block clears on the same head. See “Ticket board” for both. Before each queue rebuild, clear the `base broken` blocks of any base whose repair has merged, since QA merged the exact tree it proved starts.
@@ -69,6 +66,8 @@ If the slot is free, return. If it lacks either QA ID and another live planner h
 
 Once T3 confirms QA ended, check that the slot still points to that session before cleanup. Only the holder cleans up. If the holder ended, take over its claim and save both QA IDs in one update guarded by the old assignee and in-progress status. If the guard fails, reread the slot before cleanup.
 
-Read the batch from the launch brief and stop anything still running under its run prefix (see “Worktrees” in `.maestro/principles.md`). Close verified merges as above. Before routing, post `QA blocked` with reason `QA ended without a verdict` on each batch PR without a verdict for its current head since the batch launched. Use the exact first-line format in “Report” in `.maestro/skills/qa/SKILL.md`. Use the current base SHA if QA recorded none.
+Read the batch from the launch brief and stop anything still running under its run prefix (see “Worktrees” in `.maestro/principles.md`). Close verified merges as above.
+
+Unless a stop cancelled this QA session, post `QA blocked` with reason `QA ended without a verdict` on each still-open batch PR whose current head got no `QA fail` or `QA blocked` since the batch launched. Use the exact first-line format in “Report” in `.maestro/skills/qa/SKILL.md`. Use the current base SHA if QA recorded none.
 
 Route verdicts. Release the slot by clearing the assignee, `qa_thread_id` and `qa_task_id` and setting it to blocked in one update guarded by the observed assignee and in-progress status. If the guard fails, reread the slot. Then check the stop and QA queue and assign ready work.
