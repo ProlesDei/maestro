@@ -69,7 +69,7 @@ If the slot is free, return. If it lacks either QA ID and another live planner h
 
 Once T3 confirms QA ended, check that the slot still points to that session before cleanup. Only the holder cleans up. If the holder ended, take over its claim and save both QA IDs in one update guarded by the old assignee and in-progress status. If the guard fails, reread the slot before cleanup.
 
-Read the batch from the launch brief and stop anything still running under its run prefix (see “Worktrees” in `.maestro/principles.md`). Close verified merges as above.
+Read the batch from the launch brief and stop anything still running under its run prefix (see “Worktrees” in `.maestro/principles.md`). Clean that session's temp dir, then close verified merges as above.
 
 Unless a stop cancelled this QA session, post `QA blocked` with reason `QA ended without a verdict` on each still-open batch PR whose current head got no `QA fail` or `QA blocked` since the batch launched. Use the exact first-line format in “Report” in `.maestro/skills/qa/SKILL.md`. Use the current base SHA if QA recorded none.
 

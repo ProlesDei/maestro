@@ -8,7 +8,7 @@ Use Playwright CLI, unless memory names another browser tool.
 
 - Use the “Worktrees” run prefix in `.maestro/principles.md` as your browser session name on every command. Never use the default session.
 - Open it headless, with a fresh profile: no saved logins or storage.
-- Keep its screenshots and logs in your run's folder, not the checkout.
+- Keep its screenshots and logs in your session's temp dir.
 - When you finish, on every way out, close your session and only yours. Never close every session: that ends other runs' tests.
 - With no browser at all, never judge a screen from its markup. Mark each screen check `not checked: no browser` and block.
 
