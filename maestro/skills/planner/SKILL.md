@@ -15,6 +15,8 @@ On restart and before dispatch, scan the board. Use `steps/create-ticket.md` for
 
 Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do it.
 
+After you close a merged ticket or release the QA slot, message the `planner_thread_id` on every other open `maestro-goal-` epic. Say what changed and include the ticket ID for a merge.
+
 | When | Do |
 |---|---|
 | A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` once planning is complete |
@@ -26,7 +28,8 @@ Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
 | QA reports a failed or blocked ticket | Route as below |
-| QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Notify the planner of each other epic that tracks it at that epic's `planner_thread_id`. Check the stop and QA queue, then assign ready work |
+| QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Check the stop and QA queue, then assign ready work |
+| Another planner closes a merged ticket or releases the QA slot | Rebuild the QA queue and assign ready work |
 | A QA session ends | See “A QA session ends” below |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
 | The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Cancel live engineers and reviews on the epic outside those fixes by task ID. Check the slot and cancel live QA by task ID if its batch includes such work. Once T3 confirms they ended, release affected claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Use “A QA session ends” for QA cleanup. Start only recorded fixes and add any base repair to them. Clear the stop once all fixes merge and any outside cause clears |
