@@ -14,7 +14,11 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 If QA memory lacks a verified start, read the README, package scripts, Makefile, compose files and docs. Draft steps to start the app with fresh test data. Ask the owner only to confirm the steps or fill gaps.
 
-Follow the test run rule in [principles.md](maestro/principles.md) and prove one start in a scratch worktree on a free port. Check that the app answers, then stop what you started. Record the run steps, readiness check and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that. If the start fails, report what blocks QA.
+Follow the test run rule in [principles.md](maestro/principles.md) and prove one start in a scratch worktree on a free port. Check that the app answers. If the start fails, report what blocks QA.
+
+If users see the app in a browser, open it headless while it runs, using the tool and session setup from [QA's browser guide](maestro/skills/qa/browser.md). Take one screenshot and look at it, then close only your browser session. If no browser works, report what's missing and that QA will block screen checks until it's fixed.
+
+Stop what you started. Record the run steps, readiness check, browser tool that worked and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that.
 
 ## 3. Set up the ticket board
 
