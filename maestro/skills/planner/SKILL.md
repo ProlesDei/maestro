@@ -15,7 +15,7 @@ On restart and before dispatch, scan the board. Use `steps/create-ticket.md` for
 
 Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do it.
 
-After you close a merged ticket, release a ticket claim or release the QA slot after QA ends, message the `planner_thread_id` on every other open `maestro-goal-` epic. Say what changed and include the ticket ID for a merge.
+After you close a merged ticket, release a ticket claim, learn your engineer released one, or release the QA slot after QA ends, message the `planner_thread_id` on every other open `maestro-goal-` epic. Say what changed and include the ticket ID for a merge.
 
 | When | Do |
 |---|---|
@@ -29,7 +29,7 @@ After you close a merged ticket, release a ticket claim or release the QA slot a
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
 | QA reports a failed or blocked ticket | Route as below |
 | QA merges a PR | Verify the merge and close the ticket with its assignee as guard. Check the stop and QA queue, then assign ready work |
-| Another planner closes a merged ticket, releases a ticket claim or releases the QA slot after QA ends | Check whether to lift the stop per “QA merges a PR” and whether to close this epic per “The owner signs off”. Then rebuild the QA queue and assign ready work |
+| Another planner says a ticket merged, a claim was released or the QA slot is free | Check whether to lift the stop per “QA merges a PR”, whether this goal's work is done, and whether to close this epic per “The owner signs off”. Then rebuild the QA queue and assign ready work |
 | A QA session ends | See “A QA session ends” below |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
 | The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Cancel live engineers and reviews on the epic outside those fixes by task ID. Check the slot and cancel live QA by task ID if its batch includes such work. Once T3 confirms they ended, release affected claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Use “A QA session ends” for QA cleanup. Start only recorded fixes and add any base repair to them. Clear the stop once all fixes merge and any outside cause clears |
@@ -40,7 +40,7 @@ After you close a merged ticket, release a ticket claim or release the QA slot a
 
 ## Recover a review
 
-Treat a verdict that predates the ticket's latest ruling as missing. If an open PR's current head has no live review or usable verdict, use T3 launch briefs to count reviews for that head that ended without a verdict since the latest ruling or usable verdict. If fewer than two ended, start a fresh `maestro-code-review` child in your checkout with only the PR, head SHA, ticket ID and “Rules for review and QA”. Save its IDs per “Sessions”. Otherwise use `steps/unblock.md`.
+Treat a verdict that predates the ticket's latest ruling, or the engineer's latest reply with evidence on the PR, as missing. If an open PR's current head has no live review or usable verdict, use T3 launch briefs to count reviews for that head that ended without a verdict since the latest ruling or usable verdict. If fewer than two ended, start a fresh `maestro-code-review` child in your checkout with only the PR, head SHA, ticket ID and “Rules for review and QA”. Save its IDs per “Sessions”. Otherwise use `steps/unblock.md`.
 
 ## Send a batch to QA
 
@@ -59,11 +59,11 @@ Queue open PRs for in-progress tickets that meet the review gate in “Before yo
 
 Group other PRs by base and batch, using the ticket ID as the batch name for a lone ticket. Hold each batch until its remaining tickets can go to QA. Remove stuck tickets' batch labels and check again.
 
-The `maestro-qa-slot` is free when blocked and unassigned. Never set it to open. Claim it atomically with your planner thread ID, setting it to in progress. If held, use “Check the QA slot”. Wait on a live QA thread in T3 and recheck the queue when it ends. If it has no QA thread yet, recheck on your next event. Once you win the claim, start a fresh `maestro-qa` child in your checkout with the batch name, ticket IDs, PR URLs and “Rules for review and QA” from `.maestro/principles.md`. Save both IDs on the slot with your assignee and in-progress status as guards. If the launch fails, use “Check the QA slot”.
+The `maestro-qa-slot` is free when blocked and unassigned. Never set it to open. Claim it atomically with your planner thread ID, setting it to in progress. If held, use “Check the QA slot”. Wait on a live QA thread in T3 and recheck the queue when it ends. If it has no QA thread yet, ask the holder to tell you when it releases the slot, and recheck then or on your next event. Once you win the claim, start a fresh `maestro-qa` child in your checkout with the batch name, ticket IDs, PR URLs and “Rules for review and QA” from `.maestro/principles.md`. Save both IDs on the slot with your assignee and in-progress status as guards. If the launch fails, use “Check the QA slot”.
 
 ### Check the QA slot
 
-If the slot is free, return. If it lacks either QA ID and another live planner holds it, let that planner finish the launch. If the holder ended or your launch failed, look in T3 for a QA child launched since the current claim. Save both IDs if you hold the slot. Once T3 confirms the holder ended and its launch settled, take over and save any recovered IDs in one update guarded by the old assignee and in-progress status. Once T3 confirms the launch settled with no QA child, release the slot with the guard in “A QA session ends” and use `steps/unblock.md` for the failed launch. If you have a QA thread, leave the slot held while QA is live or use “A QA session ends” once it ends.
+If the slot is free, return. If it lacks either QA ID and another live planner holds it, let that planner finish the launch. If the holder ended or your launch failed, look in T3 for a QA child launched since the current claim. Save both IDs if you hold the slot. Once T3 confirms the holder ended and its launch settled, take over and save any recovered IDs in one update guarded by the old assignee and in-progress status. Once T3 confirms the launch settled with no QA child, release the slot with the guard in “A QA session ends”, tell each planner that asked, and use `steps/unblock.md` for the failed launch. If you have a QA thread, leave the slot held while QA is live or use “A QA session ends” once it ends.
 
 ## A QA session ends
 
