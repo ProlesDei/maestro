@@ -49,7 +49,7 @@ claude mcp add --scope project --transport stdio codebase-memory-mcp -- codebase
 
 Keep the rest of each config. Keep a matching entry. If an entry uses the same name with different settings, ask the owner before changing it. Commit the Maestro install files, QA memory and MCP config so new worktrees get them.
 
-Check that the install commit's tree contains every install file and skill link. If Git ignores any, stop and ask the owner. Open an install PR to the remote's default branch from step 1. Post verdicts as plain PR comments, wait for required checks to pass, and merge with this session's account and the merge method QA will use. If the host refuses, stop and ask the owner. A successful merge proves QA's merge path.
+Check that the install commit's tree contains every install file and skill link. If Git ignores any, stop and ask the owner. Open an install PR to the remote's default branch from step 1. Post verdicts as plain PR comments and wait for required checks to pass. Use this session's account and QA's merge method. Merge directly with the install PR's head SHA as the guard. If the host refuses or only offers a merge queue, stop and ask the owner.
 
 ## 5. Verify in T3
 

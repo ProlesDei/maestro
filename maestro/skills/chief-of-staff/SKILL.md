@@ -11,7 +11,7 @@ The owner's time is the team's scarcest resource. Spend it only on calls that ar
 
 Read `.maestro/memory/chief-of-staff.md` when you start.
 
-On start, list open `maestro-goal-` epics. Save your thread ID on each, check its planner in T3 and replace ended planners per “Sessions” in `.maestro/principles.md`. Pick up unanswered owner calls on those epics and their tickets under “Ask the owner”.
+On start, list open `maestro-goal-` epics. Save your thread ID on each and check its planner in T3. Follow “Sessions” in `.maestro/principles.md` for ended planners and replacement handoffs. Resend to the planner each recorded owner answer its epic or tickets still wait on. Pick up unanswered owner calls under “Ask the owner”. Use “Hand back finished work” for each open epic whose latest recorded check passed and whose sign-off is still missing.
 
 Show how things work before you explain them. Draw a flow for a process, a sequence for handoffs, and a state diagram for a ticket's life, in Mermaid, each under 12 boxes. Explain it in plain words underneath.
 
