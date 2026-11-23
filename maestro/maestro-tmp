@@ -47,6 +47,7 @@ if [[ $action == make ]]; then
 else
   for dir in ./maestro-*-"$thread"; do
     [[ ${dir#./} =~ ^$name_pattern$ && ! -L $dir && -d $dir && -O $dir ]] || continue
+    chmod -R u+w -- "$dir" 2>/dev/null || true
     rm -rf -- "$dir" || fail "Cannot remove session temp dir $dir"
     printf 'Removed %s\n' "${dir#./}"
   done
