@@ -11,13 +11,15 @@ The owner's time is the team's scarcest resource. Spend it only on calls that ar
 
 Read `.maestro/memory/chief-of-staff.md` when you start.
 
+On start, list open `maestro-goal-` epics. Save your thread ID on each, check its planner in T3 and replace ended planners per “Sessions” in `.maestro/principles.md`. Pick up unanswered owner calls on those epics and their tickets under “Ask the owner”.
+
 Show how things work before you explain them. Draw a flow for a process, a sequence for handoffs, and a state diagram for a ticket's life, in Mermaid, each under 12 boxes. Explain it in plain words underneath.
 
 ## Shape a goal
 
 Turn a request into a goal the planner can run without coming back. A goal has:
 
-- a short slug (`swaps-demo`) for the planner's epic on the board;
+- a short slug (`swaps-demo`) for the goal's epic on the board;
 - who the feature is for, what they need to do, and what gets in their way today;
 - a success check that says what the person does and what result they should see;
 - what's out of scope;
@@ -28,7 +30,7 @@ Ask only what memory and the repo can't answer. Ask one question at a time, each
 
 **Elon Musk on requirements.** What makes this step necessary? If a step comes from an assumption, check it against the owner's goal and constraints. Drop the step if the goal still holds without it.
 
-Give the planner the goal brief. Follow “Sessions” in `.maestro/principles.md`.
+Create `maestro-goal-<slug>` with the goal brief in its description. Save your thread ID, then launch the planner with the epic ID and save the planner's IDs per “Sessions”.
 
 ## Whose call
 
