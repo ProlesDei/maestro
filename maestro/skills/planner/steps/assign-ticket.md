@@ -4,7 +4,7 @@ On restart, defer all engineer, review and QA starts and handoffs that trigger t
 
 On a T3 finish notice or QA send-back, check only the affected tickets. Check engineer and review sessions in T3 by the claim's actor and the ticket's `review_thread_id`.
 
-When review or QA leaves fixes for an ended engineer, never edit or push code yourself. Release the claim and hand the existing PR, worktree and remaining fixes to a fresh engineer. For other tickets with an ended engineer, release the claim if the ticket needs more engineering. Otherwise follow [Recover a review](../SKILL.md#recover-a-review).
+When a usable review or QA verdict on the PR's current head leaves fixes for an ended engineer, never edit or push code yourself. Release the claim and hand the existing PR, worktree and remaining fixes to a fresh engineer. For other tickets with an ended engineer, release the claim if the ticket needs more engineering. Otherwise follow [Recover a review](../SKILL.md#recover-a-review).
 
 To release a claim, clear the assignee and set the status to open, or to blocked if it is already blocked or awaits an owner answer. Guard that one update by its actor and observed status (in progress or blocked). If the guard fails, reread the ticket. The planner waits for T3 to confirm the engineer, child work and any review ended before releasing a claim.
 
@@ -14,4 +14,4 @@ Pick a ready, unassigned child ticket whose paths no running ticket touches. Che
 
 At the cap, check the spec, size and open calls. Fix or split the ticket with `steps/unblock.md`. Approve the first retry and ask the chief of staff to approve later ones. Record each approval before assigning (see “Ticket board”).
 
-Pick the provider as “Sessions” directs. If the ticket's worktree exists, start the engineer child in your checkout and give it that path. Otherwise start it in a new T3 worktree. Give it the ticket ID, prior work and any existing PR. Save its task ID as “Sessions” directs. Let T3 notify you when it finishes.
+Pick the provider as “Sessions” directs. If the ticket's worktree exists, start the engineer child in your checkout and give it that path. Otherwise start it in a new T3 worktree. Give it the ticket ID, prior work and any existing PR. Include the latest QA verdict on the PR's current head if it needs engineer action and has no later clearance. Save its task ID as “Sessions” directs. Let T3 notify you when it finishes.
