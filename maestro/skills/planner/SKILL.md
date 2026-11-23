@@ -22,7 +22,7 @@ After you close a merged ticket, release a ticket claim, learn your engineer rel
 | A goal arrives | `steps/plan-goal.md`, then `steps/assign-ticket.md` once planning is complete |
 | A ticket is ready, an engineer ends, or you restart | `steps/assign-ticket.md` |
 | An engineer asks for review | On the PR's current head, send the usable verdict or wait for a live review. If neither exists, follow “Recover a review” |
-| A review ends | Check the PR's current head per “Recover a review” and follow that step if its verdict is missing. Otherwise send the verdict to the live claim holder, or use `steps/assign-ticket.md` if the engineer ended |
+| A review ends | Check the PR's current head per [Recover a review](#recover-a-review) and follow that step if its verdict is missing. Otherwise send the verdict to the live claim holder, or follow [Assign a ticket](steps/assign-ticket.md) if the engineer ended |
 | An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
@@ -44,7 +44,7 @@ Treat a verdict as missing if it predates the ticket's latest ruling or comes fr
 
 ## Send a batch to QA
 
-On a QA report, QA session end or restart, route only the latest QA verdict for the PR's current head if it is a fail or block with no later clearance or routing note for that verdict. Remove the affected tickets' batch labels. Send a fail, stale head, missing review pass or required branch update to the engineer who holds the claim, or use `steps/assign-ticket.md` if it ended. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks, with these exceptions:
+On a QA report, QA session end or restart, route only the latest QA verdict for the PR's current head if it is a fail or block with no later clearance or routing note for that verdict. Remove the affected tickets' batch labels. Send a fail, stale head, missing review pass or required branch update to the engineer who holds the claim, or follow [Assign a ticket](steps/assign-ticket.md) if the engineer ended. After a branch update, have the engineer rerun “Prove it and read your diff” before fresh review. Use `steps/unblock.md` for other blocks, with these exceptions:
 
 - For `base broken` blocks, first look for an open repair for that base or a merged repair for that break. If neither exists, file one with `steps/create-ticket.md`, name the base branch and broken SHA in Context, and label it `qa:first`. If no single PR can make the base start, put the whole repair in that ticket, including work that can't land alone.
 - For `QA blocked` verdicts from missing required check results, leave the ticket in progress and check again when rebuilding the queue.
