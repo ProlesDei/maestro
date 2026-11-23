@@ -17,6 +17,7 @@ ensure_qa_slot() {
   fi
 }
 
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR
 IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
 primary=$(cd "${worktree#worktree }" && pwd -P)
 digest=$(printf '%s' "$primary" | sha256sum)
@@ -28,6 +29,7 @@ for var in $(compgen -e); do
     BEADS_*|BD_*) unset "$var" ;;
   esac
 done
+unset DOLT_ROOT_HOST DOLT_ROOT_PASSWORD
 export GIT_CEILING_DIRECTORIES="$store"
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
 export BEADS_DIR="$board/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
