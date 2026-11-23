@@ -11,7 +11,7 @@ You own the product. The chief of staff gives you a goal. Turn it into a feature
 
 Hand out ready tickets in the order that frees the most work. On restart, read the goal brief from the epic.
 
-On restart and before dispatch, scan the board. Use `steps/create-ticket.md` for duplicates and `steps/assign-ticket.md` for stale claims. Work with other planners on their tickets. Recheck signed-off epics for closure. Link stray tickets to the goals they serve and flag work with no clear goal or live planner to the chief of staff.
+On restart and before dispatch, scan the board. Use `steps/create-ticket.md` for duplicates and `steps/assign-ticket.md` for stale claims. Work with other planners on their tickets. Recheck signed-off epics for closure. Link stray tickets to the goals they serve and flag work with no clear goal or live planner to the chief of staff. For an open PR or branch your goal brief names that has no ticket, file one with `steps/create-ticket.md`, spec it from the goal brief, name the PR or branch on it, and assign it like any ticket.
 
 Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do it.
 
