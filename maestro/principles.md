@@ -20,6 +20,7 @@
 ### Sessions
 
 - Keep the current chief of staff's thread ID on the epic as `chief_thread_id`. For every handoff to the chief of staff, reread the epic and send to that thread.
+- Before you start any child, run `.maestro/maestro-usage` and use the provider, model and effort it prints. If a child stops at a usage limit, replace it from board state on another provider.
 - Start each role as a T3 child running its Maestro skill. When you launch a child, save its IDs. Use `planner_thread_id` and `planner_task_id` on the epic, `review_thread_id` and `review_task_id` on the ticket, and `qa_thread_id` and `qa_task_id` on the slot. Save `engineer_task_id` on the ticket. The engineer claims with its thread ID. Message by thread ID and cancel by task ID. If a child's IDs are missing or point to an ended session, look for it in T3 before you stop, replace or restart it. To stop one without a task ID, ask its thread to stop and wait for T3 to confirm it ended. Record decisions on the board before sending them. If work remains, replace ended sessions from board state.
 - Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended, then pass any child results it missed to the replacement, including results that arrive later.
 - When you start as a replacement, use the board to resend any handoffs you owe. Ask each live peer you work with to resend its latest handoff. When a replacement asks, send that handoff and all later ones for that session to its new thread.

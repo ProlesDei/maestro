@@ -22,7 +22,7 @@ Stop what you started. Record the run steps, readiness check, browser tool that 
 
 ## 3. Set up the ticket board
 
-Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss`, `setsid` and `flock` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
+Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss`, `setsid`, `flock` and `jq` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
 On an update, end every planner and QA session before running setup, since setup adds the QA slot that planners claim. The chief of staff restarts the planners after the update merges. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 

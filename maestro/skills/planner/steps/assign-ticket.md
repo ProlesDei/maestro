@@ -14,4 +14,4 @@ Pick a ready, unassigned child ticket whose paths no running ticket touches. Che
 
 At the cap, check the spec, size and open calls. Fix or split the ticket with `steps/unblock.md`. Approve the first retry and ask the chief of staff to approve later ones. Record each approval before assigning (see “Ticket board”).
 
-Pick a model suited to the work. If the ticket's worktree exists, start the engineer child in your checkout and give it that path. Otherwise start it in a new T3 worktree. Give it the ticket ID, prior work and any existing PR. Save its task ID as “Sessions” directs. Let T3 notify you when it finishes.
+Pick the provider as “Sessions” directs. If the ticket's worktree exists, start the engineer child in your checkout and give it that path. Otherwise start it in a new T3 worktree. Give it the ticket ID, prior work and any existing PR. Save its task ID as “Sessions” directs. Let T3 notify you when it finishes.
