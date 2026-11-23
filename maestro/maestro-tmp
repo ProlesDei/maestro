@@ -26,16 +26,23 @@ case $action in
   *) fail "$usage" ;;
 esac
 [[ $thread =~ ^$thread_pattern$ ]] || fail "Need a full thread UUID"
+thread=${thread,,}
 
-root=${TMPDIR:-/tmp}
-while [[ $root == ?*/ ]]; do root=${root%/}; done
-if [[ ${root##*/} =~ ^$name_pattern$ ]]; then
-  root=$(dirname -- "$root")
-fi
+above_sessions() {
+  local probe=$1 found
+  while [[ $probe == ?*/ ]]; do probe=${probe%/}; done
+  found=$probe
+  while [[ $probe == */* ]]; do
+    [[ ${probe##*/} =~ ^$name_pattern$ ]] && found=${probe%/*}
+    probe=${probe%/*}
+  done
+  printf '%s\n' "${found:-/}"
+}
+
+root=$(above_sessions "${TMPDIR:-/tmp}")
 CDPATH='' cd -P -- "$root" 2>/dev/null || fail "Cannot enter temp root $root"
-if [[ ${PWD##*/} =~ ^$name_pattern$ ]]; then
-  cd -P -- .. 2>/dev/null || fail "Cannot enter temp root above $PWD"
-fi
+root=$(above_sessions "$PWD")
+[[ $root == "$PWD" ]] || cd -P -- "$root" 2>/dev/null || fail "Cannot enter temp root $root"
 [[ -w . && -x . ]] || fail "Temp root is not writable: $PWD"
 
 if [[ $action == make ]]; then
@@ -45,10 +52,16 @@ if [[ $action == make ]]; then
   fi
   printf '%s/%s\n' "${PWD%/}" "$name"
 else
+  status=0
   for dir in ./maestro-*-"$thread"; do
     [[ ${dir#./} =~ ^$name_pattern$ && ! -L $dir && -d $dir && -O $dir ]] || continue
-    chmod -R u+w -- "$dir" 2>/dev/null || true
-    rm -rf -- "$dir" || fail "Cannot remove session temp dir $dir"
-    printf 'Removed %s\n' "${dir#./}"
+    chmod -R u+rwx -- "$dir" 2>/dev/null || true
+    if rm -rf -- "$dir"; then
+      printf 'Removed %s\n' "${dir#./}"
+    else
+      echo "Maestro: Cannot remove session temp dir ${dir#./}" >&2
+      status=1
+    fi
   done
+  exit "$status"
 fi

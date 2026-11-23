@@ -23,4 +23,4 @@ Use Playwright CLI, unless memory names another browser tool.
 
 ## Keep the proof
 
-Save a screenshot for each check, named for the check and width. For each failure, save the steps as a script the engineer can replay.
+Save a screenshot for each check, named for the check and width. For each failure, put the steps as a script the engineer can replay in your verdict comment, since your temp dir goes when your session ends.
