@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -eu
+
+fail() {
+  echo "Maestro: $*" >&2
+  exit 1
+}
+
+usage="Usage: maestro-tmp make <role> <ticket-or-batch> | clean <thread-id>"
+role_pattern='[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*'
+label_pattern='[a-zA-Z0-9][a-zA-Z0-9._-]*'
+thread_pattern='[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}'
+name_pattern="maestro-$role_pattern-$label_pattern-$thread_pattern"
+
+action=${1-}
+case $action in
+  make)
+    (( $# == 3 )) || fail "$usage"
+    [[ $2 =~ ^$role_pattern$ && $3 =~ ^$label_pattern$ ]] || fail "Invalid role or ticket/batch name"
+    thread=${T3CODE_THREAD_ID-}
+    ;;
+  clean)
+    (( $# == 2 )) || fail "$usage"
+    thread=$2
+    ;;
+  *) fail "$usage" ;;
+esac
+[[ $thread =~ ^$thread_pattern$ ]] || fail "Need a full thread UUID"
+thread=${thread,,}
+
+above_sessions() {
+  local probe=$1 found
+  while [[ $probe == ?*/ ]]; do probe=${probe%/}; done
+  found=$probe
+  while [[ $probe == */* ]]; do
+    [[ ${probe##*/} =~ ^$name_pattern$ ]] && found=${probe%/*}
+    probe=${probe%/*}
+  done
+  printf '%s\n' "${found:-/}"
+}
+
+root=$(above_sessions "${TMPDIR:-/tmp}")
+CDPATH='' cd -P -- "$root" 2>/dev/null || fail "Cannot enter temp root $root"
+root=$(above_sessions "$PWD")
+[[ $root == "$PWD" ]] || cd -P -- "$root" 2>/dev/null || fail "Cannot enter temp root $root"
+[[ -w . && -x . ]] || fail "Temp root is not writable: $PWD"
+
+if [[ $action == make ]]; then
+  name=maestro-$2-$3-$thread
+  if ! (umask 077; mkdir -- "$name") 2>/dev/null; then
+    [[ ! -L $name && -d $name && -O $name ]] || fail "Cannot create session temp dir $name"
+  fi
+  printf '%s/%s\n' "${PWD%/}" "$name"
+else
+  status=0
+  for dir in ./maestro-*-"$thread"; do
+    [[ ${dir#./} =~ ^$name_pattern$ && ! -L $dir && -d $dir && -O $dir ]] || continue
+    chmod -R u+rwx -- "$dir" 2>/dev/null || true
+    if rm -rf -- "$dir"; then
+      printf 'Removed %s\n' "${dir#./}"
+    else
+      echo "Maestro: Cannot remove session temp dir ${dir#./}" >&2
+      status=1
+    fi
+  done
+  exit "$status"
+fi
