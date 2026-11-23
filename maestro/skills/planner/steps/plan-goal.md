@@ -8,4 +8,6 @@ Read the repo and the owner calls on the epic. Use recorded answers and send new
 
 Group each feature's tickets you expect to be ready for QA together into a batch with a unique name. Reuse batches already filed for the same work. Put a ticket in a later batch than any ticket it waits on. Put tickets with overlapping Touches paths in different batches.
 
+If a PR or branch serves the goal and has no ticket, file one with `steps/create-ticket.md`, write its spec from the goal brief, link the PR or name the branch on the ticket, and send it through normal review and QA.
+
 Reuse tickets and file only missing work with `steps/create-ticket.md`. Link each ticket reused from another epic so this epic tracks it. Check that child and tracked tickets cover the goal, then mark planning complete.
