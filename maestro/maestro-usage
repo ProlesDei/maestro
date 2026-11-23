@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -eu
+
+sessions="${CODEX_HOME:-$HOME/.codex}/sessions"
+latest=$(find "$sessions" -name '*.jsonl' -mtime -8 -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+line=
+[[ -n "$latest" ]] && line=$(grep -F '"rate_limits":{' "$latest" | tail -1 || true)
+if [[ -z "$line" ]]; then
+  echo "codex unknown"
+  exit 0
+fi
+
+jq -r --argjson now "$(date +%s)" '
+  [.. | objects | select(has("rate_limits")) | .rate_limits][-1]
+  | [.primary, .secondary] | map(select(. != null))
+  | map(if .resets_at <= $now then .used_percent = 0 else . end)
+  | max_by(.used_percent)
+  | if . == null then "codex unknown"
+    else "codex used=\(.used_percent | floor)% resets=\(.resets_at | todate)" end
+' <<<"$line"
