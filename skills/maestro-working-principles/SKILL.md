@@ -5,7 +5,7 @@ description: "Use a worktree, keep ticket status current, commit, open PRs and c
 
 # Working principles
 
-Work in your own worktree, make small checked commits, and open a PR for review and QA. The agent notes are the repo's `AGENTS.md` or `CLAUDE.md`, or its README and build files if neither exists. Use the main branch the agent notes name, or `main` by default.
+Work in your own worktree, make small checked commits, and open a PR for review and QA. The agent notes are the repo's `AGENTS.md` or `CLAUDE.md`, or its README and build files if neither exists. Use the main branch the agent notes name, else the remote's default branch, else `main`.
 
 ## Session rules
 
@@ -13,22 +13,26 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 - **Shell calls.** The shell keeps no variables or folder between calls. Run each command in one call as `cd <path> && <command>`. Inside quotes on a command line, a backtick or `$(` runs, so a body or prompt that quotes code, a diff or command output goes on stdin (`--body-file -`) in a quoted heredoc. End it with `END_` and 8 random letters, and check no line of the text is that word, so the text can't end it early.
 - **Never discard work.** No hard reset, clean, force push or force-deleted branch. Save half-done work as a `wip:` commit, never a stash: every worktree shares one stash.
 - **Never repeat a secret.** Name it by its environment variable. If one shows in output, say "secret exposed in session output" without the value.
-- **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never try another way to do the refused thing. A `low_disk` refusal, or a check, build or write that fails with `low_disk`, `no space left on device`, `ENOSPC` or `disk is full`, is an infra block, not the ticket's failure: give no verdict, kickback or handoff. Remove your temp folders and any review or QA worktree (a build keeps its worktree, with a `wip:` commit if git can still write one), then release your claim, retrying as for a lock error. Reply `infra block: disk full` with the path and what is free.
-- **Wait for your own background work.** Before you end a turn, wait for each subagent and background command you started that ends on its own, such as a red team or a check run, and use its result; stop the rest, such as a server, as below. Never end on "waiting".
+- **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never try another way to do the refused thing. A `low_disk` refusal, or a check, build or write that fails with `low_disk`, `no space left on device`, `ENOSPC` or `disk is full`, is an infra block, not the ticket's failure: give no verdict, kickback or handoff. Follow **Clean up**, including any review or QA worktree. A build keeps its worktree, with a `wip:` commit if git can still write one. Reply `infra block: disk full` with the path and what is free.
+- **Wait for your own background work.** Before you end a turn, wait for each subagent and background command you started that ends on its own, such as a red team or a check run, and use its result. Never end on "waiting".
 
 ## Share the machine
 
 - Change only what is yours: your worktree, branch, temp folder, ports and processes. Never work in the main checkout or open or search files in another session's worktree. The harness loads a `CLAUDE.md` or `AGENTS.md` it finds there as instructions. Leave global config, installed tools, and other sessions' branches and locks alone. The metadata checks in **maestro-prune** are fine. To read another branch, check it out in a fresh temp folder outside the repo.
-- Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. Run each check with `TMPDIR` set to that folder, so what it leaves there (pytest's `pytest-of-<user>`) goes with it; Remove it when done by its full literal path with no force flag; harnesses refuse a delete of a `$(...)` path, and Codex any forced one. If the delete stops at read-only files, such as a Go module cache, make the folder writable first.
-- Start each server on port 0 so the OS picks a free one, and read back the port it got. Stop each process, and the children it started, by its PID; stopping by name or port hits other sessions' too. Tie each process that outlives a command, such as a server, to your harness's process with a watcher that stops it once that process is gone: a server outlives the session that started it, so a run the time limit ends would leave it running.
+- Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. Run each check with `TMPDIR` set to that folder, so what it leaves there (pytest's `pytest-of-<user>`) goes with it. Remove the folder by its full literal path with no force flag. Harnesses refuse a delete of a `$(...)` path, and Codex any forced one. If the delete stops at read-only files, such as a Go module cache, make the folder writable first.
+- Start each server on port 0 and read back the port the OS picks. Keep one ledger at `<common>/servers/<holder>`, where `<common>` is the repo's Git common dir plus `/maestro` and `<holder>` is your **Claims** holder with `/` replaced by `-`.
+  When you start a process that outlives a command, log its PID, start time, port (or `-`), worktree path and what it does on one line. Tie it to your harness process with a watcher that stops it when the harness exits.
+  Stop each process and its children by PID. Before stopping a PID, check that its start time still matches. Drop a line once its process stops or is gone, and delete the empty ledger. On resume, read your ledger first and stop or reuse what it lists.
 - Install into the worktree or your temp folder, never globally.
-- Remove each worktree you made once its work is done, without force: that takes its ignored folders, `.venv` and `node_modules` among them, with it. If git refuses for changes, leave it, but delete the rebuildable folders **maestro-prune** lists, which loses nothing.
-- On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make. Leave repo-wide cleanup, such as garbage collection or pruning worktrees, to the **maestro-prune** skill.
+- Remove worktrees you made without force. That takes their ignored folders, `.venv` and `node_modules` among them, with them. If git refuses for changes, leave the worktree and delete the rebuildable folders **maestro-prune** lists.
+- On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make.
+- When you start work outside **maestro-prune**, check `<common>/last-prune`. If the stamp is missing or older than 24 hours, try to claim the run with an atomic OS lock at `<common>/prune.lock` without waiting. Only the winner checks the stamp again and, if still due, runs **maestro-prune** in unattended mode (`--safe-only`). It removes only Safe items, asks no questions, lists the rest as Waiting and writes the stamp. Release the lock when done. Run garbage collection and prune worktrees only through **maestro-prune**.
 
 ## Claims
 
-- Claim a ticket on the ticket board under a holder no other session uses: your role and a random id, such as `senior-engineer/3fa91c0e`. Get that id, and any random letters that name a run, holder, branch or folder, from the OS, never from your head or the ticket: sessions that make letters up make the same ones, and two runs under one holder take each other's claims.
-- A claim holds until you release it, so release it whenever you stop work on the ticket.
+- Give each session its own holder even without a ticket, and keep it on resume. Use your role and an OS-random id, such as `senior-engineer/3fa91c0e`. Get any random letters for a run, holder, branch or folder from the OS too. Claim and release tickets on the board under your holder. On a disk block, retry a failed release as for a lock error.
+
+**Clean up.** Before you end a turn that finishes or stops work, follow **Share the machine** to stop every process in your ledger, remove your temp folders and remove worktrees whose work is done. Release your claims as under **Claims**.
 
 ## Build
 
@@ -41,4 +45,4 @@ Before you build, which means change a tracked file on a branch you'll push, add
 - A check you didn't run hasn't passed. Give the check and its exit code. Mark every other claim as run, read or guessed.
 - Two fixes built on the same idea failed? Test that idea on its own before a third. Still stuck? Stop. Write what happened, each try with its failing output line, two or three options, and the one question that unblocks you.
 
-**Reply:** one short line each: what changed and whether it does what was asked, the branch and sha, each check with its exit code, the PR link if you opened one, each decision you made for the user, open risks.
+**Reply:** one short line each: what changed and whether it does what was asked, the branch and sha, each check with its exit code, the PR link if you opened one, each decision you made for the user, what you cleaned up and what remains with why, open risks.
