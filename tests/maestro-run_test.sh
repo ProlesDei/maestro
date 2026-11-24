@@ -50,7 +50,9 @@ trap 'exit 1' HUP INT TERM
 mkdir -p -- "$scratch/"{bin,repo,pids,home}
 cd -- "$scratch/repo"
 git init -q --template=
-git -c user.name=Fixture -c user.email=fixture@example.invalid commit --allow-empty -qm fixture
+git config user.name Fixture
+git config user.email fixture@example.invalid
+git commit --allow-empty -qm fixture
 common=$(git rev-parse --absolute-git-dir)
 git worktree add -q --detach "$scratch/unrelated"
 mv -- "$scratch/unrelated" "$scratch/moved"
@@ -403,3 +405,28 @@ legacy_run=$(T3CODE_THREAD_ID=$LIVE "$runner" make qa legacy)
 "$runner" clean "$LIVE"
 [[ ! -e $legacy && ! -L $legacy_run ]] || fail 'clean left a legacy run or its link'
 printf 'ok - make and clean handle legacy run names\n'
+
+mkdir -- .maestro
+cp -- "$runner" .maestro/maestro-run
+printf '#!/usr/bin/env bash\nprintf "trusted board\\n"\n' > .maestro/maestro-bd
+git add -- .maestro
+git commit -qm 'trusted launchers'
+git branch trusted-base
+read -r pinned _ < <(git ls-remote --exit-code . refs/heads/trusted-base)
+git fetch -q --no-write-fetch-head . "$pinned"
+git rm -qr -- .maestro
+git commit -qm 'checkout without launchers'
+git branch -f trusted-base HEAD
+git fetch -q . refs/heads/trusted-base
+[[ $(git rev-parse FETCH_HEAD) != "$pinned" ]] || fail 'competing fetch did not replace FETCH_HEAD'
+
+export T3CODE_THREAD_ID=$LIVE
+if "$runner" make qa pinned FETCH_HEAD 2>/dev/null; then fail 'make accepted a mutable base ref'; fi
+pinned_run=$(git cat-file blob "$pinned:.maestro/maestro-run" | bash -s -- make qa pinned "$pinned")
+launchers=$pinned_run/maestro-$pinned
+cmp -- "$runner" "$launchers/maestro-run" || fail 'run launcher differs from the pinned base'
+[[ $("$launchers/maestro-bd") == 'trusted board' ]] || fail 'board launcher differs from the pinned base'
+[[ $("$launchers/maestro-run" make qa pinned "$pinned") == "$pinned_run" ]] || fail 'pinned make changed run'
+"$launchers/maestro-run" clean
+[[ ! -e $pinned_run && ! -L $pinned_run ]] || fail 'pinned runner left the run or its link'
+printf 'ok - review launchers came from the pinned SHA after FETCH_HEAD changed\n'

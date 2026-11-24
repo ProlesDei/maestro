@@ -9,9 +9,10 @@ fail() {
   exit 1
 }
 
-usage='Usage: maestro-run make <role> <ticket-or-batch> | start <name> -- <cmd> [args...] | stop <name> | clean [thread-id] | prune'
+usage='Usage: maestro-run make <role> <ticket-or-batch> [<base-sha>] | start <name> -- <cmd> [args...] | stop <name> | clean [thread-id] | prune'
 role_pattern='[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*'
 label_pattern='[a-zA-Z0-9][a-zA-Z0-9._-]*'
+sha_pattern='[a-f0-9]{40}([a-f0-9]{24})?'
 uuid='[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}'
 run_pattern="maestro-([a-f0-9]{32}|$role_pattern-$label_pattern-$uuid)"
 alias_root=/tmp/maestro-$UID
@@ -346,11 +347,33 @@ root_probe() {
   while [[ ! -e $probe ]]; do probe=${probe%/*}; probe=${probe:-/}; done
 }
 
+save_launchers() (
+  local run=$1 sha=$2 dest=$1/maestro-$2 stage launcher
+  if [[ ! -e $dest && ! -L $dest ]]; then
+    stage=$(mktemp -d -- "$run/maestro-launchers.XXXXXXXX")
+    trap 'rm -rf -- "$stage"' EXIT
+    for launcher in maestro-run maestro-bd; do
+      git --no-replace-objects cat-file blob "$sha:.maestro/$launcher" > "$stage/$launcher"
+      chmod 700 -- "$stage/$launcher"
+    done
+    mv -T -- "$stage" "$dest"
+  fi
+  [[ -d $dest && -O $dest && ! -L $dest ]] || fail "Invalid launcher folder: $dest"
+  for launcher in maestro-run maestro-bd; do
+    [[ -f $dest/$launcher && -x $dest/$launcher && ! -L $dest/$launcher ]] ||
+      fail "Invalid launcher: $dest/$launcher"
+  done
+)
+
 action=${1-}
 case $action in
   make)
-    (( $# == 3 )) || fail "$usage"
+    (( $# == 3 || $# == 4 )) || fail "$usage"
     [[ $2 =~ ^$role_pattern$ && $3 =~ ^$label_pattern$ ]] || fail 'Invalid role or ticket/batch name'
+    if (( $# == 4 )); then
+      [[ $4 =~ ^$sha_pattern$ && $(git --no-replace-objects cat-file -t "$4" 2>/dev/null) == commit ]] ||
+        fail 'Need the full base commit SHA'
+    fi
     ;;
   start)
     (( $# >= 4 )) && [[ $2 =~ ^$label_pattern$ && $3 == -- ]] || fail "$usage"
@@ -414,6 +437,7 @@ case $action in
     else
       touch -- "$run/thread"
     fi
+    if (( $# == 4 )); then save_launchers "$run" "$4"; fi
     path=$(short_run "$run")
     exec {fd}<&-
     auto_prune "$run" >/dev/null 2>&1 || true

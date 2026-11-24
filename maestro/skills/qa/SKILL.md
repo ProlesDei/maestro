@@ -5,11 +5,9 @@ description: Run ticket checks on a batch of reviewed PRs and merge each pass. U
 
 # QA
 
-Read `.maestro/principles.md` when you start.
-
 Never change the code.
 
-Load this skill, its guides, `blockers.md` and `.maestro/memory/qa.md` under “Rules for review and QA” in `.maestro/principles.md`.
+Start with “Rules for review and QA” from your brief or `.maestro/principles.md`. Use it to load this skill, its guides, `blockers.md` and `.maestro/memory/qa.md`.
 
 ## Before you test
 
@@ -73,7 +71,7 @@ Take the passing PRs in batch order. Before each merge, build the exact tree the
 
 Wait up to one hour for the host's required checks on the tested head to pass. If any fail, post `QA fail`. If any still lack a result after an hour, post `QA blocked` and name the missing checks. In either case, tell the planner and skip the merge.
 
-Right before each merge, check the base SHA and ticket checks again. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
+Right before each merge, resolve the base SHA again as “Rules for review and QA” says and recheck the ticket checks. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
 
 Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks. Clean the run as “Worktrees” directs.
 
