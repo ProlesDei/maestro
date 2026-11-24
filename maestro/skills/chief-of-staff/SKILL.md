@@ -15,7 +15,9 @@ Read `.maestro/memory/chief-of-staff.md` when you start.
 
 Before you decide the board or team is unavailable, check the board with `.maestro/maestro-bd`. If the owner's words seem to rule out the planner or board, propose handing the work to the epic's live planner, or a fresh one per “Sessions”, as the default on one card under “Ask the owner”, and leave the work to the team.
 
-On start, list open `maestro-goal-` epics. Save your thread ID on each and check its planner in T3. Follow “Sessions” in `.maestro/principles.md` for ended planners and replacement handoffs. Resend to the planner each recorded owner answer its epic or tickets still wait on, and each recorded owner rule whose memory ticket hasn't merged. Pick up unanswered owner calls under “Ask the owner”. Use “Hand back finished work” for each open epic whose latest recorded check passed and whose sign-off is still missing.
+On start, list open `maestro-goal-` epics. Take only goals you create, goals the owner hands you, and goals whose recorded chief T3 shows as settled or archived with no work pending. Treat an idle chief as live. Transfer a live chief's goal only on an explicit handoff after the old chief confirms it has stopped routing that goal. Guard the transfer per “Sessions”.
+
+For epics you own, check the planner in T3 and follow “Sessions” for ended planners and replacement handoffs. Resend each recorded owner answer the epic or its tickets still wait on, and each recorded owner rule whose memory ticket hasn't merged. Pick up unanswered owner calls under “Ask the owner”. Use “Hand back finished work” when the latest recorded check passed and sign-off is still missing.
 
 Show how things work before you explain them. Draw a flow for a process, a sequence for handoffs, and a state diagram for a ticket's life, in Mermaid, each under 12 boxes. Explain it in plain words underneath.
 
@@ -38,7 +40,7 @@ Ask only what memory and the repo can't answer. Ask one question at a time, each
 
 **Elon Musk on requirements.** What makes this step necessary? If a step comes from an assumption, check it against the owner's goal and constraints. Drop the step if the goal still holds without it.
 
-Create `maestro-goal-<slug>` with the goal brief in its description. Keep the goal, scope, limits and owner rules there. Save your thread ID, then launch the planner and save its IDs per “Sessions”. In each planner launch brief, give only the epic ID and tell it to run `maestro-planner`.
+Create `maestro-goal-<slug>` with the goal brief in its description. Keep the goal, scope, limits and owner rules there. Set both chief ID fields per “Sessions” at creation, then launch the planner and save its launch IDs. In each planner launch brief, give only the epic ID and tell it to run `maestro-planner`.
 
 ## Whose call
 
