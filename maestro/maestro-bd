@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eu
+set -euo pipefail
 
 fail() {
   echo "Maestro: $*" >&2
@@ -22,7 +22,7 @@ start_server() {
   fi
   [[ -z "$listeners" ]] ||
     fail "Port $port is already in use. Pass a free port to maestro-setup"
-  if [[ -n "$saved" && "$saved" != "$port" && -f server.pid ]]; then
+  if [[ -n "$saved" && "$saved" != "$port" && "$pid" =~ ^[1-9][0-9]*$ ]]; then
     [[ "$(ss -Hltpn "sport = :$saved")" != *"pid=$pid,"* ]] ||
       fail "Board is running on port $saved. Stop it before changing ports"
   fi
@@ -54,7 +54,178 @@ ensure_qa_slots() {
   touch maestro-qa-slots-v2
 }
 
+rows() {
+  "${driver[@]}" list --brief --limit 0 --json
+}
+
+issue() {
+  "${driver[@]}" show "$1" --brief-deps --json | jq -ce '
+    .[0] | objects | {id, issue_type, parent, status, assignee, revision, labels, dependencies, metadata, external_ref}
+  '
+}
+
+write_issue() {
+  local id assignee status
+  IFS=$'\t' read -r id status < <(jq -r '[.id, .status] | @tsv' <<< "$1")
+  assignee=$(jq -r '.assignee // ""' <<< "$1")
+  shift
+  "${driver[@]}" update "$id" --if-assignee "$assignee" --if-status "$status" "$@" >/dev/null
+}
+
+new_token() {
+  cat /proc/sys/kernel/random/uuid
+}
+
+thread_ended() {
+  local state
+  [[ -n "$1" ]] || return 1
+  state=$(timeout -k 1s 5s t3 thread show "$1" --json --messages 0 2>/dev/null 9>&-) || return 1
+  jq -e --arg id "$1" '
+    .thread | objects | .threadId == $id and .activeRunId == null
+    and ((.pendingBackgroundTasks // []) | all(.kind != "subagent" and .childThreadId == null))
+  ' <<< "$state" >/dev/null
+}
+
+board_jq() {
+  local filter=$1
+  shift
+  jq "$@" '
+    . as $board |
+    def claimed: (.assignee // "") != "";
+    def dispatch: .metadata.maestro_dispatch;
+    def planner: .metadata.planner_thread_id;
+    def paths: [.labels[]? | select(startswith("touches:")) |
+      ltrimstr("touches:") | sub("^\\./"; "") | sub("/+$"; "") | if . == "" then "." else . end];
+    def overlap($a; $b): any($a[]; . as $x | any($b[];
+      $x == "." or . == "." or . == $x or startswith($x + "/") or (. as $y | $x | startswith($y + "/"))));
+    def path_holders($ticket): $ticket | paths as $paths | $board[] |
+      select(.id != $ticket.id and .status != "closed" and (claimed or dispatch != null)) |
+      select(overlap(paths; $paths));
+    def goal: (if .issue_type == "epic" then .id else .parent end) as $id |
+      $board[] | select(.id == $id and .status != "closed" and planner != null);
+  '"$filter"
+}
+
+caller() {
+  [[ -n "${T3CODE_THREAD_ID-}" ]] || fail "Need a T3 thread ID"
+  printf '%s\n' "$T3CODE_THREAD_ID"
+}
+
+ticket_ended() {
+  local ticket=$1 thread review planner
+  thread=$(jq -r '(.assignee | select(. != "")) // .metadata.maestro_dispatch.thread_id // ""' <<< "$ticket")
+  review=$(jq -r '.metadata.review_thread_id // ""' <<< "$ticket")
+  planner=$(jq -r '.metadata.maestro_dispatch.planner // ""' <<< "$ticket")
+  [[ -n "$thread" ]] || thread=$planner
+  thread_ended "$thread" && { [[ -z "$review" ]] || thread_ended "$review"; }
+}
+
+release_ticket() {
+  write_issue "$1" --assignee '' --status "$2" --unset-metadata maestro_dispatch --unset-metadata engineer_task_id
+}
+
+ready_ticket() {
+  local id=$1 parent=$2 ready
+  ready=$("${driver[@]}" ready --unassigned --parent "$parent" --limit 0 --brief --json)
+  jq -e --arg id "$id" 'any(.[]; .id == $id)' <<< "$ready" >/dev/null ||
+    fail "$id is not ready"
+}
+
+reserve_ticket() {
+  local id=$1 ticket parent board_rows owner status token metadata handoff=null
+  shift
+  owner=$(caller)
+  ticket=$(issue "$id")
+  board_rows=$(rows)
+  parent=$(board_jq '[$ticket | goal | select(planner == $owner)][0].id // empty' -r \
+    --argjson ticket "$ticket" --arg owner "$owner" <<< "$board_rows")
+  [[ -n "$parent" ]] || fail "$id is not on your goal"
+  status=$(jq -r .status <<< "$ticket")
+  if (( $# )); then
+    (( $# == 3 )) || fail "Usage: maestro-reassign <ticket> <observed assignee> <worktree> <branch>"
+    [[ "$(jq -r '.assignee // ""' <<< "$ticket")" == "$1" ]] || fail "$id changed hands"
+    [[ "$status" == open || "$status" == in_progress ]] || fail "$id is $status"
+    if jq -e '(.assignee // "") != "" or .metadata.maestro_dispatch != null' <<< "$ticket" >/dev/null; then
+      ticket_ended "$ticket" || fail "$id still has live or unverified work"
+    fi
+    local worktree branch pr common_dir
+    worktree=$(realpath -e -- "$2")
+    branch=$3
+    common_dir=$(git -C "$primary" rev-parse --path-format=absolute --git-common-dir)
+    [[ "$worktree" != "$primary" &&
+       "$(git -C "$worktree" rev-parse --show-toplevel)" == "$worktree" &&
+       "$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)" == "$common_dir" &&
+       "$(git -C "$worktree" symbolic-ref --quiet --short HEAD)" == "$branch" ]] ||
+      fail "Worktree and branch do not match this repo"
+    pr=$(jq -c '.external_ref // null' <<< "$ticket")
+    handoff=$(jq -nc --argjson pr "$pr" --arg worktree "$worktree" --arg branch "$branch" '{$pr, $worktree, $branch}')
+  else
+    jq -e '(.assignee // "") == "" and .metadata.maestro_dispatch == null' <<< "$ticket" >/dev/null ||
+      fail "$id already has a claim or reservation"
+  fi
+  if [[ "$status" == open ]]; then
+    ready_ticket "$id" "$parent"
+  else
+    jq -e 'all(.dependencies[]?; .status == "closed" or
+      (.dependency_type | IN("blocks", "conditional-blocks", "waits-for") | not))' <<< "$ticket" >/dev/null ||
+      fail "$id still has open prerequisites"
+  fi
+  check_paths "$ticket" "$board_rows"
+  token=$(new_token)
+  metadata=$(jq -c --arg token "$token" --arg planner "$owner" --argjson handoff "$handoff" '
+    {engineer_task_id: null, maestro_dispatch: {$token, $planner, $handoff}}
+  ' <<< "$ticket")
+  write_issue "$ticket" --assignee '' --status open --metadata "$metadata"
+  jq -c --arg id "$id" '.maestro_dispatch + {ticket: $id}' <<< "$metadata"
+}
+
+check_paths() {
+  local holder
+  holder=$(board_jq '[path_holders($ticket)][0].id // empty' -r --argjson ticket "$1" <<< "$2")
+  [[ -z "$holder" ]] || fail "$(jq -r .id <<< "$1") shares a declared path with $holder"
+}
+
+engineer_claim() {
+  local ticket parent engineer metadata path
+  engineer=$(caller)
+  ticket=$(issue "$1")
+  jq -e --arg token "$2" --arg id "$engineer" '
+    (.assignee // "") == "" and .status == "open" and
+    (.metadata.maestro_dispatch | .token == $token and (.thread_id // $id) == $id)
+  ' <<< "$ticket" >/dev/null || fail "Reservation no longer permits $engineer to claim $1"
+  path=$(jq -r '.metadata.maestro_dispatch.handoff.worktree // empty' <<< "$ticket")
+  if [[ -n "$path" ]]; then
+    [[ "$source_root" == "$path" && "$source_branch" == "$(jq -r '.metadata.maestro_dispatch.handoff.branch' <<< "$ticket")" ]] ||
+      fail "Launch the engineer in the reserved worktree and branch"
+  fi
+  parent=$(jq -er '.parent' <<< "$ticket")
+  ready_ticket "$1" "$parent"
+  check_paths "$ticket" "$(rows)"
+  metadata=$(jq -c --arg id "$engineer" '{maestro_dispatch: (.metadata.maestro_dispatch + {thread_id: $id})}' <<< "$ticket")
+  write_issue "$ticket" --assignee "$engineer" --status in_progress --metadata "$metadata"
+}
+
+bind_child() {
+  local id=$1 token=$2 thread=$3 task=${4-} ticket metadata owner
+  owner=$(caller)
+  [[ -n "$thread" ]] || fail "Need the child thread ID"
+  ticket=$(issue "$id")
+  jq -e --arg owner "$owner" --arg token "$token" --arg thread "$thread" --arg task "$task" '
+    (.assignee // "") as $assignee | ($assignee == "" or $assignee == $thread) and
+    (.metadata.engineer_task_id // $task) == $task and
+    (.metadata.maestro_dispatch | .planner == $owner and .token == $token and (.thread_id // $thread) == $thread)
+  ' <<< "$ticket" >/dev/null || fail "$id no longer holds that reservation"
+  metadata=$(jq -c --arg thread "$thread" --arg task "$task" '
+    {maestro_dispatch: (.metadata.maestro_dispatch + {thread_id: $thread}), engineer_task_id: $task}
+  ' <<< "$ticket")
+  write_issue "$ticket" --metadata "$metadata"
+}
+
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR
+if [[ ${1-} == maestro-engineer-claim ]]; then
+  source_root=$(git rev-parse --show-toplevel)
+  source_branch=$(git symbolic-ref --quiet --short HEAD || true)
+fi
 IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
 primary=$(cd "${worktree#worktree }" && pwd -P)
 digest=$(printf '%s' "$primary" | sha256sum)
@@ -107,6 +278,10 @@ port=${saved:-3307}
 if [[ -n "$setup" ]]; then port=${1-$port}; fi
 [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) ||
   fail "Invalid board port: $port"
+if [[ -n "$setup" ]]; then
+  dolt config --global --add metrics.disabled true
+fi
+pid=
 start_server
 if [[ -n "$setup" ]]; then
   if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
@@ -123,6 +298,48 @@ fi
 [[ -f maestro-qa-slots-v2 ]] || ensure_qa_slots
 trap - EXIT
 exec 9>&-
+
+case ${1-} in
+  maestro-*)
+    action=${1#maestro-}
+    shift
+    [[ -z "${T3CODE_THREAD_ID-}" ]] || driver+=(--actor "$T3CODE_THREAD_ID")
+    board_lock
+    case $action in
+      reserve)
+        (( $# == 1 )) || fail "Usage: maestro-reserve <ticket>"
+        reserve_ticket "$1" ;;
+      reassign)
+        (( $# == 4 )) || fail "Usage: maestro-reassign <ticket> <observed assignee> <worktree> <branch>"
+        reserve_ticket "$@" ;;
+      engineer-claim)
+        (( $# == 2 )) || fail "Usage: maestro-engineer-claim <ticket> <token>"
+        engineer_claim "$@" ;;
+      bind-child)
+        (( $# >= 3 && $# <= 4 )) || fail "Usage: maestro-bind-child <ticket> <token> <thread> [task]"
+        bind_child "$@" ;;
+      release-ticket)
+        (( $# == 4 || $# == 5 )) ||
+          fail "Usage: maestro-release-ticket <ticket> <observed assignee> <observed status> <open|blocked|in_progress> [token]"
+        ticket=$(issue "$1")
+        [[ "$(jq -r '.assignee // ""' <<< "$ticket")" == "$2" && "$(jq -r '.status' <<< "$ticket")" == "$3" ]] ||
+          fail "$1 changed hands or status"
+        [[ "$3" == open || "$3" == blocked || "$3" == in_progress ]] || fail "Cannot release a $3 ticket"
+        [[ "$4" == open || "$4" == blocked || "$4" == in_progress ]] || fail "Invalid release status: $4"
+        owner=$(caller)
+        jq -e --arg token "${5-}" '(.metadata.maestro_dispatch.token // "") == $token' <<< "$ticket" >/dev/null ||
+          fail "$1 no longer holds that reservation"
+        if [[ "$owner" != "$2" ]] &&
+           ! jq -e --arg owner "$owner" '
+              (.assignee // "") == "" and (.metadata.maestro_dispatch | .planner == $owner and .thread_id == null)
+           ' <<< "$ticket" >/dev/null; then
+          ticket_ended "$ticket" || fail "$1 still has live or unverified work"
+        fi
+        release_ticket "$ticket" "$4" ;;
+      *) fail "Unknown maestro-bd action: maestro-$action" ;;
+    esac
+    exit ;;
+esac
 
 for (( index=1; index<=$#; index++ )); do
   case ${!index} in
@@ -143,7 +360,9 @@ case ${!index-} in
       esac
     done
     [[ -z $json || -n $full ]] || extra+=(--brief)
+    [[ -z "$full" ]] || board_lock
     set -- "${@:1:index}" "${extra[@]}" "${@:index+1}" ;;
-  create|new) board_lock ;;
+  list|show|status|version|--help|-h|'') ;;
+  *) board_lock ;;
 esac
 exec "${driver[@]}" "$@"
