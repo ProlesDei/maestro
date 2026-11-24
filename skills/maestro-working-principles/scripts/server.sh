@@ -81,23 +81,16 @@ cleanup() {
 }
 
 lock() {
-	local attempt owner
+	local attempt owner again
 	locked=1
 	for ((attempt = 0; attempt < 50; attempt++)); do
 		if (set -C; printf '%s\n' "$$" >"$lock_file") 2>/dev/null; then
 			return
 		fi
-		if read -r owner 2>/dev/null <"$lock_file" && is_pid "$owner" && [[ -z $(started "$owner") ]]; then
-			perl -MFcntl=:flock -e '
-				my ($path, $owner) = @ARGV;
-				open my $lock, "+<", $path or exit;
-				flock $lock, LOCK_EX | LOCK_NB or exit;
-				my @file = stat $lock;
-				my @path = stat $path;
-				if (@path && $file[0] == $path[0] && $file[1] == $path[1] && <$lock> eq "$owner\n") {
-					unlink $path or die "$path: $!\n";
-				}
-			' "$lock_file" "$owner"
+		if read -r owner 2>/dev/null <"$lock_file" && is_pid "$owner" && [[ -z $(started "$owner") ]] &&
+			read -r again 2>/dev/null <"$lock_file" && [[ $again == "$owner" ]]; then
+			rm -f -- "$lock_file"
+			continue
 		fi
 		sleep 0.1
 	done
@@ -160,7 +153,7 @@ watch_server() {
 	[[ -n $birth ]] || die 1 group_start_failed
 	new_draft
 	if [[ -f $ledger ]]; then
-		cut -f 1-5 "$ledger" >"$draft"
+		cat -- "$ledger" >"$draft"
 	fi
 	printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$pid" "$birth" "$log" "$work_dir" >>"$draft"
 	save_ledger
@@ -185,22 +178,21 @@ watch_server() {
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
 		new_draft
-		LOG_PATH=$log awk 'BEGIN { FS = OFS = "\t" } $4 != ENVIRON["LOG_PATH"] { print $1, $2, $3, $4, $5 }' "$ledger" >"$draft"
+		LOG_PATH=$log awk -F '\t' '$4 != ENVIRON["LOG_PATH"]' "$ledger" >"$draft"
 		save_ledger
 	fi
 	unlock
 }
 
 check_ledger() {
-	local action=$1 target=${2-} line pid group birth log work_dir
+	local action=$1 target=${2-} line pid group birth log
 	local result found= status=0 ready watcher watcher_birth attempt
 	local -a watchers=()
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
 		new_draft
 		while IFS= read -r line; do
-			IFS=$'\t' read -r pid group birth log work_dir _ <<<"$line"
-			printf -v line '%s\t%s\t%s\t%s\t%s' "$pid" "$group" "$birth" "$log" "$work_dir"
+			IFS=$'\t' read -r pid group birth log _ <<<"$line"
 			if [[ $action == stop && $target != all && $target != "$pid" ]]; then
 				printf '%s\n' "$line" >>"$draft"
 				continue
