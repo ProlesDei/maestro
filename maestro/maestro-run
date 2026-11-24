@@ -246,20 +246,14 @@ recent() {
 }
 
 check_thread() {
-  local id=$1 result state message
+  local id=$1 state launcher=${BASH_SOURCE[0]-}
   [[ ! ${liveness[$id]+yes} ]] || return 0
-  if result=$(timeout -k 1s 5s t3 thread show "$id" --json 2>&1) &&
-    state=$(jq -er '.thread | objects | select(has("activeRunId")) | .activeRunId | if . == null then "dead" else "live" end' <<< "$result" 2>/dev/null); then
-    liveness[$id]=$state
-  else
-    message=${result,,}
-    case $message in
-      *"thread ${id,,} is no longer available"*|*'thread is no longer available'*|\
-      *"thread ${id,,} was not found"*|*"thread '${id,,}' not found"*|*'thread not found'*)
-        liveness[$id]=dead ;;
-      *) return 1 ;;
-    esac
-  fi
+  [[ -n "$launcher" ]] || return 1
+  state=$("$(dirname -- "$launcher")/maestro-bd" maestro-session "$id") || return 1
+  case $state in
+    ended|gone) liveness[$id]=dead ;;
+    *) liveness[$id]=live ;;
+  esac
 }
 
 prune() {
