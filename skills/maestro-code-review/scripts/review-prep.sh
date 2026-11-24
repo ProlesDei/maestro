@@ -2,8 +2,8 @@
 # review-prep.sh: the fixed steps of a code review, so a session spends no
 # calls or tokens on them, and the bot can route a review before it starts.
 #
-#   review-prep.sh <PR number | maestro/T-<n> branch | T-<n>>
-#     Finds the PR, its ticket and the main branch, fetches, makes a
+#   review-prep.sh <PR number | maestro/<name> branch>
+#     Finds the PR and the main branch, fetches, makes a
 #     detached worktree at the head, writes the diff and its stats to a
 #     folder of its own, checks the merge, sorts the changed files and
 #     picks full or incremental mode. Prints key=value lines, also saved
@@ -30,9 +30,9 @@
 #     out. delta_classes and main_since_classes name the file classes
 #     the delta, and main since that verdict's G, changed.
 #
-# Run it inside the repo, any worktree. Needs git 2.38+, gh and jq, and
-# maestro-ticket for a ticket's verdicts. Exit 2: bad target; 3: no PR or
-# no main branch; 1: any other failure.
+# Run it inside the repo, any worktree. Needs git 2.38+, gh and jq. Earlier
+# verdicts come from the PR's comments. Exit 2: bad target; 3: no PR or no
+# main branch; 1: any other failure.
 set -euo pipefail
 
 die() { echo "review-prep: $2" >&2; exit "$1"; }
@@ -42,7 +42,7 @@ case ${1-} in
 --route) route=1; shift ;;
 --qa) qa=1; shift ;;
 esac
-[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route | --qa] <PR number | maestro/T-<n> | T-<n>>"
+[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route | --qa] <PR number | maestro/<name>>"
 target=$1
 
 # 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
@@ -58,25 +58,12 @@ empty=$(git hash-object -t tree /dev/null)
 git --attr-source="$empty" rev-parse --git-dir >/dev/null 2>&1 && attrs=(--attr-source="$empty")
 gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff "$@"; }
 
-# The main branch, from the main checkout's project-setup.md, never the
-# PR's tree. Where the main repo is bare, the install sits in the linked
-# worktree that holds .maestro/src/ (install.sh allows only one), a clone
-# of Maestro: its .git is looked for, since git tracks no path of that
-# name, so no PR's tree can pass for the install.
-wts=$(git worktree list --porcelain)
-mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
-if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
-	while IFS= read -r w; do
-		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
-	done < <(sed -n 's/^worktree //p' <<<"$wts")
-fi
-setup=$mainwt/.maestro/project/project-setup.md
-# Read as install.sh check reads it: \r, spaces, the heading's case, a
-# leading bullet and backticks don't count.
-main=
-[ -f "$setup" ] && main=$(awk '{sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")}
-	/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); on=(tolower(h)=="main branch"); next}
-	on && $0 != "" && !/^#/ {sub(/^[-* ]+/, ""); gsub(/^[`* ]+|[`* ]+$/, ""); print; exit}' "$setup")
+# The main branch, from the remote's default branch, never the PR's tree:
+# origin/HEAD when the clone has it, else GitHub's answer.
+mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
+main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
+main=${main#origin/}
+[ -n "$main" ] || main=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)
 
 # The root files agents read as rules, as main has them since the last
 # fetch; the main checkout's copy only where main has none.
@@ -85,7 +72,7 @@ load_rules() {
 	local f
 	rules=
 	for f in AGENTS.md AGENTS.override.md CLAUDE.md CLAUDE.local.md .claude/CLAUDE.md GEMINI.md \
-		.github/copilot-instructions.md .maestro/project/project-setup.md; do
+		.github/copilot-instructions.md; do
 		if [ -n "$main" ] && git cat-file -e "refs/remotes/origin/$main:$f" 2>/dev/null; then
 			rules+=$(git show "refs/remotes/origin/$main:$f")$'\n'
 		elif [ -f "$mainwt/$f" ]; then
@@ -119,7 +106,7 @@ class() {
 	*/agents.md | */agent.md | */agents.override.md | */claude.md | */claude.local.md | \
 		*/gemini.md | */conventions.md | */.cursorrules | */.windsurfrules | */.clinerules | \
 		*/.clinerules/* | */.mcp.json | */skills/* | */prompts/* | */prompt/* | */agents/* | \
-		/.claude/* | /.agents/* | /.codex/* | /.cursor/* | /.grok/* | /.gemini/* | /.maestro/* | \
+		/.claude/* | /.agents/* | /.codex/* | /.cursor/* | /.gemini/* | \
 		/.windsurf/* | /.kiro/* | /.junie/* | /.roo/* | /.continue/* | /.amazonq/* | /.aider* | \
 		/.github/copilot-instructions.md | /.github/instructions/* | /.github/chatmodes/* | \
 		*.prompt | *.prompt.md | *.mdc)
@@ -168,44 +155,35 @@ class() {
 	esac
 }
 
-# The PR number, and the ticket its target names.
-prefix=$(maestro-ticket branch) || die 1 "cannot resolve the board branch prefix"
-ticket="" pr=""
+# The PR number, and the branch its target names.
+want="" pr=""
 case $target in
-T-[0-9]* | "$prefix"T-[0-9]*)
-	ticket=${target#"$prefix"}
-	[[ $ticket =~ ^T-[0-9]+$ ]] || die 2 "$target is no ticket id or maestro/T-<n> branch"
+maestro/*)
+	want=$target
+	[[ $want =~ ^maestro/[A-Za-z0-9._/-]+$ ]] || die 2 "$target is no maestro/<name> branch"
 	# {owner}: keeps out fork PRs, which anyone can open on any branch name.
-	pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$prefix$ticket&state=all&per_page=1" --jq '.[0].number // empty') ||
-		die 1 "gh couldn't list the PRs of $prefix$ticket"
-	[ -n "$pr" ] || die 3 "no PR from $prefix$ticket"
+	pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$want&state=all&per_page=1" --jq '.[0].number // empty') ||
+		die 1 "gh couldn't list the PRs of $want"
+	[ -n "$pr" ] || die 3 "no PR from $want"
 	;;
 '#'[0-9]* | [0-9]*)
 	pr=${target#'#'}
 	[[ $pr =~ ^[0-9]+$ ]] || die 2 "$target is no PR number"
 	;;
-*) die 2 "want a PR number, maestro/T-<n> or T-<n>, not $target" ;;
+*) die 2 "want a PR number or maestro/<name>, not $target" ;;
 esac
-
-check_board() {
-	local branch=$1 fork=$2
-	if [ "$fork" = false ] && [[ $branch =~ ^maestro/([0-9a-f-]+/)?T-[0-9]+$ ]] && [[ $branch != "$prefix"T-* ]]; then
-		die 1 "PR $pr belongs to another Maestro board"
-	fi
-}
 
 if [ -n "$route" ]; then
 	# One read of the PR: its files, and its changed lines, which size the
 	# review's time limit.
-	pv=$(gh pr view "$pr" --json files,additions,deletions,headRefName,isCrossRepository) || die 3 "gh found no PR $pr"
-	check_board "$(jq -r .headRefName <<<"$pv")" "$(jq -r .isCrossRepository <<<"$pv")"
+	pv=$(gh pr view "$pr" --json files,additions,deletions) || die 3 "gh found no PR $pr"
 	echo "pr=$pr"
 	echo "lines=$(jq -r '(.additions // 0) + (.deletions // 0)' <<<"$pv")"
 	full() { echo route=full; echo "why=$1"; exit 0; }
 	# With no main or no rules to read, nothing says which docs agents obey.
-	[ -n "$main" ] || full "no ## Main branch in the main checkout's project-setup.md"
+	[ -n "$main" ] || full "no default branch on origin"
 	load_rules
-	[ -n "$rules" ] || full "no AGENTS.md, CLAUDE.md or project-setup.md to read"
+	[ -n "$rules" ] || full "no AGENTS.md or CLAUDE.md to read"
 	files=$(jq -r '.files[] | "\(.changeType)\t\(.path)"' <<<"$pv")
 	n=$(printf '%s\n' "$files" | grep -c . || true)
 	# gh lists at most 100 files; a PR that big is no light review anyway.
@@ -227,22 +205,12 @@ H=$(jq -r .headRefOid <<<"$view")
 branch=$(jq -r .headRefName <<<"$view")
 fork=$(jq -r .isCrossRepository <<<"$view")
 [[ $H =~ ^[0-9a-f]{40}$ ]] || die 1 "PR $pr has no head sha"
-check_board "$branch" "$fork"
-suffix=${branch#"$prefix"}
-if [ "$fork" = false ] && [[ $branch == "$prefix"* ]] && [[ $suffix =~ ^(T-[0-9]+)$ ]]; then
-	[ -z "$ticket" ] || [ "$ticket" = "${BASH_REMATCH[1]}" ] || die 1 "PR $pr is on $branch, not $prefix$ticket"
-	ticket=${BASH_REMATCH[1]}
-else
-	ticket=
-fi
-
-[ -f "$setup" ] || die 3 "no $setup to read the main branch from"
-[ -n "$main" ] || die 3 "no branch under ## Main branch in $setup"
+[ -z "$want" ] || [ "$branch" = "$want" ] || die 1 "PR $pr is on $branch, not $want"
+[ -n "$main" ] || die 3 "no default branch on origin to review against"
 
 state=$(jq -r .state <<<"$view")
 base=$(jq -r .baseRefName <<<"$view")
 pkeys() {
-	echo "ticket=${ticket:-none}"
 	echo "pr=$pr"
 	echo "url=$(jq -r .url <<<"$view")"
 	echo "state=$state"
@@ -261,7 +229,7 @@ if [ -n "$qa" ]; then
 	abc=abcdefghijklmnopqrstuvwxyz rand=""
 	for b in $(od -An -N6 -tu1 /dev/urandom); do rand+=${abc:b % 26:1}; done
 	[ ${#rand} -eq 6 ] || die 1 "no 6 random bytes from /dev/urandom"
-	qarun=qa-${ticket:-pr-$pr}-$rand
+	qarun=qa-pr-$pr-$rand
 fi
 stop=
 if [ "$fork" != false ]; then
@@ -296,7 +264,7 @@ git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die
 load_rules
 
 S=$(date +%s)
-id=${ticket:-pr-$pr}
+id=pr-$pr
 run=review-$id-$S E="" G=""
 # What main is for the rest of the run: in QA mode its sha, not the ref,
 # which another session's fetch can move while this one works.
@@ -312,7 +280,7 @@ C=$(mktemp -d)
 R=$(mktemp -d)/$run
 # A failed prep leaves nothing behind for the session to clean up. Of
 # the evidence folders only this run's goes: others may be writing in
-# the ticket's.
+# the PR's.
 cleanup() {
 	[ $? -eq 0 ] && return
 	git worktree remove --force "$R" 2>/dev/null || true
@@ -378,19 +346,13 @@ done < <(gd --numstat --no-renames "$B" "$H")
 touch "$C/files.txt"
 
 # K: the sha after the first "at" in review's latest verdict, a Review:
-# or a Kickback: that isn't a Kickback: QA fail. On a ticket, from the
-# ticket; with none, from PR comments by the repo's owner, members or
-# collaborators, since anyone can comment on a public PR. QA reads no diff, so its kickback is never a base.
+# or a Kickback: that isn't a Kickback: QA fail, from PR comments by the
+# repo's owner, members or collaborators, since anyone can comment on a
+# public PR. QA reads no diff, so its kickback is never a base.
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
-if [ -n "$ticket" ]; then
-	detail=$(maestro-ticket get "$ticket" --json) || die 1 "maestro-ticket get $ticket failed"
-	firsts=$(jq -r '.comments[] | (.first_line // (.body | split("\n") | map(select(test("\\S"))) | .[0] // "")) | sub("^[ \t]+"; "")' <<<"$detail") ||
-		die 1 "maestro-ticket get $ticket failed"
-else
-	firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-		--jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
-		die 1 "gh couldn't read PR $pr's comments"
-fi
+firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
+	--jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
+	die 1 "gh couldn't read PR $pr's comments"
 # sha_after <line> <text>: the full sha right after the first <text> in
 # the line, or nothing.
 sha_after() {
@@ -412,20 +374,6 @@ if [ -n "$qa" ]; then
 	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	review_go=
 	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
-	direct_head='' current_pass=unknown
-	if [[ -n "$ticket" ]] && jq -e '.direct_qa == true' <<<"$detail" >/dev/null; then
-		basis=$(maestro-ticket qa-basis "$ticket" --json) || die 1 "cannot resolve QA basis for $ticket"
-		review_go=
-		current_pass=$(jq -r 'if .passed == true then "yes" else "no" end' <<<"$basis")
-		case $(jq -er '.route' <<<"$basis") in
-			direct)
-				# Known sensitive paths require the reviewer's GO.
-				if [[ $tier2 == 0 ]]; then direct_head=$(jq -er '.head' <<<"$basis"); fi ;;
-			review) review_go=$(jq -er '.head' <<<"$basis") ;;
-			none) ;;
-			*) die 1 "unknown QA basis for $ticket" ;;
-		esac
-	fi
 	# QA's own latest verdict. Only a fail that tested is a base for a
 	# retest: a pass or a "not tested:" checked nothing to carry over.
 	inc=retest by="QA's fail" why="no earlier QA verdict" K=""
@@ -511,8 +459,6 @@ fi
 	echo "docs_only=$([ -n "$light" ] && [ "$nfiles" -gt 0 ] && echo yes || echo no)"
 	if [ -n "$qa" ]; then
 		echo "review_go=${review_go:-none}"
-		echo "direct_head=${direct_head:-none}"
-		echo "current_pass=$current_pass"
 		echo "qa_last=$qa_last"
 		echo "qa_last_at=${qa_at:-none}"
 		echo "qa_last_main=${qa_main:-none}"

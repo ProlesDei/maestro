@@ -13,7 +13,7 @@ Open a todo list with one item per phase below.
 
 ## Phase A: Pick the shape
 
-1. If `## Conventions` in `.maestro/project/project-setup.md`, or a repo template such as `.github/pull_request_template.md`, sets a shape for this text, use that shape.
+1. If the repo's agent notes (AGENTS.md or CLAUDE.md), its contributing docs or a template such as `.github/pull_request_template.md` set a shape for this text, use that shape.
 2. Else pick the row for what the reader wants. A text that does two jobs becomes two texts that link each other.
 
 | The reader wants to | Write a | Shape |

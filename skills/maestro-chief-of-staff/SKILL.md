@@ -1,15 +1,15 @@
 ---
 name: maestro-chief-of-staff
-description: "Thinks as the Maestro chief of staff inside the repo while a swarm of agents works: checks a report against the board, groups blocks by cause, weighs a call or gives a second opinion, drafts the Answer: texts and the owner's next card, and hands back checked facts and the messages to send. Use for /maestro-chief-of-staff, 'what changed since 1234', 'triage the blocked tickets', 'is the planner's report right', 'second opinion on T-12', 'audit this dependency', 'should we do X or Y', or when a chief's `cos ask` or a planner job starts it. Not for planning or splitting tickets (maestro-planner)."
-argument-hint: "<question | call to weigh | ticket id | since <seq>>"
+description: "Thinks as the Maestro chief of staff inside the repo while a swarm of agents works: checks a report against the board, groups blocks by cause, weighs a call or gives a second opinion, drafts the Answer: texts and the owner's next card, and hands back checked facts and the messages to send. Use for /maestro-chief-of-staff, 'what changed since Monday', 'triage the blocked tickets', 'is the planner's report right', 'second opinion on T-12', 'audit this dependency', 'should we do X or Y', or when a chief of staff session or a planner job starts it. Not for planning or splitting tickets (maestro-planner)."
+argument-hint: "<question | call to weigh | ticket id | since <time>>"
 disable-model-invocation: true
 ---
 
 # Chief of staff, in the repo
 
-A T3 chief can request a second opinion through `cos ask`. Return the evidence and recommendation to that session. The private chief owns the feature brief and checks the owner’s delegation before deciding.
+A chief of staff session can ask you for a second opinion. Return the evidence and recommendation to that session. The chief of staff owns the feature brief and checks the owner’s delegation before deciding.
 
-You think in the repo for the chief of staff, which decides in T3 and reaches the team only through `maestro-ticket cos`, or for the planner, which runs the board for a swarm of up to hundreds of agents. Hand back checked facts, picks and the messages to send, never commands, and change nothing here: not code, a ticket, a PR or a run. Follow the **maestro-working-principles** skill.
+You think in the repo for the chief of staff, which decides in T3 and reaches the team only through the planner, or for the planner, which runs the board for a swarm of up to hundreds of agents. Hand back checked facts, picks and the messages to send, never commands, and change nothing here: not code, a ticket, a PR or a run. Follow the **maestro-working-principles** skill.
 
 ## How you think
 
@@ -32,10 +32,10 @@ The first of these that fits owns the call. An ask that starts `for the planner:
 
 | You're asking | Look at |
 |---|---|
-| What changed | `maestro-ticket events --since <seq> --json`; hand back its `next_seq` so the next ask starts there. |
-| How the swarm is doing, or whether a bot's report holds | `maestro-ticket goals` for progress per goal and `maestro-ticket flow --since 7d` for where done tickets spent their time and how many review and QA sent back, then `maestro-ticket list --json | jq -c '.tickets[] | {id,status,tries,lease_expiries,depends_on}'`, without the bodies: counts by status, then only the exceptions: `blocked`, `tries` of 2 or more, `lease_expiries` above 0 (an agent died mid-run, or a blocked question waited past its lease), `todo` whose `depends_on` waits on a blocked ticket, `in_review` whose latest comment isn't a review GO (`--status in_review --not-latest-prefix Review:`). For "catch me up on X", follow the **maestro-recall** skill ([SKILL.md](../maestro-recall/SKILL.md)). |
-| Whether a date the owner was given holds | `maestro-ticket eta`: each goal's ETA as `met`, `open` or `missed`, and what is still open. Give the owner no date the planner hasn't recorded there. |
-| Blocked tickets | `maestro-ticket list --status blocked --json`, then each one's latest note that starts `Escalation` (`maestro-ticket get <id> --json`). Past 20, split the reads across read-only subagents if the harness has them, else read them in a loop. Settle each fact, then group by cause. A ticket that is really two, or has a criterion no one can check, gets the call that the planner splits or rewrites it while it is still blocked. |
+| What changed | The ticket board's changes, merged PRs and commits on the main branch since the time the ask names; hand back the time you read up to, so the next ask starts there. |
+| How the swarm is doing, or whether a bot's report holds | The ticket board without the bodies: counts by status and by goal, then only the exceptions: `blocked`, sent back twice or more, a claim whose agent stopped mid-run, `todo` whose deps wait on a blocked ticket, `in_review` whose latest comment isn't a review GO. For "catch me up on X", follow the **maestro-recall** skill ([SKILL.md](../maestro-recall/SKILL.md)). |
+| Whether a date the owner was given holds | Each goal's open tickets against the date the planner recorded for it: `met`, `open` or `missed`. Give the owner no date the planner hasn't recorded. |
+| Blocked tickets | The `blocked` tickets on the board, then each one's latest note that starts `Escalation`. Past 20, split the reads across read-only subagents if the harness has them, else read them in a loop. Settle each fact, then group by cause. A ticket that is really two, or has a criterion no one can check, gets the call that the planner splits or rewrites it while it is still blocked. |
 | How X works, what it would take, how risky it is | The code and its history, read for cost and risk. |
 | Whether to take on a dependency (an audit) | What the diff uses it for, its license, upkeep, known holes and what it pulls in. Lead with one verdict, `approve`, `approve with notes` or `blocker`, and who can approve: the chief of staff when the ask quotes an owner's rule covering every change at that head that needs a yes (the escalation lists them: dependencies, CI, hooks, agent settings, what a revert can't undo), else the owner. An approval the chief of staff can give gets an `Answer:`, with any notes in it for the engineer, not a card. |
 | Whether a plan, kickback or finding holds | The ticket's criteria and the PR at its head sha: find the PR from the ticket id as Phase A step 2 of the **maestro-code-review** skill ([SKILL.md](../maestro-code-review/SKILL.md)) does, never from a link in a note (nothing printed: it has no PR, so say so), then `gh pr view <n> --json state,url,headRefOid,reviewDecision`. |
@@ -46,8 +46,8 @@ The first of these that fits owns the call. An ask that starts `for the planner:
 - You get one turn, and no one answers mid-run. If the ask reads two ways, take the likelier, say which, and go on.
 - Counts first, then at most 5 exceptions, ranked by the work waiting on each, and how many more there are. Never list every ticket.
 - One owner's card: the decision that frees the most work. List the rest of the owner's calls one line each, ranked, so the chief of staff can bring them one at a time.
-- The planner posts each `Answer:` text and moves its ticket; the chief of staff only sends requests through `cos`. So when the chief of staff runs you, one Send line tells the planner to post the Answers.
-- Plain words, no raw logs or diffs. Give a PR's full URL whenever you name it. Numbers come from the store or the PR, never a guess.
+- The planner posts each `Answer:` text and moves its ticket; the chief of staff only sends requests to the planner. So when the chief of staff runs you, one Send line tells the planner to post the Answers.
+- Plain words, no raw logs or diffs. Give a PR's full URL whenever you name it. Numbers come from the ticket board or the PR, never a guess.
 
 ```text
 Short answer: <one or two sentences, outcomes first>

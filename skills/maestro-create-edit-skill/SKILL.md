@@ -1,13 +1,13 @@
 ---
 name: maestro-create-edit-skill
-description: "Create, edit, rename or retire a skill so Claude Code, Codex and Grok Build all find it and a person can keep it up. Use for /maestro-create-edit-skill, 'add a skill', 'write a SKILL.md', 'this skill never triggers', 'this skill triggers too often', or when you change a skill's description. Not for using a skill, or for code and docs that are not skills."
+description: "Create, edit, rename or retire a skill so Claude Code and Codex both find it and a person can keep it up. Use for /maestro-create-edit-skill, 'add a skill', 'write a SKILL.md', 'this skill never triggers', 'this skill triggers too often', or when you change a skill's description. Not for using a skill, or for code and docs that are not skills."
 argument-hint: "[what the skill should do, or its name]"
 disable-model-invocation: true
 ---
 
 # Create or edit a skill
 
-A skill is a folder with a `SKILL.md`. A harness reads only `name` and `description` until a task matches, then loads the body. You hand back a skill that triggers when it should, and you never edit a `maestro-*` folder: those are the installer's copies, and the next install refuses a changed one or replaces your change.
+A skill is a folder with a `SKILL.md`. A harness reads only `name` and `description` until a task matches, then loads the body. You hand back a skill that triggers when it should, and you never edit a `maestro-*` folder: those are copies of Maestro's, and the next copy replaces your change.
 
 ## Start
 
@@ -15,7 +15,7 @@ Open a todo list with one item per phase below.
 
 ## Phase A: Decide
 
-1. List `.claude/skills/`, `.agents/skills/` and any folder `## Skills` in `.maestro/project/project-setup.md` names, and read each `description`.
+1. List `.claude/skills/`, `.agents/skills/` and any folder the repo's agent notes (AGENTS.md or CLAUDE.md) name for skills, and read each `description`.
 2. Pick one: an existing skill covers it, so **edit** that one; the agent already does this well, so **stop** and say so; else **create** one.
 3. Give the reason in one sentence before you write: "No skill covers commit style, so I'm creating `commit-style`."
 4. Name it in lowercase letters, digits and single hyphens, 64 characters at most, never with the `maestro-` prefix. To change a Maestro skill, change it in the Maestro repo, where `skills/README.md` sets the format.
@@ -39,8 +39,8 @@ Open a todo list with one item per phase below.
 
 ## Phase D: Place it
 
-1. Read `## Skills` in `.maestro/project/project-setup.md`. If it says where skills live, place it there, follow it for the steps below, and skip step 2.
-2. Else keep the same bytes in `.agents/skills/<name>/` (Codex, Grok Build) and `.claude/skills/<name>/` (Claude Code). Edit the `.agents` copy, copy it over the `.claude` one, and check the two folders match byte for byte.
+1. Read the repo's agent notes (AGENTS.md or CLAUDE.md), else its README. If they say where skills live, place it there, follow them for the steps below, and skip step 2.
+2. Else keep the same bytes in `.agents/skills/<name>/` (Codex) and `.claude/skills/<name>/` (Claude Code). Edit the `.agents` copy, copy it over the `.claude` one, and check the two folders match byte for byte.
 3. To rename or retire, remove the old folders and links, search the repo for the old name, and fix every hit.
 
 ## Phase E: Test it

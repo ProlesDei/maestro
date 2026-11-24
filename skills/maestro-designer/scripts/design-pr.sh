@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # design-pr.sh: hands a finished design up for the owner's look, in one
-# call, so a session spends no calls or tokens on the fixed steps and the
-# bots forward a card instead of writing one.
+# call, so a session spends no calls or tokens on the fixed steps and
+# writes no card by hand.
 #
-#   design-pr.sh <T-n> <run folder> --holder <holder> --token <n>
+#   design-pr.sh <ticket-id> <run folder> --title <ticket title>
 #     Checks the spec (spec.md in the run folder) has every field, two or
 #     more directions, a pick among them, numbered criteria that each
 #     name a width in px, and, unless its Motion: is just none, a
@@ -11,42 +11,40 @@
 #     screens.sh --motion);
 #     on a gap it prints problem= lines, exit 2, and writes nothing.
 #     With Motion: none, no clip goes up.
-#     Checks the ticket is a "Design:" scout ticket in in_progress under
-#     this holder's claim; else stop=<why>, exit 3.
+#     Checks the title opens "Design:"; else stop=<why>, exit 3.
 #     Then commits spec.md, the sheets (sheet-*.png), the pick's shots
 #     (<pick>-*.png, the pick's letter in lowercase) and every clip
 #     of a direction (<letter>[-+]*-motion.png, the pick's first), but
 #     no strip (*-strip.png), to
-#     .maestro/design/<T-n>/ on branch maestro/<T-n>, even where the
-#     repo ignores them, pushed with [skip ci] (Git LFS objects first,
-#     where the repo tracks them with LFS); opens a draft PR for it, or updates the open one; posts
-#     "Design spec:" and then "Escalation: design ready: PR <url>: owner's
-#     call", holding the owner's card, on the ticket; and blocks the
-#     ticket, releasing the claim. Prints pr=, sha=, status=blocked, ok=1.
+#     maestro-design/<ticket-id>/ on branch maestro/<ticket-id>, even where
+#     the repo ignores them, pushed with [skip ci] (Git LFS objects first,
+#     where the repo tracks them with LFS); opens a draft PR for it, or
+#     updates the open one; and writes the "Design spec:" note and the
+#     owner's card, "Escalation: design ready: PR <url>: owner's call",
+#     to design-spec.txt and card.txt in the run folder, for the session
+#     to post on the ticket. Prints pr=, sha=, spec=, card=, ok=1.
 #
-# Run it inside the repo, any worktree. Needs git, gh, jq and
-# maestro-ticket. Exit 1: any other failure; a rerun with the same run
-# folder repeats no comment and no move.
+# Run it inside the repo, any worktree. Needs git and gh. Exit 1: any
+# other failure; a rerun with the same run folder pushes no new commit
+# and opens no second PR.
 set -euo pipefail
 unset CDPATH
 
 die() { echo "design-pr: $2" >&2; exit "$1"; }
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
 
-[ $# -ge 2 ] || die 2 "usage: design-pr.sh <T-n> <run folder> --holder <holder> --token <n>"
+[ $# -ge 2 ] || die 2 "usage: design-pr.sh <ticket-id> <run folder> --title <ticket title>"
 id=$1 dir=$2
 shift 2
-holder='' token=''
+title=''
 while [ $# -gt 0 ]; do
 	case $1 in
-	--holder) [ $# -ge 2 ] || die 2 "--holder needs a value"; holder=$2; shift 2 ;;
-	--token) [ $# -ge 2 ] || die 2 "--token needs a value"; token=$2; shift 2 ;;
+	--title) [ $# -ge 2 ] || die 2 "--title needs a value"; title=$2; shift 2 ;;
 	*) die 2 "unknown argument $1" ;;
 	esac
 done
-[[ $id =~ ^T-[0-9]+$ ]] || die 2 "the ticket must be T-<n>, not $id"
-[[ $holder =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:-]*$ ]] || die 2 "--holder must be <bot-id>/<session-id>"
-[[ $token =~ ^[0-9]+$ ]] || die 2 "--token must be a number"
+[[ $id =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die 2 "the ticket id must be letters, digits, '.', '_' or '-', not $id"
+[ -n "$title" ] || die 2 "--title is required"
 [ -f "$dir/spec.md" ] || die 2 "no spec.md in $dir"
 dir=$(cd "$dir" && pwd)
 spec=$dir/spec.md
@@ -116,31 +114,15 @@ if [ ${#probs[@]} -gt 0 ]; then
 	exit 2
 fi
 
-# The ticket: a Design: scout ticket we hold in in_progress.
-t=$(maestro-ticket get "$id" --json) || die 1 "maestro-ticket get $id failed"
 stop() { echo "stop=$1"; exit 3; }
-title=$(jq -r '.title' <<<"$t")
 [[ $title == Design:* ]] || stop "$id is not a Design: ticket"
-[ "$(jq -r '.type' <<<"$t")" = scout ] || stop "$id is not a scout ticket"
-[ "$(jq -r '.status' <<<"$t")" = in_progress ] || stop "$id is $(jq -r '.status' <<<"$t"), not in_progress"
-[ "$(jq -r '.claim.holder // empty' <<<"$t")" = "$holder" ] || stop "$id is not claimed by $holder"
 
-# The main branch, as review-prep.sh reads it; main when none is set.
-# The install's .git is looked for, so no PR's tree can pass for it.
-wts=$(git worktree list --porcelain)
-mainwt=$(sed -n '1s/^worktree //p' <<<"$wts")
-if [ "$(sed -n 2p <<<"$wts")" = bare ]; then
-	while IFS= read -r w; do
-		[ -e "$w/.maestro/src/.git" ] && { mainwt=$w; break; }
-	done < <(sed -n 's/^worktree //p' <<<"$wts")
-fi
-setup=$mainwt/.maestro/project/project-setup.md
-main=
-[ -f "$setup" ] && main=$(awk '{sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")}
-	/^## / {h=substr($0, 4); gsub(/^[ \t]+|[ \t]+$/, "", h); on=(tolower(h)=="main branch"); next}
-	on && $0 != "" && !/^#/ {sub(/^[-* ]+/, ""); gsub(/^[`* ]+|[`* ]+$/, ""); print; exit}' "$setup")
+# The repo's web URL and default branch, main when none is set.
+meta=$(gh repo view --json url,defaultBranchRef --jq '.url + " " + .defaultBranchRef.name') || die 1 "gh can't read this repo"
+read -r web main <<<"$meta"
+[[ $web =~ ^https://[^[:space:]]+$ ]] || die 1 "gh gave no repo URL: $web"
 main=${main:-main}
-branch=$(maestro-ticket branch "$id")
+branch=maestro/$id
 
 tmp=$(mktemp -d)
 wt=
@@ -172,7 +154,7 @@ fi
 nohook() { GIT_LFS_SKIP_SMUDGE=1 git -c core.hooksPath=/dev/null "$@"; }
 wt=$tmp/wt
 nohook worktree add -q --detach "$wt" "$start" || die 1 "can't add a worktree at $start"
-d=.maestro/design/$id
+d=maestro-design/$id
 rm -rf "${wt:?}/$d"
 mkdir -p "$wt/$d"
 cp "$spec" "$dir"/sheet-*.png "${stills[@]}" "${clips[@]}" "$wt/$d/"
@@ -199,8 +181,6 @@ retry nohook -C "$wt" push -q --no-verify origin "HEAD:refs/heads/$branch" || di
 
 # The draft PR, from this repo only: a fork's PR on the same branch
 # name is never ours.
-web=$(gh repo view --json url --jq .url) || die 1 "gh can't read this repo"
-[[ $web =~ ^https://[^[:space:]]+$ ]] || die 1 "gh gave no repo URL: $web"
 raw() { echo "$web/blob/$sha/$d/$1?raw=true"; }
 {
 	echo "Design for $id, for the owner's look. This PR never merges: the owner answers in chat, and the planner closes it."
@@ -263,22 +243,15 @@ n=$(printf '%s\n' "$dirs" | grep -c .)
 	fi
 	echo "Question: Build direction $pick? Answer approved: $pick, which takes the defaults above, or changes: <what to change, or another direction's letter>. Shots: $pr"
 	echo "Return-role: designer"
-} >"$tmp/esc"
+} >"$dir/card.txt"
 {
 	echo "Design spec: PR $pr at $sha"
 	echo
 	cat "$spec"
-} >"$tmp/spec"
-
-mt() { MAESTRO_TICKET_ACTOR=${MAESTRO_TICKET_ACTOR:-${holder%%/*}} maestro-ticket "$@"; }
-mt comment "$id" --body-file "$tmp/spec" --holder "$holder" --token "$token" --idempotency-key "$holder-spec-$sha" >/dev/null ||
-	die 1 "can't post the spec on $id"
-mt comment "$id" --body-file "$tmp/esc" --holder "$holder" --token "$token" --idempotency-key "$holder-escalation-$sha" >/dev/null ||
-	die 1 "can't post the escalation on $id"
-mt transition "$id" --from in_progress --to blocked --holder "$holder" --token "$token" --release \
-	--idempotency-key "$holder-blocked-$sha" >/dev/null || die 1 "can't block $id"
+} >"$dir/design-spec.txt"
 
 echo "pr=$pr"
 echo "sha=$sha"
-echo "status=blocked"
+echo "spec=$dir/design-spec.txt"
+echo "card=$dir/card.txt"
 echo "ok=1"

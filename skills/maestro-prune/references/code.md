@@ -25,8 +25,8 @@ Phase C in SKILL.md shows them with the rest, and `--dry-run` stops there.
 
 ## Remove
 
-1. Make a worktree as **maestro-working-principles** says, but with the fixed name `prune`: `git worktree add --no-track .maestro/worktrees/prune -b maestro/prune origin/<main>`. The fixed name lets only one code prune run at a time. If the branch exists, another prune holds it, or its PR hasn't merged: change nothing and report `Code: skipped: maestro/prune exists`.
-2. Run every command under `## Checks` in `.maestro/project/project-setup.md` (or the repo's build and lint if that file is missing) before any change, and note each one already red.
+1. Make your own worktree outside the main checkout, as **maestro-working-principles** says, on a new branch with the fixed name `maestro/prune` from `origin/<main>`. The fixed name lets only one code prune run at a time. If the branch exists, another prune holds it, or its PR hasn't merged: change nothing and report `Code: skipped: maestro/prune exists`.
+2. Run every check the repo's agent notes (AGENTS.md or CLAUDE.md) name, else the build and lint its README and build files show, before any change, and note each one already red.
 3. For each class: `git rm <paths>` for files, an edit for dead code, then one commit. Ask-first items go in only after a yes, in their own commit. The message says what went and how you proved it unused.
 4. After each commit, run the checks. If one that passed in step 2 fails, `git revert --no-edit <sha>` and move that class to `Kept`.
 5. If any class stays, open the PR as **maestro-working-principles** says, with the step 2 results in its body. If none stays, open no PR and report the branch.

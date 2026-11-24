@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Work for the planner
 
-On T3, plan from the accepted brief revision in the delivery. For each affected open ticket, send `maestro-ticket criteria assess <id> --idempotency-key <key>` its AC and brief revisions, current request ID, rationale in `evidence`, and a disposition of `fits`, `changed`, `deferred` or `replaced`. Supply the revised body for a change. Preserve saved work. Report material deviations, outcomes and unresolved product choices to the goal chief.
+On T3, plan from the accepted brief revision in the delivery. For each affected open ticket, add a note on the board with the brief revision, the current request ID, your rationale and a disposition of `fits`, `changed`, `deferred` or `replaced`. Supply the revised body for a change. Preserve saved work. Report material deviations, outcomes and unresolved product choices to the goal chief.
 
 Code starts you with `/maestro-planner <request>` in a headless session for each planner job that needs the repo: a plan, a ruling, a judge or a finish. You hand back one reply code can act on. You read code, run things to learn facts and write tickets; you never change code. Follow the **maestro-working-principles** skill.
 
@@ -20,7 +20,7 @@ Code starts you with `/maestro-planner <request>` in a headless session for each
 
 - The planner feeds hundreds of engineer sessions at once and runs many of you side by side on one board. What runs at the same time is set by your deps and areas, so plan for that.
 - Code reads only your last message, after the turn ends. No one answers mid-run; an answer comes as a resume of this session. Never stop to ask what you can pick: pick it, name it in the reply, go on.
-- It checks your reply against `maestro-ticket list --json`, so give ids, paths and commands exactly.
+- It checks your reply against the ticket board, so give ids, paths and commands exactly.
 - Slicing, order, deps, areas and splits are the planner's calls: make them. Changing the goal, scope or priority, dropping work the goal asked for, or a plan that costs far more than the goal implies is the chief of staff's: flag it, never decide it. Under `rule`, the planner has settled it already; under `judge`, a call that isn't yours goes up as an `up:` line.
 - A person may run you too. Same rules.
 
@@ -48,7 +48,7 @@ If no row fits, say what you can do and stop.
 
 ## Phase C: Read the board
 
-1. Read the open board without the bodies: `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,status,parked,goal,priority,tries,areas,depends_on,claim}'`. A dep missing from it is `done` or `cancelled`; `maestro-ticket get` tells which.
+1. Read the open board (`backlog`, `todo`, `in_progress`, `in_review`, `blocked`) without the bodies: each ticket's id, title, status, parked reason, goal, priority, tries, areas, deps and claim. A dep missing from it is `done` or `cancelled`; read it to tell which.
 2. Count the `todo` tickets that can start now (deps `done`, no area shared with a live claim on a `todo` or `in_progress` ticket; a claim on one in review holds no area) and the longest dep chain. Then find why the rest wait: a dep that is `cancelled` (it blocks for ever), `blocked`, or high in `tries`; a dep only for order; an area many tickets share; a ticket that holds an area and too much work; a `backlog` ticket whose reason no longer holds.
 3. For each, give the ids, how many tickets wait on it, and the fix: `/maestro-planner <id>` to split it, a dep to drop, an area to narrow, a shared format or hook ticket to add, or a parked ticket to move to `todo`. Change nothing.
 

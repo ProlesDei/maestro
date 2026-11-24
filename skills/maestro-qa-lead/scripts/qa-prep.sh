@@ -2,7 +2,7 @@
 # qa-prep.sh: the fixed steps of a QA test in one call, so a session
 # spends no calls or tokens on them.
 #
-#   qa-prep.sh <PR number | maestro/T-<n> branch | T-<n>>
+#   qa-prep.sh <PR number | maestro/<name> branch>
 #
 # It runs the maestro-code-review skill's review-prep.sh --qa, which
 # holds the steps review and QA share; that file's header lists what it

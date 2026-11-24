@@ -24,14 +24,14 @@ Open a todo list with one item per phase below.
    | Race (`--race`): one task, rival approaches | Name each approach and the judge (the benchmark, command output or rule that picks the winner) before any worker starts. No judge, no race. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, give each worker one ticket id and a holder of its own: your bot id and 4 random letters, such as `senior-engineer/k3f9`. It claims the ticket as that holder, as the **maestro-working-principles** skill says.
+4. If the slices are Maestro tickets, give each worker one ticket id. It claims the ticket on the ticket board, as the **maestro-working-principles** skill says.
 
 ## Phase B: Launch
 
 1. Write each brief to stand alone. Workers share no chat, scratch file or branch. Each brief names:
    - the goal and its one slice or approach
    - the files it owns and the files it must not touch
-   - its own worktree and branch: for a ticket, the ones the **maestro-working-principles** skill names (run `maestro-ticket branch <id>`), so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha, with `<tag>` a short slug and 4 random letters, so no other swarm or earlier run has the branch
+   - its own worktree and branch: for a ticket, a worktree of its own on branch `maestro/<ticket-id>`, so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha, with `<tag>` a short slug and 4 random letters, so no other swarm or earlier run has the branch
    - done criteria and the proof to return: command, exit code, paths
    - the reply shape: `done`, `partial` or `blocked`; branch and sha; files; proof; open questions
 2. Launch them all in one message: parallel subagents, else one headless session per worker with all permissions. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
@@ -39,7 +39,7 @@ Open a todo list with one item per phase below.
 ## Phase C: Check
 
 1. Rerun each worker's proof yourself at its sha, in a detached worktree of your own in a `mktemp -d` folder outside the repo, which you remove after, never in the main checkout or a worker's worktree. Make the folder and worktree in one call and print the path; check its HEAD is the worker's sha; run each command there as `cd <path> && <command>` in one call, since your shell may keep no variables or folder between calls. Mark a claim you can't reproduce `unverified`.
-2. A subagent's keepalive follows your process, so its lease lasts as long as you do. Once a ticket worker returns, even if you then stop early, if `maestro-ticket get <id> --json` still shows its holder, release that claim with the holder and the `claim.token` shown, so the planner or a relaunch can take the ticket. Keep a `blocked` worker's claim, so the user answers first, as the **maestro-working-principles** skill says: a subagent's lasts as long as your session, a headless worker's until its lease runs out, and then the planner answers. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
+2. Once a ticket worker returns, even if you then stop early, if the ticket board still shows its claim, release that claim, so the planner or a relaunch can take the ticket. Keep a `blocked` worker's claim, so the user answers first, as the **maestro-working-principles** skill says. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
 3. Look across workers for files more than one changed, duplicate work, and claims that contradict each other.
 4. For a race, run the judge on every finished entry under the same conditions and record the numbers.
 
