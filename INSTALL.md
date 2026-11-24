@@ -1,101 +1,105 @@
 # Install Maestro
 
-Maestro lives in one folder, `.maestro/`, at your repo's root. Every skill sits there with its references and scripts. Claude Code and Codex find the skills through symlinks, so `.maestro/` is the only copy.
+Maestro adds 17 `maestro-*` skills to your repo for Claude Code and Codex: a planner that turns a goal into tickets, engineers that take a ticket to a PR, a reviewer, and QA that tests the PR in your running app and merges it. One script installs them into `.maestro/` and links them for both tools. You commit about 80 files to your default branch. Sessions run with full permissions, and QA merges to your default branch with your `gh` account.
+
+```mermaid
+flowchart LR
+  G[Your goal] --> P[maestro-planner] --> T[Tickets]
+  T --> E[maestro-software-engineer] --> PR[PR]
+  PR --> R[maestro-code-review] --> Q[maestro-qa-lead] --> M[Merged]
+```
+
+`.maestro/` is the only copy. `.claude/skills/` and `.agents/skills/` hold symlinks into it:
 
 ```
 your-repo/
 ├── .maestro/
-│   ├── VERSION                  # Maestro commit you installed
-│   └── skills/
-│       ├── maestro-planner/     # SKILL.md, references/, scripts/
-│       ├── maestro-qa-lead/
-│       └── ...
-├── .claude/skills/
-│   └── maestro-planner -> ../../.maestro/skills/maestro-planner
-└── .agents/skills/
-    └── maestro-planner -> ../../.maestro/skills/maestro-planner
-```
-
-```mermaid
-flowchart LR
-  M[".maestro/skills/maestro-*<br/>(source of truth)"]
-  C[".claude/skills/maestro-*<br/>Claude Code"] -->|symlink| M
-  A[".agents/skills/maestro-*<br/>Codex"] -->|symlink| M
+│   ├── install.sh               # update and uninstall from here
+│   ├── manifest                 # every path Maestro placed, with its hash
+│   ├── VERSION                  # Maestro commit installed
+│   └── skills/maestro-*/        # SKILL.md, references/, scripts/
+├── .claude/skills/maestro-*  -> ../../.maestro/skills/maestro-*   (Claude Code)
+└── .agents/skills/maestro-*  -> ../../.maestro/skills/maestro-*   (Codex)
 ```
 
 ## What you need
 
-- `git`, `bash`, `jq`, and the GitHub CLI `gh`, signed in to your repo's remote.
-- Claude Code, Codex, or both, ideally in T3. Run sessions with all permissions: Claude Code in `bypassPermissions`, Codex with `approval_policy = "never"`.
-- For UI checks by QA, engineers and the designer: Node and `playwright-cli` with Playwright's Chromium.
+| Need | For |
+|---|---|
+| Bash 4.4+ (macOS ships 3.2: `brew install bash`), Git 2.38+, jq 1.5+ | the skills' scripts |
+| `gh`, signed in to an account that can push, comment on PRs and merge | engineers open PRs; review and QA comment; QA merges |
+| A GitHub `origin`; PRs from branches in the same repo into its default branch; branch rules that allow a merge commit without a merge queue | review and QA refuse anything else |
+| Node 18+ and `playwright-cli` with Playwright's Chromium | checking anything a user sees |
+| A ticket board the agents can reach | planning, claiming and tracking work |
+| Linux, macOS or WSL (Windows needs WSL for the symlinks) | the install |
+
+**The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, and a claim only one agent can hold at a time. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
 
 ## Install
 
-Run this from your repo's root:
+From anywhere inside your repo:
 
 ```bash
-set -euo pipefail
-src=$(mktemp -d)
-git clone --depth 1 https://github.com/ProlesDei/maestro.git "$src"
-
-mkdir -p .maestro/skills .claude/skills .agents/skills
-rm -rf .maestro/skills/maestro-*
-cp -R "$src"/skills/maestro-* .maestro/skills/
-git -C "$src" rev-parse HEAD > .maestro/VERSION
-
-for dir in .claude/skills .agents/skills; do
-  for link in "$dir"/maestro-*; do
-    if [ -L "$link" ] && [ ! -e "$link" ]; then rm "$link"; fi
-  done
-  for skill in .maestro/skills/maestro-*; do
-    name=$(basename "$skill")
-    if [ -e "$dir/$name" ] && [ ! -L "$dir/$name" ]; then
-      echo "skipped $dir/$name: a folder Maestro didn't place"
-      continue
-    fi
-    ln -sfn "../../.maestro/skills/$name" "$dir/$name"
-  done
-done
-rm -rf "$src"
+src=$(mktemp -d) && git clone -q --depth 1 https://github.com/ProlesDei/maestro.git "$src" && bash "$src/install.sh"; rm -rf "$src"
 ```
 
-It replaces only what Maestro placed: the `maestro-*` folders in `.maestro/skills/` and the `maestro-*` symlinks. It never touches your own skills.
+To pin a version, add `--ref <commit or tag>` after `install.sh`. It fetches that commit and installs it.
 
-Then commit `.maestro/`, `.claude/skills/` and `.agents/skills/` to your default branch. Don't gitignore them: each ticket runs in its own git worktree, and a worktree holds only tracked files.
+The script places only `maestro-*` skills, their links and the files in `.maestro/`, and stages exactly those, even if `.gitignore` ignores `.claude/` or `.agents/`. It changes nothing and exits 1 if:
+- a path it would place already exists and it didn't place it;
+- `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink;
+- a file it placed has changed since the last install.
 
-On Windows, use WSL, or turn on Developer Mode and set `git config core.symlinks true` before you clone.
+Then add your agent notes (next section) and commit both to your default branch together. Each ticket runs in its own git worktree, which holds only committed files.
 
 ## Tell the agents about your project
 
-The skills read your repo's `AGENTS.md` or `CLAUDE.md` (the "agent notes") for anything specific to your project. Add what applies:
+The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to your project. Add:
 
-- **Main branch**, if it isn't the remote's default.
-- **Ticket board**: GitHub Issues, Beads, Linear or other, and how to reach it.
-- **Start the app**: the command, its port, and how to run two copies at once without a clash.
+- **The board**: which one, and how agents reach it.
+- **Start the app**: the command, its port, and how to run several copies at once without a clash.
 - **Outside steps**: anything a person must do first, such as a VPN, a login or a feature flag.
-- **Sensitive paths**: code where a change needs a closer look, such as auth, billing or migrations.
-- **Critical flows**: the user journeys QA must always check.
+- **Sensitive paths**: code that needs a closer look, such as auth, billing or migrations.
+- **Critical flows**: the user journeys QA always checks.
 - **Browser tool**, if not `playwright-cli`.
-- **Who proves the work**: say so if engineers prove their own work instead of QA.
+- **Who proves the work**, if engineers prove their own instead of QA.
+
+## Give sessions full permissions
+
+Maestro's sessions never stop to ask. In T3, set each session to Full access. Outside T3, each person sets it once:
+
+| Tool | Setting |
+|---|---|
+| Claude Code | `"permissions": {"defaultMode": "bypassPermissions"}` in `~/.claude/settings.json`, or `--dangerously-skip-permissions`. A repo's `.claude/settings.json` can't turn it on. |
+| Codex | `approval_policy = "never"` and `sandbox_mode = "danger-full-access"` in `~/.codex/config.toml`. Both are needed. |
 
 ## Run it
 
-Start a session in your repo and call the chief of staff:
+Call each skill by name: `/maestro-planner` in Claude Code, `$maestro-planner` in Codex.
 
-- Claude Code: `/maestro-chief-of-staff`
-- Codex: `$maestro-chief-of-staff`
+1. `maestro-planner <goal>`: writes ordered tickets on the board and names the ones that can start now.
+2. `maestro-software-engineer <ticket id>`: claims the ticket, builds it in its own worktree, opens a PR and moves the ticket to `in_review`. `maestro-swarm` runs several at once.
+3. `maestro-code-review <ticket id>`: reviews the PR in a fresh session and posts its verdict.
+4. `maestro-qa-lead <ticket id>`: tests the PR in the running app, merges it if it passes and marks the ticket `done`.
 
-It talks with you one decision at a time, sets goals and hands them to the planner. [skills/README.md](skills/README.md) lists every skill.
+`maestro-chief-of-staff` checks facts and weighs calls for you along the way; it doesn't start work. [skills/README.md](skills/README.md) lists every skill.
 
 ## Update
 
-Run the install block again, then commit. `.maestro/VERSION` changes to the new commit.
+On a new branch, run:
 
-Don't edit files in `.maestro/skills/`: the next update replaces them. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
+```bash
+bash .maestro/install.sh
+```
+
+It fetches Maestro's latest `main` (or `--ref <commit or tag>`), replaces only what it placed, removes skills Maestro dropped, and stages the change. Open a PR for it like any other change, so sessions working elsewhere never see files mid-swap.
+
+Don't edit files in `.maestro/`: the update stops until you undo the edit. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
 
 ## Uninstall
 
 ```bash
-rm -rf .maestro
-find .claude/skills .agents/skills -maxdepth 1 -name 'maestro-*' -type l -delete
+bash .maestro/install.sh --uninstall
 ```
+
+It removes only what it placed, stages the removal, and leaves your own skills alone. Commit to finish.
