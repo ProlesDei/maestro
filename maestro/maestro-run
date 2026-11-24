@@ -9,11 +9,14 @@ fail() {
   exit 1
 }
 
-usage='Usage: maestro-run make <role> <ticket-or-batch> | start <name> -- <cmd> [args...] | stop <name> | clean [thread-id] | prune'
+usage='Usage: maestro-run make <role> <ticket-or-batch> [<base-sha>] | start <name> -- <cmd> [args...] | stop <name> | clean [thread-id] | prune'
 role_pattern='[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*'
 label_pattern='[a-zA-Z0-9][a-zA-Z0-9._-]*'
+sha_pattern='[a-f0-9]{40}([a-f0-9]{24})?'
 uuid='[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}'
-run_pattern="maestro-$role_pattern-$label_pattern-$uuid"
+run_pattern="maestro-([a-f0-9]{32}|$role_pattern-$label_pattern-$uuid)"
+alias_root=/tmp/maestro-$UID
+alias_pattern='maestro-[a-f0-9]{20}'
 
 thread_key() {
   local id=$1 hash
@@ -24,6 +27,25 @@ thread_key() {
     hash=$(printf '%s' "$id" | sha256sum)
     printf '%s-%s-%s-%s-%s\n' "${hash:0:8}" "${hash:8:4}" "${hash:12:4}" "${hash:16:4}" "${hash:20:12}"
   fi
+}
+
+run_alias() {
+  local hash
+  hash=$(printf '%s' "$1" | sha256sum)
+  printf '%s/maestro-%s\n' "$alias_root" "${hash:0:20}"
+}
+
+short_run() {
+  local path=$1 LC_ALL=C
+  if (( ${#path} + 4 > 56 )); then
+    path=$(run_alias "$1")
+    mkdir -m 700 -- "$alias_root" 2>/dev/null || true
+    [[ -d $alias_root && -O $alias_root && ! -L $alias_root &&
+       $(stat -c %a -- "$alias_root") == 700 ]] || fail "Invalid run link directory: $alias_root"
+    ln -sT -- "$1" "$path" 2>/dev/null ||
+      [[ $(readlink -- "$path") == "$1" ]] || fail "Cannot link $path to $1"
+  fi
+  printf '%s\n' "$path"
 }
 
 managed_run() {
@@ -40,10 +62,12 @@ read_thread() {
 }
 
 own_run() {
-  local dir
+  local dir id
   run=
-  for dir in "${root%/}"/maestro-*-"$key"; do
+  for dir in "${root%/}/maestro-${key//-/}" "${root%/}"/maestro-*-"$key"; do
     managed_run "$dir" || continue
+    read_thread "$dir" && { [[ $id == "$thread" ]] || [[ $id =~ ^$uuid$ && ${id,,} == "${thread,,}" ]]; } ||
+      fail 'Run belongs to a different thread'
     [[ -z $run ]] || fail 'Thread has more than one run'
     run=$dir
   done
@@ -65,20 +89,37 @@ proc_live() {
 }
 
 match_paths() {
-  local arg=$1 prefix=${root%/}/ match
+  local arg=$1 prefix=$2 pattern=$3 match name
   [[ $arg == *"$prefix"* ]] || return 0
-  while [[ $arg =~ (^|[=[:space:]:])"$prefix"($run_pattern)(/|:|[[:space:]]|$) ]]; do
-    matched[${BASH_REMATCH[2]}]=1
-    match=${BASH_REMATCH[1]}$prefix${BASH_REMATCH[2]}
+  while [[ $arg =~ (^|[=[:space:]:])"$prefix"($pattern)(/|:|[[:space:]]|$) ]]; do
+    name=${BASH_REMATCH[2]}
+    match=${BASH_REMATCH[1]}$prefix$name
     arg=x${arg#*"$match"}
+    if [[ $pattern == "$alias_pattern" ]]; then
+      name=${aliases[$name]-}
+      [[ -n $name ]] || continue
+    fi
+    matched[$name]=1
   done
 }
 
 scan_processes() {
-  local mode=$1 proc pid part value cwd name id tagged
+  local mode=$1 proc pid part value cwd name id tagged link
   local -a fields values
-  local -A matched
+  local -A matched aliases=()
   births=() by_group=() by_run=()
+  case $mode in
+    runs)
+      link=$(run_alias "$run")
+      aliases[${link##*/}]=${run##*/}
+      ;;
+    report)
+      for name in "${!dirs[@]}"; do
+        link=$(run_alias "${root%/}/$name")
+        aliases[${link##*/}]=$name
+      done
+      ;;
+  esac
   for proc in /proc/[0-9]*; do
     pid=${proc##*/}
     proc_live "$pid" 2>/dev/null || continue
@@ -92,7 +133,8 @@ scan_processes() {
       mapfile -d '' -t values 2>/dev/null < "$proc/$part" || continue
       for value in "${values[@]}"; do
         case $part:$value in environ:OLDPWD=*) continue ;; esac
-        match_paths "$value"
+        match_paths "$value" "${root%/}/" "$run_pattern"
+        match_paths "$value" "$alias_root/" "$alias_pattern"
         [[ $mode == report && $part == environ ]] || continue
         case $value in
           T3CODE_THREAD_ID=*) id=${value#*=} ;;
@@ -211,11 +253,14 @@ remove_worktrees() {
   done
 }
 
-clean_run() {
-  local run=$1 mode=$2 common_dir id entry
+clean_run() (
+  local run=$1 mode=$2 expected_id=${3-} common_dir id entry link fd
   local -a children=()
+  [[ -d $root ]] || return 0
+  exec {fd}< "$root" && flock "$fd" || return 1
   managed_run "$run" || return 0
   common_dir=$(< "$run/git-common-dir") && read_thread "$run" || return 1
+  if [[ -n $expected_id ]] && { [[ $id != "$expected_id" ]] || recent "$run"; }; then return 0; fi
   unmounted "$run" || return 1
   if ! stop_processes "$mode" "$run"/services/*/pid; then
     printf 'Maestro: Processes survived in %s\n' "${run##*/}" >&2
@@ -233,13 +278,15 @@ clean_run() {
       rm -rf --one-file-system --preserve-root=all -- "${children[@]}" || return 1
   fi
   remove_worktrees "$run" "$common_dir" || return 1
+  link=$(run_alias "$run")
+  if [[ $(readlink -- "$link" 2>/dev/null) == "$run" ]]; then rm -f -- "$link" || return 1; fi
   if ! { rm -- "$run/thread" "$run/git-common-dir" && rmdir -- "$run"; }; then
     printf '%s' "$id" > "$run/thread"
     printf '%s\n' "$common_dir" > "$run/git-common-dir"
     return 1
   fi
   printf 'Removed %s\n' "${run##*/}"
-}
+)
 
 recent() {
   [[ -n $(find "$1" ! -type l -mmin "-$grace" -print -quit 2>/dev/null) ]]
@@ -291,8 +338,7 @@ prune() {
   done
   for run in "${!ids[@]}"; do
     [[ ${liveness[${ids[$run]}]} == dead ]] || continue
-    if ! read_thread "$run" || [[ $id != "${ids[$run]}" ]] || recent "$run"; then continue; fi
-    clean_run "$run" runs || status=1
+    clean_run "$run" runs "${ids[$run]}" || status=1
   done
   return "$status"
 }
@@ -314,11 +360,36 @@ root_probe() {
   while [[ ! -e $probe ]]; do probe=${probe%/*}; probe=${probe:-/}; done
 }
 
+save_launchers() (
+  local run=$1 sha=$2 dest=$1/maestro-$2 stage launcher expected actual
+  if [[ ! -e $dest && ! -L $dest ]]; then
+    stage=$(mktemp -d -- "$run/maestro-launchers.XXXXXXXX")
+    trap 'rm -rf -- "$stage"' EXIT
+    for launcher in maestro-run maestro-bd; do
+      git --no-replace-objects cat-file blob "$sha:.maestro/$launcher" > "$stage/$launcher"
+      chmod 700 -- "$stage/$launcher"
+    done
+    mv -T -- "$stage" "$dest"
+  fi
+  [[ -d $dest && -O $dest && ! -L $dest ]] || fail "Invalid launcher folder: $dest"
+  for launcher in maestro-run maestro-bd; do
+    [[ -f $dest/$launcher && -x $dest/$launcher && ! -L $dest/$launcher ]] ||
+      fail "Invalid launcher: $dest/$launcher"
+    expected=$(git --no-replace-objects rev-parse --verify "$sha:.maestro/$launcher") &&
+      actual=$(git hash-object --no-filters -- "$dest/$launcher") && [[ $actual == "$expected" ]] ||
+      fail "Launcher differs from the pinned base: $dest/$launcher"
+  done
+)
+
 action=${1-}
 case $action in
   make)
-    (( $# == 3 )) || fail "$usage"
+    (( $# == 3 || $# == 4 )) || fail "$usage"
     [[ $2 =~ ^$role_pattern$ && $3 =~ ^$label_pattern$ ]] || fail 'Invalid role or ticket/batch name'
+    if (( $# == 4 )); then
+      [[ $4 =~ ^$sha_pattern$ && $(git --no-replace-objects cat-file -t "$4" 2>/dev/null) == commit ]] ||
+        fail 'Need the full base commit SHA'
+    fi
     ;;
   start)
     (( $# >= 4 )) && [[ $2 =~ ^$label_pattern$ && $3 == -- ]] || fail "$usage"
@@ -367,7 +438,7 @@ case $action in
     creating=no
     if ! own_run; then
       creating=yes
-      run=${root%/}/maestro-$2-$3-$key
+      run=${root%/}/maestro-${key//-/}
       if ! mkdir -m 700 -- "$run" 2>/dev/null; then
         [[ -d $run && -O $run && ! -L $run ]] || fail "Cannot create $run"
       fi
@@ -382,12 +453,18 @@ case $action in
     else
       touch -- "$run/thread"
     fi
+    if (( $# == 4 )); then save_launchers "$run" "$4"; fi
+    path=$(short_run "$run")
     exec {fd}<&-
     auto_prune "$run" >/dev/null 2>&1 || true
-    printf '%s\n' "$run"
+    printf '%s\n' "$path"
     ;;
   start)
+    [[ -d $root ]] || fail 'Thread has no run'
+    exec {fd}< "$root"
+    flock "$fd"
     own_run || fail 'Thread has no run'
+    run=$(short_run "$run")
     record=$run/services/$2
     log=$run/logs/$2.log
     [[ ! -L $run/services && ! -L $run/logs && ! -L $log ]] || fail 'Invalid service paths'
@@ -405,8 +482,9 @@ case $action in
       exec "$@"
 LAUNCH
     set +m
-    TMPDIR=$run/tmp MAESTRO_RUN=$run setsid bash -c "$launcher" bash "$record" "$caller_umask" "$@" \
-      </dev/null >> "$log" 2>&1 &
+    TMPDIR=$run/tmp TMP=$run/tmp TEMP=$run/tmp MAESTRO_RUN=$run \
+      setsid bash -c "$launcher" bash "$record" "$caller_umask" "$@" \
+      {fd}<&- </dev/null >> "$log" 2>&1 &
     pid=$!
     while [[ ! -s $record/pid ]]; do
       if ! kill -0 "$pid" 2>/dev/null; then
@@ -426,7 +504,7 @@ LAUNCH
     ;;
   clean)
     status=0
-    for run in "${root%/}"/maestro-*-"$key"; do
+    for run in "${root%/}/maestro-${key//-/}" "${root%/}"/maestro-*-"$key"; do
       clean_run "$run" runs || status=1
     done
     exit "$status"

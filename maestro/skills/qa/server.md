@@ -21,4 +21,4 @@ Follow “Worktrees” in `.maestro/principles.md` for starting the app and its 
 
 ## Stop it
 
-To restart a service, use `.maestro/maestro-run stop <name>` before you start it again. On exit, follow “Worktrees” in `.maestro/principles.md`.
+To restart a service, stop it with the pinned runner before you start it again. On exit, follow “Worktrees” in `.maestro/principles.md`.
