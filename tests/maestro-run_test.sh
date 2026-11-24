@@ -25,7 +25,7 @@ live() {
 }
 
 finish() {
-  local file pid value
+  local file pid value link
   shopt -s nullglob
   for file in "$scratch"/pids/*; do
     read -r pid < "$file" || continue
@@ -37,6 +37,9 @@ finish() {
     done 2>/dev/null < "/proc/$pid/environ" || true
   done
   wait 2>/dev/null || true
+  for link in /tmp/maestro-"$UID"/maestro-*; do
+    if [[ $(readlink -- "$link") == "$scratch/"* ]]; then rm -- "$link"; fi
+  done
   chmod -R u+rwx -- "$scratch"
   rm -rf -- "$scratch"
 }
@@ -93,7 +96,7 @@ cat > "$scratch/server" <<'SERVER'
 setsid bash "$1/worker" "$1/pids/daemon" &
 bash "$1/worker" "$1/pids/group" &
 printf '%s\n' "$$" > "$1/pids/server"
-printf '%s\n' "$PWD" "$TMPDIR" "$MAESTRO_RUN"
+printf '%s\n' "$PWD" "$TMPDIR" "$TMP" "$TEMP" "$MAESTRO_RUN"
 exec sleep 300
 SERVER
 cat > "$scratch/agent" <<'AGENT'
@@ -133,7 +136,7 @@ identity() {
 }
 
 crash_run() {
-  local id=$1 expected=$2 agent run service daemon group kind pid start log pgrp sid
+  local id=$1 expected=$2 agent run service daemon group kind pid start log pgrp sid physical
   T3CODE_THREAD_ID=$id bash "$scratch/agent" "$runner" "$scratch" &
   agent=$!
   printf '%s\n' "$agent" > "$scratch/pids/agent"
@@ -145,11 +148,13 @@ crash_run() {
   service=$(< "$scratch/pids/server")
   daemon=$(< "$scratch/pids/daemon")
   group=$(< "$scratch/pids/group")
-  [[ $run == "$MAESTRO_RUN_ROOT/maestro-qa-crash-$expected" ]] || fail 'thread key'
+  physical=$(realpath -- "$run")
+  [[ $physical == "$MAESTRO_RUN_ROOT/maestro-${expected//-/}" ]] || fail 'thread key'
   [[ $start == "$service" && $log == "$run/logs/server.log" ]] || fail 'start output'
-  [[ $(< "$log") == "$PWD"$'\n'"$run/tmp"$'\n'"$run" ]] || fail 'service cwd or environment'
+  [[ $(< "$log") == "$(printf '%s\n' "$PWD" "$run/tmp" "$run/tmp" "$run/tmp" "$run")" ]] ||
+    fail 'service cwd or environment'
   [[ $(< "$run/thread") == "$id" && $(< "$run/git-common-dir") == "$common" ]] || fail 'run metadata'
-  [[ $(stat -c %a -- "$run") == 700 ]] || fail 'run mode'
+  [[ $(stat -Lc %a -- "$run") == 700 ]] || fail 'run mode'
   read -r _ _ pgrp sid _ <<< "$(identity "$group")"
   [[ $pgrp == "$service" && $sid == "$service" ]] || fail 'service process group'
   read -r _ _ pgrp sid _ <<< "$(identity "$daemon")"
@@ -169,8 +174,8 @@ crash_run() {
     [[ ! -e $run ]] || fail 'clean from inside the run left the folder'
   )
   "$runner" clean "$id"
-  [[ ! -e $run ]] || fail 'run folder survived clean'
-  [[ $(git worktree list --porcelain) != *"$run/tmp/checkout"* ]] || fail 'Git worktree entry survived clean'
+  [[ ! -e $run && ! -L $run ]] || fail 'run folder or link survived clean'
+  [[ $(git worktree list --porcelain) != *"$physical/tmp/checkout"* ]] || fail 'Git worktree entry survived clean'
   for kind in server daemon group build cwd cmdline colon space suffix; do
     pid=$(< "$scratch/pids/$kind")
     if live "$pid"; then fail "$kind PID $pid survived clean"; fi
@@ -246,7 +251,7 @@ SPAWNER
 late_run=$(T3CODE_THREAD_ID=$DEAD "$runner" make qa late)
 (cd -- "$scratch/repo" && T3CODE_THREAD_ID=$DEAD "$runner" start spawner -- bash "$scratch/spawner" "$scratch" > /dev/null)
 sleep 0.5
-find "$late_run" -exec touch -h -d '2 hours ago' -- {} +
+find "$(realpath -- "$late_run")" -exec touch -h -d '2 hours ago' -- {} +
 "$runner" prune > /dev/null
 [[ -s $scratch/pids/late ]] || fail 'spawner did not get TERM'
 late=$(< "$scratch/pids/late")
@@ -294,10 +299,25 @@ else
   printf 'skip - unprivileged mount namespace unavailable\n'
 fi
 
-default_run=$(env -u MAESTRO_RUN_ROOT HOME="$scratch/home" T3CODE_THREAD_ID="$LIVE" "$runner" make qa default)
-[[ $default_run == "$scratch/home/.local/share/maestro-runs/"* ]] || fail 'default run root path'
-[[ $(stat -c %d -- "$default_run") == "$(stat -c %d -- "$PWD")" &&
-   $(stat -fc %T -- "$default_run") != tmpfs ]] || fail 'default root is not on the checkout filesystem'
+printf -v long_label 'batch-%0250d' 0
+default_run=$(env -u MAESTRO_RUN_ROOT HOME="$scratch/home" T3CODE_THREAD_ID="$LIVE" "$runner" make qa "$long_label")
+[[ $(realpath -- "$default_run") == "$scratch/home/.local/share/maestro-runs/"* ]] || fail 'default run root path'
+[[ $(stat -Lc %d -- "$default_run") == "$(stat -c %d -- "$PWD")" &&
+   $(stat -fc %T -- "$default_run/") != tmpfs ]] || fail 'default root is not on the checkout filesystem'
+[[ ${#default_run} -le 52 ]] || fail 'run path leaves too little room for a Unix socket'
+if command -v python3 >/dev/null; then
+  TMPDIR=$default_run/tmp python3 - <<'PY'
+import os
+import socket
+import tempfile
+
+with tempfile.TemporaryDirectory(prefix="org.chromium.Chromium.") as profile:
+    path = os.path.join(profile, "SingletonSocket")
+    with socket.socket(socket.AF_UNIX) as listener:
+        listener.bind(path)
+    print(f"ok - bound a {len(os.fsencode(path))}-byte Unix socket with a 256-byte batch label")
+PY
+fi
 mkdir -- "$default_run/browser"
 (
   export HOME=$scratch/home T3CODE_THREAD_ID=$LIVE
@@ -310,7 +330,7 @@ mkdir -- "$default_run/browser"
   if live "$pid"; then fail 'stop from a browser folder left the process running'; fi
   "$runner" prune > /dev/null
   "$runner" clean
-  [[ ! -e $default_run ]] || fail 'clean from a browser folder left the run'
+  [[ ! -e $default_run && ! -L $default_run ]] || fail 'clean from a browser folder left the run'
 )
 printf 'ok - start, stop, prune, and clean work outside a Git checkout\n'
 if [[ -d /dev/shm && $(stat -c %d -- /dev/shm) != "$(stat -c %d -- "$PWD")" ]]; then
@@ -329,7 +349,7 @@ if [[ -d /dev/shm && $(stat -c %d -- /dev/shm) != "$(stat -c %d -- "$PWD")" ]]; 
     fail 'cross-device fallback error'
   rm -- "$common/maestro-runs"
   fallback=$(MAESTRO_RUN_ROOT=$candidate T3CODE_THREAD_ID=$LIVE "$runner" make qa fallback)
-  [[ $fallback == "$common/maestro-runs/"* && ! -e $candidate ]] || fail 'cross-filesystem fallback'
+  [[ $(realpath -- "$fallback") == "$common/maestro-runs/"* && ! -e $candidate ]] || fail 'cross-filesystem fallback'
   MAESTRO_RUN_ROOT=$candidate "$runner" clean "$LIVE"
   [[ ! -e $fallback ]] || fail 'clean did not find the fallback from its Git checkout'
 fi
@@ -373,3 +393,13 @@ live "$oldpwd" || fail 'clean killed another run through OLDPWD'
 T3CODE_THREAD_ID=$SHARED "$runner" clean > /dev/null
 rm -f -- "$scratch/pids/"{regroup,oldpwd,pwd,foreign}
 printf 'ok - clean follows live service sessions, matches PWD and ignores OLDPWD\n'
+
+legacy=$MAESTRO_RUN_ROOT/maestro-qa-legacy-$LIVE
+mkdir -m 700 -- "$legacy"
+printf '%s' "$LIVE" > "$legacy/thread"
+printf '%s\n' "$common" > "$legacy/git-common-dir"
+legacy_run=$(T3CODE_THREAD_ID=$LIVE "$runner" make qa legacy)
+[[ $(realpath -- "$legacy_run") == "$legacy" ]] || fail 'make did not reuse a legacy run'
+"$runner" clean "$LIVE"
+[[ ! -e $legacy && ! -L $legacy_run ]] || fail 'clean left a legacy run or its link'
+printf 'ok - make and clean handle legacy run names\n'
