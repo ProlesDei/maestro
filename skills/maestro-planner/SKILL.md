@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Work for the planner
 
-At the start of each run, check open claims. Free a claim as **Claims** says if the board or launcher shows the worker's run ended, or 24 hours have passed since the latest claim, renewal, ticket comment, status change or commit on its branch. Recheck before release. Return the ticket to its queue for the same stage and post who held the claim and why you freed it. Report any release you could not make safely.
+At the start of each run, check open claims. Free a claim as **Claims** says if the board or launcher shows the worker's run ended, or 24 hours have passed since the latest claim, ticket comment, status change or commit on its branch. Recheck before release. Return the ticket to its queue for the same stage and post who held the claim and why you freed it. Report any release you could not make safely.
 
 Then call `take` in [prune-lock.sh](../maestro-prune/scripts/prune-lock.sh), passing your Claims holder on each call. On `run`, follow [maestro-prune](../maestro-prune/SKILL.md) with `--safe-only`, then call `done` on success or `release` on failure, including a failed `done`.
 
