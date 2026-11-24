@@ -57,6 +57,8 @@ Write the ticket in your own words. When the work comes from an issue, a bug rep
 
 ## Before you file
 
+If the work needs an install update per “Sessions”, send the proposed change to the chief and stop.
+
 Read the ticket as an engineer who has seen nothing else. File it only if each holds:
 - They could start without a question.
 - QA could set up and run every check as written.
@@ -64,6 +66,6 @@ Read the ticket as an engineer who has seen nothing else. File it only if each h
 - The outcome serves the goal.
 - Nothing in it guesses at code you didn't read.
 
-File it under the goal slug's epic with its prerequisites in the same write. Put Checks in acceptance and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design.
+File it under the goal slug's epic with its prerequisites in the same write. Give Beads the parent and let it assign the child ID. Use the returned ID for later dependency links. Put Checks in acceptance and Risk and each Touches path in labels (`risk:high`, `touches:src/app.ts`). If the ticket has a batch, add `batch:<name>`. Put the goal, outcome and cases left out in the description, and Context, wait reasons and the risk reason in design.
 
 Search again as soon as you file. If tickets cover the same work, keep the first by ID. Point dependents and tracking epics to it. If it belongs to another epic, have the duplicate's epic track it too. If work started on a duplicate, have its planner cancel its sessions by task ID and save any work the kept ticket needs. Once those sessions end, set the duplicate to blocked with its assignee and status as guards, remove its prerequisite links, then close it as a duplicate with its assignee and blocked status as guards.
