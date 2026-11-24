@@ -32,7 +32,7 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 - Give each session a holder no other session uses, ticket or not: your role and a random id, such as `senior-engineer/3fa91c0e`. In your own worktree, write it once to `maestro/holder` in that worktree's git dir and read it back on resume. Claim tickets on the ticket board under it. Get that id, and any random letters that name a run, holder, branch or folder, from the OS, never from your head or the ticket: sessions that make letters up make the same ones, and two runs under one holder take each other's claims.
 - Release your claim when you stop work. Keep a `blocked` ticket's claim while its question waits, so whoever started you can answer first.
 - While working under a claim, check that you still hold it on resume and before an edit, push or ticket write. If you lost it, stop and report it. A new assignment starts with a new claim.
-- When you release another session's claim, keep it if the ticket is `blocked`. Use a release that checks the holder and status you read, so a new claim or block stays in place.
+- When you release another session's claim, keep it if the ticket is `blocked`. Use the board's guarded release if it has one. Otherwise reread the holder and status just before release and skip it if either changed. This keeps a new claim or block in place.
 
 ## Build
 
