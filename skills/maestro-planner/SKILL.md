@@ -7,6 +7,8 @@ disable-model-invocation: true
 
 # Work for the planner
 
+Start each run with `take` in [prune-lock.sh](../maestro-prune/scripts/prune-lock.sh), passing your Claims holder on each call. On `run`, follow [maestro-prune](../maestro-prune/SKILL.md) with `--safe-only`, then call `done` on success or `release` on failure, including a failed `done`.
+
 On T3, plan from the accepted brief revision in the delivery. For each affected open ticket, add a note on the board with the brief revision, the current request ID, your rationale and a disposition of `fits`, `changed`, `deferred` or `replaced`. Supply the revised body for a change. Preserve saved work. Report material deviations, outcomes and unresolved product choices to the goal chief.
 
 Read code, run checks and write tickets. Leave the code as it is. Use **maestro-create-ticket** for one small ticket. Follow the **maestro-working-principles** skill.
@@ -54,3 +56,5 @@ If no row fits, say what you can do and stop.
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 
 **Reply:** Start with `<job>: <done|draft|stopped>: <ids or the reason>`. Give the result from [Plan](references/plan.md#reply) or [Rule](references/rule.md#reply), the Check findings, the Board counts and fixes ranked by impact, or the Answer and its evidence. List each pick, how sure you are, and what fact would change it. Put each call for the chief of staff on an `up:` line using the team's card format, with `|` between fields. Put any question last.
+
+Add one `Prune:` line with the result or why it skipped or failed.
