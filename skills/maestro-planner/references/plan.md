@@ -31,10 +31,9 @@ Turn one goal into tickets an engineer can finish without asking, and create the
 
 Skip this phase unless you split or rewrote a ticket.
 
-1. Find each dependent: each open ticket whose deps hold `<id>`. Never cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first (add the new ids to its deps and remove `<id>`), then cancel `<id>` under your claim.
+1. Find each dependent: each open ticket whose deps hold `<id>`. Never cancel a ticket an open ticket depends on, since that one could never start, so move each onto the new tickets first (add the new ids to its deps and remove `<id>`), then check your claim as **Claims** says and cancel `<id>` under it.
 2. If another session adds a dependent while you cancel, move it the same way, then cancel again. If another session holds a dependent's claim, post `Escalation: split into T-a, T-b; cancel this once <dependent> (held by <holder>) is off it` with a last line `Return-role: <the ticket's role>`. If needed, move the old ticket to `blocked`. Release your claim and stop.
-3. If you lost your claim, claim again. If the board refuses, stop and report what remains.
-4. If the old ticket has an open PR, found from its id as Phase A step 2 of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)) does, never from a link in a note, close it with a comment naming the new tickets. Then remove the old ticket's worktree, if there is one, as **maestro-working-principles** says for removing a worktree: its work lives on its branch, and the new tickets get worktrees of their own.
+3. If the old ticket has an open PR, found from its id as Phase A step 2 of the **maestro-code-review** skill ([SKILL.md](../../maestro-code-review/SKILL.md)) does, never from a link in a note, close it with a comment naming the new tickets. Then remove the old ticket's worktree, if there is one, as **maestro-working-principles** says for removing a worktree: its work lives on its branch, and the new tickets get worktrees of their own.
 
 ## Reply
 

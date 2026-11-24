@@ -36,7 +36,7 @@ You split the work, launch the workers, check what they return, and write one re
 ## Phase C: Check
 
 1. Rerun each worker's proof in your own detached worktree in a fresh temp folder outside the repo. Record the path and check its head matches the worker's SHA. Follow the **maestro-working-principles** shell rule. Remove the worktree and folder when done. Mark a claim you can't reproduce `unverified`.
-2. Once a ticket worker returns, even if you then stop early, if the ticket board still shows its claim, release that claim, so the planner or a relaunch can take the ticket. Keep a `blocked` worker's claim, so the user answers first, as the **maestro-working-principles** skill says. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
+2. Once a ticket worker ends, even if you then stop early, release its remaining claim as **Claims** says, so the planner or a relaunch can take the ticket. If a worker returns no sha or no proof, relaunch it once unless its ticket is `blocked`. After a second miss, record a gap. A gap is not a pass.
 3. Look across workers for files more than one changed, duplicate work, and claims that contradict each other.
 4. For a race, score every finished entry by the chosen measure under the same conditions and record the numbers.
 

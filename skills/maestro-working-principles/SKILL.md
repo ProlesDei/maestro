@@ -15,7 +15,7 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 - **Never repeat a secret.** Name it by its environment variable. If one shows in output, say "secret exposed in session output" without the value.
 - **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never try another way to do the refused thing. A `low_disk` refusal, or a check, build or write that fails with `low_disk`, `no space left on device`, `ENOSPC` or `disk is full`, is an infra block, not the ticket's failure: give no verdict, kickback or handoff. Clean up as below, including any review or QA worktree; a build keeps its worktree, with a `wip:` commit if git can still write one. Retry a failed release as for a lock error. Reply `infra block: disk full` with the path and what is free.
 - **Wait for your own background work.** Before you end a turn, wait for each subagent and background command you started that ends on its own, such as a red team or a check run, and use its result. Never end on "waiting".
-- **Clean up after yourself.** Before you end a turn that finishes or stops work, stop the servers you started, remove your temp folders and each worktree whose work is done, and release your claims, as **Share the machine** and **Claims** say. Keep a claim a rule tells you to keep, such as a `blocked` ticket's while its question waits.
+- **Clean up after yourself.** Before you end a turn that finishes or stops work, stop the servers you started, remove your temp folders and each worktree whose work is done, and handle your claims, as **Share the machine** and **Claims** say.
 
 ## Share the machine
 
@@ -30,7 +30,9 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 ## Claims
 
 - Give each session a holder no other session uses, ticket or not: your role and a random id, such as `senior-engineer/3fa91c0e`. In your own worktree, write it once to `maestro/holder` in that worktree's git dir and read it back on resume. Claim tickets on the ticket board under it. Get that id, and any random letters that name a run, holder, branch or folder, from the OS, never from your head or the ticket: sessions that make letters up make the same ones, and two runs under one holder take each other's claims.
-- A claim holds until you release it, so release it whenever you stop work on the ticket.
+- Release your claim when you stop work. Keep a `blocked` ticket's claim while its question waits, so whoever started you can answer first.
+- While working under a claim, check that you still hold it on resume and before an edit, push or ticket write. If you lost it, stop and report it. A new assignment starts with a new claim.
+- When you release another session's claim, keep it if the ticket is `blocked`. Use a release that checks the holder and status you read, so a new claim or block stays in place.
 
 ## Build
 
