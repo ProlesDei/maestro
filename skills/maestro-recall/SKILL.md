@@ -9,10 +9,6 @@ disable-model-invocation: true
 
 You hand back a brief of where a topic stands now. Read only: change nothing, write no ticket, save no memory. Follow the **maestro-working-principles** skill.
 
-## Start
-
-Open a todo list with one item per phase below.
-
 ## Phase A: Set the scope
 
 1. Set the window: the last 7 days, or the number `--since` gives.
@@ -21,12 +17,12 @@ Open a todo list with one item per phase below.
 
 ## Phase B: Search, newest first
 
-1. **Chat history.** Search the harness's session logs, newest file first (`ls -t`). Read only the matching exchanges, never whole transcripts. Skip the current session.
+1. **Chat history.** Search the harness's session logs, newest file first. Read only the matching exchanges, never whole transcripts. Skip the current session.
    - Claude Code: `~/.claude/projects/<cwd with each character but a letter or digit as ->/*.jsonl`, plus that project's `memory/` folder.
    - Codex: `~/.codex/sessions/`.
 2. **Tickets.** List the tickets on the ticket board with their bodies, then read each match's whole comment trail and history.
-3. **Git.** `git log --since="<n> days ago" --all --oneline -- <paths>`, `git branch -a`, `git worktree list`.
-4. **PRs.** `gh pr list --search <topic>`.
+3. **Git.** Search commits across all refs in the time window, scoped to the paths that match. Check local and remote branches and linked worktrees.
+4. **PRs.** Search PRs for the topic.
 5. **Decisions.** The repo's decision log or ADR folder, if it has one.
 
 ## Phase C: Check before you trust

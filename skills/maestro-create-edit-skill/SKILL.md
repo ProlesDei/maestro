@@ -9,16 +9,12 @@ disable-model-invocation: true
 
 A skill is a folder with a `SKILL.md`. A harness reads only `name` and `description` until a task matches, then loads the body. You hand back a skill that triggers when it should, and you never edit a `maestro-*` folder: those are copies of Maestro's, and the next copy replaces your change.
 
-## Start
-
-Open a todo list with one item per phase below.
-
 ## Phase A: Decide
 
-1. List `.claude/skills/`, `.agents/skills/` and any folder the repo's agent notes (AGENTS.md or CLAUDE.md) name for skills, and read each `description`.
+1. List `.claude/skills/`, `.agents/skills/` and any folder the agent notes name for skills, and read each `description`.
 2. Pick one: an existing skill covers it, so **edit** that one; the agent already does this well, so **stop** and say so; else **create** one.
 3. Give the reason in one sentence before you write: "No skill covers commit style, so I'm creating `commit-style`."
-4. Name it in lowercase letters, digits and single hyphens, 64 characters at most, never with the `maestro-` prefix. To change a Maestro skill, change it in the Maestro repo, where `skills/README.md` sets the format.
+4. Name it in lowercase letters, digits and single hyphens, 64 characters at most, never with the `maestro-` prefix. To change a Maestro skill, work in the Maestro repo.
 
 ## Phase B: Write the frontmatter
 
@@ -29,17 +25,17 @@ Open a todo list with one item per phase below.
 ## Phase C: Write the body
 
 1. Open with one or two sentences: the job, what it hands back, and the one thing it never does.
-2. Use `## Phase A: <verb>` headings for work in stages, or one numbered list. One imperative action per step. Say what to do, never the command: the agent knows git and the shell, and commands bloat the text. Name only what it can't guess, such as a path, a branch pattern or a tool this project ships.
-3. Add only what the agent doesn't know. Link a sibling skill (`../<name>/SKILL.md`) instead of restating its rules.
+2. Use `## Phase A: <verb>` headings for work in stages, or one numbered list. One imperative action per step. Use a table for choices. Say what to do. Give a shell command only when its exact flags keep work safe or it calls a script Maestro ships.
+3. Give each rule one home. Point to **maestro-working-principles** for session rules, **maestro-create-ticket** for ticket shape, and **maestro-chief-of-staff** for owner calls. Link only within the skill, to sibling skills, or to files in the repo that uses them.
 4. Name the action, not the tool: "edit the file", not "use the Edit tool". Give a fallback for a feature one harness lacks, such as subagents or hooks.
-5. Keep `SKILL.md` under 60 lines. Move long detail to `references/<file>.md` and say when to read it. Check every link resolves.
+5. Keep `SKILL.md` under 60 lines. **maestro-code-review** is the exception. Move long detail to `references/<file>.md` and say when to read it. Check every link resolves.
 6. Put scripts in `scripts/`, in plain Bash with no agent APIs.
-7. End with a bold `**Reply:**` line naming the parts of the answer, in order.
+7. End with a bold `**Reply:**` line naming the parts of the answer in order. Put a long report shape in a fenced block above it.
 8. Write in plain words per the **maestro-technical-writing** skill ([SKILL.md](../maestro-technical-writing/SKILL.md)).
 
 ## Phase D: Place it
 
-1. Read the repo's agent notes (AGENTS.md or CLAUDE.md), else its README. If they say where skills live, place it there, follow them for the steps below, and skip step 2.
+1. Read the agent notes. If they say where skills live, place it there, follow them for the steps below, and skip step 2.
 2. Else keep the same bytes in `.agents/skills/<name>/` (Codex) and `.claude/skills/<name>/` (Claude Code). Edit the `.agents` copy, copy it over the `.claude` one, and check the two folders match byte for byte.
 3. To rename or retire, remove the old folders and links, search the repo for the old name, and fix every hit.
 

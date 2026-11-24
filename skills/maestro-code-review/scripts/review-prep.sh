@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# review-prep.sh: the fixed steps of a code review, so a session spends no
-# calls or tokens on them, and the bot can route a review before it starts.
+# review-prep.sh: prepare a PR for code review or QA.
 #
 #   review-prep.sh <PR number | maestro/<name> branch>
 #     Finds the PR and the main branch, fetches, makes a
@@ -10,15 +9,9 @@
 #     to $C/prep.txt; wrote= lists the files in $C. A fork's PR, a merged
 #     one or one on another base gets no review: it prints stop=<why>
 #     and the PR's keys, and fetches and writes nothing.
-#   review-prep.sh --route <target>
-#     Reads only the PR's file list, writes nothing, and prints
-#     route=light when every changed file is docs or inert config that no
-#     agent reads as instructions, else route=full, with pr= and lines=,
-#     its added plus deleted lines.
 #   review-prep.sh --qa <target>
-#     The fixed steps of a QA test (maestro-qa-lead): the same target,
-#     stops, fetch, diff files and sorting, then what QA needs in place
-#     of review's. A run name no other run shares, run=qa-<id>-<6
+#     maestro-qa-lead calls this mode directly. It uses the same target,
+#     stops, fetch, diff files and sorting. A unique run name, run=qa-<id>-<6
 #     letters>, names the worktree; today's main, G, is merged into it
 #     (merged=yes|conflict; a conflict is aborted and exits 0, since QA
 #     posts a fail for it), and the commit is never pushed. E is the
@@ -37,12 +30,12 @@ set -euo pipefail
 
 die() { echo "review-prep: $2" >&2; exit "$1"; }
 
-route="" qa=""
-case ${1-} in
---route) route=1; shift ;;
---qa) qa=1; shift ;;
-esac
-[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--route | --qa] <PR number | maestro/<name>>"
+qa=""
+if [ "${1-}" = --qa ]; then
+	qa=1
+	shift
+fi
+[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--qa] <PR number | maestro/<name>>"
 target=$1
 
 # 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
@@ -94,11 +87,10 @@ named() {
 }
 
 # File classes, first match wins. agent-text, ci, deps and schema are the
-# paths the tier-2 row names. docs and config are the only ones tier 0
-# and the light route take, so they are a short list of exact names: a
+# paths the tier-2 row names. Tier 0 allows docs and config: a
 # doc at the root, or a .md, .rst or .adoc in a root docs/ folder and no
 # dot folder, that the rules don't name, nor a folder it sits in. Other
-# prose is text, for the session to judge. Instruction files match in any case:
+# prose is text. Instruction files match in any case:
 # a case-insensitive disk loads claude.md as CLAUDE.md.
 class() {
 	local p=$1 l=${1,,}
@@ -173,32 +165,6 @@ maestro/*)
 *) die 2 "want a PR number or maestro/<name>, not $target" ;;
 esac
 
-if [ -n "$route" ]; then
-	# One read of the PR: its files, and its changed lines, which size the
-	# review's time limit.
-	pv=$(gh pr view "$pr" --json files,additions,deletions) || die 3 "gh found no PR $pr"
-	echo "pr=$pr"
-	echo "lines=$(jq -r '(.additions // 0) + (.deletions // 0)' <<<"$pv")"
-	full() { echo route=full; echo "why=$1"; exit 0; }
-	# With no main or no rules to read, nothing says which docs agents obey.
-	[ -n "$main" ] || full "no default branch on origin"
-	load_rules
-	[ -n "$rules" ] || full "no AGENTS.md or CLAUDE.md to read"
-	files=$(jq -r '.files[] | "\(.changeType)\t\(.path)"' <<<"$pv")
-	n=$(printf '%s\n' "$files" | grep -c . || true)
-	# gh lists at most 100 files; a PR that big is no light review anyway.
-	[[ "$n" -gt 0 && "$n" -lt 100 ]] || full "$n files"
-	while IFS=$'\t' read -r t f; do
-		# A rename lists only its new path, so what it moved stays unseen.
-		case $t in ADDED | MODIFIED | DELETED) ;; *) full "$f is ${t,,}" ;; esac
-		c=$(class "$f")
-		case $c in docs | config) ;; *) full "$f is $c" ;; esac
-	done <<<"$files"
-	echo route=light
-	echo "why=$n files, all docs or inert config"
-	exit 0
-fi
-
 view=$(gh pr view "$pr" --json number,url,title,body,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository) ||
 	die 3 "gh found no PR $pr"
 H=$(jq -r .headRefOid <<<"$view")
@@ -248,7 +214,7 @@ fi
 
 # Many sessions fetching in one checkout collide on ref locks: each fetch
 # takes only main, not every branch others push, and a failure gets a
-# random pause and two more tries, as the working principles ask.
+# random pause and two retries, as the working principles ask.
 retry() {
 	local i
 	for i in 1 2 3; do
@@ -332,7 +298,7 @@ merges=yes
 
 # files.txt: added, removed, path, class. A binary file counts no lines;
 # binary= says how many there are.
-lines=0 nfiles=0 tier2=0 light=1
+lines=0 nfiles=0 tier2=0
 binary=$(gd --numstat --no-renames "$B" "$H" | grep -c '^-	-	' || true)
 while IFS=$'\t' read -r a d f; do
 	[ "$a" = - ] && a=0
@@ -341,7 +307,6 @@ while IFS=$'\t' read -r a d f; do
 	printf '%s\t%s\t%s\t%s\n' "$a" "$d" "$f" "$c" >>"$C/files.txt"
 	lines=$((lines + a + d)) nfiles=$((nfiles + 1))
 	case $c in agent-text | ci | deps | schema) tier2=$((tier2 + 1)) ;; esac
-	case $c in docs | config) ;; *) light= ;; esac
 done < <(gd --numstat --no-renames "$B" "$H")
 touch "$C/files.txt"
 
@@ -456,7 +421,6 @@ fi
 	echo "lines=$lines"
 	echo "binary=$binary"
 	echo "tier2_paths=$tier2"
-	echo "docs_only=$([ -n "$light" ] && [ "$nfiles" -gt 0 ] && echo yes || echo no)"
 	if [ -n "$qa" ]; then
 		echo "review_go=${review_go:-none}"
 		echo "qa_last=$qa_last"

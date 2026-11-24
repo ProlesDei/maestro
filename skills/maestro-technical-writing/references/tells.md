@@ -1,6 +1,6 @@
 # AI tells
 
-The tells **maestro-unslop** fixes, by group. Each line names the tell, then the fix. A listed word is a tell only as filler or as a figure of speech; in its literal sense it stays.
+Each group lists the tell and its fix. A listed word is a tell as filler or as a figure of speech. Keep it in its literal sense.
 
 ## Words
 

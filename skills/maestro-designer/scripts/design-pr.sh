@@ -106,7 +106,8 @@ if [ -n "$pick" ]; then
 		# show the owner motion the design dropped.
 		clips=()
 	elif [ "$n_pick" = 0 ]; then
-		probs+=("Motion: no clip of the pick (${lp}[+<cue>]-<width>-motion.png) in the run folder; make one with screens.sh --motion, or write 'Motion: none'")
+		screens=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/screens.sh
+		probs+=("Motion: no clip of the pick (${lp}[+<cue>]-<width>-motion.png) in the run folder; make one with $screens --motion, or write 'Motion: none'")
 	fi
 fi
 if [ ${#probs[@]} -gt 0 ]; then
@@ -132,8 +133,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Many sessions share this repo: a lock or ref error gets a random pause
-# and two more tries, as the working principles ask.
 retry() {
 	local i
 	for i in 1 2 3; do
@@ -211,9 +210,6 @@ pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$branch&state=open&per_page
 if [ -n "$pr" ]; then
 	gh pr edit "$pr" --body-file "$tmp/body" >/dev/null || die 1 "can't update $pr"
 else
-	# A private repo on a plan with no draft PRs refuses --draft: open a
-	# plain one, titled so no person merges it. No bot would: the design
-	# ticket never reaches review or QA.
 	if ! pr=$(gh pr create --draft --base "$main" --head "$branch" --title "$title" --body-file "$tmp/body" 2>"$tmp/err"); then
 		grep -qi 'draft' "$tmp/err" || die 1 "can't open the PR: $(head -c 300 "$tmp/err")"
 		pr=$(gh pr create --base "$main" --head "$branch" --title "$title (do not merge)" --body-file "$tmp/body") ||
