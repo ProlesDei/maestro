@@ -19,6 +19,7 @@
 
 ### Sessions
 
+- Chief of staff and planner, fetch the base branch and fast-forward your checkout to it at session start and before you shape a brief, check a report or launch a child. Use the rules and memory from the updated checkout. If you have commits of your own or changes that block the fast-forward, leave the checkout as it is, read rules, memory and code at the fetched base, keep working and tell whoever started the session.
 - Maestro skills live only in `.maestro/skills/<role>/`, reached through the `.claude/skills/maestro-*` and `.agents/skills/maestro-*` symlinks. Treat copies anywhere else as stale and never use them (see “Rules for review and QA” for which version those roles read).
 - Keep the current chief of staff's thread ID on the epic as `chief_thread_id`. For every handoff to the chief of staff, reread the epic and send to that thread.
 - Before you start any child, run `.maestro/maestro-usage` and use the provider, model and effort it prints. If a child stops at a usage limit, replace it from board state on another provider.
