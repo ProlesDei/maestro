@@ -26,6 +26,7 @@ After you close a merged ticket, release a ticket claim, learn your engineer rel
 | An engineer asks for review | On the PR's current head, send the usable verdict or wait for a live review. If neither exists, follow “Recover a review” |
 | A review ends | Check the PR's current head per [Recover a review](#recover-a-review) and follow that step if its verdict is missing. Otherwise send the verdict to the live claim holder, or follow [Assign a ticket](steps/assign-ticket.md) if the engineer ended |
 | An agent is blocked, a call needs the owner, or an owner answer arrives | `steps/unblock.md` |
+| The chief of staff sends an owner rule to save | Use `steps/create-ticket.md` to file one low-risk ticket that edits only `.maestro/memory/chief-of-staff.md` |
 | A spec is wrong or unclear | `steps/update-ticket.md` |
 | An engineer and reviewer disagree | `steps/settle-dispute.md` |
 | An engineer says a PR is ready for QA, or a batch ticket gets stuck | Check whether the batch can go to QA |
