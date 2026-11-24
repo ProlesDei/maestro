@@ -339,7 +339,7 @@ session_run=$(T3CODE_THREAD_ID=$LIVE "$runner" make qa session)
 cat > "$scratch/regroup" <<'REGROUP'
 #!/usr/bin/env bash
 set -m
-env -i bash "$1/worker" "$1/pids/regroup" &
+env -i MAESTRO_TEST_TOKEN="$MAESTRO_TEST_TOKEN" bash "$1/worker" "$1/pids/regroup" &
 wait
 REGROUP
 T3CODE_THREAD_ID=$LIVE "$runner" start regroup -- bash "$scratch/regroup" "$scratch" > /dev/null
@@ -349,10 +349,27 @@ read -r _ _ pgrp sid _ <<< "$(identity "$regroup")"
 other_run=$(T3CODE_THREAD_ID=$SHARED "$runner" make qa other)
 (cd -- "$session_run" && cd -- "$other_run" && exec env T3CODE_THREAD_ID=$SHARED bash "$scratch/worker" "$scratch/pids/oldpwd") &
 oldpwd=$(worker_pid oldpwd)
+(cd -- "$scratch" && exec env -u TMPDIR PWD="$session_run" sleep 300) &
+pwd_worker=$!
+printf '%s\n' "$pwd_worker" > "$scratch/pids/pwd"
+cat > "$scratch/foreign" <<'FOREIGN'
+#!/usr/bin/env bash
+bash "$1/worker" "$1/pids/foreign" &
+sleep 0.2
+FOREIGN
+setsid bash "$scratch/foreign" "$scratch" &
+foreign=$(worker_pid foreign)
+read -r _ _ _ foreign_sid _ <<< "$(identity "$foreign")"
+while kill -0 "$foreign_sid" 2>/dev/null; do sleep 0.05; done
+mkdir -- "$session_run/services/stale"
+printf '%s %s 1\n' "$foreign_sid" "$foreign_sid" > "$session_run/services/stale/pid"
 T3CODE_THREAD_ID=$LIVE "$runner" clean
+if live "$pwd_worker"; then fail 'clean left a worker started in the run'; fi
+live "$foreign" || fail 'clean killed a session whose recorded leader is gone'
+kill -KILL "$foreign"
 [[ ! -e $session_run ]] || fail 'clean left the session run'
 if live "$regroup"; then fail 'clean left a service child in its own process group'; fi
 live "$oldpwd" || fail 'clean killed another run through OLDPWD'
 T3CODE_THREAD_ID=$SHARED "$runner" clean > /dev/null
-rm -f -- "$scratch/pids/regroup" "$scratch/pids/oldpwd"
-printf 'ok - clean follows the service session and ignores OLDPWD\n'
+rm -f -- "$scratch/pids/"{regroup,oldpwd,pwd,foreign}
+printf 'ok - clean follows live service sessions, matches PWD and ignores OLDPWD\n'

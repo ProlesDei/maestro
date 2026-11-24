@@ -91,7 +91,7 @@ scan_processes() {
     for part in environ cmdline; do
       mapfile -d '' -t values 2>/dev/null < "$proc/$part" || continue
       for value in "${values[@]}"; do
-        case $part:$value in environ:PWD=*|environ:OLDPWD=*) continue ;; esac
+        case $part:$value in environ:OLDPWD=*) continue ;; esac
         match_paths "$value"
         [[ $mode == report && $part == environ ]] || continue
         case $value in
@@ -165,10 +165,7 @@ stop_processes() {
     [[ -f $record && ! -L $record && ! -L ${record%/*} && ! -L ${record%/*/*} ]] || continue
     { read -r pid pgid birth < "$record"; } 2>/dev/null || continue
     [[ $pid =~ ^[1-9][0-9]*$ && $pid == "$pgid" && $birth =~ ^[0-9]+$ ]] || continue
-    if proc_stat "$pid" && [[ ${fields[19]} != "$birth" ]]; then
-      continue
-    fi
-    groups[$pgid]=1
+    if proc_stat "$pid" && [[ ${fields[19]} == "$birth" ]]; then groups[$pgid]=1; fi
   done
   [[ $mode != groups || ${#groups[@]} -gt 0 ]] || return 0
   deadline=$((SECONDS + 10))
