@@ -6,6 +6,7 @@ ref=main
 ref_given=false
 mode=install
 harnesses=".claude/skills .agents/skills"
+top=".maestro/VERSION .maestro/install.sh .maestro/.gitattributes"
 tab=$(printf '\t')
 
 die() { echo "maestro: $*" >&2; exit 1; }
@@ -34,7 +35,7 @@ for p in .maestro .maestro/skills .claude .claude/skills .agents .agents/skills;
   if [ -L "$p" ]; then die "$p is a symlink; Maestro only installs into real folders"; fi
   if [ -e "$p" ] && [ ! -d "$p" ]; then die "$p exists and isn't a folder"; fi
 done
-for p in .maestro/manifest .maestro/VERSION .maestro/install.sh; do
+for p in .maestro/manifest $top; do
   if [ -L "$p" ]; then die "$p is a symlink; Maestro didn't place it"; fi
 done
 if [ -e "$(git rev-parse --git-path index.lock)" ]; then die "git is busy (index.lock exists); try again when it's done"; fi
@@ -46,7 +47,7 @@ names_in_manifest() {
 }
 
 hash_of() {
-  git hash-object --no-filters -- "$1"
+  git hash-object -- "$1"
 }
 
 snapshot() {
@@ -60,7 +61,7 @@ snapshot() {
       printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
     fi
   done
-  for p in .maestro/VERSION .maestro/install.sh; do
+  for p in $top; do
     if [ -f "$p" ] && [ ! -L "$p" ]; then printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
     else printf 'f\t-\t%s\n' "$p"; fi
   done
@@ -110,7 +111,7 @@ check_untouched() {
 
 stage_paths() {
   local n h p
-  for p in "$manifest" .maestro/VERSION .maestro/install.sh; do
+  for p in "$manifest" $top; do
     if [ -f "$p" ]; then git add -f -- "$p"
     else git rm -q --cached --ignore-unmatch -- "$p"; fi
   done
@@ -138,7 +139,7 @@ if [ "$mode" = uninstall ]; then
     done
     rm -rf ".maestro/skills/$n"
   done < "$names"
-  rm -f .maestro/VERSION .maestro/install.sh
+  for p in $top; do rm -f "$p"; done
   stage_paths "$names"
   rm -f "$manifest" "$names"
   git rm -q --cached --ignore-unmatch -- "$manifest"
@@ -211,6 +212,7 @@ stage=""
 cp "$here/install.sh" .maestro/install.sh
 chmod +x .maestro/install.sh
 git -C "$here" rev-parse HEAD > .maestro/VERSION
+printf '* -text -eol\n' > .maestro/.gitattributes
 
 {
   sed "s/^/d$tab/" "$new"

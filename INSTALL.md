@@ -17,6 +17,7 @@ your-repo/
 │   ├── install.sh               # update and uninstall from here
 │   ├── manifest                 # every path Maestro placed, with its hash
 │   ├── VERSION                  # Maestro commit installed
+│   ├── .gitattributes           # keeps line endings as shipped
 │   └── skills/maestro-*/        # SKILL.md, references/, scripts/
 ├── .claude/skills/maestro-*  -> ../../.maestro/skills/maestro-*   (Claude Code)
 └── .agents/skills/maestro-*  -> ../../.maestro/skills/maestro-*   (Codex)
