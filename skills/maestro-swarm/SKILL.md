@@ -31,6 +31,7 @@ You split the work, launch the workers, check what they return, and write one re
    - done criteria and the proof to return: command, exit code, paths
    - the reply shape: `done`, `partial` or `blocked`; branch and sha; files; proof; open questions
 2. Launch them all in one message: use parallel subagents. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
+3. Find each worker's worktree path from the launch or Git's worktree list. When a worker ends, even on timeout, use [server.sh](../maestro-working-principles/scripts/server.sh) from its worktree to stop all servers there before any retry or reply. A shared harness can outlive the worker.
 
 ## Phase C: Check
 
