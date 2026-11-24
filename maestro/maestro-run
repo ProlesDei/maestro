@@ -75,7 +75,7 @@ match_paths() {
 }
 
 scan_processes() {
-  local mode=$1 proc pid part value cwd name pgid id tagged
+  local mode=$1 proc pid part value cwd name id tagged
   local -a fields values
   local -A matched
   births=() by_group=() by_run=()
@@ -84,13 +84,14 @@ scan_processes() {
     proc_live "$pid" 2>/dev/null || continue
     births[$pid]=${fields[19]}
     pgid=${fields[2]}
-    if [[ ${fields[3]} == "$pgid" ]]; then by_group[$pgid]+=" $pid"; fi
+    by_group[${fields[3]}]+=" $pid"
     [[ $mode != groups ]] || continue
     matched=()
     id='' tagged=no
     for part in environ cmdline; do
       mapfile -d '' -t values 2>/dev/null < "$proc/$part" || continue
       for value in "${values[@]}"; do
+        case $part:$value in environ:PWD=*|environ:OLDPWD=*) continue ;; esac
         match_paths "$value"
         [[ $mode == report && $part == environ ]] || continue
         case $value in

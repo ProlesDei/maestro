@@ -334,3 +334,25 @@ if [[ -d /dev/shm && $(stat -c %d -- /dev/shm) != "$(stat -c %d -- "$PWD")" ]]; 
   [[ ! -e $fallback ]] || fail 'clean did not find the fallback from its Git checkout'
 fi
 printf 'ok - default root and cross-filesystem fallback\n'
+
+session_run=$(T3CODE_THREAD_ID=$LIVE "$runner" make qa session)
+cat > "$scratch/regroup" <<'REGROUP'
+#!/usr/bin/env bash
+set -m
+env -i bash "$1/worker" "$1/pids/regroup" &
+wait
+REGROUP
+T3CODE_THREAD_ID=$LIVE "$runner" start regroup -- bash "$scratch/regroup" "$scratch" > /dev/null
+regroup=$(worker_pid regroup)
+read -r _ _ pgrp sid _ <<< "$(identity "$regroup")"
+[[ $pgrp != "$sid" ]] || fail 'regroup worker kept its process group'
+other_run=$(T3CODE_THREAD_ID=$SHARED "$runner" make qa other)
+(cd -- "$session_run" && cd -- "$other_run" && exec env T3CODE_THREAD_ID=$SHARED bash "$scratch/worker" "$scratch/pids/oldpwd") &
+oldpwd=$(worker_pid oldpwd)
+T3CODE_THREAD_ID=$LIVE "$runner" clean
+[[ ! -e $session_run ]] || fail 'clean left the session run'
+if live "$regroup"; then fail 'clean left a service child in its own process group'; fi
+live "$oldpwd" || fail 'clean killed another run through OLDPWD'
+T3CODE_THREAD_ID=$SHARED "$runner" clean > /dev/null
+rm -f -- "$scratch/pids/regroup" "$scratch/pids/oldpwd"
+printf 'ok - clean follows the service session and ignores OLDPWD\n'
