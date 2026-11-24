@@ -7,9 +7,9 @@ Read this for any change a user sees: a page, a form, a chart, an email preview.
 Use Playwright CLI, unless memory names another browser tool.
 
 - Use the “Worktrees” run prefix in `.maestro/principles.md` as your browser session name on every command. Never use the default session.
+- Run every Playwright CLI command from one folder inside the run folder, with `TMPDIR` set as “Worktrees” says. Playwright writes `.playwright-cli/` there. Save screenshots and logs there too.
 - Open it headless, with a fresh profile: no saved logins or storage.
-- Keep its screenshots and logs in your session's temp dir.
-- When you finish, on every way out, close your session and only yours. Never close every session: that ends other runs' tests.
+- On every way out, close your session and only yours. Never close every session: that ends other runs' tests.
 - With no browser at all, never judge a screen from its markup. Mark each screen check `not checked: no browser` and block.
 
 ## Check each changed screen
@@ -23,4 +23,4 @@ Use Playwright CLI, unless memory names another browser tool.
 
 ## Keep the proof
 
-Save a screenshot for each check, named for the check and width. For each failure, put the steps as a script the engineer can replay in your verdict comment, since your temp dir goes when your session ends.
+Save a screenshot for each check, named for the check and width. For each failure, put a script the engineer can replay in your verdict.

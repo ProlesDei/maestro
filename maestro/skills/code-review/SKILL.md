@@ -17,6 +17,8 @@ Read the ticket on the board, the PR body, its checks, any earlier reviews and r
 
 The PR's proof is a claim. For each criterion, check that the run shown actually proves it, with an input that would expose a likely bug: two files where the proof used one, the old behaviour as well as the new. When reading can't settle it, run it. On a high-risk ticket, rerun each criterion's proof yourself. Wrong output in the PR body is a note if the criterion still holds.
 
+Follow “Worktrees” in `.maestro/principles.md` for any checkout or check.
+
 ## Judge from first principles
 
 For each concern, ask: if this shipped today, what breaks, for whom, and how hard is it to undo? Then sort it.

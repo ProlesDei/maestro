@@ -47,7 +47,7 @@ Commit in small steps that each build.
 
 - Bring your branch up to date with the base branch the way the repo does it, and resolve each conflict to keep what both sides meant.
 - Run the project's checks. If one also fails on the base branch, say so in the PR and move on. Run each ticket check as a user would and save the result. For each, also try one input likely to break it, such as a second file, an input that exercises the old behavior, or empty or bad input.
-- For what you changed, run the probes that apply in the Test it section of `.maestro/skills/qa/server.md` and the Check each changed screen section of `.maestro/skills/qa/browser.md`. Follow the guides' setup and cleanup steps. If you lack a tool, name it and the probe you skipped in the PR, then run the rest.
+- For what you changed, run the probes that apply in the Test it section of `.maestro/skills/qa/server.md` and the Check each changed screen section of `.maestro/skills/qa/browser.md`. Follow the guides for setup and “Worktrees” in `.maestro/principles.md` for the run. If you lack a tool, name it and the probe you skipped in the PR, then run the rest.
 - Read your whole diff against the base branch and fix blockers from all three sections of `.maestro/skills/code-review/blockers.md`.
 
 ## Open the PR
