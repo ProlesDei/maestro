@@ -4,7 +4,7 @@ Verify the requested outcome on the merge candidate. A pass merges the PR. A fai
 
 ## Phase A: Resolve
 
-1. From the repo, run [review-prep.sh](../../maestro-code-review/scripts/review-prep.sh) with bash as `../maestro-code-review/scripts/review-prep.sh --qa <PR or branch>`, with the script path relative to the QA skill folder. For a ticket id, pass `maestro/<ticket-id>`. Use the ticket the ask names or the one on the PR's branch. Never use a fork's branch name to find a ticket.
+1. Pick `<main>` as **maestro-working-principles** says. From the repo, run [review-prep.sh](../../maestro-code-review/scripts/review-prep.sh) with bash. Pass `--qa`, the PR number or branch, then `<main>`. For a ticket id, pass `maestro/<ticket-id>`. Use the ticket the ask names or the one on the PR's branch. Never use a fork's branch name to find a ticket.
 
    Prep names the run and prints its keys. It merges main at `G` into PR head `H` in detached worktree `R`. Read `C/files.txt` and `C/prep.txt`. Keep evidence in `E`. Follow **maestro-working-principles** for shell calls.
 
