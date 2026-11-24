@@ -6,95 +6,41 @@ fail() {
   exit 1
 }
 
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR
+source "$(dirname -- "${BASH_SOURCE[0]}")/maestro-board-store"
+
 t3_thread() {
   timeout -k 1s 5s t3 thread show "$1" --json --messages 0 2>&1 9>&-
 }
 
 maestro_session() {
-  local id=$1 task=${2-} state life parent
+  local id=$1 task=${2-} common=${3-} state life
   [[ -n "$id" ]] || return 1
   if ! state=$(t3_thread "$id"); then
     [[ "$state" == "Thread $id is no longer available." ]] || return 1
     echo gone
     return
   fi
-  life=$(jq -er --arg id "$id" --arg task "$task" '
+  life=$(jq -er --arg id "$id" '
     .thread | objects | select(.threadId == $id) |
-    def background: ((.pendingBackgroundTasks // []) | length) > 0;
     if .archived == true or .deleted == true then "gone"
-    elif .pendingRequestCount > 0 or (.status | IN("preparing", "queued", "starting", "running")) then "live"
-    elif .pendingRequestCount == 0 and (.status == "cancelled" or
-      (($task == "" or $task == ("node:" + ($id | ltrimstr("thread:")))) and
-      .activeRunId == null and (background | not) and
-      (.status | IN("completed", "failed", "interrupted", "rolled_back")))) then "ended"
-    elif .status == "waiting" or background then "live"
-    else "idle" end
+    elif .pendingRequestCount > 0 or .activeRunId != null or .blockedOnThreadWait == true or
+      (.pendingBackgroundTasks != [] and .pendingBackgroundTasks != null) or
+      (.status | IN("preparing", "queued", "starting", "running", "waiting")) then "live"
+    elif .pendingRequestCount == 0 and has("activeRunId") and .pendingBackgroundTasks == [] and
+      (.status | IN("completed", "cancelled", "failed", "interrupted", "rolled_back")) then "quiet"
+    else "unknown" end
   ' <<< "$state") || return 1
-  if [[ "$life" == live && "$id" == thread:delegated-task:* && "${task:-node:${id#thread:}}" == "node:${id#thread:}" ]] &&
-    parent=$(jq -er '.thread | select(.status == "waiting" and .pendingRequestCount == 0) | .parentThreadId | strings' <<< "$state") &&
-    t3_thread "$parent" | jq -e --arg id "$id" --arg parent "$parent" --arg item "turn-item:${id#thread:}" '
-      .thread | .threadId == $parent and .latestRunId != null and
-      (.status | IN("waiting", "completed", "failed", "cancelled", "interrupted")) and
-      (.pendingBackgroundTasks | type == "array" and all(.[]; .childThreadId != $id and .taskId != $item))
-    ' >/dev/null &&
-    t3_thread "$id" | jq -e --argjson previous "$state" '.thread == $previous.thread' >/dev/null; then
-    life=ended
+  if [[ "$life" == quiet ]]; then
+    life=unknown
+    if { [[ -z "$common" ]] || task=$(saved_task "$id" "$common"); } &&
+       { [[ -z "$task" ]] || [[ "$id" == thread:delegated-task:* && "$task" == "node:${id#thread:}" ]]; } &&
+       { [[ -z "$common" ]] ||
+         t3_thread "$id" | jq -e --argjson before "$state" '.thread == $before.thread' >/dev/null; }; then
+      life=ended
+    fi
   fi
   printf '%s\n' "$life"
-}
-
-if [[ ${1-} == maestro-session ]]; then
-  (( $# == 2 )) || fail "Usage: maestro-session <thread>"
-  maestro_session "$2"
-  exit
-fi
-
-board_lock() {
-  exec 9>>"$board/maestro-board.lock"
-  flock -w 30 9 || fail "Board is busy. Retry shortly."
-}
-
-start_server() {
-  local listeners attempt
-  listeners=$(ss -Hltpn "sport = :$port")
-  if [[ -f server.pid ]]; then
-    read -r pid < server.pid
-    if [[ "$pid" =~ ^[1-9][0-9]*$ && "$listeners" == *"pid=$pid,"* ]]; then
-      return
-    fi
-  fi
-  [[ -z "$listeners" ]] ||
-    fail "Port $port is already in use. Pass a free port to maestro-setup"
-  if [[ -n "$saved" && "$saved" != "$port" && "$pid" =~ ^[1-9][0-9]*$ ]]; then
-    [[ "$(ss -Hltpn "sport = :$saved")" != *"pid=$pid,"* ]] ||
-      fail "Board is running on port $saved. Stop it before changing ports"
-  fi
-  mkdir -p sql
-  setsid nohup dolt sql-server --host 127.0.0.1 --port "$port" --data-dir "$board/sql" \
-    </dev/null >>server.log 2>&1 9>&- &
-  pid=$!
-  trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
-  for (( attempt=0; attempt<100; attempt++ )); do
-    listeners=$(ss -Hltpn "sport = :$port")
-    [[ "$listeners" == *"pid=$pid,"* ]] && break
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  [[ "$listeners" == *"pid=$pid,"* ]] ||
-    fail "Dolt failed to listen on port $port. See $board/server.log"
-  printf '%s\n' "$pid" > server.pid
-}
-
-ensure_qa_slots() {
-  local slots id
-  slots=$("${driver[@]}" list --all --id maestro-qa-slot,maestro-qa-slot-2 --json) ||
-    fail "Board query failed at $board (port $port)"
-  for id in maestro-qa-slot maestro-qa-slot-2; do
-    if ! jq -e --arg id "$id" 'any(.[]; .id == $id)' <<< "$slots" >/dev/null; then
-      "${driver[@]}" create "Maestro QA slot" --id "$id" --type task --status blocked >/dev/null
-    fi
-  done
-  touch maestro-qa-slots-v2
 }
 
 rows() {
@@ -106,11 +52,10 @@ issue() {
 }
 
 write_issue() {
-  local id assignee status
-  IFS=$'\t' read -r id status < <(jq -r '[.id, .status] | @tsv' <<< "$1")
-  assignee=$(jq -r '.assignee // ""' <<< "$1")
+  local -a fields
+  mapfile -t fields < <(jq -r '.id, (.assignee // ""), .status' <<< "$1")
   shift
-  "${driver[@]}" update "$id" --if-assignee "$assignee" --if-status "$status" "$@" >/dev/null
+  "${driver[@]}" update "${fields[0]}" --if-assignee "${fields[1]}" --if-status "${fields[2]}" "$@" >/dev/null
 }
 
 new_token() {
@@ -132,6 +77,8 @@ board_jq() {
     def held: .status == "in_progress" or claimed;
     def dispatch: .metadata.maestro_dispatch;
     def planner: .metadata.planner_thread_id;
+    def engineer: ((.assignee // "" | select(length > 0)) // dispatch.thread_id // dispatch.planner);
+    def qa: (.metadata.qa_thread_id // .assignee);
     def paths: [.labels[]? | select(startswith("touches:")) |
       ltrimstr("touches:") | sub("^\\./"; "") | sub("/+$"; "") | if . == "" then "." else . end];
     def overlap($a; $b): any($a[]; . as $x | any($b[];
@@ -141,25 +88,32 @@ board_jq() {
       select(overlap(paths; $paths));
     def goal: (if .issue_type == "epic" then .id else .parent end) as $id |
       $board[] | select(.id == $id and .status != "closed" and planner != null);
-    def pr_key: ascii_downcase | sub("^http://"; "https://") | sub("[?#].*$"; "") |
-      sub("/+$"; "") | sub("/0+(?<number>[0-9]+)$"; "/\(.number)");
-    def valid_batch($batch; $goal):
-      ($batch.prs | map(pr_key)) as $prs |
-      ($prs | unique | length) == ($prs | length) and all(range($batch.tickets | length); . as $i |
-        any($board[]; .id == $batch.tickets[$i] and .parent == $goal and .status == "in_progress" and
-          ((.external_ref // "" | pr_key) == $prs[$i])));
-    def batch_key: {name, base, tickets, prs: [.prs[] | pr_key]};
+    def pr_key: if type == "string" then
+      ascii_downcase | sub("^http://"; "https://") | sub("[?#].*$"; "") |
+      sub("/+$"; "") | sub("/0+(?<number>[0-9]+)$"; "/\(.number)") else null end;
+    def paired: if has("pairs") then . else
+      . + {pairs: ([.tickets // [], (.prs // [] | map(pr_key))] | transpose)} | del(.tickets, .prs) end;
+    def batch_key: {name, base, pairs};
+    def batch_output: if has("pairs") then
+      . + {tickets: [.pairs[][0]], prs: [.pairs[][1]]} | del(.pairs) else . end;
+    def prs: [.pairs[]?[1] | strings];
+    def valid_batch($batch; $goal): ($batch | prs) as $prs |
+      ($prs | length) > 0 and ($prs | unique | length) == ($prs | length) and
+      all($batch.pairs[]; . as [$ticket, $pr] |
+        ($ticket | type == "string" and length > 0) and ($pr | type == "string" and test("^https://[^/]+/.+")) and
+        any($board[]; .id == $ticket and .parent == $goal and .status == "in_progress" and
+          ((.external_ref // "" | pr_key) == $pr)));
     def qa_holds: $board[] | select(slot) | (select(held) | .metadata.maestro_qa_batch // {}),
       .metadata.maestro_qa_receipts[]?.batch;
     def qa_candidates:
       ($board | map(select(slot and .status == "blocked" and (held | not))) | sort_by(.id) | first) as $slot |
       if $slot == null then empty else
-        [qa_holds] as $holds |
+        [qa_holds | paired | prs] as $holds |
         [$board[] | select(.status != "closed" and planner != null) | . as $goal |
-          .metadata.maestro_qa_queue[]? as $batch |
+          (.metadata.maestro_qa_queue[]? | paired) as $batch |
           select(valid_batch($batch; $goal.id)) |
-          select(all($holds[]; (.prs // [] | length) > 0 and
-            all(.prs[]; pr_key as $pr | ($batch.prs | map(pr_key) | index($pr)) == null))) |
+          ($batch | prs) as $prs |
+          select(all($holds[]; length > 0 and all(.[]; . as $pr | ($prs | index($pr)) == null))) |
           $batch + {goal: $goal.id, planner_thread_id: ($goal | planner),
             task: $goal.metadata.planner_task_id, queue_owner: ($goal.metadata.maestro_qa_queue_owner // ($goal | planner))}] |
         group_by(.goal) | map(min_by(.priority, .eligible_at, .name)) |
@@ -168,18 +122,40 @@ board_jq() {
   '"$filter"
 }
 
-caller() {
-  [[ -n "${T3CODE_THREAD_ID-}" ]] || fail "Need a T3 thread ID"
-  printf '%s\n' "$T3CODE_THREAD_ID"
-}
+saved_task() (
+  local pid port
+  board_path --git-dir="$2" || return
+  [[ ! -e "$board" && ! -L "$board" ]] && return 0
+  board_env
+  [[ -f "$BEADS_DIR/metadata.json" && -f "$board/bd.path" ]] && read_bd || return 1
+  cd "$board" || return
+  read -r pid < server.pid && read -r port < "$BEADS_DIR/dolt-server.port" && board_listening "$port" "$pid" || return 1
+  timeout -k 1s 5s "$bd" --sandbox --readonly list --all --brief --limit 0 --json |
+    board_jq '
+      select(type == "array") |
+      [.[] | .metadata as $m |
+        (select(engineer == $id) | $m.engineer_task_id),
+        (select(planner == $id) | $m.planner_task_id),
+        (select($m.review_thread_id == $id) | $m.review_task_id),
+        (select(qa == $id) | $m.qa_task_id),
+        ($m.maestro_qa_receipts[]? | select(.qa_thread_id == $id) | .qa_task_id)
+      ] | map(select(. != null and . != "")) | unique |
+      if length == 0 then "" elif length == 1 then .[0] | strings else empty end
+    ' -er --arg id "$1"
+)
+
+if [[ ${1-} == maestro-session ]]; then
+  (( $# == 2 || $# == 3 )) || fail "Usage: maestro-session <thread> [git-common-dir]"
+  maestro_session "$2" '' "${3-}"
+  exit
+fi
 
 ticket_ended() {
   local -a ids
-  mapfile -t ids < <(jq -r '
-    .metadata as $m |
-    ((.assignee | select(. != "")) // $m.maestro_dispatch.thread_id // $m.maestro_dispatch.planner // ""),
+  mapfile -t ids < <(board_jq '
+    .metadata as $m | (engineer // ""),
     ($m.engineer_task_id // ""), ($m.review_thread_id // ""), ($m.review_task_id // "")
-  ' <<< "$1")
+  ' -r <<< "$1")
   thread_ended "${ids[0]}" "${ids[1]}" && { [[ -z "${ids[2]}" ]] || thread_ended "${ids[2]}" "${ids[3]}"; }
 }
 
@@ -195,23 +171,21 @@ ready_ticket() {
 }
 
 reserve_ticket() {
-  local id=$1 ticket parent board_rows owner status token metadata handoff=null
+  local id=$1 ticket parent board_rows status metadata handoff=null
   shift
-  owner=$(caller)
   ticket=$(issue "$id")
   board_rows=$(rows)
   parent=$(board_jq '[$ticket | goal | select(planner == $owner)][0].id // empty' -r \
-    --argjson ticket "$ticket" --arg owner "$owner" <<< "$board_rows")
+    --argjson ticket "$ticket" --arg owner "$actor" <<< "$board_rows")
   [[ -n "$parent" ]] || fail "$id is not on your goal"
   status=$(jq -r .status <<< "$ticket")
   if (( $# )); then
-    (( $# == 3 )) || fail "Usage: maestro-reassign <ticket> <observed assignee> <worktree> <branch>"
     [[ "$(jq -r '.assignee // ""' <<< "$ticket")" == "$1" ]] || fail "$id changed hands"
     [[ "$status" == open || "$status" == in_progress ]] || fail "$id is $status"
     if jq -e '(.assignee // "") != "" or .metadata.maestro_dispatch != null' <<< "$ticket" >/dev/null; then
       ticket_ended "$ticket" || fail "$id still has live or unverified work"
     fi
-    local worktree branch pr common_dir
+    local worktree branch common_dir
     worktree=$(realpath -e -- "$2")
     branch=$3
     common_dir=$(git -C "$primary" rev-parse --path-format=absolute --git-common-dir)
@@ -220,8 +194,7 @@ reserve_ticket() {
        "$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)" == "$common_dir" &&
        "$(git -C "$worktree" symbolic-ref --quiet --short HEAD)" == "$branch" ]] ||
       fail "Worktree and branch do not match this repo"
-    pr=$(jq -c '.external_ref // null' <<< "$ticket")
-    handoff=$(jq -nc --argjson pr "$pr" --arg worktree "$worktree" --arg branch "$branch" '{$pr, $worktree, $branch}')
+    handoff=$(jq -nc --arg worktree "$worktree" --arg branch "$branch" '{$worktree, $branch}')
   else
     jq -e '(.assignee // "") == "" and .metadata.maestro_dispatch == null' <<< "$ticket" >/dev/null ||
       fail "$id already has a claim or reservation"
@@ -234,10 +207,8 @@ reserve_ticket() {
       fail "$id still has open prerequisites"
   fi
   check_paths "$ticket" "$board_rows"
-  token=$(new_token)
-  metadata=$(jq -c --arg token "$token" --arg planner "$owner" --argjson handoff "$handoff" '
-    {engineer_task_id: null, maestro_dispatch: {$token, $planner, $handoff}}
-  ' <<< "$ticket")
+  metadata=$(jq -nc --arg token "$(new_token)" --arg planner "$actor" --argjson handoff "$handoff" '
+    {engineer_task_id: null, maestro_dispatch: {$token, $planner, $handoff}}')
   write_issue "$ticket" --assignee '' --status open --metadata "$metadata"
   jq -c --arg id "$id" '.maestro_dispatch + {ticket: $id}' <<< "$metadata"
 }
@@ -249,13 +220,12 @@ check_paths() {
 }
 
 engineer_claim() {
-  local ticket parent engineer metadata path
-  engineer=$(caller)
+  local ticket parent metadata path
   ticket=$(issue "$1")
-  jq -e --arg token "$2" --arg id "$engineer" '
+  jq -e --arg token "$2" --arg id "$actor" '
     (.assignee // "") == "" and .status == "open" and
     (.metadata.maestro_dispatch | .token == $token and (.thread_id // $id) == $id)
-  ' <<< "$ticket" >/dev/null || fail "Reservation no longer permits $engineer to claim $1"
+  ' <<< "$ticket" >/dev/null || fail "Reservation no longer permits $actor to claim $1"
   path=$(jq -r '.metadata.maestro_dispatch.handoff.worktree // empty' <<< "$ticket")
   if [[ -n "$path" ]]; then
     [[ "$(git -C "$source_dir" rev-parse --show-toplevel)" == "$path" &&
@@ -265,15 +235,15 @@ engineer_claim() {
   parent=$(jq -er '.parent' <<< "$ticket")
   ready_ticket "$1" "$parent"
   check_paths "$ticket" "$(rows)"
-  metadata=$(jq -c --arg id "$engineer" '{maestro_dispatch: (.metadata.maestro_dispatch + {thread_id: $id})}' <<< "$ticket")
-  write_issue "$ticket" --assignee "$engineer" --status in_progress --metadata "$metadata"
+  metadata=$(jq -c --arg id "$actor" '{maestro_dispatch: (.metadata.maestro_dispatch + {thread_id: $id})}' <<< "$ticket")
+  write_issue "$ticket" --assignee "$actor" --status in_progress --metadata "$metadata"
 }
 
 bind_child() {
   local id=$1 token=$2 thread=$3 task=${4-} ticket metadata
   [[ -n "$thread" ]] || fail "Need the child thread ID"
   ticket=$(issue "$id")
-  metadata=$(jq -ce --arg owner "$(caller)" --arg token "$token" --arg thread "$thread" --arg task "$task" '
+  metadata=$(jq -ce --arg owner "$actor" --arg token "$token" --arg thread "$thread" --arg task "$task" '
     .metadata as $m | $m.maestro_dispatch as $dispatch |
     if .id | IN("maestro-qa-slot", "maestro-qa-slot-2") then
       select(.status == "in_progress" and .assignee == $owner and $m.maestro_qa_batch.token == $token and
@@ -290,55 +260,47 @@ bind_child() {
 }
 
 sync_qa() {
-  local goal board_rows input metadata owner old now seed
-  owner=$(caller)
+  local goal input metadata
   goal=$(issue "$1")
-  jq -e --arg owner "$owner" '.issue_type == "epic" and .status != "closed" and .metadata.planner_thread_id == $owner' \
+  jq -e --arg owner "$actor" '.issue_type == "epic" and .status != "closed" and .metadata.planner_thread_id == $owner' \
     <<< "$goal" >/dev/null || fail "You do not hold goal $1"
   input=$(jq -ce '
     select(type == "array" and all(.[];
       (.name | type == "string" and length > 0) and
-      (.base | type == "string" and length > 0) and
-      (.priority | IN(0, 1, 2, 3)) and
-      (.tickets | type == "array" and length > 0 and all(.[]; type == "string" and length > 0)) and
-      (.prs | type == "array" and all(.[]; type == "string" and test("^https?://[^/]+/.+"; "i"))) and
+      (.base | type == "string" and length > 0) and (.priority | IN(0, 1, 2, 3)) and
+      (.tickets | type == "array" and length > 0) and (.prs | type == "array") and
       (.prs | length) == (.tickets | length))) |
     map({name, base, priority, tickets, prs}) |
     select(length == (map([.base, .name]) | unique | length))
   ' "$2") || fail "Expected QA batches with name, base, priority, tickets and corresponding PR URLs"
-  old=$(jq -c --arg owner "$owner" '
-    if (.metadata.maestro_qa_queue_owner // $owner) == $owner then .metadata.maestro_qa_queue // [] else [] end
-  ' <<< "$goal")
-  board_rows=$(rows)
-  now=$(date +%s%N)
-  seed=$(new_token)
-  metadata=$(board_jq '
+  metadata=$(rows | board_jq '
+    $goal.metadata | (.maestro_qa_queue_owner // $owner) as $old_owner |
+    [select($old_owner == $owner) | .maestro_qa_queue[]? | paired] as $old |
     {maestro_qa_queue_owner: $owner, maestro_qa_queue: [
-      ($input | to_entries[]) | .key as $index | .value | . as $batch |
+      ($input | to_entries[]) | .key as $i | (.value | paired) as $batch |
       select(valid_batch($batch; $goal.id)) |
-      ([$old[] | select(batch_key == ($batch | batch_key))][0] // {eligible_at: $now, token: ($seed + "-" + ($index | tostring))}) as $entry |
+      ([$old[] | select(batch_key == ($batch | batch_key))][0] //
+        {eligible_at: $now, token: ($seed + "-" + ($i | tostring))}) as $entry |
       $batch + ($entry | {eligible_at, token})] | sort_by(.base, .name)}
-  ' -c --argjson goal "$goal" --argjson input "$input" --argjson old "$old" \
-    --arg now "$now" --arg seed "$seed" --arg owner "$owner" <<< "$board_rows")
-  if [[ "$(jq -c '.metadata | {maestro_qa_queue_owner, maestro_qa_queue}' <<< "$goal")" != "$metadata" ]]; then
+  ' -c --argjson goal "$goal" --argjson input "$input" --arg owner "$actor" \
+    --arg now "$(date +%s%N)" --arg seed "$(new_token)")
+  [[ "$(jq -c '.metadata | {maestro_qa_queue_owner, maestro_qa_queue}' <<< "$goal")" == "$metadata" ]] ||
     write_issue "$goal" --metadata "$metadata"
-  fi
 }
 
 next_live_qa() {
   local candidates batch goal planner task owner state
   local -a fields
   candidates=$(rows | board_jq 'qa_candidates' -c) || return
-  while IFS= read -r batch; do
-    [[ -n "$batch" ]] || break
+  while IFS= read -r batch && [[ -n "$batch" ]]; do
     mapfile -t fields < <(jq -r '.goal, .planner_thread_id, (.task // ""), .queue_owner' <<< "$batch")
     goal=${fields[0]} planner=${fields[1]} task=${fields[2]} owner=${fields[3]}
-    if [[ "$owner" != "$planner" ]]; then
-      state=gone
-    elif [[ "$planner" == "${T3CODE_THREAD_ID-}" ]]; then
+    state=gone
+    if [[ "$owner" == "$planner" ]]; then
       state=live
-    else
-      state=$(maestro_session "$planner" "$task") || continue
+      if [[ "$planner" != "$actor" ]]; then
+        state=$(maestro_session "$planner" "$task") || continue
+      fi
     fi
     case $state in
       gone) write_issue "$(issue "$goal")" --unset-metadata maestro_qa_queue --unset-metadata maestro_qa_queue_owner || return ;;
@@ -348,20 +310,18 @@ next_live_qa() {
 }
 
 claim_qa() {
-  local batch slot metadata owner
-  owner=$(caller)
+  local batch slot
   batch=$(next_live_qa)
   if [[ -z "$batch" ]]; then
     echo null
-  elif [[ "$(jq -r .planner_thread_id <<< "$batch")" != "$owner" ]]; then
+  elif [[ "$(jq -r .planner_thread_id <<< "$batch")" != "$actor" ]]; then
     jq -c '{state: "waiting", planner_thread_id}' <<< "$batch"
   else
     slot=$(issue "$(jq -r .slot <<< "$batch")")
-    metadata=$(jq -c --argjson batch "$batch" '
-      {qa_thread_id: null, qa_task_id: null, maestro_qa_batch: $batch}
-    ' <<< "$slot")
-    write_issue "$slot" --assignee "$owner" --status in_progress --metadata "$metadata"
-    jq -c '. + {state: "claimed"}' <<< "$batch"
+    write_issue "$slot" --assignee "$actor" --status in_progress --metadata "$(jq -c '
+      {qa_thread_id: null, qa_task_id: null, maestro_qa_batch: .}
+    ' <<< "$batch")"
+    board_jq 'batch_output + {state: "claimed"}' -c <<< "$batch"
   fi
 }
 
@@ -375,7 +335,7 @@ qa_slot() {
 }
 
 check_qa() {
-  [[ "$(jq -r '.metadata.qa_thread_id // empty' <<< "$1")" == "$(caller)" ]] ||
+  [[ "$(jq -r '.metadata.qa_thread_id // empty' <<< "$1")" == "$actor" ]] ||
     fail "$(jq -r .id <<< "$1") is not bound to this QA thread"
 }
 
@@ -410,14 +370,13 @@ finish_qa() {
   local slot=$1 batch goal metadata token
   batch=$(jq -c '.metadata.maestro_qa_batch // {}' <<< "$slot")
   token=$(jq -r '.token // empty' <<< "$batch")
-  if [[ -n "$token" ]]; then
-    goal=$(issue "$(jq -r .goal <<< "$batch")")
-    metadata=$(jq -c --arg token "$token" '
-      {maestro_qa_queue: (.metadata.maestro_qa_queue // [] | map(select(.token != $token)))}
-    ' <<< "$goal")
-    write_issue "$goal" --metadata "$metadata" || return
-  else
+  if [[ -z "$token" ]]; then
     token=$(new_token)
+  else
+    goal=$(issue "$(jq -r .goal <<< "$batch")")
+    write_issue "$goal" --metadata "$(jq -c --arg token "$token" '
+      {maestro_qa_queue: (.metadata.maestro_qa_queue // [] | map(select(.token != $token)))}
+    ' <<< "$goal")" || return
   fi
   metadata=$(jq -c --arg token "$token" --argjson batch "$batch" '
     . as $slot | .metadata |
@@ -426,19 +385,18 @@ finish_qa() {
       maestro_qa_batch: null, qa_thread_id: null, qa_task_id: null}
   ' <<< "$slot")
   write_issue "$slot" --assignee '' --status blocked --metadata "$metadata" || return
-  jq -c '.maestro_qa_receipts[-1]' <<< "$metadata"
+  board_jq '.maestro_qa_receipts[-1] | .batch |= batch_output' -c <<< "$metadata"
 }
 
 ack_qa() {
-  local slot owner goal receipt metadata
-  owner=$(caller)
+  local slot goal receipt metadata
   slot=$(issue "$1")
   receipt=$(jq -ce --arg token "$2" '.metadata.maestro_qa_receipts[]? | select(.token == $token)' <<< "$slot") ||
     fail "No matching QA receipt"
   goal=$(jq -r '.batch.goal // empty' <<< "$receipt")
   if [[ -n "$goal" ]]; then
     goal=$(issue "$goal")
-    [[ "$(jq -r '.metadata.planner_thread_id' <<< "$goal")" == "$owner" ]] || fail "Receipt belongs to another goal"
+    [[ "$(jq -r '.metadata.planner_thread_id' <<< "$goal")" == "$actor" ]] || fail "Receipt belongs to another goal"
   fi
   metadata=$(jq -c --arg token "$2" '
     {maestro_qa_receipts: (.metadata.maestro_qa_receipts | map(select(.token != $token)))}
@@ -447,213 +405,141 @@ ack_qa() {
 }
 
 reap_claims() {
-  local board_rows candidates id ticket status qa target
+  local board_rows candidates id ticket status qa target receipt
   board_rows=$(rows)
   candidates=$(board_jq '
-    .[] | select(if slot then held else
-      .issue_type != "epic" and .status != "closed" and (claimed or dispatch != null) end) | .id
+    .[] | select(if slot then .status == "in_progress" else
+      (.status | IN("open", "in_progress", "blocked")) and .issue_type != "epic" and (claimed or dispatch != null) end) | .id
   ' -r <<< "$board_rows")
-  while IFS= read -r id; do
-    [[ -n "$id" ]] || continue
+  while IFS= read -r id && [[ -n "$id" ]]; do
     (
       board_lock
       ticket=$(issue "$id") || exit 0
       status=$(jq -r .status <<< "$ticket")
       if [[ "$id" == maestro-qa-slot || "$id" == maestro-qa-slot-2 ]]; then
         [[ "$status" == in_progress ]] || exit 0
-        qa=$(jq -r '.metadata.qa_thread_id // .assignee // ""' <<< "$ticket")
+        qa=$(board_jq 'qa // ""' -r <<< "$ticket")
         thread_ended "$qa" "$(jq -r '.metadata.qa_task_id // ""' <<< "$ticket")" || exit 0
         receipt=$(finish_qa "$ticket")
         board_jq '$receipt + {planner_thread_id: ([$board[] | select(.id == $receipt.batch.goal) | planner][0] // $receipt.assignee)}' \
           -c --argjson receipt "$receipt" <<< "$board_rows"
-      else
-        [[ "$status" == open || "$status" == in_progress || "$status" == blocked ]] || exit 0
-        ticket_ended "$ticket" || exit 0
-        target=open
-        if [[ "$status" == blocked ]] || { [[ "$status" == in_progress ]] && jq -e '.external_ref' <<< "$ticket" >/dev/null; }; then
-          target=$status
-        fi
-        release_ticket "$ticket" "$target"
-        board_jq '$ticket | {ticket: .id, assignee, engineer_thread_id: ((.assignee | select(. != "")) // dispatch.thread_id),
-          engineer_task_id: .metadata.engineer_task_id, review_thread_id: .metadata.review_thread_id,
-          planner_thread_id: ([goal | planner][0] // null)}' -c --argjson ticket "$ticket" <<< "$board_rows"
+        exit
       fi
+      [[ "$status" == open || "$status" == in_progress || "$status" == blocked ]] || exit 0
+      ticket_ended "$ticket" || exit 0
+      target=$(jq -r 'if .status == "blocked" or (.status == "in_progress" and .external_ref != null)
+        then .status else "open" end' <<< "$ticket")
+      release_ticket "$ticket" "$target"
+      board_jq '$ticket | {ticket: .id, assignee, engineer_thread_id: ((.assignee | select(. != "")) // dispatch.thread_id),
+        engineer_task_id: .metadata.engineer_task_id, review_thread_id: .metadata.review_thread_id,
+        planner_thread_id: ([goal | planner][0] // null)}' -c --argjson ticket "$ticket" <<< "$board_rows"
     )
   done <<< "$candidates" | jq -sc .
 }
 
 wake_targets() {
-  local board_rows changed batch
+  local changed
   if [[ "$1" == qa ]]; then
     board_lock
-    batch=$(next_live_qa)
-    jq -sc '[.[].planner_thread_id]' <<< "$batch"
+    next_live_qa | jq -sc '[.[].planner_thread_id]'
   else
-    board_rows=$(rows)
     changed=$(issue "$1")
-    board_jq '[
+    rows | board_jq '[
       $changed, ($board[] | select(.status != "closed" and .id != $changed.id) | select(
         ($changed.status == "closed" and any(.dependencies[]?; .depends_on_id == $changed.id and (.type | IN("blocks", "conditional-blocks", "waits-for", "tracks")))) or
-        (.status == "open" and (claimed | not) and dispatch == null and overlap(paths; ($changed | paths))) or
-        any(.metadata.maestro_qa_queue[]?.tickets[]; . == $changed.id)
+        (.status == "open" and (claimed | not) and dispatch == null and overlap(paths; ($changed | paths)))
       )) | goal | planner
-    ] | unique' -c --argjson changed "$changed" <<< "$board_rows"
+    ] | unique' -c --argjson changed "$changed"
   fi
 }
 
-unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR
 source_dir=$PWD
-IFS= read -r -d '' worktree < <(git worktree list --porcelain -z)
-primary=$(cd "${worktree#worktree }" && pwd -P)
-digest=$(printf '%s' "$primary" | sha256sum)
-store="$HOME/.local/share/maestro-board"
-board="$store/${primary##*/}-${digest:0:12}"
-for var in $(compgen -e); do
-  case $var in
-    BEADS_ACTOR|BD_ACTOR) ;;
-    BEADS_*|BD_*) unset "$var" ;;
-  esac
-done
-unset DOLT_ROOT_HOST DOLT_ROOT_PASSWORD
-export GIT_CEILING_DIRECTORIES="$store"
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=beads.role GIT_CONFIG_VALUE_0=maintainer
-export BEADS_DIR="$board/.beads" BD_DISABLE_METRICS=1 BD_DISABLE_EVENT_FLUSH=1
-export DOLT_ROOT_PATH="$board" DOLT_DISABLE_EVENT_FLUSH=1
-
-setup=
 if [[ ${1-} == maestro-setup ]]; then
-  setup=1
+  open_board setup "${@:2}"
+  exit
+fi
+open_board ''
+
+require_args() {
+  local expected=$1 usage=$2 count=$3
+  (( count == expected )) || fail "Usage: maestro-$action${usage:+ $usage}"
+}
+
+if [[ ${1-} == maestro-* ]]; then
+  action=${1#maestro-}
+  actor=${T3CODE_THREAD_ID-}
   shift
-  (( $# <= 1 )) || fail "Usage: maestro-bd maestro-setup [port]"
-  bd=$(type -P bd) && bd=$(realpath -- "$bd") &&
-    "$bd" --version | grep -Eq '^bd version 1\.3\.4( |$)' || fail "Need bd 1.3.4 on PATH"
-  for tool in ss setsid flock jq; do command -v "$tool" >/dev/null || fail "Need $tool on PATH"; done
-  mkdir -p -- "$store"
-  version=$(DOLT_ROOT_PATH="$store" DOLT_DISABLE_VERSION_CHECKS=true dolt version) ||
-    fail "Need Dolt 2.2.0 on PATH"
-  version=${version%%$'\n'*}
-  [[ "$version" == "dolt version 2.2.0" ]] || fail "Need Dolt 2.2.0 on PATH. Found $version"
-else
-  [[ -f "$BEADS_DIR/metadata.json" && -f "$board/bd.path" ]] ||
-    fail "Run .maestro/maestro-bd maestro-setup to set up the board at $board"
-  read -r bd < "$board/bd.path"
-  [[ "$bd" == /* && -x "$bd" ]] || fail "Verified bd is missing at $bd. Rerun board setup"
-fi
-
-umask 077
-mkdir -p -- "$board"
-cd "$board"
-driver=("$bd" --sandbox --dolt-auto-commit on)
-export DOLT_DISABLE_VERSION_CHECKS=true
-board_lock
-saved=
-if [[ -f "$BEADS_DIR/metadata.json" ]]; then
-  [[ -f "$BEADS_DIR/dolt-server.port" ]] || fail "Missing $BEADS_DIR/dolt-server.port"
-  saved=$(<"$BEADS_DIR/dolt-server.port")
-fi
-port=${saved:-3307}
-if [[ -n "$setup" ]]; then port=${1-$port}; fi
-[[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && (( port <= 65535 )) ||
-  fail "Invalid board port: $port"
-if [[ -n "$setup" ]]; then
-  dolt config --global --add metrics.disabled true
-fi
-pid=
-start_server
-if [[ -n "$setup" ]]; then
-  if [[ ! -f "$BEADS_DIR/metadata.json" ]]; then
-    "$bd" --sandbox init --server --external --server-host 127.0.0.1 --server-port "$port" \
-      --server-user root --prefix maestro --skip-agents --skip-hooks --non-interactive
+  [[ -z "$actor" ]] || driver+=(--actor "$actor")
+  case $action in
+    reap) require_args 0 '' "$#"; reap_claims; exit ;;
+    wake-targets) require_args 1 '<ticket|qa>' "$#"; wake_targets "$1"; exit ;;
+  esac
+  [[ -n "$actor" ]] || fail "Need a T3 thread ID"
+  if [[ "$action" == qa-merge ]]; then
+    [[ $# -ge 6 && "$5" == -- ]] ||
+      fail "Usage: maestro-qa-merge <slot> <token> <remote> <tested base SHA> -- <merge command> [args...]"
+    merge_qa "$1" "$2" "$3" "$4" "${@:6}"
+    exit
   fi
-  printf '%s\n' "$port" > "$BEADS_DIR/dolt-server.port"
-  printf '%s\n' "$bd" > bd.path
-  ensure_qa_slots
-  trap - EXIT
-  echo "Maestro board running at $board (port $port, PID $pid)"
-  exit 0
+  board_lock
+  case $action in
+    reserve)
+      require_args 1 '<ticket>' "$#"
+      reserve_ticket "$1" ;;
+    reassign)
+      require_args 4 '<ticket> <observed assignee> <worktree> <branch>' "$#"
+      reserve_ticket "$@" ;;
+    engineer-claim)
+      require_args 2 '<ticket> <token>' "$#"
+      engineer_claim "$@" ;;
+    engineer-check)
+      (( $# == 1 || $# == 2 )) || fail "Usage: maestro-engineer-check <ticket> [token]"
+      jq -e --arg owner "$actor" --arg token "${2-}" '
+        .status == "in_progress" and .assignee == $owner and (.metadata.maestro_dispatch.token // "") == $token
+      ' <<< "$(issue "$1")" >/dev/null || fail "$1 no longer holds your engineer claim" ;;
+    bind-child)
+      (( $# == 3 || $# == 4 )) || fail "Usage: maestro-bind-child <ticket|slot> <token> [task]"
+      bind_child "$@" ;;
+    release-ticket)
+      (( $# == 4 || $# == 5 )) ||
+        fail "Usage: maestro-release-ticket <ticket> <observed assignee> <observed status> <open|blocked|in_progress> [token]"
+      ticket=$(issue "$1")
+      jq -e --arg assignee "$2" --arg status "$3" --arg token "${5-}" '
+        (.assignee // "") == $assignee and .status == $status and (.metadata.maestro_dispatch.token // "") == $token
+      ' <<< "$ticket" >/dev/null || fail "$1 changed hands, status or reservation"
+      [[ "$3" == open || "$3" == blocked || "$3" == in_progress ]] || fail "Cannot release a $3 ticket"
+      [[ "$4" == open || "$4" == blocked || "$4" == in_progress ]] || fail "Invalid release status: $4"
+      if [[ "$actor" != "$2" ]] && ! jq -e --arg owner "$actor" '
+        (.assignee // "") == "" and (.metadata.maestro_dispatch | .planner == $owner and .thread_id == null)
+      ' <<< "$ticket" >/dev/null; then
+        ticket_ended "$ticket" || fail "$1 still has live or unverified work"
+      fi
+      release_ticket "$ticket" "$4" ;;
+    qa-sync)
+      require_args 2 '<epic> <absolute JSON file or ->' "$#"
+      [[ "$2" == /* || "$2" == - ]] || fail "Use an absolute path for the QA queue file"
+      sync_qa "$@" ;;
+    qa-claim)
+      require_args 0 '' "$#"
+      claim_qa ;;
+    qa-ack|qa-check|qa-release)
+      require_args 2 '<slot> <token>' "$#"
+      [[ "$1" == maestro-qa-slot || "$1" == maestro-qa-slot-2 ]] || fail "$1 is not a QA slot"
+      case $action in
+        qa-ack) ack_qa "$@" ;;
+        qa-check) check_qa "$(qa_slot "$@")" ;;
+        qa-release)
+          slot=$(qa_slot "$@")
+          qa=$(jq -r '.metadata.qa_thread_id // empty' <<< "$slot")
+          [[ "$(jq -r '.assignee // ""' <<< "$slot")" == "$actor" ]] || fail "$1 is held by another planner"
+          [[ -z "$qa" ]] || thread_ended "$qa" "$(jq -r '.metadata.qa_task_id // ""' <<< "$slot")" ||
+            fail "$1 still has live or unverified QA work"
+          finish_qa "$slot" ;;
+      esac ;;
+    *) fail "Unknown maestro-bd action: maestro-$action" ;;
+  esac
+  exit
 fi
-[[ -f maestro-qa-slots-v2 ]] || ensure_qa_slots
-trap - EXIT
-exec 9>&-
-
-case ${1-} in
-  maestro-*)
-    action=${1#maestro-}
-    shift
-    [[ -z "${T3CODE_THREAD_ID-}" ]] || driver+=(--actor "$T3CODE_THREAD_ID")
-    case $action in
-      qa-merge)
-        [[ $# -ge 6 && "$5" == -- ]] ||
-          fail "Usage: maestro-qa-merge <slot> <token> <remote> <tested base SHA> -- <merge command> [args...]"
-        merge_qa "$1" "$2" "$3" "$4" "${@:6}"
-        exit ;;
-      reap) (( $# == 0 )) || fail "Usage: maestro-reap"; reap_claims; exit ;;
-      wake-targets) (( $# == 1 )) || fail "Usage: maestro-wake-targets <ticket|qa>"; wake_targets "$1"; exit ;;
-    esac
-    board_lock
-    case $action in
-      reserve)
-        (( $# == 1 )) || fail "Usage: maestro-reserve <ticket>"
-        reserve_ticket "$1" ;;
-      reassign)
-        (( $# == 4 )) || fail "Usage: maestro-reassign <ticket> <observed assignee> <worktree> <branch>"
-        reserve_ticket "$@" ;;
-      engineer-claim)
-        (( $# == 2 )) || fail "Usage: maestro-engineer-claim <ticket> <token>"
-        engineer_claim "$@" ;;
-      engineer-check)
-        (( $# == 1 || $# == 2 )) || fail "Usage: maestro-engineer-check <ticket> [token]"
-        owner=$(caller)
-        ticket=$(issue "$1")
-        jq -e --arg owner "$owner" --arg token "${2-}" '
-          .status == "in_progress" and .assignee == $owner and (.metadata.maestro_dispatch.token // "") == $token
-        ' <<< "$ticket" >/dev/null || fail "$1 no longer holds your engineer claim" ;;
-      bind-child)
-        (( $# >= 3 && $# <= 4 )) || fail "Usage: maestro-bind-child <ticket|slot> <token> <thread> [task]"
-        bind_child "$@" ;;
-      release-ticket)
-        (( $# == 4 || $# == 5 )) ||
-          fail "Usage: maestro-release-ticket <ticket> <observed assignee> <observed status> <open|blocked|in_progress> [token]"
-        ticket=$(issue "$1")
-        [[ "$(jq -r '.assignee // ""' <<< "$ticket")" == "$2" && "$(jq -r '.status' <<< "$ticket")" == "$3" ]] ||
-          fail "$1 changed hands or status"
-        [[ "$3" == open || "$3" == blocked || "$3" == in_progress ]] || fail "Cannot release a $3 ticket"
-        [[ "$4" == open || "$4" == blocked || "$4" == in_progress ]] || fail "Invalid release status: $4"
-        owner=$(caller)
-        jq -e --arg token "${5-}" '(.metadata.maestro_dispatch.token // "") == $token' <<< "$ticket" >/dev/null ||
-          fail "$1 no longer holds that reservation"
-        if [[ "$owner" != "$2" ]] &&
-           ! jq -e --arg owner "$owner" '
-              (.assignee // "") == "" and (.metadata.maestro_dispatch | .planner == $owner and .thread_id == null)
-           ' <<< "$ticket" >/dev/null; then
-          ticket_ended "$ticket" || fail "$1 still has live or unverified work"
-        fi
-        release_ticket "$ticket" "$4" ;;
-      qa-sync)
-        (( $# == 2 )) || fail "Usage: maestro-qa-sync <epic> <absolute JSON file or ->"
-        [[ "$2" == /* || "$2" == - ]] || fail "Use an absolute path for the QA queue file"
-        sync_qa "$@" ;;
-      qa-claim)
-        (( $# == 0 )) || fail "Usage: maestro-qa-claim"
-        claim_qa ;;
-      qa-ack|qa-check|qa-release)
-        (( $# == 2 )) || fail "Usage: maestro-$action <slot> <token>"
-        [[ "$1" == maestro-qa-slot || "$1" == maestro-qa-slot-2 ]] || fail "$1 is not a QA slot"
-        case $action in
-          qa-ack) ack_qa "$@" ;;
-          qa-check) slot=$(qa_slot "$@"); check_qa "$slot" ;;
-          qa-release)
-            slot=$(qa_slot "$@")
-            qa=$(jq -r '.metadata.qa_thread_id // empty' <<< "$slot")
-            [[ "$(jq -r '.assignee // ""' <<< "$slot")" == "$(caller)" ]] || fail "$1 is held by another planner"
-            [[ -z "$qa" ]] || thread_ended "$qa" "$(jq -r '.metadata.qa_task_id // ""' <<< "$slot")" ||
-              fail "$1 still has live or unverified QA work"
-            finish_qa "$slot" ;;
-        esac ;;
-      *) fail "Unknown maestro-bd action: maestro-$action" ;;
-    esac
-    exit ;;
-esac
 
 for (( index=1; index<=$#; index++ )); do
   case ${!index} in

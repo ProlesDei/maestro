@@ -246,18 +246,16 @@ recent() {
 }
 
 check_thread() {
-  local id=$1 state launcher=${BASH_SOURCE[0]-}
-  [[ ! ${liveness[$id]+yes} ]] || return 0
-  [[ -n "$launcher" ]] || return 1
-  state=$("$(dirname -- "$launcher")/maestro-bd" maestro-session "$id") || return 1
+  local key=$1 id=$2 state
+  state=$("$(dirname -- "${BASH_SOURCE[0]}")/maestro-bd" maestro-session "$id" "${3-}") || return 1
   case $state in
-    ended|gone) liveness[$id]=dead ;;
-    *) liveness[$id]=live ;;
+    ended|gone) liveness[$key]=dead ;;
+    *) liveness[$key]=live ;;
   esac
 }
 
 prune() {
-  local keep=${1-} grace=${MAESTRO_RUN_GRACE_MIN:-60} run id pid status=0
+  local keep=${1-} grace=${MAESTRO_RUN_GRACE_MIN:-60} run id pid common_dir status=0
   local -A dirs=() ids=() liveness=() untagged=() births=() by_group=() by_run=()
   [[ $grace =~ ^[0-9]+$ ]] || fail 'MAESTRO_RUN_GRACE_MIN must be a whole number'
   if ! command -v t3 >/dev/null; then
@@ -271,8 +269,16 @@ prune() {
     ids[$run]=$id
   done
   if [[ -z $keep ]]; then scan_processes report; fi
-  for id in "${ids[@]}" "${untagged[@]}"; do
-    if ! check_thread "$id"; then
+  for run in "${!ids[@]}"; do
+    common_dir=$(< "$run/git-common-dir") && [[ $common_dir == /* ]] || continue
+    if ! check_thread "$run" "${ids[$run]}" "$common_dir"; then
+      printf 'Maestro: T3 unavailable, keeping runs\n' >&2
+      return 0
+    fi
+  done
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common_dir=
+  for id in "${untagged[@]}"; do
+    if [[ ! ${liveness[$id]+yes} ]] && ! check_thread "$id" "$id" "$common_dir"; then
       printf 'Maestro: T3 unavailable, keeping runs\n' >&2
       return 0
     fi
@@ -284,7 +290,7 @@ prune() {
     fi
   done
   for run in "${!ids[@]}"; do
-    [[ ${liveness[${ids[$run]}]} == dead ]] || continue
+    [[ ${liveness[$run]-} == dead ]] || continue
     if ! read_thread "$run" || [[ $id != "${ids[$run]}" ]] || recent "$run"; then continue; fi
     clean_run "$run" runs || status=1
   done
