@@ -46,9 +46,7 @@ names_in_manifest() {
 }
 
 hash_of() {
-  local x=""
-  if [ -x "$1" ]; then x="+x"; fi
-  printf '%s%s' "$(git hash-object --no-filters -- "$1")" "$x"
+  git hash-object --no-filters -- "$1"
 }
 
 snapshot() {
@@ -91,9 +89,15 @@ check_untouched() {
   if [ "${1:-}" = allow_missing ]; then filter=present_only; skip=--diff-filter=d; fi
   names=$(mktemp)
   names_in_manifest > "$names"
-  if ! grep -v "^d$tab" "$manifest" | cut -f3 | tr '\n' '\0' | xargs -0 git diff --quiet $skip --; then
+  if ! { echo "$manifest"; grep -v "^d$tab" "$manifest" | cut -f3; } | tr '\n' '\0' | xargs -0 git diff --quiet $skip --; then
     rm -f "$names"
     die "Maestro's paths have staged changes that differ from the files; commit or unstage them, then run this again"
+  fi
+  if [ -z "$skip" ] && git rev-parse -q --verify HEAD >/dev/null; then
+    if ! { echo "$manifest"; grep -v "^d$tab" "$manifest" | cut -f3; } | tr '\n' '\0' | xargs -0 git diff --cached --quiet --diff-filter=D --; then
+      rm -f "$names"
+      die "Maestro's paths have staged deletions; commit or unstage them, then run this again"
+    fi
   fi
   if ! diff <(grep -v "^d$tab" "$manifest" | $filter) <(snapshot "$names" | $filter) > "$names.diff"; then
     echo "maestro: these paths changed since the last install:" >&2
@@ -110,8 +114,11 @@ stage_paths() {
     if [ -f "$p" ]; then git add -f -- "$p"
     else git rm -q --cached --ignore-unmatch -- "$p"; fi
   done
+  if [ -f .maestro/install.sh ]; then git update-index --chmod=+x -- .maestro/install.sh; fi
   while IFS= read -r n; do
-    if [ -d ".maestro/skills/$n" ]; then git add -A -f -- ".maestro/skills/$n"
+    if [ -d ".maestro/skills/$n" ]; then
+      git add -A -f -- ".maestro/skills/$n"
+      find ".maestro/skills/$n" -type f -perm -u+x -print0 | xargs -0 git update-index --chmod=+x --
     else git rm -r -q --cached --ignore-unmatch -- ".maestro/skills/$n"; fi
     for h in $harnesses; do
       if [ -L "$h/$n" ]; then git add -f -- "$h/$n"
