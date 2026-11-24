@@ -291,8 +291,12 @@ prune() {
   done
   for run in "${!ids[@]}"; do
     [[ ${liveness[$run]-} == dead ]] || continue
-    if ! read_thread "$run" || [[ $id != "${ids[$run]}" ]] || recent "$run"; then continue; fi
-    clean_run "$run" runs || status=1
+    (
+      exec {lock}< "$root"
+      flock "$lock"
+      if ! read_thread "$run" || [[ $id != "${ids[$run]}" ]] || recent "$run"; then exit 0; fi
+      clean_run "$run" runs
+    ) || status=1
   done
   return "$status"
 }
