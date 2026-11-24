@@ -34,11 +34,21 @@ for p in .maestro .maestro/skills .claude .claude/skills .agents .agents/skills;
   if [ -L "$p" ]; then die "$p is a symlink; Maestro only installs into real folders"; fi
   if [ -e "$p" ] && [ ! -d "$p" ]; then die "$p exists and isn't a folder"; fi
 done
+for p in .maestro/manifest .maestro/VERSION .maestro/install.sh; do
+  if [ -L "$p" ]; then die "$p is a symlink; Maestro didn't place it"; fi
+done
+if [ -e "$(git rev-parse --git-path index.lock)" ]; then die "git is busy (index.lock exists); try again when it's done"; fi
 
 manifest=.maestro/manifest
 
 names_in_manifest() {
   if [ -f "$manifest" ]; then grep "^d$tab" "$manifest" | cut -f2; fi
+}
+
+hash_of() {
+  local x=""
+  if [ -x "$1" ]; then x="+x"; fi
+  printf '%s%s' "$(git hash-object --no-filters -- "$1")" "$x"
 }
 
 snapshot() {
@@ -49,11 +59,11 @@ snapshot() {
     if [ -L "$p" ]; then
       printf 'l\t%s\t%s\n' "$(readlink "$p")" "$p"
     else
-      printf 'f\t%s\t%s\n' "$(git hash-object --no-filters -- "$p")" "$p"
+      printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
     fi
   done
   for p in .maestro/VERSION .maestro/install.sh; do
-    if [ -f "$p" ] && [ ! -L "$p" ]; then printf 'f\t%s\t%s\n' "$(git hash-object --no-filters -- "$p")" "$p"
+    if [ -f "$p" ] && [ ! -L "$p" ]; then printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
     else printf 'f\t-\t%s\n' "$p"; fi
   done
   while IFS= read -r n; do
@@ -66,13 +76,26 @@ snapshot() {
   done < "$1"
 }
 
+present_only() {
+  local kind sum p
+  while IFS="$tab" read -r kind sum p; do
+    if [ "$sum" = missing ] || [ "$sum" = - ]; then continue; fi
+    if [ -e "$p" ] || [ -L "$p" ]; then printf '%s\t%s\t%s\n' "$kind" "$sum" "$p"; fi
+  done
+}
+
 check_untouched() {
   [ -e .maestro ] || return 0
   [ -f "$manifest" ] || die ".maestro/ exists but Maestro didn't place it (no $manifest); move it aside first"
-  local names
+  local names filter=cat skip=""
+  if [ "${1:-}" = allow_missing ]; then filter=present_only; skip=--diff-filter=d; fi
   names=$(mktemp)
   names_in_manifest > "$names"
-  if ! diff <(grep -v "^d$tab" "$manifest") <(snapshot "$names") > "$names.diff"; then
+  if ! grep -v "^d$tab" "$manifest" | cut -f3 | tr '\n' '\0' | xargs -0 git diff --quiet $skip --; then
+    rm -f "$names"
+    die "Maestro's paths have staged changes that differ from the files; commit or unstage them, then run this again"
+  fi
+  if ! diff <(grep -v "^d$tab" "$manifest" | $filter) <(snapshot "$names" | $filter) > "$names.diff"; then
     echo "maestro: these paths changed since the last install:" >&2
     grep '^[<>]' "$names.diff" | cut -f3 | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
     rm -f "$names" "$names.diff"
@@ -82,10 +105,14 @@ check_untouched() {
 }
 
 stage_paths() {
-  if [ -d .maestro ]; then git add -A -f -- .maestro
-  else git rm -r -q --cached --ignore-unmatch -- .maestro; fi
-  local n h
+  local n h p
+  for p in "$manifest" .maestro/VERSION .maestro/install.sh; do
+    if [ -f "$p" ]; then git add -f -- "$p"
+    else git rm -q --cached --ignore-unmatch -- "$p"; fi
+  done
   while IFS= read -r n; do
+    if [ -d ".maestro/skills/$n" ]; then git add -A -f -- ".maestro/skills/$n"
+    else git rm -r -q --cached --ignore-unmatch -- ".maestro/skills/$n"; fi
     for h in $harnesses; do
       if [ -L "$h/$n" ]; then git add -f -- "$h/$n"
       else git rm -q --cached --ignore-unmatch -- "$h/$n"; fi
@@ -95,7 +122,7 @@ stage_paths() {
 
 if [ "$mode" = uninstall ]; then
   [ -f "$manifest" ] || die "no $manifest here; nothing Maestro placed to remove"
-  check_untouched
+  check_untouched allow_missing
   names=$(mktemp)
   names_in_manifest > "$names"
   while IFS= read -r n; do
@@ -104,12 +131,13 @@ if [ "$mode" = uninstall ]; then
     done
     rm -rf ".maestro/skills/$n"
   done < "$names"
-  rm -f .maestro/VERSION .maestro/install.sh "$manifest"
+  rm -f .maestro/VERSION .maestro/install.sh
+  stage_paths "$names"
+  rm -f "$manifest" "$names"
+  git rm -q --cached --ignore-unmatch -- "$manifest"
   for d in .maestro/skills .maestro $harnesses; do
     if [ -d "$d" ]; then rmdir "$d" 2>/dev/null || true; fi
   done
-  stage_paths "$names"
-  rm -f "$names"
   echo "maestro: removed and staged; commit to finish"
   exit 0
 fi
@@ -122,7 +150,7 @@ if [ "$is_source" = false ] || [ "$ref_given" = true ]; then
   git init -q "$tmp"
   git -C "$tmp" fetch -q --depth 1 "$repo_url" "$ref" || die "couldn't fetch $ref from $repo_url"
   git -C "$tmp" -c advice.detachedHead=false checkout -q FETCH_HEAD
-  [ -f "$tmp/install.sh" ] || die "$ref has no install.sh"
+  [ -f "$tmp/install.sh" ] && [ -d "$tmp/skills" ] || die "$ref has no install.sh and skills/; pick a newer commit"
   bash "$tmp/install.sh"
   exit $?
 fi

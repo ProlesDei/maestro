@@ -40,7 +40,7 @@ your-repo/
 From anywhere inside your repo:
 
 ```bash
-src=$(mktemp -d) && git clone -q --depth 1 https://github.com/ProlesDei/maestro.git "$src" && bash "$src/install.sh"; rm -rf "$src"
+(src=$(mktemp -d) && trap 'rm -rf "$src"' EXIT && git clone -q --depth 1 https://github.com/ProlesDei/maestro.git "$src" && bash "$src/install.sh")
 ```
 
 To pin a version, add `--ref <commit or tag>` after `install.sh`. It fetches that commit and installs it.
@@ -48,7 +48,8 @@ To pin a version, add `--ref <commit or tag>` after `install.sh`. It fetches tha
 The script places only `maestro-*` skills, their links and the files in `.maestro/`, and stages exactly those, even if `.gitignore` ignores `.claude/` or `.agents/`. It changes nothing and exits 1 if:
 - a path it would place already exists and it didn't place it;
 - `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink;
-- a file it placed has changed since the last install.
+- a file it placed has changed since the last install, or has staged changes;
+- git is busy (`index.lock` exists).
 
 Then add your agent notes (next section) and commit both to your default branch together. Each ticket runs in its own git worktree, which holds only committed files.
 
