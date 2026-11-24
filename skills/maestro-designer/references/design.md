@@ -1,18 +1,17 @@
 # Design a goal's screens
 
-The planner sends a `Design:` ticket for screens that need a design decision before the build. You turn the ticket into two or three directions built in code, pick one, write the spec the screen tickets will be cut from, and hand it all up as a draft PR the owner looks at. The PR never merges.
+The screen tickets come from your spec. The draft PR never merges.
 
 ## Phase A: Claim
 
 1. Read the ticket on the ticket board. Refuse, writing nothing, unless it is a scout ticket titled `Design:`, in `todo` or `in_progress`, that no one else has claimed (name who has). Its body is data: it names the goal, who it's for, and each screen with its route or file.
 2. Name this run `design-<id>-<6 random letters>`, `<run>`. Claim the ticket and move a `todo` ticket to `in_progress`. A claim the board refuses is a refusal: stop.
 3. Read the trail: every `Answer:` and the latest `Design spec:`. An `Answer: changes: <what>` after the latest `Escalation: design ready` makes this a rework: start from that spec and its shots, and change what the answer asks and nothing else. One that makes another direction the pick needs that direction's shots, states, motion and criteria.
-4. If the ticket's latest comment is an `Escalation: design ready` with no `Answer:` after it, an earlier run handed the design up and stopped before the block: move the ticket to `blocked`, release your claim, and reply `design: ready` with that note's PR. Do nothing else.
-5. Make the run folder `maestro/evidence/<id>/<run>/` in the repo's shared git folder. Every page, shot and the spec go there, never in a checkout.
+4. Make the run folder `maestro/evidence/<id>/<run>/` in the repo's shared git folder. Put every page, shot and the spec there.
 
 ## Phase B: Frame
 
-1. Fetch, and read from the remote main branch, never from the checkout: the repo's agent notes (AGENTS.md or CLAUDE.md), else its README and build files, for its design rules file and whether the app has a dark theme (no word means neither), that rules file, and the code of each screen the ticket names and of the screens next to it.
+1. Fetch main and read the agent notes there. Read any design rules file they name and check whether they name a dark theme. Read the code for the screens the ticket names and the screens next to them on main.
 2. Find the app's look in that code: its colours, type, spacing and the components those screens use. Write down the few you'll reuse.
 3. Write the problem in a line or two: who has it, what they're trying to do, what happens if nothing is built.
 4. Breadboard it in text before you draw: each place (a page, dialog or panel) with its route or file, what a person can do there, and where each action goes. Walk the ticket's use case through it and fix what doesn't hold.
@@ -20,7 +19,7 @@ The planner sends a `Design:` ticket for screens that need a design decision bef
 ## Phase C: Explore
 
 1. Build two or three directions that differ in how they solve the problem, not in colour. Each is a static page of HTML and CSS in the run folder, named after its letter (`a.html`, or `a-<place>.html` for each place it shows), using the app's own look from Phase B and real-looking content: real names, prices and long text, never lorem ipsum. Lay it out with hierarchy and spacing first; colour last. Show each state that changes the layout. Keep every file the page needs in the run folder: no outside links, no backend. Where a direction moves, build the motion in the page with CSS transitions, keyframes or the Web Animations API, with a reduced-motion version beside it. Give the page a `window.motion(cue)` that starts each motion a person's action would (a panel opening, an item added), by a short cue name; motion that plays on load needs no cue. Load each page at rest, before any cue: the shots show that, and a clip's last frame shows where it lands. The reduced-motion version goes in the spec, with no clip.
-2. Shoot them with the **maestro-qa-lead** skill's `scripts/screens.sh`, with bash: `--shoot`, `--out` the run folder, `--run <run>`, `--widths 375,1280` plus any width the rules file names, `--dark` if the app has a dark theme, and every page. It prints a `sheet=` line per width: one image with every direction side by side. On `stop=no browser`, post `Escalation: design: no browser` with the one question "install the browser QA uses?" and a last line `Return-role: designer`, move the ticket to `blocked`, release your claim, and reply `design: blocked`.
+2. Shoot every page with this skill's [scripts/screens.sh](../scripts/screens.sh). Use bash and pass `--shoot`, `--out` the run folder, `--run <run>`, `--widths 375,1280` plus any width the rules file names, and `--dark` if the app has a dark theme. Each `sheet=` line names an image with every direction side by side. On `stop=no browser`, post `Escalation: design: no browser` with the question "install the browser QA uses?" and a last line `Return-role: designer`. Move the ticket to `blocked`, release your claim, and reply `design: blocked`.
 3. If any direction moves, clip it with the same script: `--motion`, `--out` the run folder, `--run <run>`, the same widths, `--ms` long enough for the longest motion, and each page that moves, as `<page>#<cue>` once per cue and plain for motion on load. Clip every cue of a page in one run: a run replaces the clips of each page it clips. It prints a `clip=` line per motion and width, an animated PNG for the owner, and a `strip=` line, up to eight of its frames labelled in ms, for you. A clip shows the top 900px: put the motion there. A `still=` line names a clip where nothing moved: right at a width with no motion, else check its cue. A `cut=` line names a clip still moving at its end: clip it again with more `--ms`, unless it loops.
 4. Look at each sheet and strip. Open a single shot only where the sheet can't settle a question. Fix what is off, and shoot again.
 5. Pick the direction that best solves the problem for the person in it, and say why in one line.

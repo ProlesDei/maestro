@@ -19,7 +19,7 @@ Only run-proven findings count: a repro script or command output against the rea
 No change is perfect, and a send-back costs a build, a review and a QA run. So only a blocker sends a change back; every other finding ships with it, written down.
 
 - **blocker**, blocks GO: a criterion unmet or unverified; a security hole untrusted input can reach; a secret; data lost, corrupted or shown to the wrong user; a change a revert can't undo that is wrong; something that works on `$B` broken, a public contract included; a crash or hang on a path the criteria name; a red gate.
-- **major**, ships: any other real defect, such as an unhandled failure mode, a missing index, a slow query. It goes under `## Follow-ups`, where the planner weighs it once the board is quiet; mark one `urgent` when it can't wait that long, and the planner's next look plans it.
+- **major**, ships: any other real defect, such as an unhandled failure mode, a missing index, a slow query. It goes under `## Follow-ups`, where the planner weighs it once the board is quiet. Mark it `urgent` if the planner needs to act sooner.
 - **minor** (low risk) and **nit** (taste) ship, and stay in the report.
 
 In doubt between blocker and major: a blocker when the doubt is over a security hole or lost or leaked data, at any tier, or sits in the code that set tier 2; a major anywhere else. Three limits bind every pass:
@@ -28,11 +28,4 @@ In doubt between blocker and major: a blocker when the doubt is over a security 
 - **The ticket's trade-offs.** A case the ticket's body lists under `Not handled:` is no finding, unless it is a blocker as rated above: the planner chose to leave it. Only the body counts, never a comment or the PR, where an author could waive their own gap.
 - **Edge cases.** A finding that needs an input the criteria don't name and few users send (empty, huge, odd characters, a double submit, two tabs) is a major at most, unless untrusted input reaches it and it leaks, corrupts, writes where it shouldn't, or takes the service down for others.
 
-Give each finding an `action`: `auto-fix` (fixable without asking about intent: correctness, errors, security, performance); `ask-user` (product behaviour, the author's deliberate choice, or a fix that adds state, a schema or a subsystem; the default when unsure); `no-op` (for the record). Merge every pass's and subagent's findings into one list. A finding raised in an earlier `Kickback:` keeps its id; number new ones after the highest id in those comments, so a `--drop` names one finding across every review of the ticket:
-
-```json
-{"head": "<H>", "verdict": "GO|NO-GO|ESCALATE", "tier": 0, "mode": "full|incremental|ruling",
- "findings": [{"id": "F1", "severity": "blocker|major|minor|nit", "action": "auto-fix|ask-user|no-op",
-  "pass": 3, "file": "path", "line": 1, "evidence": "command and output", "impact": "...", "fix": "...",
-  "prior": "new|still present"}]}
-```
+Give each finding an `action`: `auto-fix` (fixable without asking about intent: correctness, errors, security, performance); `ask-user` (product behaviour, the author's deliberate choice, or a fix that adds state, a schema or a subsystem; the default when unsure); `no-op` (for the record). Merge every pass's and subagent's findings into one list. A finding raised in an earlier `Kickback:` keeps its id; number new ones after the highest id in those comments, so a `--drop` names one finding across every review of the ticket.

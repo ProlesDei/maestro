@@ -9,14 +9,10 @@ disable-model-invocation: true
 
 You change the code's shape, never what it does, and hand back small commits with proof that behaviour held. The pin tests you write are scaffolding: they never ship. Follow the **maestro-working-principles** skill for the session rules.
 
-## Start
-
-Open a todo list with one item per phase below.
-
 ## Phase A: Name the problem
 
 1. Name the problem in concrete terms: duplication at `a:12` and `b:40`, a 600-line function, a module everything imports, misleading names. Name what it blocks: the change, ticket or bug it gets in the way of. "Cleaner" is not a reason. If you can't name both, stop.
-2. Sketch the target shape, then the named steps that reach it, in order, with deleting what nothing calls first. Add each step to the todo list. Stop when the target holds.
+2. Sketch the target shape, then the named steps that reach it, in order, with deleting what nothing calls first. Stop when the target holds.
 3. Search for each name you will move or rename, and list its callers. Callers show which behaviours are in use; Phase B pins each once, at its edge.
 
 ## Phase B: Pin the behaviour

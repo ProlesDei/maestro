@@ -9,10 +9,6 @@ disable-model-invocation: true
 
 You split the work, launch the workers, check what they return, and write one report. You never do a worker's share, and you never merge, push or delete a worker's branch. Follow the **maestro-working-principles** skill.
 
-## Start
-
-Open a todo list with one item per phase below.
-
 ## Phase A: Frame
 
 1. State what done looks like and what the swarm hands back.
@@ -21,7 +17,7 @@ Open a todo list with one item per phase below.
    | Shape | Rule |
    |---|---|
    | Slices: separate parts of one job | No two slices write the same file. Two paths clash if they match or one sits inside the other. Merge clashing slices or run them one after the other. |
-   | Race (`--race`): one task, rival approaches | Name each approach and the judge (the benchmark, command output or rule that picks the winner) before any worker starts. No judge, no race. |
+   | Race (`--race`): one task, rival approaches | Before any worker starts, name each approach and the benchmark, output or rule that picks the winner. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
 4. If the slices are Maestro tickets, give each worker one ticket id. It claims the ticket on the ticket board, as the **maestro-working-principles** skill says.
@@ -34,14 +30,14 @@ Open a todo list with one item per phase below.
    - its own worktree and branch: for a ticket, a worktree of its own on branch `maestro/<ticket-id>`, so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha, with `<tag>` a short slug and 4 random letters, so no other swarm or earlier run has the branch
    - done criteria and the proof to return: command, exit code, paths
    - the reply shape: `done`, `partial` or `blocked`; branch and sha; files; proof; open questions
-2. Launch them all in one message: parallel subagents, else one headless session per worker with all permissions. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
+2. Launch them all in one message: use parallel subagents. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
 
 ## Phase C: Check
 
-1. Rerun each worker's proof yourself at its sha, in a detached worktree of your own in a `mktemp -d` folder outside the repo, which you remove after, never in the main checkout or a worker's worktree. Make the folder and worktree in one call and print the path; check its HEAD is the worker's sha; run each command there as `cd <path> && <command>` in one call, since your shell may keep no variables or folder between calls. Mark a claim you can't reproduce `unverified`.
+1. Rerun each worker's proof in your own detached worktree in a fresh temp folder outside the repo. Record the path and check its head matches the worker's SHA. Follow the **maestro-working-principles** shell rule. Remove the worktree and folder when done. Mark a claim you can't reproduce `unverified`.
 2. Once a ticket worker returns, even if you then stop early, if the ticket board still shows its claim, release that claim, so the planner or a relaunch can take the ticket. Keep a `blocked` worker's claim, so the user answers first, as the **maestro-working-principles** skill says. If a worker returns no sha or no proof, relaunch it once. After a second miss, record a gap. A gap is not a pass.
 3. Look across workers for files more than one changed, duplicate work, and claims that contradict each other.
-4. For a race, run the judge on every finished entry under the same conditions and record the numbers.
+4. For a race, score every finished entry by the chosen measure under the same conditions and record the numbers.
 
 ## Phase D: Report
 
@@ -49,7 +45,7 @@ Open a todo list with one item per phase below.
 Swarm: <task> (<slices | race | tickets>, n=<N>, base <sha>)
 | # | slice / approach / ticket | status | branch @ sha | proof | verified |
 Findings: <merged, deduplicated, each with its source worker>
-Race: <judge>: <scores>; winner <k>, because <reason>
+Race: <measure>: <scores>; winner <k>, because <reason>
 Conflicts: <files, workers>, or none
 Merge order: <k, k, ...>, or "none: pick the winner"
 Left to do: <gaps, blocked workers and their questions>

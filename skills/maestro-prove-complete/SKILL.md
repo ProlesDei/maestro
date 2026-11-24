@@ -1,23 +1,19 @@
 ---
 name: maestro-prove-complete
-description: "Prove each acceptance criterion on the running code at one commit, with evidence a stranger can check without asking you. Use for /maestro-prove-complete, 'is it done?', 'prove it works', or before you call any work done."
+description: "Prove each acceptance criterion on running code at one commit. Use for /maestro-prove-complete, 'is it done?', 'prove it works' or before calling work done. Not for fixing failures."
 ---
 
 # Prove it's complete
 
 "Done" is a claim; the proof is a set of outputs a skeptic can check, tied to one commit. Reading the code or a summary is not proof. You prove and never fix: a failure goes back to the build with its evidence.
 
-## Start
-
-Open a todo list with one item per phase below.
-
 ## Phase A: Pin what you prove
 
-1. In the worktree, `git status --porcelain` prints nothing. Your sha is `git rev-parse HEAD`. Proof from a dirty tree or another sha doesn't count, save what step 4 carries.
+1. Check that the worktree is clean and record its head SHA. Prove the change at that commit, except for proof carried in step 4.
 2. Number each acceptance criterion from the ticket on the ticket board.
-3. Read how the project runs in the repo's agent notes (AGENTS.md or CLAUDE.md), else its README and build files. Then check each step there that needs a person and that this proof needs, as **maestro-working-principles** says; one not done: prove each claim that doesn't need it, mark the rest `not checked: outside step`, and write the block up as it says.
+3. Read how the project runs in the agent notes. Then check each step there that needs a person and that this proof needs, as **maestro-working-principles** says; one not done: prove each claim that doesn't need it, mark the rest `not checked: outside step`, and write the block up as it says.
 4. On a rerun after a `Kickback:`, prove only what changed: each item it names, and each criterion whose code, or anything it calls, changed since the sha of the latest `Handoff:`. Mark the rest `carried: <that sha>`; it counts as a pass. Never prove a criterion again that nothing touched.
-5. Save each file as `<n>-<slug>.<ext>` in `$(git rev-parse --git-common-dir)/maestro/evidence/<id>/<sha>/`, so a rerun's proof never mixes with an older commit's.
+5. Save each file as `<n>-<slug>.<ext>` in `maestro/evidence/<id>/<sha>/` under the Git common directory, so a rerun's proof never mixes with an older commit's.
 
 ## Phase B: Prove each claim
 
@@ -28,13 +24,11 @@ Pick the strongest proof for each:
 | logic | the changed path run for real on the base commit and on yours: the command or request that reaches it, or a throwaway script in a temp folder that calls it | the command, both outputs, exit codes |
 | a bug | the repro failing on the base commit and passing on yours | both outputs |
 | a CLI | the real command against the built binary | command, output excerpt, exit code |
-| an HTTP API | `curl -i` against the running app | request, status, the headers that matter, body excerpt |
+| an HTTP API | a request to the running app that captures the response headers | request, status, the headers that matter, body excerpt |
 | a UI | drive the real page as [browser.md](../maestro-qa-lead/references/browser.md#open-a-browser-of-your-own) says; a run with no `<run>` of its own names one `eng-<id>-<6 random letters from the OS>` and uses Phase A step 5's folder | screenshot of the state the criterion names, URL, steps to get there |
 | data or a migration | a query before and after, on a scratch database | both results, row counts |
 | speed | one benchmark run 5 or more times before and after, on one machine | median and spread of each |
 | background work | the log lines that show it ran, with timestamps | excerpt, never the whole log |
-
-Stop every process you started.
 
 ## Phase C: Try to break it
 
