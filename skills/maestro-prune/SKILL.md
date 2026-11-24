@@ -37,7 +37,7 @@ Run `git fetch --prune origin` (retry once if it fails on a lock) and `df -h .`.
 | Ask first | the rest with none of the keep labels: other pushed but unmerged worktrees and branches, evidence folders, rebuildable folders, temp files, empty folders, server ledgers with any live matching process, temp folders: the machine's temp folder holds other projects' and tools' folders too |
 | Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; harness folders (`.claude/`, `.agents/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, and every `*.lock` file: a live git or tool call holds it |
 
-With `--safe-only`, skip code candidates even with `--code`. Otherwise, if no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates, and remove them after Phase D, as [references/code.md](references/code.md) says.
+With `--safe-only`, sort a worktree Safe only if it is `prunable` or its ticket is `done` or `cancelled`; move other Safe worktrees to Ask first, since a session with no ticket may still use a clean one. Also skip code candidates, even with `--code`. Otherwise, if no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates, and remove them after Phase D, as [references/code.md](references/code.md) says.
 
 ## Phase C: Show the list
 

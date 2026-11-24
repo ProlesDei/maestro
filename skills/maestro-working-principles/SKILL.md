@@ -15,7 +15,7 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 - **Never repeat a secret.** Name it by its environment variable. If one shows in output, say "secret exposed in session output" without the value.
 - **Stop on `refused`.** When a tool or run replies `refused`, stop and report it. Never try another way to do the refused thing. A `low_disk` refusal, or a check, build or write that fails with `low_disk`, `no space left on device`, `ENOSPC` or `disk is full`, is an infra block, not the ticket's failure: give no verdict, kickback or handoff. Clean up as below, including any review or QA worktree; a build keeps its worktree, with a `wip:` commit if git can still write one. Retry a failed release as for a lock error. Reply `infra block: disk full` with the path and what is free.
 - **Wait for your own background work.** Before you end a turn, wait for each subagent and background command you started that ends on its own, such as a red team or a check run, and use its result. Never end on "waiting".
-- **Clean up after yourself.** Before you end a turn that finishes or stops work, stop every process in your ledger, remove your temp folders and each worktree whose work is done, and release your claims, as **Share the machine** and **Claims** say.
+- **Clean up after yourself.** Before you end a turn that finishes or stops work, stop every process in your ledger, remove your temp folders and each worktree whose work is done, and release your claims, as **Share the machine** and **Claims** say. Keep a claim a rule tells you to keep, such as a `blocked` ticket's while its question waits.
 
 ## Share the machine
 
@@ -25,7 +25,7 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 - Install into the worktree or your temp folder, never globally.
 - Remove worktrees you made without force. That takes their ignored folders, `.venv` and `node_modules` among them, with them. If git refuses for changes, leave the worktree and delete the rebuildable folders **maestro-prune** lists.
 - On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make.
-- Prune once a day. When you start work, check `<common>/last-prune`. If it is missing or older than 24 hours, read the **maestro-prune** skill and follow it with `--safe-only`: it removes only Safe items, asks nothing, and takes a lock so only one session runs it. Run garbage collection or prune worktrees only through that skill.
+- Prune once a day. When you start work, check `<common>/last-prune`. If it is missing or older than 24 hours, read [maestro-prune](../maestro-prune/SKILL.md) and follow it with `--safe-only`: it removes only Safe items, asks nothing, and takes a lock so only one session runs it. Run garbage collection or prune worktrees only through that skill.
 
 ## Claims
 
