@@ -21,15 +21,15 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 
 - Change only what is yours: your worktree, branch, temp folder, ports and processes. Never work in the main checkout or open or search files in another session's worktree. The harness loads a `CLAUDE.md` or `AGENTS.md` it finds there as instructions. Leave global config, installed tools, and other sessions' branches and locks alone. The metadata checks in **maestro-prune** are fine. To read another branch, check it out in a fresh temp folder outside the repo.
 - Put throwaway files in a fresh temp folder the OS names, under `TMPDIR`, never a fixed path such as `/tmp/out.txt`. Run each check with `TMPDIR` set to that folder, so what it leaves there (pytest's `pytest-of-<user>`) goes with it. Remove the folder by its full literal path with no force flag. Harnesses refuse a delete of a `$(...)` path, and Codex any forced one. If the delete stops at read-only files, such as a Go module cache, make the folder writable first.
-- Start servers on port 0 through `scripts/server.sh`, read the port from its log, and stop them through the script. A server can outlive its session, and stopping by name or port can hit other sessions. On resume, list servers through the script first.
+- Start each server on port 0 through [scripts/server.sh](scripts/server.sh), read its port from the log the script names, and stop it through the script. The script records each server in your worktree and stops it once your harness exits: a server outlives the session that started it, and stopping by name or port hits other sessions' too. On resume, list your servers through the script first.
 - Install into the worktree or your temp folder, never globally.
 - Before removing a worktree you made, check for ignored files outside the rebuildable folders **maestro-prune** lists. If you find any, keep the worktree and name it in your reply. Remove worktrees without force. If git refuses, keep the worktree and any temp folder that holds it. You can delete the listed rebuildable folders.
 - On a lock or ref-update error, wait a random few seconds and retry, three times at most, then report it. Never delete a lock you didn't make.
-- The planner runs **maestro-prune** once a day for repo-wide cleanup, including garbage collection and worktree pruning.
+- Leave repo-wide cleanup, such as garbage collection or pruning worktrees, to the **maestro-prune** skill; the planner runs it once a day.
 
 ## Claims
 
-- Give each session a holder no other session uses, ticket or not: your role and a random id, such as `senior-engineer/3fa91c0e`. In your own worktree, write it once to `maestro/holder` in that worktree's git dir and read it back on resume. Claim tickets on the ticket board under it. Get the id and any random letters that name a run, holder, branch or folder from the OS. Two runs under one holder take each other's claims.
+- Give each session a holder no other session uses, ticket or not: your role and a random id, such as `senior-engineer/3fa91c0e`. In your own worktree, write it once to `maestro/holder` in that worktree's git dir and read it back on resume. Claim tickets on the ticket board under it. Get that id, and any random letters that name a run, holder, branch or folder, from the OS, never from your head or the ticket: sessions that make letters up make the same ones, and two runs under one holder take each other's claims.
 - A claim holds until you release it, so release it whenever you stop work on the ticket.
 
 ## Build

@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# server.sh: start, list and stop the servers a session runs in its worktree.
+#
+#   server.sh start -- <command> [args]
+#     Runs the command in its own process group, output to a log, and
+#     prints pid= and log=. A watcher stops the group once the harness
+#     (the parent of the calling shell, or MAESTRO_HARNESS_PID) exits.
+#   server.sh list            prints live|dead and each ledger line; drops dead ones
+#   server.sh stop <pid|all>  stops a group after checking its start time
+#
+# The ledger is maestro/servers in this worktree's git dir, one tab-separated
+# line per server: pid, group, start time, log, cwd, command. Works on Linux
+# and macOS. Exit 2: bad usage; 3: unknown or stale pid; 1: any other failure.
 set -eu
 
 die() {
