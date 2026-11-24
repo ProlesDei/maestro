@@ -24,11 +24,11 @@ Record the run steps, readiness check, browser tool that worked and any secret n
 
 Put `bd` 1.3.4 and Dolt 2.2.0 on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
-On an update, end every planner and QA session before running setup, since setup adds the QA slot that planners claim. The chief of staff restarts the planners after the update merges. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
+The chief of staff restarts the planners after the update merges. Setup adds a second QA slot and keeps any existing hold. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 
 To move an old board, stop its Dolt server and move `.maestro/maestro-board/` by hand to that folder, and if `.beads/dolt-server.port` is missing, write the old port there before running setup.
 
-Run setup once at a time per board. If the first setup stops partway, stop any board server it left running, move the board folder aside and run setup again. Run setup again after a reboot or stop, or after `bd` moves. If its port is taken, pass a free one. To move the primary checkout, stop Dolt, move the checkout, repair its worktrees, then move the board folder to the new path's name before running setup.
+If the first setup stops partway, stop any board server it left running, move the board folder aside and run setup again. After a reboot or stop, the launcher starts Dolt on the saved port. If the port is taken, run setup with a free one. Rerun setup if `bd` moves. To move the primary checkout, stop Dolt, move the checkout, repair its worktrees, then move the board folder to the new path's name before running setup.
 
 ## 4. Connect the code graph and commit
 

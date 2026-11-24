@@ -293,24 +293,16 @@ recent() {
 }
 
 check_thread() {
-  local id=$1 result state message
-  [[ ! ${liveness[$id]+yes} ]] || return 0
-  if result=$(timeout -k 1s 5s t3 thread show "$id" --json 2>&1) &&
-    state=$(jq -er '.thread | objects | select(has("activeRunId")) | .activeRunId | if . == null then "dead" else "live" end' <<< "$result" 2>/dev/null); then
-    liveness[$id]=$state
-  else
-    message=${result,,}
-    case $message in
-      *"thread ${id,,} is no longer available"*|*'thread is no longer available'*|\
-      *"thread ${id,,} was not found"*|*"thread '${id,,}' not found"*|*'thread not found'*)
-        liveness[$id]=dead ;;
-      *) return 1 ;;
-    esac
-  fi
+  local key=$1 id=$2 state
+  state=$("$(dirname -- "${BASH_SOURCE[0]}")/maestro-bd" maestro-session "$id" "${3-}") || return 1
+  case $state in
+    ended|gone) liveness[$key]=dead ;;
+    *) liveness[$key]=live ;;
+  esac
 }
 
 prune() {
-  local keep=${1-} grace=${MAESTRO_RUN_GRACE_MIN:-60} run id pid status=0
+  local keep=${1-} grace=${MAESTRO_RUN_GRACE_MIN:-60} run id pid common_dir status=0
   local -A dirs=() ids=() liveness=() untagged=() births=() by_group=() by_run=()
   [[ $grace =~ ^[0-9]+$ ]] || fail 'MAESTRO_RUN_GRACE_MIN must be a whole number'
   if ! command -v t3 >/dev/null; then
@@ -324,8 +316,16 @@ prune() {
     ids[$run]=$id
   done
   if [[ -z $keep ]]; then scan_processes report; fi
-  for id in "${ids[@]}" "${untagged[@]}"; do
-    if ! check_thread "$id"; then
+  for run in "${!ids[@]}"; do
+    common_dir=$(< "$run/git-common-dir") && [[ $common_dir == /* ]] || continue
+    if ! check_thread "$run" "${ids[$run]}" "$common_dir"; then
+      printf 'Maestro: T3 unavailable, keeping runs\n' >&2
+      return 0
+    fi
+  done
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common_dir=
+  for id in "${untagged[@]}"; do
+    if [[ ! ${liveness[$id]+yes} ]] && ! check_thread "$id" "$id" "$common_dir"; then
       printf 'Maestro: T3 unavailable, keeping runs\n' >&2
       return 0
     fi
@@ -337,7 +337,7 @@ prune() {
     fi
   done
   for run in "${!ids[@]}"; do
-    [[ ${liveness[${ids[$run]}]} == dead ]] || continue
+    [[ ${liveness[$run]-} == dead ]] || continue
     clean_run "$run" runs "${ids[$run]}" || status=1
   done
   return "$status"
@@ -362,17 +362,21 @@ root_probe() {
 
 save_launchers() (
   local run=$1 sha=$2 dest=$1/maestro-$2 stage launcher expected actual
+  local -a launchers=(maestro-run maestro-bd)
+  if git --no-replace-objects cat-file -e "$sha:.maestro/maestro-board-store" 2>/dev/null; then
+    launchers+=(maestro-board-store)
+  fi
   if [[ ! -e $dest && ! -L $dest ]]; then
     stage=$(mktemp -d -- "$run/maestro-launchers.XXXXXXXX")
     trap 'rm -rf -- "$stage"' EXIT
-    for launcher in maestro-run maestro-bd; do
+    for launcher in "${launchers[@]}"; do
       git --no-replace-objects cat-file blob "$sha:.maestro/$launcher" > "$stage/$launcher"
       chmod 700 -- "$stage/$launcher"
     done
     mv -T -- "$stage" "$dest"
   fi
   [[ -d $dest && -O $dest && ! -L $dest ]] || fail "Invalid launcher folder: $dest"
-  for launcher in maestro-run maestro-bd; do
+  for launcher in "${launchers[@]}"; do
     [[ -f $dest/$launcher && -x $dest/$launcher && ! -L $dest/$launcher ]] ||
       fail "Invalid launcher: $dest/$launcher"
     expected=$(git --no-replace-objects rev-parse --verify "$sha:.maestro/$launcher") &&

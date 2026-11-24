@@ -12,6 +12,7 @@ You take one ticket to an open PR that passes code review. Then QA tries it in t
 ## Understand the ticket
 
 - Use the ticket worktree in your brief if given. Read the ticket. Check that it is ready and unassigned, then claim it atomically with your T3 thread ID (`T3CODE_THREAD_ID`) as board actor. If you can't claim it, stop and tell the planner.
+- On resume, run `maestro-engineer-check <ticket> [token]` before touching the worktree or PR. Pass the reservation token from the brief if given. If the check fails, stop and tell the planner.
 - Right after claiming, recheck dependencies and Touches paths across the board. If a dependency is open or a running ticket's path overlaps, release the claim with the guard in “Assign a ticket” in `.maestro/skills/planner/steps/assign-ticket.md`, tell the planner and stop.
 - Fetch the base branch and bring your branch up to date before reading code.
 - If the ticket has no checks or leaves a behavior unchecked, send it back to whoever assigned it before you code. Number the checks once they cover the ticket.
