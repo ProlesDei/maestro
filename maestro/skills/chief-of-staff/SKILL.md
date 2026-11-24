@@ -17,11 +17,13 @@ Before you decide the board or team is unavailable, check the board with `.maest
 
 On start, list open `maestro-goal-` epics. Take only goals you create, goals the owner hands you, and goals whose recorded chief T3 shows as settled or archived with no work pending. Treat an idle chief as live. Transfer a live chief's goal only on an explicit handoff after the old chief confirms it has stopped routing that goal. Guard the transfer per “Sessions”.
 
-For epics you own, check the planner in T3 and follow “Sessions” for ended planners and replacement handoffs. Resend each recorded owner answer the epic or its tickets still wait on, and each recorded owner rule whose memory ticket hasn't merged. Pick up unanswered owner calls under “Ask the owner”. Use “Hand back finished work” when the latest recorded check passed and sign-off is still missing.
+For epics you own that have team work, check the planner in T3 and follow “Sessions” for ended planners and replacement handoffs. Resend each recorded owner answer the epic or its tickets still wait on and all pending owner rules that apply. Pick up unanswered owner calls under “Ask the owner”. Use “Hand back finished work” when the latest recorded check passed and sign-off is still missing.
 
 Show how things work before you explain them. Draw a flow for a process, a sequence for handoffs, and a state diagram for a ticket's life, in Mermaid, each under 12 boxes. Explain it in plain words underneath.
 
 ## Shape a goal
+
+Route requests that change Maestro itself to the owner for the upstream Maestro repo. Keep them off the team board.
 
 Turn a request into a goal the planner can run without coming back. A goal has:
 
@@ -64,7 +66,7 @@ Otherwise send one card per call, one at a time, starting with the call that fre
 
 Give the planner the answer and what it means for the work.
 
-If the owner must do steps by hand, check disk and memory for what already exists, then give numbered steps with one action each and the exact URL for each page. Ask for whatever is easiest to copy, such as the full URL from the address bar, and pull out the values yourself.
+Before giving the owner steps to do by hand, check supplied files, disk and memory. Delegate any remaining lookup you have permission to do. Give only the steps that need the owner, with one action per step and the exact URL for each page. Ask for whatever is easiest to copy, such as the full URL from the address bar, and pull out the values yourself.
 
 ## Check status
 
@@ -78,8 +80,8 @@ When runs keep failing on one cause and keep spending, call a stop. Tell the pla
 
 ## Hand back finished work
 
-Done means merged and tried by a person. When the planner reports the goal's success check passed, use “Check status” to verify and report the result, then give the owner the feature, how to try it, and the goal's number. Ask what isn't working. Tell the planner what failed or that the owner signed off.
+Done means merged and tried by a person. When the planner reports the goal's success check passed, use “Check status” to verify and report the result, then give the owner the feature and the goal's number. Pair each sign-off check with one action and what the owner should see. Ask what isn't working. Tell the planner what failed or that the owner signed off.
 
 ## Remember the owner's rules
 
-Record a rule on the epic it came from when an answer sets one ("always", "never", a limit, "you decide this from now on"), or when two or three answers point the same way. Include what it covers, who set it and when, why, and what lifts it. If the rule did not come from an open epic, shape a goal `maestro-goal-rule-<slug>` whose success check is the rule in the base branch's memory file. Send it to the epic's live planner, or start a fresh one per “Sessions” and send it there. Apply the rule yourself until its ticket merges. Follow the same steps when the owner changes their mind. Keep task status in the conversation, not in memory.
+When an answer sets a rule ("always", "never", a limit, "you decide this from now on"), or two or three answers point the same way, record it on an open `maestro-goal-rule-<slug>` epic. Link the goal it came from, if any. Include what it covers, who set it and when, why, and what lifts it. Read open rule epics at startup. Apply pending rules and tell affected planners to follow them. Record proposed QA memory on the goal's epic. Pass pending memory to the next install update. Close a rule epic once its rule is in the base branch's memory file. Follow the same steps when the owner changes their mind. Keep task status in the conversation, not in memory.

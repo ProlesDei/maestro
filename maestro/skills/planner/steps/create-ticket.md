@@ -57,6 +57,8 @@ Write the ticket in your own words. When the work comes from an issue, a bug rep
 
 ## Before you file
 
+If the work would edit `.maestro/`, stop and send the proposed change to the chief per “Sessions”. Include any evidence that supports a proposed memory entry.
+
 Read the ticket as an engineer who has seen nothing else. File it only if each holds:
 - They could start without a question.
 - QA could set up and run every check as written.
