@@ -5,7 +5,7 @@ description: "Use a worktree, keep ticket status current, commit, open PRs and c
 
 # Working principles
 
-Work in your own worktree, make small checked commits, and open a PR for review and QA. The agent notes are the repo's `AGENTS.md` or `CLAUDE.md`, or its README and build files if neither exists. Use the main branch the agent notes name, else the remote's default branch, else `main`. If git has no local record of the remote's default branch, ask the remote. Check the branch exists before using it.
+Work in your own worktree, make small checked commits, and open a PR for review and QA. The agent notes are the repo's `AGENTS.md` or `CLAUDE.md`, or its README and build files if neither exists. Use the main branch the main checkout's agent notes name, else the remote's default branch, else `main`. If git has no local record of the remote's default branch, ask the remote. Check the branch exists before using it.
 
 ## Session rules
 
