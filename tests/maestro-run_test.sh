@@ -172,8 +172,12 @@ crash_run() {
   done
   (
     cd -- "$run/tmp/checkout"
+    if [[ $id == "$delegated" ]]; then
+      [[ -L $run ]] || fail 'missing short link fixture'
+      rm -- "$run"
+    fi
     "$runner" clean "$id"
-    [[ ! -e $run ]] || fail 'clean from inside the run left the folder'
+    [[ ! -e $physical ]] || fail 'clean from inside the run left the folder'
   )
   "$runner" clean "$id"
   [[ ! -e $run && ! -L $run ]] || fail 'run folder or link survived clean'
@@ -402,9 +406,24 @@ printf '%s' "$LIVE" > "$legacy/thread"
 printf '%s\n' "$common" > "$legacy/git-common-dir"
 legacy_run=$(T3CODE_THREAD_ID=$LIVE "$runner" make qa legacy)
 [[ $(realpath -- "$legacy_run") == "$legacy" ]] || fail 'make did not reuse a legacy run'
-"$runner" clean "$LIVE"
+[[ -L $legacy_run ]] || fail 'missing short link fixture'
+mkdir -- "$scratch/check-order"
+cat > "$scratch/check-order/rm" <<'RM'
+#!/usr/bin/env bash
+if [[ ${2-} == "$CHECK_RUN/thread" ]]; then
+  if [[ -L $CHECK_LINK ]] || flock -n "$MAESTRO_RUN_ROOT" true; then
+    printf 'FAIL: cleanup must unlink under the run lock before deleting metadata\n' >&2
+    exit 1
+  fi
+  touch -- "$CHECK_RUN.checked"
+fi
+exec "$REAL_RM" "$@"
+RM
+chmod +x -- "$scratch/check-order/rm"
+PATH="$scratch/check-order:$PATH" CHECK_RUN=$legacy CHECK_LINK=$legacy_run REAL_RM=$(type -P rm) "$runner" clean "$LIVE"
+[[ -f $legacy.checked ]] || fail 'cleanup did not check link order'
 [[ ! -e $legacy && ! -L $legacy_run ]] || fail 'clean left a legacy run or its link'
-printf 'ok - make and clean handle legacy run names\n'
+printf 'ok - clean unlinks legacy runs under the lock before deleting metadata\n'
 
 mkdir -- .maestro
 cp -- "$runner" .maestro/maestro-run
@@ -427,6 +446,11 @@ launchers=$pinned_run/maestro-$pinned
 cmp -- "$runner" "$launchers/maestro-run" || fail 'run launcher differs from the pinned base'
 [[ $("$launchers/maestro-bd") == 'trusted board' ]] || fail 'board launcher differs from the pinned base'
 [[ $("$launchers/maestro-run" make qa pinned "$pinned") == "$pinned_run" ]] || fail 'pinned make changed run'
+printf 'exit 99\n' >> "$launchers/maestro-bd"
+if output=$(git cat-file blob "$pinned:.maestro/maestro-run" | bash -s -- make qa pinned "$pinned" 2>&1); then
+  fail 'pinned make accepted a changed cached launcher'
+fi
+[[ $output == 'Maestro: Launcher differs from the pinned base: '* ]] || fail "unexpected launcher error: $output"
 "$launchers/maestro-run" clean
 [[ ! -e $pinned_run && ! -L $pinned_run ]] || fail 'pinned runner left the run or its link'
-printf 'ok - review launchers came from the pinned SHA after FETCH_HEAD changed\n'
+printf 'ok - review launchers came from the pinned SHA and make rejected a changed cache\n'
