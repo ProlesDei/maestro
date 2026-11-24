@@ -4,8 +4,8 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 ## 1. Place Maestro
 
-1. Before writing, find a remote that can take PRs and its default branch. If you can't find both, stop and ask the owner. Resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes in the checkout, including their parents. The board under `~/.local/share/maestro-board/` is the one write outside it. If any resolve outside the checkout, stop and ask the owner. Check the files and skill links you would replace. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
-2. Copy the checkout's `maestro/` files into `.maestro/`. On an update, keep existing memory and any old board.
+1. Before writing, find a remote that can take PRs and its default branch. If you can't find both, stop and ask the owner. Resolve `.maestro`, `.agents`, `.claude`, `AGENTS.md`, `CLAUDE.md`, and every other path the install writes or removes in the checkout, including their parents. If any resolve outside the checkout, stop and ask the owner. The board and QA run folder can live outside it. Check the files and skill links you would replace or remove. Stop if Maestro did not place one. Also stop if the root `AGENTS.md` has a `## Maestro principles` section outside the markers.
+2. On an update, end every Maestro session first, and clean each ended run with the old `.maestro/maestro-tmp` if it is there. Copy the checkout's `maestro/` files into `.maestro/`. Keep existing memory and any old board. Remove files Maestro placed and no longer ships.
 3. For each folder in `.maestro/skills/`, make sure `.agents/skills/` and `.claude/skills/` each hold a relative symlink `maestro-<folder>` that points to it.
 4. Put one line at the end of the root `AGENTS.md` between `<!-- maestro:start -->` and `<!-- maestro:end -->`: “Maestro roles read `.maestro/principles.md` when they start.” Create the file if needed. On an update, replace only what sits between the markers.
 5. Add `@AGENTS.md` to the root `CLAUDE.md` if missing. Create the file if needed.
@@ -14,15 +14,15 @@ An agent follows these steps at the root of the team's primary checkout, with a 
 
 If QA memory lacks a verified start, read the README, package scripts, Makefile, compose files and docs. Draft steps to start the app with fresh test data. Ask the owner only to confirm the steps or fill gaps.
 
-Follow the test run rule in [principles.md](maestro/principles.md) and prove one start in a scratch worktree on a free port. Check that the app answers. If the start fails, report what blocks QA.
+Put `bash`, `git`, `t3`, `ss`, `setsid`, `flock` and `jq` on the install session's `PATH`. Follow the test run and [Worktrees](maestro/principles.md#worktrees) rules. Prove one start in a worktree inside the run folder on a free port. Check that the app answers. If the start fails, report what blocks QA.
 
 If users see the app in a browser, open it headless while it runs, using the tool and session setup from [QA's browser guide](maestro/skills/qa/browser.md). Take one screenshot and look at it, then close only your browser session. If no browser works, report what's missing and that QA will block screen checks until it's fixed.
 
-Stop what you started. Record the run steps, readiness check, browser tool that worked and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that.
+Record the run steps, readiness check, browser tool that worked and any secret names under “How to run the app” in `.maestro/memory/qa.md`. If the repo has no app, record that.
 
 ## 3. Set up the ticket board
 
-Put `bd` 1.3.4, Dolt 2.2.0, and Linux `ss`, `setsid`, `flock` and `jq` on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
+Put `bd` 1.3.4 and Dolt 2.2.0 on the install session's `PATH`. Verify the `bd` and Dolt downloads against their release checksums.
 
 On an update, end every planner and QA session before running setup, since setup adds the QA slot that planners claim. The chief of staff restarts the planners after the update merges. Run `.maestro/maestro-bd maestro-setup`. On a fresh install, append a free port if 3307 is taken. The board binds to loopback, so sessions run on the board's machine. Its folder under `~/.local/share/maestro-board/` is named `<repo>-<hash>`, with the first 12 SHA-256 digits of the primary checkout's physical path.
 

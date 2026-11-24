@@ -15,6 +15,8 @@ On restart and before dispatch, scan the board. Use `steps/create-ticket.md` for
 
 Each step lives in `.maestro/skills/planner/steps/`. Read the step before you do it.
 
+When a child ends, follow “Worktrees” in `.maestro/principles.md` for cleanup. For QA, use “A QA session ends” below.
+
 After you close a merged ticket, release a ticket claim, learn your engineer released one, or release the QA slot, message the `planner_thread_id` on every other open `maestro-goal-` epic. Say what changed and include the ticket ID for a merge.
 
 | When | Do |
@@ -32,7 +34,7 @@ After you close a merged ticket, release a ticket claim, learn your engineer rel
 | Another planner says a ticket merged, a claim was released or the QA slot is free | Check whether to lift the stop per “QA merges a PR”, whether this goal's work is done, and whether to close this epic per “The owner signs off”. Then rebuild the QA queue and assign ready work |
 | A QA session ends | See “A QA session ends” below |
 | Review notes or QA follow-ups arrive | File the ones worth doing with `steps/create-ticket.md` |
-| The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Cancel live engineers and reviews on the epic outside those fixes by task ID. Check the slot and cancel live QA by task ID if its batch includes such work. Once T3 confirms they ended, release affected claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Use “A QA session ends” for QA cleanup. Start only recorded fixes and add any base repair to them. Clear the stop once all fixes merge and any outside cause clears |
+| The chief of staff calls a stop | Record the stop, its fixes and any outside cause first (see “Ticket board”). Include all unmerged prerequisites when you record a fix or its prerequisites change. Cancel live engineers and reviews on the epic outside those fixes by task ID. Check the slot and cancel live QA by task ID if its batch includes such work. Once T3 confirms they ended, clean each run per “Worktrees”, using “A QA session ends” for QA. Release affected claims with the guard in `steps/assign-ticket.md`, including claims from sessions already ended. Start only recorded fixes and add any base repair to them. Clear the stop once all fixes merge and any outside cause clears |
 | The chief of staff says the outside cause cleared | Set the stop's `outside_cause` to null. Check whether to lift the stop, recheck the QA queue and assign ready work |
 | The chief of staff asks for progress, or the goal's status changes | `steps/report.md` |
 | The goal's work is done or the owner reports a failure | `steps/close-goal.md` |
@@ -69,7 +71,7 @@ If the slot is free, return. If it lacks either QA ID and another live planner h
 
 Once T3 confirms QA ended, check that the slot still points to that session before cleanup. Only the holder cleans up. If the holder ended, take over its claim and save both QA IDs in one update guarded by the old assignee and in-progress status. If the guard fails, reread the slot before cleanup.
 
-Read the batch from the launch brief and stop anything still running under its run prefix (see “Worktrees” in `.maestro/principles.md`). Clean that session's temp dir, then close verified merges as above.
+Clean the QA run by thread ID per “Worktrees”, then close verified merges as above.
 
 Unless a stop cancelled this QA session, post `QA blocked` with reason `QA ended without a verdict` on each still-open batch PR whose current head got no `QA fail` or `QA blocked` since the batch launched. Use the exact first-line format in “Report” in `.maestro/skills/qa/SKILL.md`. Use the current base SHA if QA recorded none.
 

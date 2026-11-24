@@ -23,7 +23,7 @@
 - Keep the current chief of staff's thread ID on the epic as `chief_thread_id`. For every handoff to the chief of staff, reread the epic and send to that thread.
 - Before you start any child, run `.maestro/maestro-usage` and use the provider, model and effort it prints. If a child stops at a usage limit, replace it from board state on another provider.
 - Start each role as a T3 child running its Maestro skill. When you launch a child, save its IDs. Use `planner_thread_id` and `planner_task_id` on the epic, `review_thread_id` and `review_task_id` on the ticket, and `qa_thread_id` and `qa_task_id` on the slot. Save `engineer_task_id` on the ticket. The engineer claims with its thread ID. Message by thread ID and cancel by task ID. If a child's IDs are missing or point to an ended session, look for it in T3 before you stop, replace or restart it. To stop one without a task ID, ask its thread to stop and wait for T3 to confirm it ended. Record decisions on the board before sending them. If work remains, replace ended sessions from board state.
-- Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended, then pass any child results it missed to the replacement, including results that arrive later.
+- Only the chief of staff replaces the planner. Wait for T3 to confirm the old planner ended and clean its run per “Worktrees” before you overwrite its IDs, then pass any child results it missed to the replacement, including results that arrive later.
 - When you start as a replacement, use the board to resend any handoffs you owe. Ask each live peer you work with to resend its latest handoff. When a replacement asks, send that handoff and all later ones for that session to its new thread.
 
 ### Rules for review and QA
@@ -32,10 +32,13 @@
 
 ### Worktrees
 
-- Give each task its own worktree and branch. Reuse a ticket's worktree across sessions and handoffs. QA tests in its own fresh worktree. Keep ports separate. Before a build or check, name every server, service, container, Compose project and volume it can start with the prefix `maestro-<role>-<ticket or batch>-<thread-id>`.
-- At session start, use `.maestro/maestro-tmp make <role> <ticket-or-batch>` to get your temp dir. Review and QA use the primary checkout's launcher. Use a stable, file-safe label such as the goal slug or `session` if you have no ticket or batch. Set `TMPDIR` to that dir for builds, tests and servers, and put their temp files and build output there. Leave shared tool caches where they are. Use the same temp root for a child session and its cleanup. Put any proof a PR or verdict needs in the PR or comment text itself. Never link to a temp file.
-- On every way out, clean your own temp dir by thread ID as your last step. Whoever starts a child runs `.maestro/maestro-tmp clean <thread-id>` after T3 confirms it ended, whether it finished, was cancelled, replaced, stopped or failed. For QA, the slot holder cleans up after stopping any services left running.
-- Once Git or the merged PR confirms the task landed on its base, cancel its live children by task ID. Check for local work, active users and ignored files the repo can't rebuild. Keep the worktree and report any block to cleanup. Otherwise remove it from another checkout.
+- Give each task its own worktree and branch. Reuse a ticket's worktree across sessions and handoffs. Keep ports separate.
+- Run `.maestro/maestro-run make <role> <ticket-or-batch>` at the start of each turn, with the same role and label every turn. It returns the same run folder on disk. Use the ticket or batch, or `session` if you have neither. Run every `.maestro/maestro-run` command from a checkout of this repo; review and QA use the primary checkout's script by absolute path.
+- Put review and QA checkouts, database files, logs and browser files in the run folder. Set `TMPDIR` to its `tmp/` for builds, checks and browsers. Never use `mktemp -d` or `/tmp` for run files. Leave shared caches in place.
+- Use the run folder's basename as the prefix for servers, services, browser sessions, containers, Compose projects and volumes. Start servers and services with `.maestro/maestro-run start <name> -- <cmd...>`. Keep container data in bind mounts under the run folder.
+- Put proof in the PR or verdict text. Never link to the run folder. On every exit, including pass, fail, block, error or cancel, close your browser session, remove containers, networks and volumes with your prefix, then run `.maestro/maestro-run clean` last.
+- If you start, cancel, replace or stop a child, do the same for it once T3 confirms it ended, with `clean <child thread-id>`.
+- Once Git or the merged PR confirms the task landed on its base, cancel its live children by task ID and clean their runs as above. Check for local work, active users and ignored files the repo can't rebuild. Keep the worktree and report any block to cleanup. Otherwise remove it from another checkout.
 
 ### Code graph freshness
 

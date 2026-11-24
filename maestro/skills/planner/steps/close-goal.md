@@ -1,6 +1,6 @@
 # Close a goal
 
-If the owner reports a failure, use it as the failed check. Otherwise run the success check in a fresh worktree of the merged base. Start the app as `.maestro/memory/qa.md` says only if the check needs it. Record the result and what you did on the epic, and stop what you started. On failure, keep the goal open and file a fix ticket under its epic with `steps/create-ticket.md`.
+If the owner reports a failure, use it as the failed check. Otherwise follow “Worktrees” in `.maestro/principles.md` and run the success check in a fresh worktree of the merged base inside your run folder. Start the app as `.maestro/memory/qa.md` says only if the check needs it. Record the result and what you did on the epic. On failure, keep the goal open and file a fix ticket under its epic with `steps/create-ticket.md`.
 
 When the check passes, give the chief of staff the goal and the results for owner sign-off.
 

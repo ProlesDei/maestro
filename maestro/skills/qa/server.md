@@ -4,15 +4,12 @@ Read this for any change a server runs: an endpoint, a worker, a job, a migratio
 
 ## Start it
 
-Use the “Worktrees” run prefix in `.maestro/principles.md`. Add a suffix when resources need distinct names.
+Follow “Worktrees” in `.maestro/principles.md` for starting the app and its services. Use memory for what to run.
 
 - Use a free port no other run holds, and pass it the way the app reads it. If you had to learn how, record it in a `Remember:` line in the verdict.
-- Start it so you can stop it and every process it spawns, and log to a folder of your own for this run.
 - Use fresh state for this run. Run migrations the way production does.
 - Wait until it answers, on its health check if it has one, before you test. Check that your own process holds the port and its log shows it bound there. If another run took the port first, pick a new one.
 - If startup fails, quote the log lines that show why.
-
-Start a service the app needs (a database, a queue) the same way, or the way memory says.
 
 ## Test it
 
@@ -24,4 +21,4 @@ Start a service the app needs (a database, a queue) the same way, or the way mem
 
 ## Stop it
 
-Stop each server and service you started, with every process it spawned, on every way out: pass, fail, block or error. Stop only what you started; another run's server on this machine is not yours to touch. Then check its port is free. A server that outlives your run takes a port and memory from every run after it.
+To restart a service, use `.maestro/maestro-run stop <name>` before you start it again. On exit, follow “Worktrees” in `.maestro/principles.md`.
