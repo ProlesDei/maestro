@@ -69,7 +69,7 @@ export T3_FIXTURE_MODE=ok
 
 cat > "$scratch/bin/t3" <<'T3'
 #!/usr/bin/env bash
-[[ $# == 4 && $1 == thread && $2 == show && $4 == --json ]] || exit 2
+[[ $# == 6 && $1 == thread && $2 == show && $4 == --json && $5 == --messages && $6 == 0 ]] || exit 2
 printf '%s\n' "$3" >> "$T3_FIXTURE_LOG"
 case $T3_FIXTURE_MODE in
   down) echo 'Server no longer available' >&2; exit 1 ;;
@@ -79,8 +79,8 @@ case $T3_FIXTURE_MODE in
 esac
 case $3 in
   "$GONE") echo "Thread $3 is no longer available." >&2; exit 1 ;;
-  "$DEAD"|"$FRESH"|"$RECENT_FILE"|"$SHARED") echo '{"thread":{"activeRunId":null}}' ;;
-  *) echo '{"thread":{"activeRunId":"run-id"}}' ;;
+  "$DEAD"|"$FRESH"|"$RECENT_FILE"|"$SHARED") printf '{"thread":{"threadId":"%s","archived":true}}\n' "$3" ;;
+  *) printf '{"thread":{"threadId":"%s","status":"waiting","activeRunId":null,"pendingRequestCount":1}}\n' "$3" ;;
 esac
 T3
 chmod +x -- "$scratch/bin/t3"

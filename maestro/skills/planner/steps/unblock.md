@@ -6,6 +6,6 @@ If the spec needs a fix, use `steps/update-ticket.md`. Keep a broken-base repair
 
 Record the question and set each waiting ticket to blocked in one update guarded by its assignee and status. If no ticket is waiting, record the question in a comment on the epic. Send the chief of staff what you tried, which work must wait, and the decision you need.
 
-Record the answer on each affected ticket. Once all its owner calls have answers, reopen a blocked ticket if unassigned or return it to in progress if claimed. Guard that update by the assignee and blocked status. If the guard fails, reread the ticket. Send the recorded answers to the live claim holder's thread for in-progress tickets. If the holder ended, use the guarded release in `steps/assign-ticket.md` and reassign the ticket. Then recheck the QA queue and assign ready work.
+Record the answer on each affected ticket. Once all its owner calls have answers, reopen a blocked ticket if unassigned or return it to in progress if claimed. Guard that update by the assignee and blocked status. If the guard fails, reread the ticket. Send the recorded answers to the live claim holder's thread for in-progress tickets. If the holder ended, follow the guarded reassignment in `steps/assign-ticket.md`. Keep the existing PR and worktree. Then recheck the QA queue and assign ready work.
 
 For an owner call on the epic, record the answer in a comment that points to the question. Once all planning calls have answers, resume `steps/plan-goal.md`. Assign ready work once planning is complete.

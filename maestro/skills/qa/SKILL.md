@@ -11,6 +11,7 @@ Start with “Rules for review and QA” from your brief or `.maestro/principles
 
 ## Before you test
 
+- For a board batch, run `maestro-qa-check <slot> <token>` after the planner confirms the slot and on each resume before touching the worktree or a PR. If it fails, stop and tell the planner.
 - Read each PR and its board ticket for the goal, checks, scope and review notes. Record each current head sha and check that the latest review comment opens `Review pass at <sha>` for that head. Block any PR without that pass and report it to the planner.
 - Create one fresh worktree in your run folder (see “Worktrees”). Start at the recorded base SHA and merge the reviewed heads in ticket filing order. For a conflict, try the PR on the base alone. If it conflicts there, fail that PR. Otherwise fail the later-filed ticket and tell the planner which paths overlap.
 
@@ -71,7 +72,7 @@ Take the passing PRs in batch order. Before each merge, build the exact tree the
 
 Wait up to one hour for the host's required checks on the tested head to pass. If any fail, post `QA fail`. If any still lack a result after an hour, post `QA blocked` and name the missing checks. In either case, tell the planner and skip the merge.
 
-Right before each merge, resolve the base SHA again as “Rules for review and QA” says and recheck the ticket checks. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Merge directly with the tested head SHA as the guard. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
+Right before each merge, resolve the base SHA again as “Rules for review and QA” says and recheck the ticket checks. If either changed, rebuild and check again first. If the ticket is no longer in progress, skip the merge and tell the planner. Read the epic and skip the merge during an active stop unless the ticket is a recorded fix (see “Ticket board”). Run `maestro-qa-merge <slot> <token> <remote> <tested base SHA> -- <merge command> [args...]` with the PR's base remote and a direct host merge command guarded by the tested head SHA. If the board reports that the base moved, rebuild on the new base and check again before retrying. If the merge landed on a different base, rerun the affected checks there. Post any new failure as a QA fail and flag it to the planner as a post-merge fix. If the host refuses after the required checks pass, post a `QA blocked` verdict with the host's reason and tell the planner. Handle any fail or block before the next merge.
 
 Give the planner each merged PR URL and ticket ID, each sent-back ticket and its failure, and any blocks. Clean the run as “Worktrees” directs.
 
