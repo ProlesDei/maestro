@@ -11,7 +11,7 @@ You clear out what no one needs (worktrees, branches, rebuildable folders, temp 
 
 The planner alone starts unattended runs. It owns the lock and stamp for those `--safe-only` runs. An interactive run uses neither.
 
-Fetch from `origin` with tag pruning off (`--no-prune-tags`). Prune remote refs only in interactive runs (`--prune` there, `--no-prune` in `--safe-only`). Retry once if the fetch fails on a lock. If it still fails in `--safe-only`, report failure and stop. Run `df -h .`. Merges land on the remote, so every merge check below uses `origin/<main>`. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: each ticket's status and claim, `git worktree list --porcelain` and `lsof -d cwd -Fn`.
+Fetch from `origin` in every mode with remote ref pruning on (`--prune`) and tag pruning off (`--no-prune-tags`). Retry once if the fetch fails on a lock. If it still fails in `--safe-only`, report failure and stop. Run `df -h .`. Merges land on the remote, so every merge check below uses `origin/<main>`. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: each ticket's status and claim, `git worktree list --porcelain` and `lsof -d cwd -Fn`.
 
 ## Phase A: Find candidates (read only)
 

@@ -4,12 +4,12 @@
 #   server.sh start -- <command> [args]
 #     Runs the command in its own process group, output to a log, and
 #     prints pid= and log=. A watcher stops the group once the harness
-#     (the parent of the calling shell, or MAESTRO_HARNESS_PID) exits.
+#     (the first non-shell ancestor, or MAESTRO_HARNESS_PID) exits.
 #   server.sh list            prints live|dead and each ledger line; drops dead ones
 #   server.sh stop <pid|all>  stops a group after checking its start time
 #
 # The ledger is maestro/servers in this worktree's git dir, one tab-separated
-# line per server: pid, group, start time, log, cwd, command. Works on Linux
+# line per server: pid, group, start time, log, cwd. Works on Linux
 # and macOS. Exit 2: bad usage; 3: unknown or stale pid; 1: any other failure.
 set -eu
 
@@ -20,6 +20,17 @@ die() {
 
 is_pid() {
 	[[ $1 =~ ^[1-9][0-9]*$ && $1 != 1 ]]
+}
+
+harness_pid() {
+	local pid=$PPID parent name
+	while is_pid "$pid" && read -r parent name < <(ps -p "$pid" -o ppid= -o comm=); do
+		name=${name##*/}
+		case ${name#-} in
+			bash|sh|zsh|dash|fish) pid=$parent ;;
+			*) printf '%s\n' "$pid"; return ;;
+		esac
+	done
 }
 
 started() {
@@ -70,11 +81,23 @@ cleanup() {
 }
 
 lock() {
-	local attempt
+	local attempt owner
 	locked=1
 	for ((attempt = 0; attempt < 50; attempt++)); do
 		if (set -C; printf '%s\n' "$$" >"$lock_file") 2>/dev/null; then
 			return
+		fi
+		if read -r owner 2>/dev/null <"$lock_file" && is_pid "$owner" && [[ -z $(started "$owner") ]]; then
+			perl -MFcntl=:flock -e '
+				my ($path, $owner) = @ARGV;
+				open my $lock, "+<", $path or exit;
+				flock $lock, LOCK_EX | LOCK_NB or exit;
+				my @file = stat $lock;
+				my @path = stat $path;
+				if (@path && $file[0] == $path[0] && $file[1] == $path[1] && <$lock> eq "$owner\n") {
+					unlink $path or die "$path: $!\n";
+				}
+			' "$lock_file" "$owner"
 		fi
 		sleep 0.1
 	done
@@ -121,9 +144,9 @@ stop_group() {
 }
 
 watch_server() {
-	local harness=$1 harness_birth=$2 log=$3 work_dir=$4 command=$5
+	local harness=$1 harness_birth=$2 log=$3 work_dir=$4
 	local pid birth cancelled=
-	shift 5
+	shift 4
 	watch_file=$log.watch
 	trap 'cancelled=1' TERM INT
 	lock || die 1 ledger_busy
@@ -137,9 +160,9 @@ watch_server() {
 	[[ -n $birth ]] || die 1 group_start_failed
 	new_draft
 	if [[ -f $ledger ]]; then
-		cat -- "$ledger" >"$draft"
+		cut -f 1-5 "$ledger" >"$draft"
 	fi
-	printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$pid" "$pid" "$birth" "$log" "$work_dir" "$command" >>"$draft"
+	printf '%s\t%s\t%s\t%s\t%s\n' "$pid" "$pid" "$birth" "$log" "$work_dir" >>"$draft"
 	save_ledger
 	new_draft
 	printf '%s\t%s\n' "$$" "$(started "$$")" >"$draft"
@@ -162,21 +185,22 @@ watch_server() {
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
 		new_draft
-		LOG_PATH=$log awk -F '\t' '$4 != ENVIRON["LOG_PATH"]' "$ledger" >"$draft"
+		LOG_PATH=$log awk 'BEGIN { FS = OFS = "\t" } $4 != ENVIRON["LOG_PATH"] { print $1, $2, $3, $4, $5 }' "$ledger" >"$draft"
 		save_ledger
 	fi
 	unlock
 }
 
 check_ledger() {
-	local action=$1 target=${2-} line pid group birth log
+	local action=$1 target=${2-} line pid group birth log work_dir
 	local result found= status=0 ready watcher watcher_birth attempt
 	local -a watchers=()
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
 		new_draft
 		while IFS= read -r line; do
-			IFS=$'\t' read -r pid group birth log _ <<<"$line"
+			IFS=$'\t' read -r pid group birth log work_dir _ <<<"$line"
+			printf -v line '%s\t%s\t%s\t%s\t%s' "$pid" "$group" "$birth" "$log" "$work_dir"
 			if [[ $action == stop && $target != all && $target != "$pid" ]]; then
 				printf '%s\n' "$line" >>"$draft"
 				continue
@@ -249,7 +273,7 @@ case $1 in
 		shift 2
 		harness=${MAESTRO_HARNESS_PID-}
 		if [[ -z $harness ]]; then
-			harness=$(ps -p "$PPID" -o ppid= | tr -d '[:space:]')
+			harness=$(harness_pid)
 		fi
 		is_pid "$harness" || die 1 invalid_harness
 		harness_birth=$(started "$harness")
@@ -260,10 +284,9 @@ case $1 in
 		fi
 		(umask 077; mkdir -p -- "$state")
 		log=$(mktemp "$state/server.XXXXXXXX")
-		printf -v command '%q ' "$@"
 		pid=$(
 			set -m
-			nohup "$BASH" "$script" _watch "$harness" "$harness_birth" "$log" "$work_dir" "${command% }" "$@" </dev/null 2>>"$log" &
+			nohup "$BASH" "$script" _watch "$harness" "$harness_birth" "$log" "$work_dir" "$@" </dev/null 2>>"$log" &
 		)
 		is_pid "$pid" || die 1 "start_failed log=$log"
 		printf 'pid=%s\nlog=%s\n' "$pid" "$log"

@@ -9,10 +9,10 @@ die() { printf 'prune-lock: %s\n' "$*" >&2; exit 1; }
 action=${1-}
 case "$action" in
 	take|done|release) ;;
-	*) die 'usage: prune-lock.sh {take|done|release} [holder]' ;;
+	*) die 'usage: prune-lock.sh {take|done|release} <holder>' ;;
 esac
-[ "$#" -le 2 ] || die 'expected one holder'
-holder=${2:-$(id -un)@$(hostname)}
+[ "$#" -eq 2 ] && [ -n "$2" ] || die 'expected one holder'
+holder=$2
 case "$holder" in
 	*[[:space:]]*) die 'holder must have no spaces' ;;
 esac
