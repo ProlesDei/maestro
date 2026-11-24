@@ -1,0 +1,55 @@
+---
+name: maestro-create-ticket
+description: "Adds one ticket to the Maestro board with one maestro-ticket create call, after asking once for what it can't infer. Use for /maestro-create-ticket, 'make a ticket for this', 'add this to the board', or when work has no ticket yet."
+argument-hint: "[what needs doing]"
+disable-model-invocation: true
+---
+
+# Create a ticket
+
+You draft one ticket, ask once, and make one `maestro-ticket create` call. This skill owns the ticket shape. The store checks deps and cycles: don't redo that here.
+
+Follow the **maestro-working-principles** skill.
+
+1. **Draft.** From the user's words (or ask for one sentence), write:
+   - a title: a verb and an object, under 70 characters, never "Improve X";
+   - a body: the goal in one or two sentences, numbered acceptance criteria, a `Not handled:` list, the paths to start from and the closest code to copy, what must not change, and for each dep the code this ticket needs from it.
+
+   A criterion is something a command or the running app can show, so QA can test it as written. One that restates the title, or that only taste can judge, is not a criterion: rewrite it. Read the code each criterion touches on the main branch: rewrite one the code already contradicts, or that pulls against another, since the engineer would stop and ask.
+
+   Make the trade-offs here, where one costs a line; in review it costs a round. Write a criterion for the main path, and one for each case that must hold: the empty state, the wrong input users will send, the failure that would lose data or money. Each names its input and what must show. Put every other case you weighed under `Not handled:`, with a few words on why it can wait (rare, cheap to fix later, another ticket's). The engineer builds none of those, and review and QA send nothing back for one, or for any case the criteria don't name, unless it is a blocker as the **maestro-code-review** skill's [passes.md](../maestro-code-review/references/passes.md#rate-each-finding) rates one. Past about six criteria, split the ticket.
+2. **Look around.** Run `maestro-ticket list --status backlog,todo,in_progress,in_review,blocked --json | jq -c '.tickets[] | {id,title,areas}'` and compare titles and areas. If one is close, show it and ask whether to go on. Check each path you named exists.
+3. **Ask once.** In one message, ask only for the fields you can't infer, each with your pick so the user can say "yes":
+
+   | Field | Values | Default |
+   |---|---|---|
+   | deps | ticket ids that must be `done` first; check each with `maestro-ticket get` | none |
+   | areas | repo-relative paths the change touches, as narrow as you can. Two tickets with overlapping areas never run at once | from the paths |
+   | priority | `0` (most urgent) to `3` | `2` |
+   | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
+   | parked | why a `backlog` ticket waits: `hold` (someone said wait), `deferred` (cut from this slice) or `unready` (a criterion can't be checked yet) | `unready` |
+   | goal | slug of the goal it serves, so the board counts progress per goal | the goal you were given, else none |
+   | tier | which engineer builds it: `junior` for a routine ticket (clear criteria, one area, easy to undo), else `senior` (security, money, data migrations, public APIs, concurrency, unclear scope) | your pick by that rule |
+   | route | Only the planner can add `--direct-qa` to a ship ticket. Choose it when the effect is contained, QA can observe it, and reverting restores users to their prior state. State what QA should try and why a revert suffices. Use review for uncertainty, lasting side effects or any [tier 2 risk](../maestro-code-review/SKILL.md#phase-c-pick-the-tier-and-mode). | review |
+   | role | who builds it: `engineer`, the one role the store takes that builds tickets. QA and review take only built tickets, so they are never a ticket's role; `designer` works only a `Design:` ticket, which **maestro-planner** makes | `engineer` |
+
+   Waiting on another ticket is a dep, never `blocked` or `backlog`.
+4. **Create.** Show the command, then run it:
+
+   ```sh
+   maestro-ticket create --json --lint --title '<title>' --priority <n> --status <todo|backlog> --role <role> --tier <senior|junior> \
+     --deps '<T-1,T-2>' --areas '<path,path>' --goal '<slug>' --parked <reason> \
+     --idempotency-key 'create:<yyyy-mm-dd>:<title slug>' \
+     --body-file - <<'END_<8 random letters>'
+   <body>
+   END_<the same 8 letters>
+   ```
+
+   - Leave out `--type`: the default, `ship`, is a ticket that ends in a merged PR. `--lint` refuses one with no numbered criterion, no `Not handled:` line (`Not handled: none` when there is nothing to leave) or no areas, and names each gap: fix the draft, never drop the flag.
+   - The title, body, deps and areas come from the user, so the shell must never expand them. Single-quote each flag value and write each `'` as `'\''`. Keep the heredoc delimiter quoted and new each time, as **maestro-working-principles** says for quoted text.
+   - The slugs are lowercase letters, digits and hyphens. Leave out `--deps` or `--goal` when empty, `--parked` unless the status is `backlog`, and `--tier` unless the role is `engineer`.
+   - A ticket that replaces a cancelled one (a re-file) gets `--split-from '<old id>'`, naming the newest cancelled ticket if that one was itself rewritten, so its tries carry over and `maestro-ticket costs` counts the old ticket's runs toward it. Never name one that already has a replacement: a second link makes it a split, and its runs stay on it. One made without it can be linked later with `maestro-ticket update '<new id>' --split-from '<old id>'`.
+   - A `hold` needs a note right after: comment `Hold: set by <the owner, or the bot>, <date>: <why>; lifts when <a fact the board shows>`, sent on stdin in a heredoc as the body was.
+   - If the store refuses, show its message, fix only the field it names, and run again with the same key. On `idempotency_conflict`, another ticket got this title today: read it; if it is this work and not `cancelled`, reply with its id, else change the title, and with it the key.
+
+**Reply:** the new id, title, status and its parked reason, tier, priority, goal, deps and areas, then `Next: /maestro-software-engineer <id>`.
