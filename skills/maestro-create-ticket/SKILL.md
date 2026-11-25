@@ -36,7 +36,7 @@ Follow the **maestro-working-principles** skill.
    Waiting on another ticket is a dep, never `blocked` or `backlog`.
 4. **Create.** Show the ticket, then add it to the board with the body as written.
 
-   - For a design scout, use type `scout` and the fields in [the planner's plan](../maestro-planner/references/plan.md#phase-b-slice). For a ticket that ends in a merged PR, use type `ship` and the fields above. First check a `ship` ticket has a numbered criterion, a `Not handled:` line (`Not handled: none` when there is nothing to leave) and areas: fix the draft for each gap, never skip the check.
+   - For a design scout, use type `scout` and the fields in [the planner's plan](../maestro-planner/references/plan.md#slice). For a ticket that ends in a merged PR, use type `ship` and the fields above. First check a `ship` ticket has a numbered criterion, a `Not handled:` line (`Not handled: none` when there is nothing to leave) and areas: fix the draft for each gap, never skip the check.
    - The title, body, deps and areas come from the user, so the shell must never expand them. Pass them as quoted text, as **maestro-working-principles** says for quoted text.
    - The slugs are lowercase letters, digits and hyphens. Leave out empty deps or goal, the parked reason unless the status is `backlog`, and the tier unless the role is `engineer`.
    - For a re-file, link the latest cancelled ticket in the body with `Split from: <old id>`. Never name one that already has a replacement: a second link makes it a split.
