@@ -9,8 +9,6 @@ disable-model-invocation: true
 
 At the start of each run, call `take` in [prune-lock.sh](../maestro-prune/scripts/prune-lock.sh), passing your Claims holder on each call. On `run`, follow [maestro-prune](../maestro-prune/SKILL.md) with `--safe-only`, then call `done` on success or `release` on failure, including a failed `done`.
 
-On T3, plan from the accepted brief revision in the delivery. For each affected open ticket, add a note on the board with the brief revision, the current request ID, your rationale and a disposition of `fits`, `changed`, `deferred` or `replaced`. Supply the revised body for a change. Preserve saved work. Report material deviations, outcomes and unresolved product choices to the goal chief.
-
 Read code, run checks and write tickets. Leave the code as it is. Use **maestro-create-ticket** for one small ticket. Follow the **maestro-working-principles** skill.
 
 ## How you think
@@ -20,8 +18,8 @@ Read code, run checks and write tickets. Leave the code as it is. Use **maestro-
 
 ## Who you work for
 
-- The planner feeds hundreds of engineer sessions at once and runs many of you side by side on one board. What runs at the same time is set by your deps and areas, so plan for that.
-- Decide slicing, order, deps, areas and splits. Send changes to the goal, scope or priority, cuts to requested work, and plans that cost far more than expected to the chief of staff as `up:` lines.
+- Plan for many sessions on one board at once. Deps and areas set which tickets can run side by side.
+- Decide slicing, order, deps, areas and splits. Send changes to the goal, scope or priority, cuts to requested work, plans that cost far more than expected, and open product choices to the chief of staff as `up:` lines.
 
 ## Phase A: Pick the job
 
@@ -37,7 +35,7 @@ Pick the row that fits the request. For several, do them in table order and answ
 
 If no row fits, say what you can do and stop.
 
-Before a job's first ticket write, check open claims. Free a claim as **Claims** says if the board or launcher shows the worker's run ended, or 24 hours have passed since the latest claim, ticket comment, status change or commit on its branch. Return the ticket to its queue for the same stage and post who held the claim and why you freed it. Report any release you could not make safely.
+Before a job's first ticket write, check open claims. Free a claim as **Claims** says if the board shows the worker's run ended. Return the ticket to its queue for the same stage and post who held the claim and why you freed it. Report any release you could not make safely.
 
 ## Phase B: Check a plan
 
@@ -53,7 +51,7 @@ Before a job's first ticket write, check open claims. Free a claim as **Claims**
 
 ## Phase D: Answer a question
 
-1. Find out from the repo, not memory: search and read the code, run the app on the main branch.
+1. Find out from the repo, not memory: search and read the code. Run the app on the main branch if the code leaves the answer open.
 2. Answer in a sentence or two, then the evidence: paths with line numbers, commands with exit codes.
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 

@@ -37,4 +37,4 @@ Skip this phase unless you split or rewrote a ticket.
 
 ## Reply
 
-The spec in five lines or fewer, then one line per ticket (`<id> <title> [status, tier, priority, deps with the code each is for, areas]`, or the full draft if you created nothing), the old ticket's new status and each dependent moved, how many new tickets can start now and the longest dep chain, then `Start now: <ids> | none`, the one most tickets wait on first, for the planner to hand to its engineers.
+The spec in five lines or fewer, then one line per ticket (`<id> <title> [status, tier, priority, deps with the code each is for, areas]`, or the full draft if you created nothing), the old ticket's new status and each dependent moved, how many new tickets can start now and the longest dep chain, then `Start now: <ids> | none`, the one most tickets wait on first.

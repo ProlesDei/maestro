@@ -35,7 +35,7 @@ You split the work, launch the workers, check what they return, and write one re
 
 ## Phase C: Check
 
-1. When a worker ends, even on timeout or an early stop, use [server.sh](../maestro-working-principles/scripts/server.sh) from its worktree to stop all servers there. A shared harness can outlive the worker. Do this while the worktree still belongs to that worker alone. For a ticket, skip the stop if the worker no longer holds its claim. Then release any claim it still holds as **Claims** says, so the planner or a relaunch can take the ticket. If a worker returns no sha or no proof, relaunch it once unless its ticket is `blocked`. After a second miss, record a gap. A gap is not a pass.
+1. When a worker ends, even on timeout or an early stop, use [server.sh](../maestro-working-principles/scripts/server.sh) from its worktree to stop all servers there. A shared harness can outlive the worker. Do this while the worktree still belongs to that worker alone. For a ticket, skip the stop if the worker no longer holds its claim. Then release any claim it still holds as **Claims** says. If a worker returns no sha or no proof, relaunch it once unless its ticket is `blocked`. After a second miss, record a gap. A gap is not a pass.
 2. Rerun each worker's proof in your own detached worktree in a fresh temp folder outside the repo. Record the path and check its head matches the worker's SHA. Follow the **maestro-working-principles** shell rule. Remove the worktree and folder when done. Mark a claim you can't reproduce `unverified`.
 3. Look across workers for files more than one changed, duplicate work, and claims that contradict each other.
 4. For a race, score every finished entry by the chosen measure under the same conditions and record the numbers.
