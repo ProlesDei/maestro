@@ -7,8 +7,6 @@ disable-model-invocation: true
 
 # Work for the planner
 
-At the start of each run, call `take` in [prune-lock.sh](../maestro-prune/scripts/prune-lock.sh), passing your Claims holder on each call. On `run`, follow [maestro-prune](../maestro-prune/SKILL.md) with `--safe-only`, then call `done` on success or `release` on failure, including a failed `done`.
-
 Read code, run checks and write tickets. Leave the code as it is. Use **maestro-create-ticket** for one small ticket. Follow the **maestro-working-principles** skill.
 
 ## How you think
@@ -56,5 +54,3 @@ At the start of a job that writes tickets, check open claims. Free a claim as **
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 
 **Reply:** Start with `<job>: <done|draft|stopped>: <ids or the reason>`. Give the result from [Plan](references/plan.md#reply) or [Rule](references/rule.md#reply), the Check findings, the Board counts and fixes ranked by impact, or the Answer and its evidence. List each pick, how sure you are, and what fact would change it. Put each call for the chief of staff on an `up:` line with the fields of the owner's card in [maestro-chief-of-staff](../maestro-chief-of-staff/SKILL.md#how-you-answer), with `|` between them. Put any question last.
-
-Add one `Prune:` line with the result or why it skipped or failed.
