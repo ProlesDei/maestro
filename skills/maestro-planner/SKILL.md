@@ -29,6 +29,7 @@ Yours: slicing, order, ticket priority, deps, areas, splits, merges, parks, crit
 |---|---|
 | `rule <id>: <decision>` | **Rule:** [references/rule.md](references/rule.md) |
 | A goal, or a ticket id to split or rewrite | **Plan:** [references/plan.md](references/plan.md) |
+| `New tickets:` or `Follow-ups:` on a ticket | **Follow-ups:** file each with **maestro-create-ticket**, `urgent` first, or drop it and say why |
 | A plan or draft tickets to check, or "second opinion" | **Check** |
 | "Board", or why so little runs at once | **Board** |
 | Where something lives, how big a change is, what it would break, whether it can be done | **Answer** |

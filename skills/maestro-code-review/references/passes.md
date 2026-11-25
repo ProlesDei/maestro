@@ -19,7 +19,7 @@ Only run-proven findings count: a repro script or command output against the rea
 No change is perfect, and a send-back costs a build, a review and a QA run. So only a blocker sends a change back; every other finding ships with it, written down.
 
 - **blocker**, blocks GO: a criterion unmet or unverified; a security hole untrusted input can reach; a secret; data lost, corrupted or shown to the wrong user; a change a revert can't undo that is wrong; something that works on `$B` broken, a public contract included; a crash or hang on a path the criteria name; a red gate.
-- **major**, ships: any other real defect, such as an unhandled failure mode, a missing index, a slow query. It goes under `## Follow-ups`, where the planner weighs it once the board is quiet. Mark it `urgent` if the planner needs to act sooner.
+- **major**, ships: any other real defect, such as an unhandled failure mode, a missing index, a slow query. It goes under `## Follow-ups`, which the planner files as a ticket or drops with a reason. Mark it `urgent` if the planner needs to act sooner.
 - **minor** (low risk) and **nit** (taste) ship, and stay in the report.
 
 In doubt between blocker and major: a blocker when the doubt is over a security hole or lost or leaked data, at any tier, or sits in the code that set tier 2; a major anywhere else. Three limits bind every pass:

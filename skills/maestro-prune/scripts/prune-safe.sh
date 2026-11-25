@@ -86,6 +86,11 @@ files_label() {
 	done < <(git -C "$1" --no-optional-locks status --porcelain -z --ignored=matching 2>/dev/null || printf 'XX\0')
 }
 
+closed_pushed() {
+	git merge-base --is-ancestor "$2" "refs/remotes/origin/$1" 2>/dev/null && command -v gh >/dev/null 2>&1 &&
+		[[ $(gh pr list --head "$1" --state all --json state --jq '.[0].state // ""' 2>/dev/null) == CLOSED ]]
+}
+
 freed=''
 check_worktree() {
 	local wt=$1 branch=$2 flags=$3 real head gd label err
@@ -95,7 +100,7 @@ check_worktree() {
 	real=$(cd -- "$wt" 2>/dev/null && pwd -P) || { kept "$wt" missing; return; }
 	[[ $real != "$own" ]] || { kept "$wt" own; return; }
 	head=$(git -C "$wt" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || { kept "$wt" unverified; return; }
-	git merge-base --is-ancestor "$head" "$tip" || { kept "$wt" unmerged; return; }
+	git merge-base --is-ancestor "$head" "$tip" || closed_pushed "${branch#refs/heads/}" "$head" || { kept "$wt" unmerged; return; }
 	[[ -n $cwds ]] || { kept "$wt" in-use-unknown; return; }
 	! in_use "$real" || { kept "$wt" in-use; return; }
 	gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || { kept "$wt" unverified; return; }

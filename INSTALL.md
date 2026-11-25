@@ -38,7 +38,16 @@ your-repo/
 
 **The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, a claim only one agent can hold at a time, and these fields: deps, areas, priority, goal and a parked reason for `backlog`, plus type (`ship` or `scout`), tier and route (`review` or `qa`), which the planner sets. GitHub Issues and Linear have no claim only one agent can hold, and every session posts as one account, so your agent notes must name one: a dispatcher that hands each ticket to one session, say, or a claim tool. A board kept in the repo's tracked files can't hold a claim across worktrees. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
 
-**Running the sessions** is yours: a dispatcher, a scheduler or a person. Apart from `maestro-swarm` for its own workers, Maestro's skills never start a session or free another's claim, so your outer layer must start the session each ticket's next step needs (the `Next:` or `Start now:` line of each reply names it), and free a claim once the session that held it ended.
+**Running the sessions** is yours: a dispatcher, a scheduler or a person. Apart from `maestro-swarm` for its own workers, Maestro's skills never start a session or free another's claim. Your outer layer frees a claim once the session that held it ended, and starts the next session from each ticket's state:
+
+| Ticket | Start |
+|---|---|
+| `todo` with every dep `done`, or `in_progress` with no claim | `maestro-software-engineer <id>`, or `maestro-designer design <id>` for a `Design:` scout |
+| `in_review`, route `qa` or a latest `Review: GO at` the PR's head | `maestro-qa-lead <id>` |
+| any other `in_review` | `maestro-code-review <id>` |
+| `blocked` | `maestro-chief-of-staff`, which sends the ruling to `maestro-planner rule <id>: <decision>` |
+
+A reply's `Next:`, `Start now:` and `up:` lines (`up:` goes to the chief of staff) say the same sooner.
 
 ## Install
 
