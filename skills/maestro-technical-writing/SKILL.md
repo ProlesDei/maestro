@@ -21,7 +21,7 @@ Write so a tired engineer gets it on the first read. Hand back the finished text
 | start using a project | README | what it is in one sentence, why to use it, a quickstart that works when pasted, links to the rest |
 | review a change | PR description | what changed, why, how you checked it (commands and results), the risk, what is out of scope |
 | trace the history | commit message | a subject of 72 characters or fewer that says what changed; a body wrapped at 72 that says why and what the diff can't show; no file list |
-| build something | ticket body | the goal, acceptance criteria someone can test, pointers by path; the **maestro-create-ticket** skill owns the full shape |
+| build something | ticket body | the goal, acceptance criteria someone can test, pointers by path; the **maestro-create-ticket** ([SKILL.md](../maestro-create-ticket/SKILL.md)) skill owns the full shape |
 
 ## Phase B: Write to the rules
 

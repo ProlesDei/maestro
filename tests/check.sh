@@ -51,6 +51,15 @@ for d in sorted(os.listdir('skills')):
     implicit_off = os.path.isfile(yaml) and 'allow_implicit_invocation: false' in open(yaml).read()
     if manual != implicit_off:
         print(f'FAIL {skill}: disable-model-invocation and openai.yaml allow_implicit_invocation disagree'); bad = 1
+manual = {d for d in os.listdir('skills') if os.path.isfile(os.path.join('skills', d, 'SKILL.md')) and 'disable-model-invocation: true' in open(os.path.join('skills', d, 'SKILL.md'), encoding='utf-8').read().split('---')[1]}
+for f in files:
+    if not f.startswith('skills/') or f == 'skills/README.md':
+        continue
+    text = open(f, encoding='utf-8').read()
+    own = f.split('/')[1]
+    for name in sorted(set(re.findall(r'\*\*(maestro-[a-z-]+)\*\*', text)) & manual - {own}):
+        if not re.search(r'\]\([^)]*' + re.escape(name) + r'/', text):
+            print(f'FAIL {f}: names manual-only {name} without a link into its folder'); bad = 1
 sys.exit(bad)
 EOF
 

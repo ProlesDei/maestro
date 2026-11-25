@@ -16,7 +16,7 @@ Turn one goal into tickets an engineer can finish without asking, or split one t
 4. Plan wide, not long. Add a dep only where a ticket needs another's code to build or run, and name that code in the body; set order with priority. Give tickets with no dep between them areas that don't overlap, here and on the board.
 5. Put every slice the goal needs in `todo`; park in `backlog` as `deferred` only work the plan leaves out. Put the check for behaviour that hurts users when wrong, such as charging the right amount, on the PR that changes it.
 6. Plan screens as engineer tickets, from an approved design when the goal names one. Add a design only when the owner asks, or you can name an open choice and the costly rework a wrong pick would cause: one `todo` ticket titled `Design: <slug>`, type `scout`, role `designer`, owner the planner, no areas, its body naming the audience, the routes or files and the reason. Plan the rest now; the owner's approval comes back as a rule.
-7. Draft each ship ticket in the shape **maestro-create-ticket** gives, with criteria that meet its rules and the ticket's share of the trade-offs as criteria and `Not handled:`. Pick tier and route for each, splits too, by its rules, and its default for any field you can't infer. Name each pick.
+7. Draft each ship ticket in the shape **maestro-create-ticket** ([SKILL.md](../../maestro-create-ticket/SKILL.md)) gives, with criteria that meet its rules and the ticket's share of the trade-offs as criteria and `Not handled:`. Pick tier and route for each, splits too, by its rules, and its default for any field you can't infer. Name each pick.
 8. With "draft", or a call for the chief of staff, create nothing: reply with the full drafts and the `up:` lines.
 
 ## Create

@@ -26,9 +26,9 @@ A skill is a folder with a `SKILL.md`. A harness reads only `name` and `descript
 
 1. Open with one or two sentences: the job, what it hands back, and the one thing it never does.
 2. Use `## Phase A: <verb>` headings for work in stages, or one numbered list. One imperative action per step. Use a table for choices. Say what to do. Give a shell command only when its exact flags keep work safe or it calls a script Maestro ships.
-3. Give each rule one home. Point to **maestro-working-principles** for session rules, **maestro-create-ticket** for ticket shape, and **maestro-chief-of-staff** for owner calls. Link only within the skill, to sibling skills, or to files in the repo that uses them.
+3. Give each rule one home. Point to **maestro-working-principles** for session rules, **maestro-create-ticket** ([SKILL.md](../maestro-create-ticket/SKILL.md)) for ticket shape, and **maestro-chief-of-staff** ([SKILL.md](../maestro-chief-of-staff/SKILL.md)) for owner calls. Link only within the skill, to sibling skills, or to files in the repo that uses them.
 4. Name the action, not the tool: "edit the file", not "use the Edit tool". Give a fallback for a feature one harness lacks, such as subagents or hooks.
-5. Keep `SKILL.md` under 60 lines. **maestro-code-review** is the exception. Move long detail to `references/<file>.md` and say when to read it. Check every link resolves.
+5. Keep `SKILL.md` under 60 lines. **maestro-code-review** ([SKILL.md](../maestro-code-review/SKILL.md)) is the exception. Move long detail to `references/<file>.md` and say when to read it. Check every link resolves.
 6. Put scripts in `scripts/`, in plain Bash with no agent APIs.
 7. End with a bold `**Reply:**` line naming the parts of the answer in order. Put a long report shape in a fenced block above it.
 8. Write in plain words per the **maestro-technical-writing** skill ([SKILL.md](../maestro-technical-writing/SKILL.md)).
