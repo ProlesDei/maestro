@@ -58,7 +58,7 @@ The script places only `maestro-*` skills, their links and its own files in `.ma
 
 If it fails or you stop it (Ctrl-C) partway, it puts every file back as it was.
 
-Then add your agent notes (next section) and commit both to your default branch together. Each ticket runs in its own git worktree, which holds only committed files.
+Then add your agent notes (next section) and commit both to your default branch together. First exclude `.maestro/`, `.claude/skills/maestro-*` and `.agents/skills/maestro-*` from formatters and pre-commit hooks: prettier and the like rewrite the skills' tables, and every later update then refuses. Each ticket runs in its own git worktree, which holds only committed files.
 
 ## Tell the agents about your project
 
@@ -105,7 +105,7 @@ bash .maestro/install.sh
 
 It fetches Maestro's latest `main` (or `--ref`), replaces only what it placed, removes what Maestro dropped, and stages the change. Open a PR for it like any other change, so sessions working elsewhere never see files mid-swap. If `.maestro/install.sh` ever breaks, the install one-liner does the same update with the newest installer.
 
-Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Exclude them from formatters and pre-commit hooks too: prettier and the like rewrite the skills' tables and block the next update. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
+Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Keep them out of formatters and pre-commit hooks, as Install says. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
 
 ## Uninstall
 

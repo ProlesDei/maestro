@@ -20,7 +20,7 @@ You split the work, launch the workers, check what they return, and write one re
    | Race (`--race`): one task, rival approaches | Before any worker starts, name each approach and the benchmark, output or rule that picks the winner. |
 
 3. Set N: 3 by default, 8 at most. Say the cost before you start: workers times the expected session size.
-4. If the slices are Maestro tickets, give each worker one ticket id whose role is `engineer`; a `Design:` scout is the designer's. It claims the ticket on the ticket board, as the **maestro-working-principles** skill says.
+4. If the slices are Maestro tickets, give each worker one ticket id whose role is `engineer` or unset; a `Design:` scout is the designer's. It claims the ticket on the ticket board, as the **maestro-working-principles** skill says.
 
 ## Phase B: Launch
 

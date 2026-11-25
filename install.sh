@@ -139,7 +139,7 @@ check_untouched() {
     rmcmd="git rm -rfq --ignore-unmatch .maestro/skills/maestro-* .maestro/install.sh $manifest .maestro/VERSION .maestro/.gitattributes"
     for h in $harnesses; do rmcmd="$rmcmd $h/maestro-*"; done
     [ -z "$linked" ] || rmcmd="$rmcmd; mkdir -p $harnesses"
-    die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run $rmcmd $next"
+    die "undo those changes, then run this again. If you committed them (a formatter or pre-commit hook rewrote files, say), first exclude .maestro/, .claude/skills/maestro-* and .agents/skills/maestro-* from it, then run $rmcmd $next"
   fi
   { echo "$manifest"; cat "$stage/old-units"; } | tr '\n' '\0' > "$stage/specs"
   changed=$({
