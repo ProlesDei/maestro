@@ -162,7 +162,7 @@ if [[ -d $ev && ! -L $common/maestro && ! -L $ev ]] && compgen -G "$ev/pr-*" >/d
 				MERGED | CLOSED) ;;
 				*) kept "$dir" "pr-$state"; continue ;;
 			esac
-			recent=$(find "$dir" -mmin -60 -print -quit 2>/dev/null) || { kept "$dir" unverified; continue; }
+			recent=$(find "$dir" -mmin -10080 -print -quit 2>/dev/null) || { kept "$dir" unverified; continue; }
 			[[ -z $recent ]] || { kept "$dir" recent; continue; }
 			if [[ -n $dry ]]; then
 				remove_line evidence "$dir"

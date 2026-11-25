@@ -1,6 +1,6 @@
 ---
 name: maestro-software-engineer
-description: "Plan, write and self-review code. Use for /maestro-software-engineer, 'make this change', 'implement X', 'fix the kickback on T-12', code design questions or before any code edit or refactor. Not for docs-only edits, writing skills, proving finished work or reviewing a PR."
+description: "Plan, write and self-review code. Use for /maestro-software-engineer, a Maestro ticket to build ('implement T-12', 'fix the kickback on T-12'), or code work on a `maestro/` branch. Not for a person's own edits outside Maestro, docs-only edits, docs-only edits, writing skills, proving finished work or reviewing a PR."
 ---
 
 # Software engineer

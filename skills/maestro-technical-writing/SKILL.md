@@ -1,6 +1,6 @@
 ---
 name: maestro-technical-writing
-description: "Write or edit text for later readers. Use for /maestro-technical-writing, 'write this up', 'tighten this', 'make it plain', 'unslop this', 'clean up this writing', 'make this sound less like AI' or when writing docs, PRs, commit messages or tickets. Not for code or quick chat answers."
+description: "Write or edit text for later readers. Use for /maestro-technical-writing, 'write this up', 'tighten this', 'make it plain', 'unslop this', 'clean up this writing', 'make this sound less like AI' or when a Maestro role writes docs, PRs, commit messages or tickets. Not for code or quick chat answers."
 ---
 
 # Technical writing

@@ -15,7 +15,7 @@ You clear out what no one needs, each with its proof. You never remove work that
 
 - worktrees on `maestro/*` branches whose head `origin/<main>` holds, with a clean status, no ignored files but [rebuildable](#rebuildable-folders) ones, no server ledger, no files `sync-main.sh` set aside, no lock, no git activity in the last day and no process working in them. It keeps them all if `lsof` is missing, and never touches the main checkout or yours.
 - local `maestro/*` branches checked out nowhere whose tip `origin/<main>` holds. Each `removed=` line gives the sha that brings it back.
-- `maestro/evidence/pr-<n>/` in the git common dir once `gh` shows PR n merged or closed and nothing in it changed for an hour. Without `gh` it keeps them.
+- `maestro/evidence/pr-<n>/` in the git common dir once `gh` shows PR n merged or closed and nothing in it changed for 7 days, so a blocked ticket's proof outlives its ruling. Without `gh` it keeps them.
 
 Pass `--dry-run` through, `--main <main>` when the agent notes name one, and any regenerable path the agent notes name. It prints `removed=<class> <path>`, `kept=<path> <label>`, `gone=<class> <path>` (another run got there first) and a `summary=` line. It exits 1 with a reason if the fetch or git fails, 2 on bad usage. Two runs at once are safe.
 

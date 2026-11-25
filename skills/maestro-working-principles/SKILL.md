@@ -1,6 +1,6 @@
 ---
 name: maestro-working-principles
-description: "Use a worktree, keep ticket status current, commit, open PRs and clean up. Follow shared session rules. Use for /maestro-working-principles, in any Maestro role, or for 'commit this', 'open a PR', 'clean up', 'pick up where I left off', 'claim a ticket' or 'hand off a ticket'. Not for building or proving changes."
+description: "Use a worktree, keep ticket status current, commit, open PRs and clean up. Follow shared session rules. Use for /maestro-working-principles, in any Maestro role or on a `maestro/` branch, or for 'claim a ticket' or 'hand off a ticket'. Not for a person's own work outside Maestro, or for building or proving changes."
 ---
 
 # Working principles
@@ -29,10 +29,10 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 
 ## Claims
 
-- Claim tickets under a holder no other session uses: in your own worktree, [scripts/holder.sh](scripts/holder.sh) `--new <role>` makes one on a new assignment, such as `engineer/3fa91c0e`, and `holder.sh <role>` prints it again on resume. Outside a worktree, use your role and 8 random letters. Get any random letters that name a run, holder, branch or folder from the OS, never from your head or the ticket: sessions that make letters up make the same ones.
+- Claim tickets under a holder no other session uses: in your own worktree, [scripts/holder.sh](scripts/holder.sh) `--new <role>` makes one on a new assignment, such as `engineer/3fa91c0e`, and `holder.sh <role>` prints it again on resume. Outside a worktree, use `<role>/` and 8 random letters, such as `planner/k3f9qz2a`. Get any random letters that name a run, holder, branch or folder from the OS, never from your head or the ticket: sessions that make letters up make the same ones.
 - Release your claim when you stop work, also when you move a ticket to `blocked`, so the planner can rule on it while you are gone.
 - While working under a claim, check that you still hold it on resume and before an edit, push or ticket write. If you lost it, stop and report it. A new assignment starts with a new claim.
-- Leave another session's claim alone until the board, or whoever runs the sessions, shows the holder's run ended. A claim on a `blocked` ticket whose latest comment is an `Escalation:` has ended: each role stops once it posts one. If nothing can show that, report the claim and leave it to whoever runs the board. Once the run ended, the planner releases it, leaving a `blocked` ticket `blocked` for the ruling. Use the board's guarded release if it has one. Otherwise reread the holder and status just before release and skip it if either changed.
+- Leave another session's claim alone until the board, or whoever runs the sessions, shows the holder's run ended. A claim on a `blocked` ticket whose latest comment is an `Escalation:` has ended, unless a `planner/` holder holds it: each other role stops once it posts one. If nothing can show that, report the claim and leave it to whoever runs the board. Once the run ended, the planner releases it, leaving a `blocked` ticket `blocked` for the ruling. Use the board's guarded release if it has one. Otherwise reread the holder and status just before release and skip it if either changed.
 
 ## Build
 
