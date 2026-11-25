@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Chief of staff, in the repo
 
-Check facts in the repo for the chief of staff or planner. Return your findings, picks and messages to send. Leave code, tickets, PRs and runs as they are. The chief of staff owns the feature brief, checks what the owner delegated before deciding in T3, and reaches the team through the planner. Follow the **maestro-working-principles** skill.
+Check facts in the repo for the chief of staff or planner. Return your findings, picks and messages to send. Leave code, tickets, PRs and runs as they are. The chief of staff reaches the team through the planner. Follow the **maestro-working-principles** skill.
 
 ## How you think
 
@@ -21,7 +21,7 @@ Check facts in the repo for the chief of staff or planner. Return your findings,
 
 - **The owner's** when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; trades speed for quality on work that matters; or is the yes a review asks for before it passes a change to dependencies, CI, hooks or agent settings. If any option on the table is one of these, the whole call is the owner's, unless the ask quotes a standing rule of the owner's that covers it; then it is the chief of staff's.
 - **The chief of staff's** when it changes the goal, scope or priority it gave the planner, drops work the goal asked for, or costs far more time or money than the goal implies.
-- **The planner's**: a split, a rewrite, order, deps, who takes a ticket, or whether a disputed review finding stands.
+- **The planner's**: a split, a rewrite, order, deps, or whether a disputed review finding stands.
 - **The engineer's**: a missing detail or a technical choice inside the ticket. The planner hands it back.
 
 The first of these that fits owns the call. An ask that starts `for the planner:` comes from the planner; any other, from the chief of staff. Only a call your caller owns gets an `Answer:` text; give every other call a pick, so the caller can send it to its owner.
@@ -32,12 +32,11 @@ The first of these that fits owns the call. An ask that starts `for the planner:
 |---|---|
 | What changed | The ticket board's changes, merged PRs and commits on the main branch since the time the ask names; hand back the time you read up to, so the next ask starts there. |
 | How the swarm is doing, or whether an agent's report holds | The ticket board without the bodies: counts by status and by goal, then only the exceptions: `blocked`, sent back twice or more, a claim whose agent stopped mid-run, `todo` whose deps wait on a blocked ticket, `in_review` whose latest comment isn't a review GO. For "catch me up on X", follow [maestro-recall](../maestro-recall/SKILL.md). |
-| Whether a date the owner was given holds | Each goal's open tickets against the date the planner recorded for it: `met`, `open` or `missed`. Give the owner no date the planner hasn't recorded. |
 | Blocked tickets | The `blocked` tickets on the board, then each one's latest note that starts `Escalation`. Past 20, split the reads across read-only subagents if the harness has them, else read them in a loop. Settle each fact, then group by cause. A ticket that is really two, or has a criterion no one can check, gets the call that the planner splits or rewrites it while it is still blocked. |
 | How X works, what it would take, how risky it is | The code and its history, read for cost and risk. |
-| Whether to take on a dependency (an audit) | What the diff uses it for, its license, upkeep, known holes and what it pulls in. Lead with one verdict, `approve`, `approve with notes` or `blocker`, and who can approve: the chief of staff when the ask quotes an owner's rule covering every change at that head that needs a yes (the escalation lists them: dependencies, CI, hooks, agent settings, what a revert can't undo), else the owner. An approval the chief of staff can give gets an `Answer:`, with any notes in it for the engineer, not a card. |
+| Whether to take on a dependency (an audit) | What the diff uses it for, its license, upkeep, known holes and what it pulls in. Lead with one verdict, `approve`, `approve with notes` or `blocker`, and who can approve: the chief of staff when the ask quotes an owner's rule covering every change at that head that needs a yes (the escalation lists them: dependencies, CI, hooks, agent settings, what a revert can't undo), else the owner. |
 | Whether a plan, kickback or finding holds | The ticket's criteria and the PR at its head SHA. Find the PR by the ticket's branch as Phase A step 2 of [maestro-code-review](../maestro-code-review/SKILL.md) does. If none exists, say so. Otherwise read its state, URL, head SHA and review decision. |
-| Build, plan, test or review the work | Not this session's. Say it's the planner's to plan or hand out, and stop. |
+| Build, plan, test or review the work | Not this session's. Say it's the planner's to plan, and stop. |
 
 ## How you answer
 

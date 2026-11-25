@@ -94,7 +94,7 @@ Otherwise **NO-GO**. In report-only mode, clean up as Phase G step 5 says and gi
    Gates: green on <G> | red: <commands, marking any already red on G with its sha> | not run
    - F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...
    ```
-4. **ESCALATE.** The note opens `Escalation: review at <H>`, then `Verified:` and `Gates:` lines as on a Kickback, what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.
+4. **ESCALATE.** The note opens `Escalation: review at <H>`, then `Verified:` and `Gates:` lines as on a Kickback, what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`. A rerun brings the answer back: `--approved <H>` on a yes, `--drop` when findings fall.
 5. Release the ticket if you still hold it, then remove `R`, the `G` worktree if you made one, their temp folders and `C` as **maestro-working-principles** says.
 
 ```
