@@ -55,6 +55,6 @@ At the start of a job that writes tickets, check open claims. Free a claim as **
 2. Answer in a sentence or two, then the evidence: paths with line numbers, commands with exit codes.
 3. If the answer changes the plan (a piece is bigger, riskier, or already built), say how.
 
-**Reply:** Start with `<job>: <done|draft|stopped>: <ids or the reason>`. Give the result from [Plan](references/plan.md#reply) or [Rule](references/rule.md#reply), the Check findings, the Board counts and fixes ranked by impact, or the Answer and its evidence. List each pick, how sure you are, and what fact would change it. Put each call for the chief of staff on an `up:` line using the team's card format, with `|` between fields. Put any question last.
+**Reply:** Start with `<job>: <done|draft|stopped>: <ids or the reason>`. Give the result from [Plan](references/plan.md#reply) or [Rule](references/rule.md#reply), the Check findings, the Board counts and fixes ranked by impact, or the Answer and its evidence. List each pick, how sure you are, and what fact would change it. Put each call for the chief of staff on an `up:` line with the fields of the owner's card in [maestro-chief-of-staff](../maestro-chief-of-staff/SKILL.md#how-you-answer), with `|` between them. Put any question last.
 
 Add one `Prune:` line with the result or why it skipped or failed.

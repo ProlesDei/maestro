@@ -246,7 +246,7 @@ n=$(printf '%s\n' "$dirs" | grep -c .)
 		echo "Default: $pick."
 	fi
 	echo "Question: Build direction $pick? Answer approved: $pick, which takes the defaults above, or changes: <what to change, or another direction's letter>. Shots: $pr"
-	echo "Return-role: designer"
+	echo "Blocked-from: in_progress"
 } >"$dir/card.txt"
 {
 	echo "Design spec: PR $pr at $sha"
