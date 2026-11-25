@@ -1,6 +1,6 @@
 ---
 name: maestro-prove-complete
-description: "Prove each acceptance criterion on running code at one commit. Use for /maestro-prove-complete, 'is it done?', 'prove it works' or before calling work done. Not for fixing failures."
+description: "Prove each acceptance criterion on running code at one commit. Use for /maestro-prove-complete, 'is it done?' or 'prove it works' on Maestro work, or when the agent notes say engineers prove their own. Not for a person's own work outside Maestro, an engineer handing off to QA, or fixing failures."
 ---
 
 # Prove it's complete
