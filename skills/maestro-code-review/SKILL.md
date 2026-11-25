@@ -46,7 +46,7 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it fails the same way in a second detached worktree at `G`. Mark those gates as already red on `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
+1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it fails the same way in a second detached worktree at `G`. One that goes green on a rerun at `H` runs 3 times at `G`: red in any of them makes it already red on `G`, an `urgent` follow-up for a flaky check, not this PR's blocker. Mark those gates as already red on `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
 2. Read the PR's checks for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
@@ -60,7 +60,7 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 Majors, minors and nits never hold a GO.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
-- it would be GO but needs the owner's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
+- it would be GO but needs the owner's yes: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion); and `--approved` doesn't name `H`, nor did an `Answer:` give that yes at an earlier head in `H`'s history whose later changes by the author touch none of these (cite it);
 - a gate needs an outside step that isn't done (Phase A step 3);
 - every surviving blocker was raised in an earlier review `Kickback:` (not QA's), and either the author disputes it in the `Handoff:` since or review raised it at two different shas, and `--drop` names none of them: the planner settles a dispute, so a repeat Kickback would loop. List each with the author's answer and your evidence.
 

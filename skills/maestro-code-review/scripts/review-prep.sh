@@ -170,6 +170,12 @@ maestro/*)
 '#'[0-9]* | [0-9]*)
 	pr=${target#'#'}
 	[[ $pr =~ ^[0-9]+$ ]] || die 2 "$target is no PR number"
+	if ! gh pr view "$pr" --json number >/dev/null 2>&1; then
+		want=maestro/$pr
+		pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$want&state=all&per_page=1" --jq '.[0].number // empty') ||
+			die 1 "gh couldn't read PR $target or list the PRs of $want"
+		[ -n "$pr" ] || die 3 "no PR from $want"
+	fi
 	;;
 *) die 2 "want a PR number or maestro/<name>, not $target" ;;
 esac
