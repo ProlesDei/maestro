@@ -32,7 +32,7 @@ if [[ $remote != "$tested_base" ]]; then
 	git fetch -q origin "$remote" 2>/dev/null && git merge-base --is-ancestor "$tested_base" "$remote" &&
 		ours=$(gd "$tested_base...$head") && theirs=$(gd "$tested_base" "$remote") ||
 		die 3 "base $base moved since QA pass: $remote, and git couldn't compare it"
-	both=$(LC_ALL=C comm -12 <(LC_ALL=C sort <<<"$ours") <(LC_ALL=C sort <<<"$theirs") | head -n 3 | paste -sd, -)
+	both=$(LC_ALL=C comm -12 <(LC_ALL=C sort <<<"$ours") <(LC_ALL=C sort <<<"$theirs") | sed -n 1,3p | paste -sd, -)
 	[[ -z $both ]] || die 3 "base $base moved since QA pass: $remote changes $both"
 fi
 out=$(gh pr merge "$pr" --merge --match-head-commit "$head" 2>&1) || true

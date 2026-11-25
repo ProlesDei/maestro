@@ -101,6 +101,7 @@ check_worktree() {
 	gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || { kept "$wt" unverified; return; }
 	[[ ! -s $gd/maestro/servers ]] || { kept "$wt" servers; return; }
 	! compgen -G "$gd/maestro/saved.*" >/dev/null || { kept "$wt" saved; return; }
+	[[ -z $(find "$gd/maestro" -maxdepth 1 -name holder -mmin -10080 -print -quit 2>/dev/null) ]] || { kept "$wt" claimed; return; }
 	[[ -z $(find "$gd" -maxdepth 1 -type f -mmin -1440 -print -quit 2>/dev/null) ]] || { kept "$wt" recent; return; }
 	label=$(files_label "$wt")
 	[[ -z $label ]] || { kept "$wt" "$label"; return; }
@@ -109,7 +110,7 @@ check_worktree() {
 		freed+="$branch"$'\n'
 	elif err=$(git worktree remove "$wt" 2>&1); then
 		remove_line worktree "$wt"
-	elif ! git worktree list --porcelain | grep -qxF "worktree $wt"; then
+	elif ! grep -qxF "worktree $wt" <<<"$(git worktree list --porcelain)"; then
 		gone worktree "$wt"
 	else
 		kept "$wt" "refused: $(head -n 1 <<<"$err")"
