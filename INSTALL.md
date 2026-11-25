@@ -44,8 +44,8 @@ your-repo/
 - runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then); a `maestro-chief-of-staff <id>` line runs naming each card still waiting on the owner, as the `blocked` row says;
 - sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names;
 - shows each owner's card to the owner. When the owner picks an option, runs its decision for each id on the card's `Tickets` (the owner's own words as `maestro-planner rule <id>: <answer>` if no option fits). For a plan that created no ticket, reruns that planner call with `; owner ruled: <answer>` added. A `joins <What>` reply adds its tickets to that card, so the picked decision runs for them too;
-- reruns a run after 15 minutes when it ended with no reply, or left its ticket's status and notes as they were with no `Next:` line (a full disk, GitHub down, a stopped ruling), and tells the owner after 3 tries. A chief-of-staff run never counts: it writes nothing by design;
-- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves:
+- reruns a run after 15 minutes when it ended with no reply, or left its ticket's status and notes as they were with no `Next:` line or with `Next: none` (a full disk, GitHub down, a stopped ruling), and tells the owner after 3 tries. A chief-of-staff run never counts: it writes nothing by design;
+- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves, unless the run left it as it was (the rule above applies):
 
 | Ticket | Start |
 |---|---|
