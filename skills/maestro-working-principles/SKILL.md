@@ -29,7 +29,7 @@ Work in your own worktree, make small checked commits, and open a PR for review 
 
 ## Claims
 
-- Claim tickets under a holder no other session uses: in your own worktree, [scripts/holder.sh](scripts/holder.sh) `<role>` prints it, the same one on resume, such as `engineer/3fa91c0e`. Outside a worktree, use your role and 8 random letters. Get any random letters that name a run, holder, branch or folder from the OS, never from your head or the ticket: sessions that make letters up make the same ones.
+- Claim tickets under a holder no other session uses: in your own worktree, [scripts/holder.sh](scripts/holder.sh) `--new <role>` makes one on a new assignment, such as `engineer/3fa91c0e`, and `holder.sh <role>` prints it again on resume. Outside a worktree, use your role and 8 random letters. Get any random letters that name a run, holder, branch or folder from the OS, never from your head or the ticket: sessions that make letters up make the same ones.
 - Release your claim when you stop work. Keep a `blocked` ticket's claim while its question waits, so whoever started you can answer first.
 - While working under a claim, check that you still hold it on resume and before an edit, push or ticket write. If you lost it, stop and report it. A new assignment starts with a new claim.
 - Leave another session's claim alone until the board, or whoever runs the sessions, shows the holder's run ended. If nothing can show that, report the claim and leave it to whoever runs the board. Once the run ended, the planner releases it, leaving a `blocked` ticket `blocked` for the ruling. Use the board's guarded release if it has one. Otherwise reread the holder and status just before release and skip it if either changed.
