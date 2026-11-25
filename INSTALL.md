@@ -40,10 +40,10 @@ your-repo/
 
 **Running the sessions** is yours: a dispatcher, a scheduler or a person. Apart from `maestro-swarm` for its own workers, Maestro's skills never start a session or free another's claim. Your outer layer:
 
-- frees a claim once the session that held it ended;
+- frees a claim once the session that held it ended, and at once a claim on a `blocked` ticket whose latest comment is an `Escalation:`, unless a `planner/` holder holds it;
 - runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then);
-- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names; shows its owner's card to the owner, and runs the owner's answer as `maestro-planner rule <id>: <answer>`;
-- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves:
+- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names; shows its owner's card to the owner, and runs the owner's answer as `maestro-planner rule <id>: <answer>`, or, for a plan that created no ticket, reruns that planner call with `; owner ruled: <answer>` added;
+- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves. Wait 15 minutes before starting a ticket again when its last run left its status and notes as they were (a full disk, GitHub down):
 
 | Ticket | Start |
 |---|---|
@@ -107,7 +107,7 @@ Call each skill by name: `/maestro-planner` in Claude Code, `$maestro-planner` i
 
 `maestro-chief-of-staff` checks facts and weighs calls for you along the way; it doesn't start work. [skills/README.md](skills/README.md) lists every skill.
 
-Merged worktrees, branches and QA evidence pile up across a swarm. Run `maestro-prune --safe-only` on a schedule, daily say, from your own scheduler or by hand: it removes only what is merged and idle.
+Merged worktrees, branches and QA evidence pile up across a swarm. Run `maestro-prune --safe-only` on a schedule, daily say, from your own scheduler or by hand: it removes only what is merged and idle. Run `maestro-planner board` on the same schedule: it lifts holds whose fact came true and finishes splits and drops that waited on another session.
 
 ## Update
 

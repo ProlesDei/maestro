@@ -85,7 +85,7 @@ Verify the requested outcome on the PR head merged with main. A pass merges the 
    New tickets: <problems outside the verdict, worst first | none>
    ```
 
-   A fail opens `Kickback: QA fail at <H> (PR <url>), tier <n>, on <main> at <G>` instead: every send-back, review's or yours, is a `Kickback:`.
+   If a failing item also failed in an earlier `Kickback: QA fail` at another sha, post `Escalation: QA at <H>: <item> failed again` with a last line `Blocked-from: in_review` instead, so the planner rules before another round. A fail opens `Kickback: QA fail at <H> (PR <url>), tier <n>, on <main> at <G>` instead: every send-back, review's or yours, is a `Kickback:`.
 
 5. A fail's note sent the ticket back: do Phase F step 5. On a pass, go on to Phase F.
 
