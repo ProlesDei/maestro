@@ -32,6 +32,14 @@ What we hold to:
 - Build for a swarm. Nothing collides by name (each ticket, or task with no ticket, gets its own worktree and branch; each session gets its own temp dir and port), output stays short enough to count and group, and every token multiplies by the sessions that run it.
 - Never cut a skill, role or diagram without the owner's yes.
 
+## Upgrades
+
+Teams update with `.maestro/install.sh` while tickets, PRs and comments from the old version are still open, so every change must upgrade cleanly:
+- What crosses versions is a contract: skill names, script arguments, printed keys and exit codes, note first lines (`Handoff:`, `Kickback:`, `Review: GO at`, `QA: pass at`, `Escalation:`, `Blocked-from:`, `Answer:`), `maestro/<id>` branches and ticket statuses. Change one only if the skills still read the old form while tickets made under it can be open, and say so in the PR.
+- The installer checks and removes only what the old manifest lists, and an old install runs the new `install.sh` before it checks anything. Keep `install.sh` and `skills/` at the repo root and the installer bash 3.2-safe. Bump the manifest's `format` line when its shape changes, and keep reading every older format.
+- A renamed skill is a drop plus an add: fix every link to the old name.
+- Say in each PR what a team must do after updating, or "nothing".
+
 ## Inspirations
 
 Two builders shape how Maestro works. Before you add a rule, see how they handle it.
