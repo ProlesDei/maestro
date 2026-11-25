@@ -41,10 +41,11 @@ fi
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "run this from inside your project's git repo"
 root=$(cd "$root" && pwd -P)
 cd "$root"
+linked=
 for link in .claude/skills .agents/skills; do
   for real in .agents/skills .claude/skills; do
     if [ "$link" != "$real" ] && [ -L "$link" ] && [ -d "$real" ] && [ ! -L "$real" ] &&
-      [ "$(cd "$link" && pwd -P)" = "$(cd "$real" && pwd -P)" ]; then harnesses=$real; fi
+      [ "$(cd "$link" && pwd -P)" = "$(cd "$real" && pwd -P)" ]; then harnesses=$real linked=$link; fi
   done
 done
 [ "$is_source" = true ] && [ "$here" = "$root" ] && die "run this from your project's repo, not from the Maestro clone"
@@ -168,7 +169,7 @@ if [ -e .maestro ]; then
   bad=$(awk -F'\t' '$1=="d"{p=$2} $1=="f"||$1=="l"{p=$3} $1!~/^[dfl]$/{next}
     (p ~ /(^|\/)\.\.(\/|$)/ || p !~ /^(\.maestro\/|\.(claude|agents)\/skills\/maestro-)./) && n++ < 20 {print "  " p}' "$prev")
   [ -z "$bad" ] || die "$manifest names paths outside .maestro/, .claude/skills/maestro-* and .agents/skills/maestro-*; Maestro won't touch them:"$'\n'"$bad"
-  units "$prev" > "$stage/old-units"
+  units "$prev" | { if [ -n "$linked" ]; then grep -v "^$linked/" || true; else cat; fi; } > "$stage/old-units"
 elif [ "$mode" = uninstall ]; then
   die "no $manifest here; nothing Maestro placed to remove"
 else
@@ -213,7 +214,7 @@ clash=$(LC_ALL=C comm -13 "$stage/old-units" "$stage/new-units" | while IFS= rea
 done)
 [ -z "$clash" ] || die "these paths exist and Maestro didn't place them; rename or remove them first:"$'\n'"$clash"
 
-if [ -f "$index" ]; then cp "$index" "$stage/index"; fi
+if [ -f "$index" ]; then cp -p "$index" "$stage/index"; fi
 while IFS= read -r p; do
   if [ -e "$stage/new/$p" ] || [ -L "$stage/new/$p" ]; then echo "$p"; fi
 done < "$stage/all" > "$stage/incoming"
@@ -230,6 +231,7 @@ mv -- "$index_lock" "$index"
 finished=true
 index_lock=
 while IFS= read -r p; do
+  if [ -n "$linked" ] && [ "${p%/*}" = "$harnesses" ]; then continue; fi
   if [ ! -e "$p" ] && [ ! -L "$p" ]; then rmdir -p "${p%/*}" 2>/dev/null || true; fi
 done < "$stage/all"
 
