@@ -10,6 +10,7 @@ manifest=.maestro/manifest
 tab=$(printf '\t')
 
 die() { echo "maestro: $*" >&2; exit 1; }
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -44,19 +45,21 @@ cd "$root"
 
 index=$(git rev-parse --git-path index)
 stage=$(mktemp -d "$(git rev-parse --path-format=absolute --git-path maestro-stage.XXXXXX)")
+prev=$stage/prev-manifest
 index_lock=
 created=
-swapped=()
+finished=false
 
 cleanup() {
-  local status=$? p failed=false
-  if [ "$status" -ne 0 ]; then
-    for p in ${swapped[@]+"${swapped[@]}"}; do
-      rm -rf -- "$p" || { failed=true; continue; }
+  local p failed=false
+  if [ "$finished" = false ] && [ -f "$stage/incoming" ]; then
+    while IFS= read -r p; do
       if [ -e "$stage/old/$p" ] || [ -L "$stage/old/$p" ]; then
-        mv -- "$stage/old/$p" "$p" || failed=true
+        { rm -rf -- "$p" && mv -- "$stage/old/$p" "$p"; } || failed=true
+      elif [ ! -e "$stage/new/$p" ] && [ ! -L "$stage/new/$p" ] && grep -qxF -- "$p" "$stage/incoming"; then
+        rm -rf -- "$p" || failed=true
       fi
-    done
+    done < "$stage/all"
     for p in $created; do rmdir "$p" || failed=true; done
   fi
   if [ -n "$index_lock" ]; then rm -f "$index_lock"; fi
@@ -97,8 +100,8 @@ state() {
 
 snapshot() {
   {
-    awk -F'\t' '$1=="f"||$1=="l"{print $3}' "$manifest"
-    awk -F'\t' '$1=="d"{print $2}' "$manifest" | while IFS= read -r d; do
+    awk -F'\t' '$1=="f"||$1=="l"{print $3}' "$prev"
+    awk -F'\t' '$1=="d"{print $2}' "$prev" | while IFS= read -r d; do
       if [ -d "$d" ]; then find "$d" ! -type d; fi
     done
   } | LC_ALL=C sort -u | state | LC_ALL=C sort
@@ -114,7 +117,7 @@ present_only() {
 check_untouched() {
   local want=cat skip='' changed
   if [ "$mode" = uninstall ]; then want=present_only; skip=--diff-filter=d; fi
-  if ! diff <(grep "^[fl]$tab" "$manifest" | $want | LC_ALL=C sort) <(snapshot) > "$stage/diff"; then
+  if ! diff <(grep "^[fl]$tab" "$prev" | $want | LC_ALL=C sort) <(snapshot) > "$stage/diff"; then
     echo "maestro: these paths differ from what Maestro placed:" >&2
     grep '^[<>]' "$stage/diff" | cut -f3 | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
     die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run git rm -rfq .maestro .claude/skills/maestro-* .agents/skills/maestro-* and then the install one-liner in INSTALL.md"
@@ -144,14 +147,20 @@ stage_paths() {
 swap_path() {
   local p=$1
   if [ -e "$p" ] || [ -L "$p" ]; then mv -- "$p" "$stage/old/$p"; fi
-  swapped+=("$p")
   if [ -e "$stage/new/$p" ] || [ -L "$stage/new/$p" ]; then mv -- "$stage/new/$p" "$p"; fi
 }
 
 if [ -e .maestro ]; then
   [ -f "$manifest" ] || die ".maestro/ exists but Maestro didn't place it (no $manifest); move it aside first"
-  [ "$(head -n 1 "$manifest")" = "format 1" ] || die "$manifest isn't format 1, so a newer Maestro placed it; run the install one-liner in INSTALL.md, which runs the newest installer"
-  units "$manifest" > "$stage/old-units"
+  case $(head -n 1 "$manifest") in
+    "format 1") cp "$manifest" "$prev" ;;
+    format*) die "$manifest isn't format 1, so a newer Maestro placed it; run the install one-liner in INSTALL.md, which runs the newest installer" ;;
+    *) awk -F'\t' -v OFS='\t' '$1=="d"{$2=".maestro/skills/" $2} {print}' "$manifest" > "$prev" ;;
+  esac
+  bad=$(awk -F'\t' '$1=="d"{p=$2} $1=="f"||$1=="l"{p=$3} $1!~/^[dfl]$/{next}
+    (p ~ /(^|\/)\.\.(\/|$)/ || p !~ /^(\.maestro\/|\.(claude|agents)\/skills\/maestro-)./) && n++ < 20 {print "  " p}' "$prev")
+  [ -z "$bad" ] || die "$manifest names paths outside .maestro/, .claude/skills/maestro-* and .agents/skills/maestro-*; Maestro won't touch them:"$'\n'"$bad"
+  units "$prev" > "$stage/old-units"
 elif [ "$mode" = uninstall ]; then
   die "no $manifest here; nothing Maestro placed to remove"
 else
@@ -197,6 +206,9 @@ done)
 [ -z "$clash" ] || die "these paths exist and Maestro didn't place them; rename or remove them first:"$'\n'"$clash"
 
 if [ -f "$index" ]; then cp "$index" "$stage/index"; fi
+while IFS= read -r p; do
+  if [ -e "$stage/new/$p" ] || [ -L "$stage/new/$p" ]; then echo "$p"; fi
+done < "$stage/all" > "$stage/incoming"
 while IFS= read -r d; do
   mkdir -p "$stage/old/$d"
   if [ ! -d "$d" ]; then mkdir "$d"; created="$d $created"; fi
@@ -205,12 +217,13 @@ while IFS= read -r p; do swap_path "$p"; done < "$stage/all"
 
 GIT_INDEX_FILE="$stage/index" stage_paths < "$stage/all"
 cp -p "$stage/index" "$index_lock"
+trap '' INT TERM HUP
 mv -- "$index_lock" "$index"
-trap - EXIT
+finished=true
+index_lock=
 while IFS= read -r p; do
   if [ ! -e "$p" ] && [ ! -L "$p" ]; then rmdir -p "${p%/*}" 2>/dev/null || true; fi
 done < "$stage/all"
-rm -rf "$stage"
 
 if [ "$mode" = uninstall ]; then
   echo "maestro: removed and staged; commit to finish"

@@ -35,7 +35,7 @@ your-repo/
 | A ticket board the agents can reach | planning, claiming and tracking work |
 | Linux, macOS or WSL (Windows needs WSL for the symlinks) | the install |
 
-**The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, a claim only one agent can hold at a time, and these fields: deps, areas, priority and goal, plus type (`ship` or `scout`), tier and route, which the planner sets. A board kept in the repo's tracked files can't hold a claim across worktrees. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
+**The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, a claim only one agent can hold at a time, and these fields: deps, areas, priority, goal and a parked reason for `backlog`, plus type (`ship` or `scout`), tier and route, which the planner sets. A board kept in the repo's tracked files can't hold a claim across worktrees. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
 
 ## Install
 
@@ -51,8 +51,10 @@ The script places only `maestro-*` skills, their links and the files in `.maestr
 - a path it would place already exists and it didn't place it;
 - `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink;
 - a file it placed has changed since the last install, or has staged changes;
-- `.maestro/manifest` comes from a newer Maestro;
+- `.maestro/manifest` comes from a newer Maestro, or names a path outside `.maestro/`, `.claude/skills/maestro-*` and `.agents/skills/maestro-*`;
 - git is busy (`index.lock` exists).
+
+If it fails or you stop it (Ctrl-C) partway, it puts every file back as it was.
 
 Then add your agent notes (next section) and commit both to your default branch together. Each ticket runs in its own git worktree, which holds only committed files.
 

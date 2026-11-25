@@ -36,7 +36,7 @@ What we hold to:
 
 Teams update with `.maestro/install.sh` while tickets, PRs and comments from the old version are still open, so every change must upgrade cleanly:
 - What crosses versions is a contract: skill names, script arguments, printed keys and exit codes, note first lines (`Handoff:`, `Kickback:`, `Review: GO at`, `QA: pass at`, `Escalation:`, `Blocked-from:`, `Answer:`), `maestro/<id>` branches and ticket statuses. Change one only if the skills still read the old form while tickets made under it can be open, and say so in the PR.
-- The installer checks and removes only what the old manifest lists, and an old install runs the new `install.sh` before it checks anything. Keep `install.sh` and `skills/` at the repo root and the installer bash 3.2-safe. Bump the manifest's `format` line when its shape changes, and keep reading every older format.
+- The installer checks and removes only what the old manifest lists. To update, an old `.maestro/install.sh` fetches the new `install.sh` and runs it with no flags; to uninstall, it runs itself. Installs made before the `format` line run their own checks first. So an update never needs a new flag, `install.sh` and `skills/` stay at the repo root, and the installer stays bash 3.2-safe. Bump the manifest's `format` line when its shape changes, and keep reading every older format.
 - A renamed skill is a drop plus an add: fix every link to the old name.
 - Say in each PR what a team must do after updating, or "nothing".
 
