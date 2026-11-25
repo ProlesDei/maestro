@@ -42,10 +42,10 @@ your-repo/
 
 - frees a claim once the session that held it ended, and at once a claim on a `blocked` ticket whose latest comment is an `Escalation:`, unless a `planner/` holder holds it;
 - runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then); a `maestro-chief-of-staff <id>` line runs naming each card still waiting on the owner, as the `blocked` row says;
-- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names;
+- sends each `up:` line to `maestro-chief-of-staff`, and each `Send:` line of a chief-of-staff run you started to whom it names;
 - shows each owner's card to the owner. When the owner picks an option, runs its decision for each id on the card's `Tickets` (the owner's own words as `maestro-planner rule <id>: <answer>` if no option fits). For a plan that created no ticket, reruns that planner call with `; owner ruled: <answer>` added. A `joins <What>` reply adds its tickets to that card, so the picked decision runs for them too;
-- reruns a run after 15 minutes when it ended with no reply, or left its ticket's status and notes as they were with no `Next:` line or with `Next: none` (a full disk, GitHub down, a stopped ruling), and tells the owner after 3 tries. A chief-of-staff run, a run whose reply has an `up:` line, and a planner job that only reads (a draft, Check, Board or Answer) never count: they change nothing by design or wait on the owner;
-- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves, unless the run left it as it was (the rule above applies):
+- reruns a run after 15 minutes when it left its ticket's status and notes as they were, with no reply, no `Next:` line or `Next: none`, and the ticket is still unclaimed (a full disk, GitHub down, a stopped ruling), and tells the owner after 3 tries. A chief-of-staff run, a run whose reply has an `up:` line, and a planner job that only reads (a draft, Check, Board or Answer) never count: they change nothing by design or wait on the owner;
+- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves, unless it is the ending run's own ticket and that run left it as it was (the rule above applies):
 
 | Ticket | Start |
 |---|---|
@@ -120,6 +120,8 @@ bash .maestro/install.sh
 ```
 
 It fetches Maestro's latest `main` (or `--ref`), replaces only what it placed, removes what Maestro dropped, and stages the change. Open a PR for it like any other change, so sessions working elsewhere never see files mid-swap. If `.maestro/install.sh` ever breaks, the install one-liner does the same update with the newest installer.
+
+Updating past the version that made the planner a product owner? Your outer layer now runs the sessions as **Running the sessions** says: it frees claims, including the ones older engineers kept on escalated tickets, and schedules `maestro-prune --safe-only` and `maestro-planner board`.
 
 Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Keep them out of formatters and pre-commit hooks, as Install says. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
 

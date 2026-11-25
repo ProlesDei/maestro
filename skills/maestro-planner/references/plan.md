@@ -4,7 +4,7 @@ Turn one goal into tickets an engineer can finish without asking, or split one t
 
 ## Frame
 
-1. Take the goal and its slug from the request (`goal <slug>: ...`), else make a short one. Given an id, read the ticket and take the goal from it. Go on only if it is `backlog`, `todo`, `blocked`, or `in_progress` with a `Kickback:` as its latest note (later `Retest:`, `Answer:` or your own `Split into` notes are fine); else stop and say why. Edit it under a claim, as the skill says. If it has a `Split into <ids>` note, reuse those ids and go to [Close the old ticket](#close-the-old-ticket).
+1. Take the goal and its slug from the request (`goal <slug>: ...`), else make a short one. A request ending `; owner ruled: <x>` or `; chief of staff ruled: <x>` settles that call: plan with it and never raise it again. Given an id, read the ticket and take the goal from it. Go on only if it is `backlog`, `todo`, `blocked`, or `in_progress` with a `Kickback:` as its latest note (later `Retest:`, `Answer:` or your own `Split into` notes are fine); else stop and say why. Edit it under a claim, as the skill says. If it has a `Split into <ids>` note, reuse those ids and go to [Close the old ticket](#close-the-old-ticket).
 2. Write a spec of a page or less: the problem and who has it, the outcome that means done (what a command or the running app shows), scope and non-goals, risks, and the cases that must hold and the ones this goal leaves. If you can't state the outcome, ask for it and stop.
 3. Find the files each part touches and the closest code that does the same kind of thing; check each path exists. Read the open board without the bodies: a ticket that covers a piece becomes a dep.
 
