@@ -24,8 +24,8 @@
 #     the delta, and main since that verdict's G, changed.
 #
 # Run it inside the repo, any worktree. Needs git 2.38+, gh and jq. Earlier
-# verdicts come from the PR's comments. Exit 2: bad target; 3: no PR or no
-# main branch; 1: any other failure.
+# verdicts come from the PR's comments. Exit 2: bad target; 3: branch
+# lookup found no PR; 1: any other failure.
 set -euo pipefail
 
 die() { echo "review-prep: $2" >&2; exit "$1"; }
@@ -39,7 +39,7 @@ fi
 target=$1
 main=${2-}
 
-# 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
+# 4.4: "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
 # Paths as written, not quoted. Attributes from an empty tree and no
 # global attributes file, so a -diff in the PR's or the checkout's
@@ -72,8 +72,8 @@ load_rules() {
 	rules=
 	for f in AGENTS.md AGENTS.override.md CLAUDE.md CLAUDE.local.md .claude/CLAUDE.md GEMINI.md \
 		.github/copilot-instructions.md; do
-		if [ -n "$main" ] && git cat-file -e "refs/remotes/origin/$main:$f" 2>/dev/null; then
-			rules+=$(git show "refs/remotes/origin/$main:$f")$'\n'
+		if git cat-file -e "$tip:$f" 2>/dev/null; then
+			rules+=$(git show "$tip:$f")$'\n'
 		elif [ -f "$mainwt/$f" ]; then
 			rules+=$(cat "$mainwt/$f")$'\n'
 		fi
@@ -172,7 +172,7 @@ maestro/*)
 esac
 
 view=$(gh pr view "$pr" --json number,url,title,body,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository) ||
-	die 3 "gh found no PR $pr"
+	die 1 "couldn't read PR $pr"
 H=$(jq -r .headRefOid <<<"$view")
 branch=$(jq -r .headRefName <<<"$view")
 fork=$(jq -r .isCrossRepository <<<"$view")
@@ -231,19 +231,15 @@ retry() {
 retry git fetch -q origin "+refs/heads/$main:refs/remotes/origin/$main" || die 1 "git fetch origin $main failed"
 git cat-file -e "$H^{commit}" 2>/dev/null || retry git fetch -q origin "pull/$pr/head" ||
 	die 1 "can't fetch PR $pr's head $H"
-git rev-parse -q --verify "refs/remotes/origin/$main^{commit}" >/dev/null || die 3 "no origin/$main after the fetch"
+tip=$(git rev-parse -q --verify "refs/remotes/origin/$main^{commit}") || die 1 "no origin/$main after the fetch"
 load_rules
 
 S=$(date +%s)
 id=pr-$pr
 run=review-$id-$S E="" G=""
-# What main is for the rest of the run: in QA mode its sha, not the ref,
-# which another session's fetch can move while this one works.
-tip=origin/$main
 if [ -n "$qa" ]; then
 	run=$qarun
-	G=$(git rev-parse "refs/remotes/origin/$main^{commit}")
-	tip=$G
+	G=$tip
 	# In the shared git folder, never the worktree: the PR controls that.
 	E=$(git rev-parse --path-format=absolute --git-common-dir)/maestro/evidence/$id/$run
 fi
@@ -296,7 +292,7 @@ gd --stat "$B" "$H" >"$C/stat.txt"
 git log --oneline "$B..$H" >"$C/log.txt"
 merges=yes
 # QA's real merge above has already said.
-[ -n "$qa" ] || git merge-tree --write-tree "origin/$main" "$H" >/dev/null 2>&1 || {
+[ -n "$qa" ] || git merge-tree --write-tree "$tip" "$H" >/dev/null 2>&1 || {
 	[ $? -eq 1 ] || die 1 "git merge-tree failed"
 	merges=conflict
 }
@@ -372,26 +368,21 @@ if [ -n "$K" ]; then
 		[ -z "$qa" ] || K=
 	else
 		# The author's change since K, with main's merges taken out.
-		if T=$(git merge-tree --write-tree "$K" "$B" | head -n 1) && gd "$T" "$H" >"$C/delta.patch"; then
+		if T=$(git merge-tree --write-tree "$K" "$B"); then
+			T=${T%%$'\n'*}
+			gd "$T" "$H" >"$C/delta.patch"
 			delta=$(gd --numstat --no-renames "$T" "$H")
+			dfiles=$(grep -c . <<<"$delta" || true)
+			dlines=$(awk -F'\t' '{a = $1 == "-" ? 0 : $1; d = $2 == "-" ? 0 : $2; n += a + d} END {print n + 0}' <<<"$delta")
+			[ -z "$qa" ] || dclasses=$(cut -f3- <<<"$delta" | classes)
+			if [ "$dlines" -gt 400 ] || [ "$dfiles" -gt 15 ]; then
+				why="delta of $dlines lines in $dfiles files: redone, not fixed"
+			else
+				mode=$inc why="from $by at $K"
+			fi
 		else
 			T=
-			# A conflict: the files both the author and this PR changed.
-			mapfile -t both < <(comm -12 <(gd --name-only "$K" "$H" | sort) <(gd --name-only "$B" "$H" | sort))
-			: >"$C/delta.patch"
-			delta=
-			if [ ${#both[@]} -gt 0 ]; then
-				gd "$B" "$H" -- "${both[@]}" >"$C/delta.patch"
-				delta=$(gd --numstat --no-renames "$B" "$H" -- "${both[@]}")
-			fi
-		fi
-		dfiles=$(grep -c . <<<"$delta" || true)
-		dlines=$(awk -F'\t' '{a = $1 == "-" ? 0 : $1; d = $2 == "-" ? 0 : $2; n += a + d} END {print n + 0}' <<<"$delta")
-		[ -z "$qa" ] || dclasses=$(cut -f3- <<<"$delta" | classes)
-		if [ "$dlines" -gt 400 ] || [ "$dfiles" -gt 15 ]; then
-			why="delta of $dlines lines in $dfiles files: redone, not fixed"
-		else
-			mode=$inc why="from $by at $K"
+			why="can't build the delta base tree from $K and $B"
 		fi
 	fi
 fi

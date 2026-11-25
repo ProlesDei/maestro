@@ -6,6 +6,7 @@ ref=main
 ref_given=false
 mode=install
 harnesses=".claude/skills .agents/skills"
+folders=".maestro .maestro/skills .claude .claude/skills .agents .agents/skills"
 top=".maestro/VERSION .maestro/install.sh .maestro/.gitattributes"
 tab=$(printf '\t')
 
@@ -31,14 +32,15 @@ if [ -d "$here/skills" ] && [ "$(git -C "$here" rev-parse --show-toplevel 2>/dev
 fi
 [ "$is_source" = true ] && [ "$here" = "$root" ] && die "run this from your project's repo, not from the Maestro clone"
 
-for p in .maestro .maestro/skills .claude .claude/skills .agents .agents/skills; do
+for p in $folders; do
   if [ -L "$p" ]; then die "$p is a symlink; Maestro only installs into real folders"; fi
   if [ -e "$p" ] && [ ! -d "$p" ]; then die "$p exists and isn't a folder"; fi
 done
 for p in .maestro/manifest $top; do
   if [ -L "$p" ]; then die "$p is a symlink; Maestro didn't place it"; fi
 done
-if [ -e "$(git rev-parse --git-path index.lock)" ]; then die "git is busy (index.lock exists); try again when it's done"; fi
+index=$(git rev-parse --git-path index)
+if [ -e "$index.lock" ]; then die "git is busy (index.lock exists); try again when it's done"; fi
 
 manifest=.maestro/manifest
 
@@ -51,24 +53,30 @@ hash_of() {
 }
 
 snapshot() {
-  local n h p
+  local n h p sum
   while IFS= read -r n; do
     if [ -d ".maestro/skills/$n" ]; then find ".maestro/skills/$n" ! -type d; fi
   done < "$1" | LC_ALL=C sort | while IFS= read -r p; do
     if [ -L "$p" ]; then
-      printf 'l\t%s\t%s\n' "$(readlink "$p")" "$p"
+      sum=$(readlink "$p")
+      printf 'l\t%s\t%s\n' "$sum" "$p"
     else
-      printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
+      sum=$(hash_of "$p")
+      printf 'f\t%s\t%s\n' "$sum" "$p"
     fi
   done
   for p in $top; do
-    if [ -f "$p" ] && [ ! -L "$p" ]; then printf 'f\t%s\t%s\n' "$(hash_of "$p")" "$p"
+    if [ -f "$p" ] && [ ! -L "$p" ]; then
+      sum=$(hash_of "$p")
+      printf 'f\t%s\t%s\n' "$sum" "$p"
     else printf 'f\t-\t%s\n' "$p"; fi
   done
   while IFS= read -r n; do
     for h in $harnesses; do
       p="$h/$n"
-      if [ -L "$p" ]; then printf 'l\t%s\t%s\n' "$(readlink "$p")" "$p"
+      if [ -L "$p" ]; then
+        sum=$(readlink "$p")
+        printf 'l\t%s\t%s\n' "$sum" "$p"
       elif [ -e "$p" ]; then printf 'l\t-\t%s\n' "$p"
       else printf 'l\tmissing\t%s\n' "$p"; fi
     done
@@ -150,9 +158,8 @@ if [ "$mode" = uninstall ]; then
   exit 0
 fi
 
-check_untouched
-
 if [ "$is_source" = false ] || [ "$ref_given" = true ]; then
+  check_untouched
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   git init -q "$tmp"
@@ -163,10 +170,46 @@ if [ "$is_source" = false ] || [ "$ref_given" = true ]; then
   exit $?
 fi
 
-new=$(mktemp)
-old=$(mktemp)
-stage=""
-trap 'rm -f "$new" "$old"; if [ -n "$stage" ]; then rm -rf "$stage"; fi' EXIT
+stage=$(mktemp -d "$(git rev-parse --path-format=absolute --git-path maestro-stage.XXXXXX)")
+new=$stage/new-names
+old=$stage/old-names
+names=$stage/names
+index_lock=
+created=
+swapped=()
+
+cleanup_install() {
+  local status=$? p failed=false
+  if [ "$status" -ne 0 ]; then
+    for p in ${swapped[@]+"${swapped[@]}"}; do
+      rm -rf -- "$p" || { failed=true; continue; }
+      if [ -e "$stage/old/$p" ] || [ -L "$stage/old/$p" ]; then
+        mv -- "$stage/old/$p" "$p" || failed=true
+      fi
+    done
+    for p in $created; do rmdir "$p" || failed=true; done
+  fi
+  if [ -n "$index_lock" ]; then rm -f "$index_lock"; fi
+  if [ "$failed" = true ]; then
+    echo "maestro: rollback failed; backups are in $stage" >&2
+  else
+    rm -rf "$stage"
+  fi
+}
+trap cleanup_install EXIT
+
+swap_path() {
+  local p=$1
+  if [ -e "$p" ] || [ -L "$p" ]; then mv -- "$p" "$stage/old/$p"; fi
+  swapped+=("$p")
+  if [ -e "$stage/new/$p" ] || [ -L "$stage/new/$p" ]; then mv -- "$stage/new/$p" "$p"; fi
+}
+
+if ! (set -C; : > "$index.lock") 2>/dev/null; then
+  die "git is busy (index.lock exists); try again when it's done"
+fi
+index_lock=$index.lock
+check_untouched
 
 for d in "$here"/skills/maestro-*/; do
   if [ -f "$d/SKILL.md" ]; then basename "$d"; fi
@@ -174,6 +217,7 @@ done > "$new"
 [ -s "$new" ] || die "no maestro-* skills found in $here/skills"
 
 names_in_manifest > "$old"
+sort -u "$old" "$new" > "$names"
 
 clash=""
 while IFS= read -r n; do
@@ -184,43 +228,44 @@ while IFS= read -r n; do
 done < "$new"
 [ -z "$clash" ] || die "these paths exist and Maestro didn't place them; rename or remove them first:"$'\n'"$clash"
 
-mkdir -p .maestro/skills .claude/skills .agents/skills
-stage=$(mktemp -d "$root/.maestro/.stage.XXXXXX")
+for d in $folders; do mkdir -p "$stage/new/$d" "$stage/old/$d"; done
 while IFS= read -r n; do
-  cp -R "$here/skills/$n" "$stage/$n"
-done < "$new"
-
-while IFS= read -r n; do
-  if grep -qxF "$n" "$new"; then continue; fi
+  cp -R "$here/skills/$n" "$stage/new/.maestro/skills/$n"
   for h in $harnesses; do
-    if [ -L "$h/$n" ]; then rm "$h/$n"; fi
-  done
-  rm -rf ".maestro/skills/$n"
-done < "$old"
-
-while IFS= read -r n; do
-  if [ -d ".maestro/skills/$n" ]; then mv ".maestro/skills/$n" "$stage/$n.old"; fi
-  mv "$stage/$n" ".maestro/skills/$n"
-  for h in $harnesses; do
-    ln -sfn "../../.maestro/skills/$n" "$h/$n"
-    [ -L "$h/$n" ] || die "$h/$n isn't a symlink; this shell can't make them (on Windows, use WSL)"
+    ln -s "../../.maestro/skills/$n" "$stage/new/$h/$n"
+    [ -L "$stage/new/$h/$n" ] || die "$h/$n isn't a symlink; this shell can't make them (on Windows, use WSL)"
   done
 done < "$new"
-rm -rf "$stage"
-stage=""
+cp "$here/install.sh" "$stage/new/.maestro/install.sh"
+chmod +x "$stage/new/.maestro/install.sh"
+version=$(git -C "$here" rev-parse HEAD)
+printf '%s\n' "$version" > "$stage/new/.maestro/VERSION"
+printf '* -text -eol\n' > "$stage/new/.maestro/.gitattributes"
+count=$(wc -l < "$new" | tr -d ' ')
+if [ -f "$index" ]; then cp "$index" "$stage/index"; fi
 
-cp "$here/install.sh" .maestro/install.sh
-chmod +x .maestro/install.sh
-git -C "$here" rev-parse HEAD > .maestro/VERSION
-printf '* -text -eol\n' > .maestro/.gitattributes
-
+for d in $folders; do
+  if [ ! -d "$d" ]; then
+    mkdir "$d"
+    created="$d $created"
+  fi
+done
+while IFS= read -r n; do
+  swap_path ".maestro/skills/$n"
+  for h in $harnesses; do swap_path "$h/$n"; done
+done < "$names"
+for p in $top; do swap_path "$p"; done
 {
   sed "s/^/d$tab/" "$new"
   snapshot "$new"
-} > "$manifest"
+} > "$stage/new/$manifest"
+swap_path "$manifest"
 
-stage_paths "$old"
-stage_paths "$new"
+GIT_INDEX_FILE="$stage/index" stage_paths "$names"
+cp -p "$stage/index" "$index_lock"
+mv -- "$index_lock" "$index"
+trap - EXIT
+rm -rf "$stage"
 
-echo "maestro: installed $(wc -l < "$new" | tr -d ' ') skills at $(cut -c1-12 .maestro/VERSION) and staged them"
+echo "maestro: installed $count skills at ${version:0:12} and staged them"
 echo "maestro: commit .maestro/, .claude/skills/ and .agents/skills/ to your default branch"

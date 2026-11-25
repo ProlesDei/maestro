@@ -34,13 +34,13 @@ Follow the **maestro-working-principles** skill.
    | role | who builds it: `engineer`, the one role that builds tickets. QA and review take only built tickets, so they are never a ticket's role; `designer` works only a `Design:` ticket, which **maestro-planner** makes | `engineer` |
 
    Waiting on another ticket is a dep, never `blocked` or `backlog`.
-4. **Create.** Show the ticket, then add it to the board with every field above and the body as written.
+4. **Create.** Show the ticket, then add it to the board with the body as written.
 
-   - Its type is `ship`: a ticket that ends in a merged PR. First check it has a numbered criterion, a `Not handled:` line (`Not handled: none` when there is nothing to leave) and areas: fix the draft for each gap, never skip the check.
+   - For a design scout, use type `scout` and the fields in [the planner's plan](../maestro-planner/references/plan.md#phase-b-slice). For a ticket that ends in a merged PR, use type `ship` and the fields above. First check a `ship` ticket has a numbered criterion, a `Not handled:` line (`Not handled: none` when there is nothing to leave) and areas: fix the draft for each gap, never skip the check.
    - The title, body, deps and areas come from the user, so the shell must never expand them. Pass them as quoted text, as **maestro-working-principles** says for quoted text.
    - The slugs are lowercase letters, digits and hyphens. Leave out empty deps or goal, the parked reason unless the status is `backlog`, and the tier unless the role is `engineer`.
    - For a re-file, link the latest cancelled ticket in the body with `Split from: <old id>`. Never name one that already has a replacement: a second link makes it a split.
    - For a `hold`, comment `Hold: set by <the owner, or the planner>, <date>: <why>; lifts when <a fact the board shows>` right after you create the ticket.
    - If the board refuses, show its message, fix only the field it names, and try again. Before any retry, look for a ticket with this title made today, so you never add it twice: if it is this work and not `cancelled`, reply with its id, else change the title.
 
-**Reply:** the new id, title, status and its parked reason, tier, priority, goal, deps and areas, then `Next: /maestro-software-engineer <id>`.
+**Reply:** the new id, title, status and its parked reason, tier, priority, goal, deps and areas, then `Next: /maestro-software-engineer <id>`, or `/maestro-designer <id>` for a scout.
