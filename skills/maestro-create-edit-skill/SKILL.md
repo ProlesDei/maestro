@@ -36,7 +36,7 @@ A skill is a folder with a `SKILL.md`. A harness reads only `name` and `descript
 ## Phase D: Place it
 
 1. Read the agent notes. If they say where skills live, place it there, follow them for the steps below, and skip step 2.
-2. Else keep the same bytes in `.agents/skills/<name>/` (Codex) and `.claude/skills/<name>/` (Claude Code). Edit the `.agents` copy, copy it over the `.claude` one, and check the two folders match byte for byte.
+2. Else put the one copy in `.agents/skills/<name>/` (Codex) and link `.claude/skills/<name>` (Claude Code) to it with a relative symlink, so there is nothing to keep in step. Check Claude Code reads the skill through the link.
 3. To rename or retire, remove the old folders and links, search the repo for the old name, and fix every hit.
 
 ## Phase E: Test it
@@ -46,4 +46,4 @@ A skill is a folder with a `SKILL.md`. A harness reads only `name` and `descript
 3. If it never loads, sharpen the description's trigger phrases. If it loads too often, add to `Not for ...`. Trial it again.
 4. Put both prompts and their results in the PR body or commit message.
 
-**Reply:** the decision and its reason, the folders and links written or removed, whether the copies match, if you made them, and the two trial prompts with what happened.
+**Reply:** the decision and its reason, the folders and links written or removed, and the two trial prompts with what happened.
