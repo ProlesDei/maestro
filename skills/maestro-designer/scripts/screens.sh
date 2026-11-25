@@ -292,18 +292,21 @@ EOF
 run_jobs() { # <jobs.json> <tail>
 	{ printf 'async page => {\n  const jobs = '; cat "$1"; cat "$2"; } >"$tmp/run.js"
 	(cd "$out" && playwright-cli -s="$run" run-code --filename="$tmp/run.js") >"$tmp/log" 2>&1 || {
-		cat "$tmp/log" >&2
+		tail -n 5 "$tmp/log" >&2
 		die 1 "the browser failed"
 	}
-	! grep -q '^### Error' "$tmp/log" || { cat "$tmp/log" >&2; die 1 "the browser failed"; }
+	! grep -q '^### Error' "$tmp/log" || { tail -n 5 "$tmp/log" >&2; die 1 "the browser failed"; }
 }
 shoot_jobs() { run_jobs "$1" "$tmp/shoot.tail"; }
 
 (cd "$out" && playwright-cli -s="$run" open --browser chromium --idle-timeout 900000) >"$tmp/log" 2>&1 || {
-	cat "$tmp/log" >&2
 	echo "run=$run"
-	echo "stop=no browser"
-	exit 4
+	if grep -qE "is not installed|Executable doesn't exist|install-browser|playwright install" "$tmp/log"; then
+		echo "stop=no browser"
+		exit 4
+	fi
+	grep -m 2 -E '^Error|FATAL' "$tmp/log" >&2 || tail -n 5 "$tmp/log" >&2
+	die 1 "the browser didn't start"
 }
 
 echo "run=$run"
