@@ -121,10 +121,10 @@ stop() { echo "stop=$1"; exit 3; }
 [[ $title == Design:* ]] || stop "$id is not a Design: ticket"
 
 if [ -z "$base" ]; then
-	base=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
-	base=${base#refs/remotes/origin/}
-	[ -n "$base" ] || base=$(git ls-remote --symref origin HEAD 2>/dev/null |
+	base=$(git ls-remote --symref origin HEAD 2>/dev/null |
 		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	[ -n "$base" ] || base=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
+	base=${base#refs/remotes/origin/}
 	base=${base:-main}
 fi
 git check-ref-format "refs/heads/$base" || die 2 "invalid base branch: $base"

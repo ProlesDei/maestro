@@ -34,10 +34,10 @@ fetch() { GIT_TERMINAL_PROMPT=0 git fetch --quiet --prune --no-prune-tags origin
 err=$(fetch) || { sleep 2 && err=$(fetch); } || die 1 "git fetch origin failed: $(head -n 1 <<<"$err")"
 
 if [[ -z $main ]]; then
-	main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
-	main=${main#origin/}
-	[[ -n $main ]] || main=$(git ls-remote --symref origin HEAD 2>/dev/null |
+	main=$(git ls-remote --symref origin HEAD 2>/dev/null |
 		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	[[ -n $main ]] || main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
+	main=${main#origin/}
 	main=${main:-main}
 fi
 git check-ref-format "refs/heads/$main" || die 2 "bad main branch: $main"

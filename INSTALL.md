@@ -42,7 +42,7 @@ your-repo/
 
 - frees a claim once the session that held it ended, and at once a claim on a `blocked` ticket whose latest comment is an `Escalation:`, unless a `planner/` holder holds it;
 - runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then);
-- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names; shows its owner's card to the owner, and runs the owner's answer as `maestro-planner rule <id>: <answer>` for each id on the card's `Tickets`, or, for a plan that created no ticket, reruns that planner call with `; owner ruled: <answer>` added;
+- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names; shows its owner's card to the owner, and runs the decision of the option the owner picks for each id on the card's `Tickets` (the owner's own words as `maestro-planner rule <id>: <answer>` if none fits), or, for a plan that created no ticket, reruns that planner call with `; owner ruled: <answer>` added;
 - after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves. Any run you start that ends with no reply, or leaves its ticket's status and notes as they were (a full disk, GitHub down, a stopped ruling), runs again after 15 minutes, 3 tries at most; then tell the owner:
 
 | Ticket | Start |
@@ -50,7 +50,7 @@ your-repo/
 | `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
 | `in_review` with route `qa`, or whose latest `Review: GO at` names the PR's head with no `Rereview:` after it | `maestro-qa-lead <id>` |
 | any other `in_review` | `maestro-code-review <id>` |
-| `blocked`, once per `Escalation:` (a run that gave a reply counts), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>` |
+| `blocked`, once per `Escalation:` (a run that gave a reply counts), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>`, naming each card still waiting on the owner, so one cause joins its card |
 
 ## Install
 

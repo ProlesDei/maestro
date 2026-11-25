@@ -57,11 +57,12 @@ gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}
 mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 if [ -z "$main" ]; then
 	# The main branch, from the remote's default branch, never the PR's tree:
-	# origin/HEAD when the clone has it, else GitHub's answer.
-	main=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
-	main=${main#refs/remotes/origin/}
-	[ -n "$main" ] || main=$(git ls-remote --symref origin HEAD 2>/dev/null |
+	# GitHub's answer, else origin/HEAD, which goes stale when the default
+	# branch is renamed.
+	main=$(git ls-remote --symref origin HEAD 2>/dev/null |
 		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	[ -n "$main" ] || main=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
+	main=${main#refs/remotes/origin/}
 	main=${main:-main}
 fi
 git check-ref-format "refs/heads/$main" || die 2 "invalid base branch: $main"

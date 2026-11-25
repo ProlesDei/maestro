@@ -50,7 +50,7 @@ The first of these that fits owns the call. An ask that starts `for the planner:
 Short answer: <one or two sentences, outcomes first>
 Facts: <one line each, with what shows it: a ticket's status or note, a PR URL, an exit code>
 Calls: <each pick, one line with whose call it is, its why and the tickets it frees>
-Owner's card: What, Why now, Options (two or three, each with its trade-off), Default (your pick, why, and why not each other option), Question (one word if it can be), Tickets (every id the answer frees; asked about one ticket, the card is that ticket's cause and lists each other ticket the same cause holds) | none. Then: <the other owner's calls, one line each, ranked>
+Owner's card: What, Why now, Options (two or three, each with its trade-off and the decision to run if picked, as `maestro-planner rule <id>: <decision>` for each ticket or the plan call with `; owner ruled: <decision>`), Default (your pick, why, and why not each other option), Question (one word if it can be), Tickets (every id the answer frees; asked about one ticket, the card is that ticket's cause and lists each other ticket the same cause holds) | `joins <What>` plus the tickets, when a card the ask names as waiting already covers this cause | none. Then: <the other owner's calls, one line each, ranked>
 Answers: <id>: Answer: <the exact text to post>, one line per ticket | none
 Send: <recipient>: <one job, with the goal or tickets it serves>, one line each, a ruling to the planner as `maestro-planner rule <id>: <decision>`, the one that frees the most work first; never the owner, who gets the card | none
 ```
