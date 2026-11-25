@@ -20,7 +20,7 @@ Before each move, check the ticket still has the status from your last read or m
    4. Move the ticket from `blocked` straight to `done` under your claim, if it is still `blocked`. Only the planner can skip review for a `Design:` scout this way.
 8. If it is `blocked` and the latest `Escalation:` reads `PR <url> merged as <M>`, or QA's `merge <M>: <reason>`, look up the ticket's PR by branch as in step 7. Check that it is merged at the head the note names and that its remote branch is gone or still at that head. If either check fails, stop and say why. Otherwise, for `merge <M>:`, file the failure on main as an `urgent` ticket with **maestro-create-ticket**; then move the ticket to `done` and reply: its code is on main already.
 
-   For any other `blocked` ticket, move it back to the status the latest `Escalation:` names on its `Blocked-from:` line if that is `backlog` (keeping its parked reason), `todo`, `in_progress` or `in_review`, else to `in_progress`. If the decision drops every item still standing of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
+   For any other `blocked` ticket, move it back to the status the latest `Escalation:` names on its `Blocked-from:` line if that is `backlog` (keeping its parked reason), `todo`, `in_progress` or `in_review`. A note with no `Blocked-from:` line comes from an older Maestro: send an `Escalation: review at` or `Escalation: QA at` back to `in_review`, any other to `in_progress`. If the decision drops every item still standing of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
 
 ## Reply
 
