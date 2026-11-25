@@ -7,7 +7,9 @@ if [[ ${1-} == --new ]]; then
 	shift
 fi
 [[ $# == 1 && $1 =~ ^[a-z0-9-]+$ ]] || { echo 'usage: holder.sh [--new] <role>' >&2; exit 2; }
-dir=$(git rev-parse --absolute-git-dir)/maestro || exit 1
+gd=$(git rev-parse --absolute-git-dir) && common=$(cd "$(git rev-parse --git-common-dir)" && pwd -P) || exit 1
+[[ $(cd "$gd" && pwd -P) != "$common" ]] || { echo 'holder.sh: not in a linked worktree; use <role>/<8 random hex> for this session' >&2; exit 3; }
+dir=$gd/maestro
 if [[ -n $new || ! -e $dir/holder ]]; then
 	mkdir -p -- "$dir"
 	draft=$(mktemp "$dir/holder.XXXXXXXX")

@@ -45,9 +45,10 @@ while IFS= read -r -d '' path; do
 done < <(git diff -z --name-only --no-renames --diff-filter=A HEAD "$sha" --)
 [[ -z $saved ]] || printf 'saved_dir=%s\n' "$saved"
 
-if out=$(git merge --quiet --ff --no-edit -m "Merge origin/$main" "$sha" 2>&1); then
+if out=$(git merge --quiet --ff --no-edit -m "Merge branch '$main' of origin" "$sha" 2>&1); then
 	if [[ -e .gitmodules ]]; then
-		mapfile -t subs < <(git submodule foreach --quiet pwd)
+		subs=()
+		while IFS= read -r p; do subs+=("$p"); done < <(git submodule foreach --quiet pwd)
 		if ((${#subs[@]})) && ! out=$(git submodule update --recursive --checkout -- "${subs[@]}" 2>&1); then
 			echo result=submodule_failed
 			error_line "$out"
