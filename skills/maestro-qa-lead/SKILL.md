@@ -40,7 +40,7 @@ Answer: <the verdict, findings, steps, plan or answer>
 Evidence: <one line each: command, exit code, excerpt or path>
 Picks: <each call you made, one line> | none
 Open: <not checked, guessed, for the planner, for the chief of staff> | none
-Next: <who acts next and on what, for whoever reads the reply, such as engineer: fix T-12 or planner: rewrite T-12 criterion 2> | none
+Next: <the skill call to start next, as written, such as maestro-software-engineer T-12 after a fail, maestro-code-review T-12 after a Rereview or maestro-chief-of-staff T-12 after an Escalation> | none
 ```
 
 Fill in the block. For a tested PR, add what [test-a-pr.md](references/test-a-pr.md) asks for under `Answer:`.

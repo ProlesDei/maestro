@@ -1,7 +1,7 @@
 ---
 name: maestro-planner
 description: "The product owner: turn a goal into a spec and ordered, testable tickets; split, rewrite, merge, reprioritize, park or drop tickets; carry out a ruling; check a plan; fix what keeps tickets from running in parallel; or answer a code question a plan depends on. Use for /maestro-planner, 'plan this feature', 'split T-12', 'rule on T-12', 'check this plan', 'why is so little running', or 'how big is this change'."
-argument-hint: "<goal | ticket id | rule <id>: <decision> | plan to check | board | question>"
+argument-hint: "<goal | ticket id | rule <id>: <decision> | follow-ups <id> | plan to check | board | question>"
 disable-model-invocation: true
 ---
 
@@ -29,7 +29,7 @@ Yours: slicing, order, ticket priority, deps, areas, splits, merges, parks, crit
 |---|---|
 | `rule <id>: <decision>` | **Rule:** [references/rule.md](references/rule.md) |
 | A goal, or a ticket id to split or rewrite | **Plan:** [references/plan.md](references/plan.md) |
-| `New tickets:` or `Follow-ups:` on a ticket | **Follow-ups:** file each with **maestro-create-ticket**, `urgent` first, or drop it and say why |
+| `follow-ups <id>`: a ticket's `New tickets:` or `Follow-ups:` | **Follow-ups:** file each with that skill's create step, skipping its look-around and ask as Plan does, `urgent` first, or drop it with a reason; then post `Filed: <ids>; dropped: <item: why>` on `<id>`. Skip any a `Filed:` note already covers |
 | A plan or draft tickets to check, or "second opinion" | **Check** |
 | "Board", or why so little runs at once | **Board** |
 | Where something lives, how big a change is, what it would break, whether it can be done | **Answer** |
