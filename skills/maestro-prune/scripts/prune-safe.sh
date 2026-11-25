@@ -86,6 +86,12 @@ files_label() {
 	done < <(git -C "$1" --no-optional-locks status --porcelain -z --ignored=matching 2>/dev/null || printf 'XX\0')
 }
 
+pr_done() {
+	command -v gh >/dev/null 2>&1 || return 1
+	case $(gh pr view "$1" --json state -q .state 2>/dev/null) in MERGED | CLOSED) return 0 ;; esac
+	return 1
+}
+
 closed_pushed() {
 	git merge-base --is-ancestor "$2" "refs/remotes/origin/$1" 2>/dev/null && command -v gh >/dev/null 2>&1 &&
 		[[ $(gh pr list --head "$1" --state all --json state --jq '.[0].state // ""' 2>/dev/null) == CLOSED ]]
@@ -93,14 +99,22 @@ closed_pushed() {
 
 freed=''
 check_worktree() {
-	local wt=$1 branch=$2 flags=$3 real head gd label err
-	[[ $branch == refs/heads/maestro/* ]] || return 0
+	local wt=$1 branch=$2 flags=$3 real head gd label err pr=''
+	if [[ -z $branch && ${wt##*/} =~ ^(qa|review)-pr-([1-9][0-9]*)- ]]; then
+		pr=${BASH_REMATCH[2]}
+	elif [[ $branch != refs/heads/maestro/* ]]; then
+		return 0
+	fi
 	[[ $flags != *' locked'* ]] || { kept "$wt" locked; return; }
 	[[ $flags != *' prunable'* ]] || { kept "$wt" prunable; return; }
 	real=$(cd -- "$wt" 2>/dev/null && pwd -P) || { kept "$wt" missing; return; }
 	[[ $real != "$own" ]] || { kept "$wt" own; return; }
 	head=$(git -C "$wt" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || { kept "$wt" unverified; return; }
-	git merge-base --is-ancestor "$head" "$tip" || closed_pushed "${branch#refs/heads/}" "$head" || { kept "$wt" unmerged; return; }
+	if [[ -n $pr ]]; then
+		pr_done "$pr" || { kept "$wt" pr-open-or-unknown; return; }
+	else
+		git merge-base --is-ancestor "$head" "$tip" || closed_pushed "${branch#refs/heads/}" "$head" || { kept "$wt" unmerged; return; }
+	fi
 	[[ -n $cwds ]] || { kept "$wt" in-use-unknown; return; }
 	! in_use "$real" || { kept "$wt" in-use; return; }
 	gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || { kept "$wt" unverified; return; }
@@ -115,6 +129,7 @@ check_worktree() {
 		freed+="$branch"$'\n'
 	elif err=$(git worktree remove "$wt" 2>&1); then
 		remove_line worktree "$wt"
+		[[ -z $pr ]] || rmdir -- "${wt%/*}" 2>/dev/null || true
 	elif ! grep -qxF "worktree $wt" <<<"$(git worktree list --porcelain)"; then
 		gone worktree "$wt"
 	else

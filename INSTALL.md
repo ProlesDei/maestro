@@ -41,8 +41,9 @@ your-repo/
 **Running the sessions** is yours: a dispatcher, a scheduler or a person. Apart from `maestro-swarm` for its own workers, Maestro's skills never start a session or free another's claim. Your outer layer:
 
 - frees a claim once the session that held it ended;
-- runs each `Next:` and `Start now:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then); sends each `up:` line and the chief of staff's `Send:` lines to whom they name; and shows the chief of staff's owner's card to the owner;
-- when no reply speaks for a ticket, after a crash or a restart, starts from its state:
+- runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then);
+- sends each `up:` line to `maestro-chief-of-staff`, and each of its `Send:` lines to whom it names; shows its owner's card to the owner, and runs the owner's answer as `maestro-planner rule <id>: <answer>`;
+- after each run ends, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves:
 
 | Ticket | Start |
 |---|---|
@@ -50,7 +51,6 @@ your-repo/
 | `in_review` with route `qa`, or whose latest `Review: GO at` names the PR's head with no `Rereview:` after it | `maestro-qa-lead <id>` |
 | any other `in_review` | `maestro-code-review <id>` |
 | `blocked`, once per `Escalation:` | `maestro-chief-of-staff <id>` |
-| `done` with `New tickets:` or `Follow-ups:` items and no `Filed:` note | `maestro-planner follow-ups <id>` |
 
 ## Install
 
