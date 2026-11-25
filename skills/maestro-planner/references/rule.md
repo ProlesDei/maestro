@@ -16,8 +16,10 @@ Before each move, check the ticket still has the status from your last read or m
    1. Claim the ticket in `blocked`, as Phase A step 2 of [plan.md](plan.md) claims one, so no second `rule` run plans it at once; on any refusal, stop and say so. Release the claim on any stop below.
    2. Follow Phases B and C of [plan.md](plan.md) for the goal, with the approved spec in place of Phase A's. Create only engineer tickets, one per slice of the screens. Take each criterion as written from the spec's `Criteria:`. In each body, name the PR and link the design ticket with `Design: <id>`.
    3. Close the draft PR on branch `maestro/<id>` in this repo if it is open. Find it as Phase A step 2 of [maestro-code-review](../../maestro-code-review/SKILL.md) does. Comment with the approved direction and new ticket ids.
-   4. Move the ticket from `blocked` straight to `done` under your claim, if it is still `blocked`. Only the planner can skip review this way, and only for a designer's `Design:` scout ticket.
-8. Else, if it is `blocked`, move it back to the status it was blocked from, and set its role to the note's `Return-role:` only if that is exactly `engineer`, `qa-lead`, `reviewer`, `planner`, `chief-of-staff` or `designer`; else leave its role. If the decision drops an item of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
+   4. Move the ticket from `blocked` straight to `done` under your claim, if it is still `blocked`. Only the planner can skip review for a `Design:` scout this way.
+8. If it is `blocked` and the latest `Escalation:` reads `PR <url> merged as <M>`, look up the ticket's PR by branch as in step 7. Check that it is merged at the head the note names and that its remote branch is gone or still at that head. If either check fails, stop and say why. Otherwise move the ticket to `done` and reply.
+
+   For any other `blocked` ticket, move it back to the status it was blocked from, and set its role to the note's `Return-role:` only if that is exactly `engineer`, `qa-lead`, `reviewer`, `planner`, `chief-of-staff` or `designer`; else leave its role. If the decision drops an item of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
 
 ## Reply
 

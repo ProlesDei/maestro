@@ -52,7 +52,7 @@ group_has_children() {
 }
 
 run_group() {
-	local ready=$1 attempt status
+	local ready=$1 attempt status command_status=0
 	shift
 	trap ':' TERM
 	for ((attempt = 0; attempt < 100; attempt++)); do
@@ -62,14 +62,14 @@ run_group() {
 	[[ -e $ready ]] || exit 1
 	set +m
 	"$@" &
-	wait "$!" || :
+	wait "$!" || command_status=$?
 
 	set -m
 	while :; do
 		group_has_children "$$" &
 		status=0
 		wait "$!" 2>/dev/null || status=$?
-		[[ $status != 1 ]] || return 0
+		[[ $status != 1 ]] || return "$command_status"
 		sleep 0.1
 	done
 }
@@ -138,7 +138,7 @@ stop_group() {
 
 watch_server() {
 	local harness=$1 harness_birth=$2 log=$3 work_dir=$4
-	local pid birth cancelled=
+	local pid birth status cancelled=
 	shift 4
 	watch_file=$log.watch
 	trap 'cancelled=1' TERM INT
@@ -162,9 +162,12 @@ watch_server() {
 	mv -f -- "$draft" "$watch_file"
 	draft=
 	unlock
+	sleep 1
 	trap '' PIPE
-	printf '%s\n' "$pid" || :
-	exec >/dev/null
+	if matches "$pid" "$birth" "$pid"; then
+		printf '%s\n' "$pid" || :
+		exec >/dev/null
+	fi
 
 	while matches "$pid" "$birth" "$pid"; do
 		if [[ -n $cancelled ]] || ! matches "$harness" "$harness_birth"; then
@@ -173,7 +176,8 @@ watch_server() {
 		fi
 		sleep 1
 	done
-	wait "$pid" 2>/dev/null || :
+	status=0
+	wait "$pid" 2>/dev/null || status=$?
 
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
@@ -182,6 +186,7 @@ watch_server() {
 		save_ledger
 	fi
 	unlock
+	printf 'status=%s\n' "$status" || :
 }
 
 check_ledger() {
@@ -280,6 +285,11 @@ case $1 in
 			set -m
 			nohup "$BASH" "$script" _watch "$harness" "$harness_birth" "$log" "$work_dir" "$@" </dev/null 2>>"$log" &
 		)
+		if [[ $pid == status=* ]]; then
+			printf 'server: start_failed %s log=%s\n' "$pid" "$log" >&2
+			tail -n 20 -- "$log" >&2
+			exit 1
+		fi
 		is_pid "$pid" || die 1 "start_failed log=$log"
 		printf 'pid=%s\nlog=%s\n' "$pid" "$log"
 		;;

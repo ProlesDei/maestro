@@ -53,12 +53,18 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it also fails in a second detached worktree at `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
+1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it fails the same way in a second detached worktree at `G`. Mark those gates as already red on `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
 2. Read the PR's checks for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide
 
-**GO** if all hold: no surviving blocker; every criterion (or claimed behaviour) verified with code and evidence, left `for QA`, carried as Phase C step 2 says, or waived, as pass 1 says; every gate green on `H` merged with `G`; all earlier feedback resolved, bar the QA items Phase B leaves to QA. Majors, minors and nits never hold a GO.
+**GO** requires all three.
+
+- No surviving blocker, including any gate failure Phase E counts as a blocker.
+- Every criterion (or claimed behaviour) verified with code and evidence, left `for QA`, carried as Phase C step 2 says, or waived, as pass 1 says.
+- All earlier feedback resolved, bar the QA items Phase B leaves to QA.
+
+Majors, minors and nits never hold a GO.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
 - it would be GO but needs the owner's yes, and `--approved` doesn't name `H`: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion);
@@ -78,13 +84,14 @@ Otherwise **NO-GO**. In report-only mode, clean up as Phase G step 5 says and gi
    ```text
    Review: GO at <H> (PR <url>), tier <n>, gated on <G>
    Verified: criteria <numbers checked at H>; carried <numbers> from <comment id> | none
+   Gates: green | already red on <G>: <commands>
    For QA: <what the diff puts most at risk in the running app, one line each> | none
    ```
-   **NO-GO.** One line per surviving blocker, and nothing else: a line the engineer must fix or answer costs a round. Every reason for the NO-GO is such a line, a red gate, a conflict, a missing PR or an owner's no included, and `<n>` counts them. `ask-user` findings last, each as a question.
+   **NO-GO.** One line per surviving blocker, and nothing else: a line the engineer must fix or answer costs a round. Every reason for the NO-GO is such a line, including a gate failure Phase E counts as a blocker, a conflict, a missing PR or an owner's no. `<n>` counts those lines. `ask-user` findings last, each as a question.
    ```text
    Kickback: <n> blockers at <H>
    Verified: criteria <numbers checked and passing at H>; carried <numbers> from <comment id> | none
-   Gates: green on <G> | red: <commands> | not run
+   Gates: green on <G> | red: <commands, marking any already red on G with its sha> | not run
    - F1 [blocker, auto-fix] file:line: what's wrong. Fix: ...
    ```
 4. **ESCALATE.** The note opens `Escalation: review at <H>`, then `Verified:` and `Gates:` lines as on a Kickback, what happened, two or three options, your pick, the one question, and a last line `Return-role: <the ticket's role>`. The planner brings the answer back as a rerun: `--approved <H>` on a yes, `--drop` when findings fall.

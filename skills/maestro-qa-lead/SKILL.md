@@ -25,7 +25,7 @@ Pick the row that fits the ask. For several, do them in table order. If none fit
 
 | The ask | Job | You do |
 |---|---|---|
-| A PR number, branch or ticket id, or "test" | **test** | Follow [references/test-a-pr.md](references/test-a-pr.md). |
+| A PR number, `maestro/<name>` branch or ticket id, or "test" | **test** | Follow [references/test-a-pr.md](references/test-a-pr.md). |
 | A verdict or finding to check, or "second look" | **second-look** | Rerun the steps it cites at the same sha. Agree or disagree item by item based on your own output. |
 | A bug or failure to reproduce | **repro** | Find the shortest steps from a fresh start that show it. Run them 3 times; give the rate, the first wrong output, the sha and whether the main branch has it too. |
 | A ticket to check before it's built | **testable** | For each criterion, name the proof: the command, request or page, and what it must show. Mark any no run could settle, with a rewrite for the planner. |
