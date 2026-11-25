@@ -30,7 +30,7 @@ your-repo/
 | Bash 4.4+ (macOS ships 3.2: `brew install bash`), Git 2.38+, jq 1.5+ | the skills' scripts |
 | `gh`, signed in to an account that can push, comment on PRs and merge | engineers open PRs; review and QA comment; QA merges |
 | A GitHub `origin`; PRs from branches in the same repo into its default branch; branch rules that allow a merge commit without a merge queue | review and QA refuse anything else |
-| Branch rules that don't require an approving review, or let QA's account bypass it | verdicts are PR comments, and every session posts as one account |
+| Branch rules that don't require an approving review or an up-to-date branch, or let QA's account bypass them | verdicts are PR comments, and every session posts as one account |
 | Node 18+ and `playwright-cli` with Playwright's Chromium | checking anything a user sees |
 | A ticket board the agents can reach | planning, claiming and tracking work |
 | Linux, macOS or WSL (Windows needs WSL for the symlinks) | the install |

@@ -43,4 +43,5 @@ merge=$(jq -r '.mergeCommit.oid // ""' <<<"$view")
 [[ $merge =~ ^[0-9a-f]{40}$ ]] || die 6 "merge state unknown: PR $pr merged with no merge commit"
 echo "$merge"
 parent=$(git fetch -q origin "$merge" && git rev-parse --verify "$merge^1") || parent=unknown
+[[ $parent != unknown ]] || die 6 "merged $merge; couldn't read its parent"
 [[ $parent == "$tested_base" ]] || die 4 "merged $merge onto an untested base $parent"
