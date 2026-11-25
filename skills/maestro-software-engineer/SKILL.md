@@ -13,7 +13,7 @@ Follow the **maestro-working-principles** skill and its [build rules](../maestro
 
 ## Phase A: Get into a worktree, up to date
 
-1. Before you edit, claim the ticket if you have one, then add or reuse a worktree and read its trail as the [build rules](../maestro-working-principles/references/build.md) say. A design question with no code needs none.
+1. Before you edit, add or reuse a worktree, claim the ticket if you have one under the holder you make there, and read its trail as the [build rules](../maestro-working-principles/references/build.md) say. A design question with no code needs none.
 2. Check absolute paths from earlier in the session before you write. On a ticket, a file you must change outside its `areas`: add it to the ticket's areas on the ticket board and say why in the PR. Escalate only if another live claim holds it, naming that ticket.
 3. If merging main causes a conflict, read the main commit that touched each hunk and keep what both sides meant. Regenerate a generated file or lockfile instead of hand-merging it. If both can't hold, stop and ask. Commit the merge alone, then rerun the build.
 

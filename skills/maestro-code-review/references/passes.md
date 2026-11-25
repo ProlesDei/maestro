@@ -37,5 +37,5 @@ Review picks the tier in Phase C of [SKILL.md](../SKILL.md); QA picks it the sam
 | Tier | When the diff touches | Passes (below) | Skeptic |
 |---|---|---|---|
 | 2 | A changed code line in a path or function the agent notes call sensitive, or one that handles auth, permissions, sessions, secrets or signatures; money or amounts; deletes; locks, queues, workers or retries. Any change to schemas or migrations; dependencies or lockfiles; CI, hooks, deploy or infra; text agents obey (skills, prompts, `AGENTS.md`, harness settings) | All nine; 3, 4, 6 and 7 say `not run: no <area> code` when the diff has none | Full: pass 8 in a fresh session; pass 9 too above 150 changed lines, else inline |
-| 0 | Only docs or inert config (`LICENSE`, `.gitignore`, `.editorconfig`, formatter config), or one file with at most 50 changed lines (`files.txt`) | 1; check a docs change hides no code change | Short, inline |
+| 0 | Only docs or inert config (`LICENSE`, `.gitignore`, `.editorconfig`, formatter config), or one file with at most 50 changed lines (`files.txt`) | 1, and 2 when the file is code; check a docs change hides no code change | Short, inline |
 | 1 | Anything else | 1 and 2; 7 when it touches a public interface | Short, inline |
