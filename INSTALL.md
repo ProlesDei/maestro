@@ -9,7 +9,7 @@ flowchart LR
   PR --> R[maestro-code-review] --> Q[maestro-qa-lead] --> M[Merged]
 ```
 
-`.maestro/` is the only copy. `.claude/skills/` and `.agents/skills/` hold symlinks into it:
+`.maestro/` is the only copy. `.claude/skills/` and `.agents/skills/` hold symlinks into it. Your own files in `.maestro/`, such as mobile.dev Maestro flows, stay yours:
 
 ```
 your-repo/
@@ -30,12 +30,13 @@ your-repo/
 | Bash 4.4+ (macOS ships 3.2: `brew install bash`), Git 2.38+, jq 1.5+ | the skills' scripts |
 | `gh`, signed in to an account that can push, comment on PRs and merge | engineers open PRs; review and QA comment; QA merges |
 | A GitHub `origin`; PRs from branches in the same repo into its default branch; branch rules that allow a merge commit without a merge queue | review and QA refuse anything else |
-| Branch rules that don't require an approving review or an up-to-date branch, or let QA's account bypass them | verdicts are PR comments, and every session posts as one account |
+| Branch rules that don't require an approving review or an up-to-date branch | verdicts are PR comments, and every session posts as one account |
+| Required status checks green on the PR's head before QA merges | QA merges without admin rights, so a red check stops the merge |
 | Node 18+ and `playwright-cli` with Playwright's Chromium | checking anything a user sees |
 | A ticket board the agents can reach | planning, claiming and tracking work |
-| Linux, macOS or WSL (Windows needs WSL for the symlinks) | the install |
+| Linux, macOS or WSL (Windows needs WSL for the symlinks), and git's `core.symlinks` not set to false | the install, and the links in every worktree |
 
-**The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, a claim only one agent can hold at a time, and these fields: deps, areas, priority, goal and a parked reason for `backlog`, plus type (`ship` or `scout`), tier and route, which the planner sets. A board kept in the repo's tracked files can't hold a claim across worktrees. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
+**The board** can be GitHub Issues, Beads, Linear or any tracker the agents can read and write. It needs these statuses: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, `cancelled`. It also needs ordered notes on each ticket, a claim only one agent can hold at a time, and these fields: deps, areas, priority, goal and a parked reason for `backlog`, plus type (`ship` or `scout`), tier and route (`review` or `qa`), which the planner sets. GitHub Issues and Linear have no claim only one agent can hold, and every session posts as one account, so your agent notes must name one: a dispatcher that hands each ticket to one session, say, or a claim tool. A board kept in the repo's tracked files can't hold a claim across worktrees. [maestro-create-ticket](skills/maestro-create-ticket/SKILL.md) sets the ticket's shape; [maestro-working-principles](skills/maestro-working-principles/SKILL.md) sets claims and notes.
 
 ## Install
 
@@ -47,11 +48,12 @@ From anywhere inside your repo:
 
 To pin a version, add `--ref <tag, branch or full 40-character sha>` after `install.sh`.
 
-The script places only `maestro-*` skills, their links and the files in `.maestro/`, and stages exactly those, even if `.gitignore` ignores `.claude/` or `.agents/`. It changes nothing and exits 1 if:
+The script places only `maestro-*` skills, their links and its own files in `.maestro/`, and stages exactly those, even if `.gitignore` ignores `.claude/` or `.agents/`. It changes nothing and exits 1 if:
 - a path it would place already exists and it didn't place it;
 - `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink, except one `skills/` folder linked to the other;
 - a file it placed has changed since the last install, or has staged changes;
 - `.maestro/manifest` comes from a newer Maestro, or names a path outside `.maestro/`, `.claude/skills/maestro-*` and `.agents/skills/maestro-*`;
+- git's `core.symlinks` is false, or a sparse checkout leaves out `.maestro/`, `.claude/` or `.agents/`;
 - git is busy (`index.lock` exists).
 
 If it fails or you stop it (Ctrl-C) partway, it puts every file back as it was.
@@ -62,8 +64,9 @@ Then add your agent notes (next section) and commit both to your default branch 
 
 The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to your project. Add:
 
-- **The board**: which one, and how agents reach it.
-- **Start the app**: the command, its port, and how to run several copies at once without a clash; or that there is no app, and which commands show a change works.
+- **The board**: which one, how agents reach it, and how they claim and release a ticket.
+- **Start the app**: the command, its port, where a worktree gets its env file and its own database, and how to run several copies at once without a clash; or that there is no app, and which commands show a change works.
+- **Regenerable files**: ignored files a finished worktree may lose, such as build outputs and copied env files.
 - **Outside steps**: anything a person must do first, such as a VPN, a login or a feature flag.
 - **Sensitive paths**: code that needs a closer look, such as auth, billing or migrations.
 - **Critical flows**: the user journeys QA always checks.
@@ -100,7 +103,7 @@ bash .maestro/install.sh
 
 It fetches Maestro's latest `main` (or `--ref`), replaces only what it placed, removes what Maestro dropped, and stages the change. Open a PR for it like any other change, so sessions working elsewhere never see files mid-swap. If `.maestro/install.sh` ever breaks, the install one-liner does the same update with the newest installer.
 
-Don't edit files in `.maestro/`: the update stops until you undo the edit. Exclude `.maestro/` from formatters and pre-commit hooks too: prettier and the like rewrite the skills' tables and block the next update. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
+Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Exclude them from formatters and pre-commit hooks too: prettier and the like rewrite the skills' tables and block the next update. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
 
 ## Uninstall
 
@@ -108,4 +111,4 @@ Don't edit files in `.maestro/`: the update stops until you undo the edit. Exclu
 bash .maestro/install.sh --uninstall
 ```
 
-It removes only what it placed, stages the removal, and leaves your own skills alone. Commit to finish.
+It removes only what it placed, stages the removal, and leaves your own skills and files alone. Commit to finish.

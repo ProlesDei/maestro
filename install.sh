@@ -41,6 +41,8 @@ fi
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "run this from inside your project's git repo"
 root=$(cd "$root" && pwd -P)
 cd "$root"
+[ "$(git config --type=bool core.symlinks 2>/dev/null || echo true)" = true ] ||
+  die "core.symlinks is false, so git checks out the skill links as text files; run git config core.symlinks true, then git checkout -- any links already written as text, and run this again (on Windows, clone in WSL)"
 linked=
 for link in .claude/skills .agents/skills; do
   for real in .agents/skills .claude/skills; do
@@ -49,6 +51,11 @@ for link in .claude/skills .agents/skills; do
   done
 done
 [ "$is_source" = true ] && [ "$here" = "$root" ] && die "run this from your project's repo, not from the Maestro clone"
+if [ "$(git config --type=bool core.sparseCheckout 2>/dev/null)" = true ]; then
+  want=$(for p in .maestro .maestro/skills $harnesses; do echo "$p/maestro-x"; done)
+  [ "$(printf '%s\n' "$want" | git sparse-checkout check-rules 2>/dev/null || echo "$want")" = "$want" ] ||
+    die "this sparse checkout leaves out .maestro/, .claude/ or .agents/; run git sparse-checkout add .maestro .claude .agents and run this again"
+fi
 
 index=$(git rev-parse --git-path index)
 stage=$(mktemp -d "$(git rev-parse --path-format=absolute --git-path maestro-stage.XXXXXX)")
@@ -129,7 +136,7 @@ check_untouched() {
     echo "maestro: these paths differ from what Maestro placed:" >&2
     grep '^[<>]' "$stage/diff" | cut -f3 | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
     if [ "$mode" = uninstall ]; then next="and commit"; else next="and then the install one-liner in INSTALL.md"; fi
-    rmcmd="git rm -rfq --ignore-unmatch .maestro"
+    rmcmd="git rm -rfq --ignore-unmatch .maestro/skills/maestro-* .maestro/install.sh $manifest .maestro/VERSION .maestro/.gitattributes"
     for h in $harnesses; do rmcmd="$rmcmd $h/maestro-*"; done
     [ -z "$linked" ] || rmcmd="$rmcmd; mkdir -p $harnesses"
     die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run $rmcmd $next"
@@ -162,8 +169,7 @@ swap_path() {
   if [ -e "$stage/new/$p" ] || [ -L "$stage/new/$p" ]; then mv -- "$stage/new/$p" "$p"; fi
 }
 
-if [ -e .maestro ]; then
-  [ -f "$manifest" ] || die ".maestro/ exists but Maestro didn't place it (no $manifest); move it aside first"
+if [ -f "$manifest" ]; then
   case $(head -n 1 "$manifest") in
     "format 1") cp "$manifest" "$prev" ;;
     format*) die "$manifest isn't format 1, so a newer Maestro placed it; run the install one-liner in INSTALL.md, which runs the newest installer" ;;
@@ -176,6 +182,7 @@ if [ -e .maestro ]; then
 elif [ "$mode" = uninstall ]; then
   die "no $manifest here; nothing Maestro placed to remove"
 else
+  [ ! -e "$manifest" ] && [ ! -L "$manifest" ] || die "$manifest exists and Maestro didn't place it; rename or remove it first"
   : > "$stage/old-units"
 fi
 
@@ -197,7 +204,7 @@ if [ "$mode" = install ]; then
   chmod +x "$stage/new/.maestro/install.sh"
   version=$(git -C "$here" rev-parse HEAD)
   printf '%s\n' "$version" > "$stage/new/.maestro/VERSION"
-  printf '* -text -eol\n' > "$stage/new/.maestro/.gitattributes"
+  printf '%s -text -eol\n' 'skills/**' /install.sh /manifest /VERSION /.gitattributes > "$stage/new/.maestro/.gitattributes"
   (cd "$stage/new" && find . ! -type d | sed 's|^\./||' | LC_ALL=C sort | state) >> "$stage/plan"
   cp "$stage/plan" "$stage/new/$manifest"
 fi
