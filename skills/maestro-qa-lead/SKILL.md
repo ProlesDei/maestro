@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Work for the QA lead
 
-Use the [PR test](references/test-a-pr.md) to verify the requested behavior. QA may merge a reviewed PR or a direct handoff whose actual diff qualifies for focused QA.
+Use the [PR test](references/test-a-pr.md) to verify the requested behavior. QA may merge a reviewed PR, or one whose ticket the planner routed straight to QA if its diff still fits that route.
 
 Follow **maestro-working-principles**. Read and write tickets on the ticket board.
 

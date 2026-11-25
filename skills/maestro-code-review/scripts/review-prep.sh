@@ -353,6 +353,8 @@ if [ -n "$qa" ]; then
 	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	review_go=
 	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
+	review_tier='' re='\), tier ([0-2])(,|$)'
+	[[ -z $review_go || ! $rlast =~ $re ]] || review_tier=${BASH_REMATCH[1]}
 	# QA's own latest verdict. Only a fail that tested is a base for a
 	# retest: a pass or a "not tested:" checked nothing to carry over.
 	inc=retest by="QA's fail" why="no earlier QA verdict" K=""
@@ -431,6 +433,7 @@ fi
 	echo "tier2_paths=$tier2"
 	if [ -n "$qa" ]; then
 		echo "review_go=${review_go:-none}"
+		echo "review_tier=${review_tier:-none}"
 		echo "qa_last=$qa_last"
 		echo "qa_last_at=${qa_at:-none}"
 		echo "qa_last_main=${qa_main:-none}"
