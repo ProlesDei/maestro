@@ -41,6 +41,12 @@ fi
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "run this from inside your project's git repo"
 root=$(cd "$root" && pwd -P)
 cd "$root"
+for link in .claude/skills .agents/skills; do
+  for real in .agents/skills .claude/skills; do
+    if [ "$link" != "$real" ] && [ -L "$link" ] && [ -d "$real" ] && [ ! -L "$real" ] &&
+      [ "$(cd "$link" && pwd -P)" = "$(cd "$real" && pwd -P)" ]; then harnesses=$real; fi
+  done
+done
 [ "$is_source" = true ] && [ "$here" = "$root" ] && die "run this from your project's repo, not from the Maestro clone"
 
 index=$(git rev-parse --git-path index)
@@ -52,6 +58,7 @@ finished=false
 
 cleanup() {
   local p failed=false
+  trap '' INT TERM HUP
   if [ "$finished" = false ] && [ -f "$stage/incoming" ]; then
     while IFS= read -r p; do
       if [ -e "$stage/old/$p" ] || [ -L "$stage/old/$p" ]; then
@@ -115,12 +122,13 @@ present_only() {
 }
 
 check_untouched() {
-  local want=cat skip='' changed
+  local want=cat skip='' changed next
   if [ "$mode" = uninstall ]; then want=present_only; skip=--diff-filter=d; fi
   if ! diff <(grep "^[fl]$tab" "$prev" | $want | LC_ALL=C sort) <(snapshot) > "$stage/diff"; then
     echo "maestro: these paths differ from what Maestro placed:" >&2
     grep '^[<>]' "$stage/diff" | cut -f3 | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
-    die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run git rm -rfq .maestro .claude/skills/maestro-* .agents/skills/maestro-* and then the install one-liner in INSTALL.md"
+    if [ "$mode" = uninstall ]; then next="and commit"; else next="and then the install one-liner in INSTALL.md"; fi
+    die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run git rm -rfq .maestro .claude/skills/maestro-* .agents/skills/maestro-* $next"
   fi
   { echo "$manifest"; cat "$stage/old-units"; } | tr '\n' '\0' > "$stage/specs"
   changed=$({

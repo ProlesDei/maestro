@@ -49,7 +49,7 @@ To pin a version, add `--ref <tag, branch or full 40-character sha>` after `inst
 
 The script places only `maestro-*` skills, their links and the files in `.maestro/`, and stages exactly those, even if `.gitignore` ignores `.claude/` or `.agents/`. It changes nothing and exits 1 if:
 - a path it would place already exists and it didn't place it;
-- `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink;
+- `.maestro/`, `.claude/` or `.agents/` (or a `skills/` folder in them) is a symlink, except one `skills/` folder linked to the other;
 - a file it placed has changed since the last install, or has staged changes;
 - `.maestro/manifest` comes from a newer Maestro, or names a path outside `.maestro/`, `.claude/skills/maestro-*` and `.agents/skills/maestro-*`;
 - git is busy (`index.lock` exists).
