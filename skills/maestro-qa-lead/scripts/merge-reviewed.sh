@@ -4,7 +4,8 @@
 # state or fork changed since QA; 2: usage; 3: the base moved since QA's
 # pass; 4: merged onto an untested base, M on stdout; 5: not merged
 # (queued, auto-merge or refused), with gh's reason and the auto-merge
-# state. Each but 0 and 2 gives its reason in one stderr line.
+# state; 6: gh or git couldn't read the state, so reread the PR. Each but
+# 0 and 2 gives its reason in one stderr line.
 set -euo pipefail
 die() { echo "merge-reviewed: $2" >&2; exit "$1"; }
 [[ $# == 4 ]] || die 2 'usage: merge-reviewed.sh pr head base tested_base'
@@ -19,15 +20,15 @@ changed() {
 		if .isCrossRepository then "fork" else empty end] | join(", ")' <<<"$view"
 }
 fields=headRefOid,baseRefName,isCrossRepository,state,mergeCommit,autoMergeRequest
-view=$(gh pr view "$pr" --json "$fields") || die 5 "not merged: gh couldn't read PR $pr"
+view=$(gh pr view "$pr" --json "$fields") || die 6 "not merged: gh couldn't read PR $pr"
 why=$(changed OPEN)
 [[ -z $why ]] || die 1 "PR changed since QA: $why"
-remote=$(git ls-remote origin "refs/heads/$base") || die 5 "not merged: git ls-remote origin failed"
+remote=$(git ls-remote origin "refs/heads/$base") || die 6 "not merged: git ls-remote origin failed"
 remote=${remote%%$'\t'*}
 [[ $remote == "$tested_base" ]] || die 3 "base $base moved since QA pass: ${remote:-gone}"
 out=$(gh pr merge "$pr" --merge --match-head-commit "$head" 2>&1) || true
 out=${out//$'\n'/ }
-view=$(gh pr view "$pr" --json "$fields") || die 5 "merge state unknown: gh couldn't read PR $pr: $out"
+view=$(gh pr view "$pr" --json "$fields") || die 6 "merge state unknown: gh couldn't read PR $pr: $out"
 if [[ $(jq -r .state <<<"$view") != MERGED ]]; then
 	why=$(changed OPEN)
 	[[ -z $why ]] || die 1 "PR changed since QA: $why: $out"
@@ -39,7 +40,7 @@ fi
 why=$(changed MERGED)
 [[ -z $why ]] || die 1 "PR changed since QA: $why"
 merge=$(jq -r '.mergeCommit.oid // ""' <<<"$view")
-[[ $merge =~ ^[0-9a-f]{40}$ ]] || die 5 "merge state unknown: PR $pr merged with no merge commit"
+[[ $merge =~ ^[0-9a-f]{40}$ ]] || die 6 "merge state unknown: PR $pr merged with no merge commit"
 echo "$merge"
 parent=$(git fetch -q origin "$merge" && git rev-parse --verify "$merge^1") || parent=unknown
 [[ $parent == "$tested_base" ]] || die 4 "merged $merge onto an untested base $parent"
