@@ -43,4 +43,4 @@ Follow the **maestro-working-principles** skill.
    - For a `hold`, comment `Hold: set by <the owner, or the planner>, <date>: <why>; lifts when <a fact the board shows>` right after you create the ticket.
    - If the board refuses, show its message, fix only the field it names, and try again. Before any retry, look for a ticket with this title made today, so you never add it twice: if it is this work and not `cancelled`, reply with its id, else change the title.
 
-**Reply:** the new id, title, status and its parked reason, tier, priority, goal, deps and areas, then `Next: /maestro-software-engineer <id>`.
+**Reply:** the new id, title, status and its parked reason, tier, priority, goal, deps and areas, then `Next: /maestro-software-engineer <id>`, or `/maestro-designer <id>` for a scout.

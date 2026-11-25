@@ -53,7 +53,7 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 
 ## Phase E: Run the gates
 
-1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it also fails in a second detached worktree at `G`. Mark those gates as already red on `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
+1. Wait until every pass and subagent is done with `R`. In `R`, record the current sha of `origin/<main>` as `G` and merge that sha. Run main's checks from Phase A step 3. Record each command, exit code and summary. A red gate is a blocker unless it fails the same way in a second detached worktree at `G`. Mark those gates as already red on `G`. Record that worktree's path for cleanup. If the disk fills, follow `Stop on refused` in **maestro-working-principles**. Never skip a hook or check.
 2. Read the PR's checks for leads only. Reproduce a red check locally before it counts; a green CI run proves nothing.
 
 ## Phase F: Decide

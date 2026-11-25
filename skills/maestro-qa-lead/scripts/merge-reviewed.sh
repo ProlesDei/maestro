@@ -17,8 +17,7 @@ fi
 merge=$(jq -er --arg base "$base" --arg head "$head" \
 	'select(.state == "MERGED" and .baseRefName == $base and .headRefOid == $head) | .mergeCommit.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<<"$view")
 echo "$merge"
-git fetch -q origin "$merge"
-parent=$(git rev-parse --verify "$merge^1")
+parent=$(git fetch -q origin "$merge" && git rev-parse --verify "$merge^1") || parent=unknown
 if [[ $parent != "$tested_base" ]]; then
 	echo "merged $merge onto an untested base $parent" >&2
 	exit 4

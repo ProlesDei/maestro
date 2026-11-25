@@ -170,7 +170,7 @@ if [ "$is_source" = false ] || [ "$ref_given" = true ]; then
   exit $?
 fi
 
-stage=$(mktemp -d "$root/.maestro-stage.XXXXXX")
+stage=$(mktemp -d "$(git rev-parse --path-format=absolute --git-path maestro-stage.XXXXXX)")
 new=$stage/new-names
 old=$stage/old-names
 names=$stage/names
