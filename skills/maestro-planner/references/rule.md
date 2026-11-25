@@ -5,9 +5,9 @@ Given `rule <id>: <decision>`, post the decision and move the ticket. Carry out 
 Before each move, check the ticket still has the status from your last read or move; if a claim or move came since, stop and say so.
 
 1. Read the ticket on the ticket board: its status, the latest `Escalation:` note, the latest `Kickback:` and every `Answer:`. If it is `done` or `cancelled`, stop and say so; if it has a live claim, stop: `rule: stopped: <id> held`, or for a hold `rule: stopped: can't park claimed`.
-2. If the decision holds the ticket (`hold, set by <who>: <why>; lifts when <fact>`), do only this step. It must be `todo`, `backlog`, or `in_progress`; else stop: `rule: stopped: can't park <status>`. Move an `in_progress` one to `todo`, then a `todo` one to `backlog` parked `hold`, or re-park a `backlog` one as `hold`; then comment `Hold: set by <who>, <today's date>: <why>; lifts when <fact>`.
-   If the decision lifts a hold or other park on a `backlog` ticket, move it to `todo` and do only this step.
-3. If a disputed kickback is `in_progress`, move it before posting the answer. Move it to `blocked` for a split, rewrite or drop. Otherwise, if the decision drops a finding from the latest `Kickback:`, move it to `in_review`.
+2. If the decision holds the ticket (`hold, set by <who>: <why>; lifts when <fact>`), do only this step. It must be `todo`, `backlog`, `in_progress` or `blocked`; else stop: `rule: stopped: can't park <status>`. Move a `blocked` one to its `Blocked-from:` status first, as step 8 says, an `in_progress` one to `todo`, then a `todo` one to `backlog` parked `hold`, or re-park a `backlog` one as `hold`; then comment `Hold: set by <who>, <today's date>: <why>; lifts when <fact>`.
+   If the decision lifts a hold or other park on a `backlog` ticket, move it to `todo`, clear its parked reason, comment `Answer: lifted: <why>` and do only this step.
+3. If a disputed kickback is `in_progress`, move it before posting the answer. Move it to `blocked` for a split, rewrite or drop. Otherwise, if the decision drops every item of the latest `Kickback:` still standing, move it to `in_review`; with any item left, leave it `in_progress` for the engineer.
 4. Post the comments in this order:
    1. If the decision drops an item of a `Kickback: QA fail at <H>`, from a block or a dispute, and no `Retest:` came after that `Kickback:`, first `Retest: planner at <H>: <why>`. Only a new QA run clears the item.
    2. Then `Answer: <decision>`. One that changes an earlier `Answer:` names it and says why. On a `Design:` ticket, `approved:` with a letter other than the latest `Design spec:`'s `Pick:` approves a direction with no criteria yet: post it as `Answer: changes: make <letter> the pick, with its own criteria`, so step 8 sends it back to the designer.
@@ -20,7 +20,7 @@ Before each move, check the ticket still has the status from your last read or m
    4. Move the ticket from `blocked` straight to `done` under your claim, if it is still `blocked`. Only the planner can skip review for a `Design:` scout this way.
 8. If it is `blocked` and the latest `Escalation:` reads `PR <url> merged as <M>`, look up the ticket's PR by branch as in step 7. Check that it is merged at the head the note names and that its remote branch is gone or still at that head. If either check fails, stop and say why. Otherwise move the ticket to `done` and reply.
 
-   For any other `blocked` ticket, move it back to the status the latest `Escalation:` names on its `Blocked-from:` line if that is `todo`, `in_progress` or `in_review`, else to `in_progress`. If the decision drops an item of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
+   For any other `blocked` ticket, move it back to the status the latest `Escalation:` names on its `Blocked-from:` line if that is `backlog` (keeping its parked reason), `todo`, `in_progress` or `in_review`, else to `in_progress`. If the decision drops every item still standing of the latest `Kickback:`, a `Kickback: QA fail`, and the ticket is now `in_progress`, move it to `in_review`: QA tests it again.
 
 ## Reply
 

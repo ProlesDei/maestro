@@ -335,7 +335,7 @@ lines=$n_lines nfiles=$n_files binary=$n_binary tier2=$n_tier2
 # posts as: a member who keeps that private shows as a CONTRIBUTOR. QA
 # reads no diff, so its kickback is never a base.
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
-me=$(gh api user --jq .login 2>/dev/null) || me=
+me=$(gh api user --jq .login 2>/dev/null) && [ -n "$me" ] || die 1 "gh couldn't read its own login"
 firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" | jq -r --arg me "$me" \
 	'.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or ($me != "" and .user.login == $me)) | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
 	die 1 "gh couldn't read PR $pr's comments"
