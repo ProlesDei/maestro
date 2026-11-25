@@ -93,6 +93,8 @@ Call each skill by name: `/maestro-planner` in Claude Code, `$maestro-planner` i
 
 `maestro-chief-of-staff` checks facts and weighs calls for you along the way; it doesn't start work. [skills/README.md](skills/README.md) lists every skill.
 
+Merged worktrees, branches and QA evidence pile up across a swarm. Run `maestro-prune --safe-only` on a schedule, daily say, from your own scheduler or by hand: it removes only what is merged and idle.
+
 ## Update
 
 On a new branch, run:

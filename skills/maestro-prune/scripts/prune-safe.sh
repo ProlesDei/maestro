@@ -36,6 +36,8 @@ err=$(fetch) || { sleep 2 && err=$(fetch); } || die 1 "git fetch origin failed: 
 if [[ -z $main ]]; then
 	main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
 	main=${main#origin/}
+	[[ -n $main ]] || main=$(git ls-remote --symref origin HEAD 2>/dev/null |
+		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
 	main=${main:-main}
 fi
 git check-ref-format "refs/heads/$main" || die 2 "bad main branch: $main"
@@ -65,16 +67,12 @@ in_use() {
 }
 
 is_rebuildable() {
-	local path=${1%/} pat part
-	local -a parts
+	local path=${1%/} pat
 	for pat in "${rebuildable[@]}"; do
 		case $path in $pat) return 0 ;; esac
 	done
-	IFS=/ read -r -a parts <<<"$path"
-	for part in "${parts[@]}"; do
-		for pat in "${rebuildable[@]}"; do
-			case $part in $pat) return 0 ;; esac
-		done
+	for pat in "${rebuildable[@]}"; do
+		case ${path##*/} in $pat) return 0 ;; esac
 	done
 	return 1
 }
@@ -102,6 +100,7 @@ check_worktree() {
 	! in_use "$real" || { kept "$wt" in-use; return; }
 	gd=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null) || { kept "$wt" unverified; return; }
 	[[ ! -s $gd/maestro/servers ]] || { kept "$wt" servers; return; }
+	! compgen -G "$gd/maestro/saved.*" >/dev/null || { kept "$wt" saved; return; }
 	[[ -z $(find "$gd" -maxdepth 1 -type f -mmin -1440 -print -quit 2>/dev/null) ]] || { kept "$wt" recent; return; }
 	label=$(files_label "$wt")
 	[[ -z $label ]] || { kept "$wt" "$label"; return; }

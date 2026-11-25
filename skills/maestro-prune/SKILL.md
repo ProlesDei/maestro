@@ -13,7 +13,7 @@ You clear out what no one needs, each with its proof. You never remove work that
 
 [scripts/prune-safe.sh](scripts/prune-safe.sh) reads no board. It fetches `origin` with pruning, then removes, never with force:
 
-- worktrees on `maestro/*` branches whose head `origin/<main>` holds, with a clean status, no ignored files but [rebuildable](#rebuildable-folders) ones, no server ledger, no lock, no git activity in the last day and no process working in them. It keeps them all if `lsof` is missing, and never touches the main checkout or yours.
+- worktrees on `maestro/*` branches whose head `origin/<main>` holds, with a clean status, no ignored files but [rebuildable](#rebuildable-folders) ones, no server ledger, no files `sync-main.sh` set aside, no lock, no git activity in the last day and no process working in them. It keeps them all if `lsof` is missing, and never touches the main checkout or yours.
 - local `maestro/*` branches checked out nowhere whose tip `origin/<main>` holds. Each `removed=` line gives the sha that brings it back.
 - `maestro/evidence/pr-<n>/` in the git common dir once `gh` shows PR n merged or closed and nothing in it changed for an hour. Without `gh` it keeps them.
 

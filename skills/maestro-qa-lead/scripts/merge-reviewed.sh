@@ -35,9 +35,10 @@ if [[ $(jq -r .state <<<"$view") != MERGED ]]; then
 	# A queued or auto-merge PR would merge a later push no one tested.
 	gh pr merge "$pr" --disable-auto >/dev/null 2>&1 || true
 	view=$(gh pr view "$pr" --json "$fields") || view='{"autoMergeRequest":"unknown"}'
-	red=$(gh pr checks "$pr" --required --json name,bucket \
-		--jq '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' 2>/dev/null) || true
-	die 5 "not merged: ${out:-gh said nothing}; auto-merge off: $(jq '.autoMergeRequest == null' <<<"$view")${red:+; required checks red: $red}"
+	checks=$(gh pr checks "$pr" --required --json name,bucket 2>/dev/null) || true
+	red=$(jq -r '[.[]? | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' <<<"${checks:-[]}" 2>/dev/null) || red=''
+	wait=$(jq -r '[.[]? | select(.bucket == "pending") | .name] | join(", ")' <<<"${checks:-[]}" 2>/dev/null) || wait=''
+	die 5 "not merged: ${out:-gh said nothing}; auto-merge off: $(jq '.autoMergeRequest == null' <<<"$view")${red:+; required checks red: $red}${wait:+; required checks pending: $wait}"
 fi
 why=$(changed MERGED)
 [[ -z $why ]] || die 1 "PR changed since QA: $why"
