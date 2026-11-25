@@ -123,13 +123,16 @@ present_only() {
 }
 
 check_untouched() {
-  local want=cat skip='' changed next
+  local want=cat skip='' changed next rmcmd h
   if [ "$mode" = uninstall ]; then want=present_only; skip=--diff-filter=d; fi
   if ! diff <(grep "^[fl]$tab" "$prev" | $want | LC_ALL=C sort) <(snapshot) > "$stage/diff"; then
     echo "maestro: these paths differ from what Maestro placed:" >&2
     grep '^[<>]' "$stage/diff" | cut -f3 | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
     if [ "$mode" = uninstall ]; then next="and commit"; else next="and then the install one-liner in INSTALL.md"; fi
-    die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run git rm -rfq .maestro .claude/skills/maestro-* .agents/skills/maestro-* $next"
+    rmcmd="git rm -rfq --ignore-unmatch .maestro"
+    for h in $harnesses; do rmcmd="$rmcmd $h/maestro-*"; done
+    [ -z "$linked" ] || rmcmd="$rmcmd; mkdir -p $harnesses"
+    die "undo those changes, then run this again. If you committed them (a formatter rewrote files, say), run $rmcmd $next"
   fi
   { echo "$manifest"; cat "$stage/old-units"; } | tr '\n' '\0' > "$stage/specs"
   changed=$({
@@ -139,7 +142,7 @@ check_untouched() {
   if [ -n "$changed" ]; then
     echo "maestro: git's index holds changes to these paths that the files don't have:" >&2
     printf '%s\n' "$changed" | LC_ALL=C sort -u | head -20 | sed 's/^/  /' >&2
-    die "run git add on them so the index matches the files, then run this again"
+    die "run git add -f on them so the index matches the files, then run this again"
   fi
 }
 
