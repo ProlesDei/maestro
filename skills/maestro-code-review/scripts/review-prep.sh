@@ -8,7 +8,8 @@
 #     picks full or incremental mode. Prints key=value lines, also saved
 #     to $C/prep.txt; wrote= lists the files in $C. A fork's PR, a merged
 #     one or one on another base gets no review: it prints stop=<why>
-#     and the PR's keys, and fetches and writes nothing.
+#     and the PR's keys, and fetches and writes nothing. stop=merged adds
+#     merge_commit=<sha> and remote_branch=gone|at_head|past_head.
 #   review-prep.sh --qa <target>
 #     maestro-qa-lead calls this mode directly. It uses the same target,
 #     stops, fetch, diff files and sorting. A unique run name, run=qa-<id>-<6
@@ -46,11 +47,12 @@ main=${2-}
 # .gitattributes, or the user's, hides no code from the counts or the
 # patch (the tree part needs git 2.40+). Only .git/info/attributes, the
 # repo's own, still applies: binary= reports what it, or a real binary,
-# leaves uncounted.
+# leaves uncounted. diff-tree and rev-list are plumbing: no diff, color
+# or log setting of the user's changes what they print.
 attrs=()
 empty=$(git hash-object -t tree /dev/null)
 git --attr-source="$empty" rev-parse --git-dir >/dev/null 2>&1 && attrs=(--attr-source="$empty")
-gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff "$@"; }
+gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff-tree -r -M "$@"; }
 
 mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 if [ -z "$main" ]; then
@@ -73,7 +75,7 @@ load_rules() {
 	for f in AGENTS.md AGENTS.override.md CLAUDE.md CLAUDE.local.md .claude/CLAUDE.md GEMINI.md \
 		.github/copilot-instructions.md; do
 		if git cat-file -e "$tip:$f" 2>/dev/null; then
-			rules+=$(git show "$tip:$f")$'\n'
+			rules+=$(git cat-file blob "$tip:$f")$'\n'
 		elif [ -f "$mainwt/$f" ]; then
 			rules+=$(cat "$mainwt/$f")$'\n'
 		fi
@@ -171,7 +173,7 @@ maestro/*)
 *) die 2 "want a PR number or maestro/<name>, not $target" ;;
 esac
 
-view=$(gh pr view "$pr" --json number,url,title,body,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository) ||
+view=$(gh pr view "$pr" --json number,url,title,body,state,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository,mergeCommit) ||
 	die 1 "couldn't read PR $pr"
 H=$(jq -r .headRefOid <<<"$view")
 branch=$(jq -r .headRefName <<<"$view")
@@ -207,6 +209,9 @@ if [ "$fork" != false ]; then
 	stop=fork # never run, or even check out, a fork's code
 elif [ "$state" = MERGED ]; then
 	stop=merged
+	rb=$(git ls-remote origin "refs/heads/$branch") || die 1 "git ls-remote origin failed"
+	case ${rb%%$'\t'*} in "") rb=gone ;; "$H") rb=at_head ;; *) rb=past_head ;; esac
+	stop+=$'\n'"merge_commit=$(jq -r '.mergeCommit.oid // "none"' <<<"$view")"$'\n'"remote_branch=$rb"
 elif [ "$base" != "$main" ]; then
 	stop="base $base isn't $main"
 fi
@@ -287,9 +292,9 @@ fi
 
 B=$(git merge-base "$tip" "$H")
 jq . <<<"$view" >"$C/pr.json"
-gd "$B" "$H" >"$C/diff.patch"
+gd -p "$B" "$H" >"$C/diff.patch"
 gd --stat "$B" "$H" >"$C/stat.txt"
-git log --oneline "$B..$H" >"$C/log.txt"
+git rev-list --oneline "$B..$H" >"$C/log.txt"
 merges=yes
 # QA's real merge above has already said.
 [ -n "$qa" ] || git merge-tree --write-tree "$tip" "$H" >/dev/null 2>&1 || {
@@ -297,27 +302,42 @@ merges=yes
 	merges=conflict
 }
 
-# files.txt: added, removed, path, class. A binary file counts no lines;
-# binary= says how many there are.
-lines=0 nfiles=0 tier2=0
-binary=$(gd --numstat --no-renames "$B" "$H" | grep -c '^-	-	' || true)
-while IFS=$'\t' read -r a d f; do
-	[ "$a" = - ] && a=0
-	[ "$d" = - ] && d=0
-	c=$(class "$f")
-	printf '%s\t%s\t%s\t%s\n' "$a" "$d" "$f" "$c" >>"$C/files.txt"
-	lines=$((lines + a + d)) nfiles=$((nfiles + 1))
-	case $c in agent-text | ci | deps | schema) tier2=$((tier2 + 1)) ;; esac
-done < <(gd --numstat --no-renames "$B" "$H")
-touch "$C/files.txt"
+# numstat <from> <to>: added, removed, path, class per file. A rename's
+# path is "old => new" and its class names both paths' classes, comma
+# apart, when they differ. A binary file counts no lines. Sets n_files,
+# n_lines, n_binary, n_tier2 and n_classes, the distinct classes.
+numstat() {
+	local a d f o c
+	n_files=0 n_lines=0 n_binary=0 n_tier2=0 n_classes=
+	while IFS=$'\t' read -r -d '' a d f; do
+		o=
+		[ -n "$f" ] || { IFS= read -r -d '' o && IFS= read -r -d '' f; }
+		if [ "$a" = - ]; then a=0 d=0 n_binary=$((n_binary + 1)); fi
+		c=$(class "$f")
+		if [ -n "$o" ] && [ "$(class "$o")" != "$c" ]; then c+=,$(class "$o"); fi
+		case ,$c, in *,agent-text,* | *,ci,* | *,deps,* | *,schema,*) n_tier2=$((n_tier2 + 1)) ;; esac
+		n_classes+=" ${c//,/ }"
+		printf '%s\t%s\t%s\t%s\n' "$a" "$d" "${o:+$o => }$f" "$c"
+		n_lines=$((n_lines + a + d)) n_files=$((n_files + 1))
+	done < <(gd --numstat -z "$1" "$2")
+	n_classes=$(tr ' ' '\n' <<<"$n_classes" | sort -u | tr '\n' ' ')
+	n_classes=${n_classes# }
+	n_classes=${n_classes% }
+	n_classes=${n_classes:-none}
+}
+numstat "$B" "$H" >"$C/files.txt"
+lines=$n_lines nfiles=$n_files binary=$n_binary tier2=$n_tier2
 
 # K: the sha after the first "at" in review's latest verdict, a Review:
 # or a Kickback: that isn't a Kickback: QA fail, from PR comments by the
 # repo's owner, members or collaborators, since anyone can comment on a
-# public PR. QA reads no diff, so its kickback is never a base.
+# public PR, or by the gh user this runs as, whom every Maestro session
+# posts as: a member who keeps that private shows as a CONTRIBUTOR. QA
+# reads no diff, so its kickback is never a base.
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
-firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" \
-	--jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
+me=$(gh api user --jq .login 2>/dev/null) || me=
+firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" | jq -r --arg me "$me" \
+	'.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or ($me != "" and .user.login == $me)) | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
 	die 1 "gh couldn't read PR $pr's comments"
 # sha_after <line> <text>: the full sha right after the first <text> in
 # the line, or nothing.
@@ -326,14 +346,7 @@ sha_after() {
 	[[ ${1#*"$2"} =~ ^([0-9a-f]{40})([^[:alnum:]]|$) ]] && echo "${BASH_REMATCH[1]}"
 	return 0
 }
-# classes: the distinct classes of the paths on stdin, on one line.
-classes() {
-	local f out
-	out=$(while IFS= read -r f; do if [ -n "$f" ]; then class "$f"; fi; done | sort -u | tr '\n' ' ')
-	out=${out% }
-	echo "${out:-none}"
-}
-inc=incremental by="review's verdict" why="no earlier verdict" delta=""
+inc=incremental by="review's verdict" why="no earlier verdict"
 if [ -n "$qa" ]; then
 	# What review passed: its latest verdict, a Kickback: of its own
 	# included, and only when that one opens as a GO.
@@ -370,11 +383,9 @@ if [ -n "$K" ]; then
 		# The author's change since K, with main's merges taken out.
 		if T=$(git merge-tree --write-tree "$K" "$B"); then
 			T=${T%%$'\n'*}
-			gd "$T" "$H" >"$C/delta.patch"
-			delta=$(gd --numstat --no-renames "$T" "$H")
-			dfiles=$(grep -c . <<<"$delta" || true)
-			dlines=$(awk -F'\t' '{a = $1 == "-" ? 0 : $1; d = $2 == "-" ? 0 : $2; n += a + d} END {print n + 0}' <<<"$delta")
-			[ -z "$qa" ] || dclasses=$(cut -f3- <<<"$delta" | classes)
+			gd -p "$T" "$H" >"$C/delta.patch"
+			numstat "$T" "$H" >/dev/null
+			dfiles=$n_files dlines=$n_lines dclasses=$n_classes
 			if [ "$dlines" -gt 400 ] || [ "$dfiles" -gt 15 ]; then
 				why="delta of $dlines lines in $dfiles files: redone, not fixed"
 			else
@@ -391,7 +402,8 @@ fi
 if [ -n "$qa" ]; then
 	msince=unknown
 	if [ -n "$qa_main" ] && git cat-file -e "$qa_main^{commit}" 2>/dev/null; then
-		msince=$(gd --name-only --no-renames "$qa_main" "$G" | classes)
+		numstat "$qa_main" "$G" >/dev/null
+		msince=$n_classes
 	fi
 fi
 
