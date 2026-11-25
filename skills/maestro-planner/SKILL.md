@@ -29,7 +29,7 @@ Yours: slicing, order, ticket priority, deps, areas, splits, merges, parks, crit
 |---|---|
 | `rule <id>: <decision>` | **Rule:** [references/rule.md](references/rule.md) |
 | A goal, or a ticket id to split or rewrite | **Plan:** [references/plan.md](references/plan.md) |
-| `follow-ups <id>`: a ticket's `New tickets:` or `Follow-ups:` | **Follow-ups:** skip any a `Filed:` note already covers; check each against the board's titles and areas, open and recently done, as that skill's look-around does, and drop a match as `same as <id>`; file the rest with its create step, skipping its ask as Plan does, `urgent` first, or drop one with a reason; then post `Filed: <ids>; dropped: <item: why>` on `<id>` |
+| `follow-ups <id>`: a ticket's `New tickets:` or `Follow-ups:` | **Follow-ups:** skip any a `Filed:` note already covers; check each against the board's titles and areas, open and recently done, as that skill's look-around does, and drop a match as `same as <id>`; file the rest with its create step, skipping its ask as Plan does, under the source ticket's goal: `urgent` ones as `todo`, the others as `backlog` parked `deferred` for a Board pass or a plan to promote; or drop one with a reason; then post `Filed: <ids>; dropped: <item: why>` on `<id>` |
 | A plan or draft tickets to check, or "second opinion" | **Check** |
 | "Board", or why so little runs at once | **Board** |
 | Where something lives, how big a change is, what it would break, whether it can be done | **Answer** |
