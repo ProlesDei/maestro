@@ -61,7 +61,7 @@ run_group() {
 	done
 	[[ -e $ready ]] || exit 1
 	set +m
-	"$@" &
+	PYTHONUNBUFFERED=1 "$@" &
 	wait "$!" || command_status=$?
 
 	set -m
@@ -191,7 +191,7 @@ watch_server() {
 
 check_ledger() {
 	local action=$1 target=${2-} line pid group birth log
-	local result found= status=0 ready watcher watcher_birth attempt
+	local result found='' status=0 ready watcher watcher_birth attempt
 	local -a watchers=()
 	lock || die 1 ledger_busy
 	if [[ -f $ledger ]]; then
@@ -263,7 +263,7 @@ git_dir=$(git rev-parse --absolute-git-dir) || die 1 no_git_dir
 state=$git_dir/maestro
 ledger=$state/servers
 lock_file=$state/servers.lock
-draft= locked= watch_file=
+draft='' locked='' watch_file=''
 trap cleanup EXIT
 case $1 in
 	start)
