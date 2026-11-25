@@ -42,6 +42,7 @@ main=${2-}
 
 # 4.4: "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
+[[ $(git version) =~ ([0-9]+)\.([0-9]+) ]] && ((BASH_REMATCH[1] * 100 + BASH_REMATCH[2] >= 238)) || die 1 "needs git 2.38 or later"
 # Paths as written, not quoted. Attributes from an empty tree and no
 # global attributes file, so a -diff in the PR's or the checkout's
 # .gitattributes, or the user's, hides no code from the counts or the

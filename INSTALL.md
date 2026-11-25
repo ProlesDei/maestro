@@ -44,16 +44,16 @@ your-repo/
 - runs each `Next:` line a reply gives, as written, since some carry flags such as `--approved <H>` (`after <time>` means not before then); a `maestro-chief-of-staff <id>` line runs naming each card still waiting on the owner, as the `blocked` row says;
 - runs one `maestro-chief-of-staff` at a time: ids and `up:` lines that come up while one runs wait, then go to the next run together, naming each card still waiting, so one cause gets one card;
 - sends a reply's `up:` lines together, with the call that gave them, to one `maestro-chief-of-staff` run, and each `Send:` line of a chief-of-staff run you started to whom it names;
-- shows each owner's card to the owner. When the owner picks an option, runs its decision for each id on the card's `Tickets` (the owner's own words as `maestro-planner rule <id>: <answer>` if no option fits). For a plan that created no ticket, runs the picked option's plan call, or reruns the latest call for that goal with `; owner ruled: <answer>` added. A `joins <What>` reply adds its tickets to that card, so the picked decision runs for them too. Drops a card once none of its tickets is still `blocked`;
+- shows each owner's card to the owner. When the owner picks an option, runs its decision for each id on the card's `Tickets` (the owner's own words as `maestro-planner rule <id>: <answer>` if no option fits). For a plan that created no ticket, runs the picked option's plan call, or reruns the latest call for that goal with `; owner ruled: <answer>` added. A `joins <What>` reply adds its tickets to that card, so the picked decision runs for them too. Drops a card once the owner's pick has run for it and none of its tickets is still `blocked`;
 - reruns a run after 15 minutes when it left its ticket's status and notes as they were, with no reply, no `Next:` line or `Next: none`, and the ticket is still unclaimed (a full disk, GitHub down, a stopped ruling), and tells the owner after 3 tries. A chief-of-staff run, a run whose reply has an `up:` line, and a planner job that only reads (a draft, Check, Board or Answer) never count: they change nothing by design or wait on the owner;
-- after each run ends, and every 15 minutes, starts from this table each unclaimed ticket that no `Next:` line started or holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves, unless its own last run left it as it was (the rule above applies):
+- after each run ends, and every 15 minutes, starts from this table each unclaimed ticket that no run you started is still working on and no `Next:` line holds for later, such as one a `Next: none`, a ruling or a `Start now:` line leaves, unless its own last run left it as it was (the rule above applies):
 
 | Ticket | Start |
 |---|---|
 | `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
 | `in_review` with route `qa`, or whose latest `Review: GO at` names the PR's head with no `Rereview:` after it | `maestro-qa-lead <id>` |
 | any other `in_review` | `maestro-code-review <id>` |
-| `blocked`, once per `Escalation:` (a run that gave a reply counts), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>`, naming each card still waiting on the owner, so one cause joins its card |
+| `blocked`, once per `Escalation:` (a run counts once a card, a `joins` line, a Send line or an Answer names the ticket), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>`, naming each card still waiting on the owner, so one cause joins its card |
 
 ## Install
 
