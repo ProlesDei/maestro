@@ -3,7 +3,7 @@
 # call, so a session spends no calls or tokens on the fixed steps and
 # writes no card by hand.
 #
-#   design-pr.sh <ticket-id> <run folder> --title <ticket title>
+#   design-pr.sh <ticket-id> <run folder> --title <ticket title> [--base <branch>]
 #     Checks the spec (spec.md in the run folder) has every field, two or
 #     more directions, a pick among them, numbered criteria that each
 #     name a width in px, and, unless its Motion: is just none, a
@@ -33,13 +33,15 @@ unset CDPATH
 die() { echo "design-pr: $2" >&2; exit "$1"; }
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
 
-[ $# -ge 2 ] || die 2 "usage: design-pr.sh <ticket-id> <run folder> --title <ticket title>"
+[ $# -ge 2 ] || die 2 "usage: design-pr.sh <ticket-id> <run folder> --title <ticket title> [--base <branch>]"
 id=$1 dir=$2
 shift 2
 title=''
+base=''
 while [ $# -gt 0 ]; do
 	case $1 in
 	--title) [ $# -ge 2 ] || die 2 "--title needs a value"; title=$2; shift 2 ;;
+	--base) [ $# -ge 2 ] || die 2 "--base needs a value"; base=$2; shift 2 ;;
 	*) die 2 "unknown argument $1" ;;
 	esac
 done
@@ -118,11 +120,17 @@ fi
 stop() { echo "stop=$1"; exit 3; }
 [[ $title == Design:* ]] || stop "$id is not a Design: ticket"
 
-# The repo's web URL and default branch, main when none is set.
-meta=$(gh repo view --json url,defaultBranchRef --jq '.url + " " + .defaultBranchRef.name') || die 1 "gh can't read this repo"
-read -r web main <<<"$meta"
+if [ -z "$base" ]; then
+	base=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
+	base=${base#refs/remotes/origin/}
+	[ -n "$base" ] || base=$(git ls-remote --symref origin HEAD 2>/dev/null |
+		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	base=${base:-main}
+fi
+git check-ref-format "refs/heads/$base" || die 2 "invalid base branch: $base"
+
+web=$(gh repo view --json url --jq .url) || die 1 "gh can't read this repo"
 [[ $web =~ ^https://[^[:space:]]+$ ]] || die 1 "gh gave no repo URL: $web"
-main=${main:-main}
 branch=maestro/$id
 
 tmp=$(mktemp -d)
@@ -141,8 +149,8 @@ retry() {
 	done
 	return 1
 }
-retry git fetch -q origin "$main" || die 1 "can't fetch $main"
-start=refs/remotes/origin/$main
+start=refs/remotes/origin/$base
+retry git fetch -q origin "+refs/heads/$base:$start" || die 1 "can't fetch $base"
 if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
 	retry git fetch -q origin "+refs/heads/$branch:refs/remotes/origin/$branch" || die 1 "can't fetch $branch"
 	start=refs/remotes/origin/$branch
@@ -210,9 +218,9 @@ pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$branch&state=open&per_page
 if [ -n "$pr" ]; then
 	gh pr edit "$pr" --body-file "$tmp/body" >/dev/null || die 1 "can't update $pr"
 else
-	if ! pr=$(gh pr create --draft --base "$main" --head "$branch" --title "$title" --body-file "$tmp/body" 2>"$tmp/err"); then
+	if ! pr=$(gh pr create --draft --base "$base" --head "$branch" --title "$title" --body-file "$tmp/body" 2>"$tmp/err"); then
 		grep -qi 'draft' "$tmp/err" || die 1 "can't open the PR: $(head -c 300 "$tmp/err")"
-		pr=$(gh pr create --base "$main" --head "$branch" --title "$title (do not merge)" --body-file "$tmp/body") ||
+		pr=$(gh pr create --base "$base" --head "$branch" --title "$title (do not merge)" --body-file "$tmp/body") ||
 			die 1 "can't open the PR"
 	fi
 	pr=$(tail -n1 <<<"$pr")

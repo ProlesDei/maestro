@@ -1,15 +1,17 @@
 ---
 name: maestro-prune
 description: "Clean up a repo's workspace: stale worktrees, merged branches, dependency and build folders, temp files and folders, and Maestro leftovers, each with proof that nothing is lost, asking before anything that costs work to get back. Removes unused code only when there is nothing else to clean, or with --code. Use for /maestro-prune, 'clean up worktrees', 'free up disk space', 'delete merged branches', 'remove node_modules', or 'prune this repo'. Not for reshaping code that is still used (maestro-refactor-code) or cleaning up after your own change (maestro-working-principles)."
-argument-hint: "[--dry-run] [--code [path]]"
+argument-hint: "[--dry-run] [--safe-only] [--code [path]]"
 disable-model-invocation: true
 ---
 
 # Prune
 
-You clear out what no one needs (worktrees, branches, rebuildable folders, temp files and folders, Maestro leftovers), each with its proof. You never remove work that exists nowhere else, or anything a live session holds. Follow the **maestro-working-principles** skill. Below, `<main>` is the main branch the agent notes name, else the remote's default branch (default `main`), and `<common>` is `$(git rev-parse --git-common-dir)/maestro`.
+You clear out what no one needs (worktrees, branches, rebuildable folders, temp files and folders, Maestro leftovers), each with its proof. You never remove work that exists nowhere else, or anything a live session holds. Follow the **maestro-working-principles** skill. Below, `<main>` is the main branch the agent notes name, else the remote's default branch (default `main`), and `<common>` is the absolute git common dir plus `/maestro`.
 
-Run `git fetch --prune origin` (retry once if it fails on a lock) and `df -h .`. Merges land on the remote, never on local `<main>`, so every merge check below uses `origin/<main>`. Hundreds of sessions may share this repo, and its ticket board. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: every ticket's status and claim from the ticket board, `git worktree list --porcelain` and `lsof -d cwd -Fn`.
+The planner alone starts unattended runs. It owns the lock and stamp for those `--safe-only` runs. An interactive run uses neither.
+
+Fetch from `origin` in every mode with remote ref pruning on (`--prune`) and tag pruning off (`--no-prune-tags`). Retry once if the fetch fails on a lock. If it still fails in `--safe-only`, report failure and stop. Run `df -h .`. Merges land on the remote, so every merge check below uses `origin/<main>`. Save each shared list once to a file in `S=$(mktemp -d)`, and test items against those files instead of making one call per item: each ticket's status and claim, `git worktree list --porcelain` and `lsof -d cwd -Fn`.
 
 ## Phase A: Find candidates (read only)
 
@@ -24,33 +26,38 @@ Run `git fetch --prune origin` (retry once if it fails on a lock) and `df -h .`.
 
 ## Phase B: Label and sort each candidate
 
-- `in-use`: the ticket board shows its ticket claimed; `git worktree list` marks it `locked`; or the saved `lsof` list has a line that is `n<path>` or starts `n<path>/` (skip this test where `lsof` is missing).
-- `dirty`: a worktree whose `git -C <path> status --porcelain` prints anything. `unpushed`: a worktree head or branch tip that isn't `merged` and that `git branch -r --contains <sha>` doesn't list. `recent`: `find <path> -name node_modules -prune -o -mmin -1440 -print -quit` prints something. `merged`: `git merge-base --is-ancestor <sha> origin/<main>` passes, or, after a squash merge, `git merge-tree --write-tree origin/<main> <sha> | head -1` prints `git rev-parse 'origin/<main>^{tree}'`. `unverified`: the fetch failed.
+- `in-use`: the ticket board shows its ticket claimed, `git worktree list` marks it `locked`, the worktree has a non-empty `maestro/servers` ledger in its own git dir, or the saved `lsof` list has a line that is `n<path>` or starts `n<path>/`. With `--safe-only`, keep every worktree if `lsof` is missing or you can't check live use.
+- `dirty`: a worktree whose `git -C <path> status --porcelain` prints anything, or whose ignored paths include anything outside the rebuildable folders in Phase A. `unpushed`: a worktree head or branch tip that isn't `merged` and that `git branch -r --contains <sha>` doesn't list. `recent`: `find <path> -name node_modules -prune -o -mmin -1440 -print -quit` prints something. `merged`: `git merge-base --is-ancestor <sha> origin/<main>` passes. In interactive runs on Git 2.38 or later, a squash merge also counts if `git merge-tree --write-tree origin/<main> <sha> | head -1` prints `git rev-parse 'origin/<main>^{tree}'`. `unverified`: a check needed for removal failed or could not run.
 
 | Sort | What goes there |
 |---|---|
 | Safe | no keep label, and nothing lost: `merged` worktrees and branches, those of `cancelled` tickets (a remote branch holds the tip), `qa-<id>-*` and `review-<id>-*` worktrees whose ticket isn't `in_review`, `prunable` entries |
-| Ask first | the rest with none of the keep labels: other pushed but unmerged worktrees and branches, evidence folders, rebuildable folders, temp files, empty folders, temp folders: the machine's temp folder holds other projects' and tools' folders too |
+| Ask first | the rest with none of the keep labels: other pushed but unmerged worktrees and branches, evidence folders, rebuildable folders, temp files, empty folders and temp folders |
 | Keep | anything `in-use`, `recent`, `dirty`, `unpushed` or `unverified`; harness folders (`.claude/`, `.agents/`), `AGENTS.md`, `CLAUDE.md`, `.env*` and other secrets files, and every `*.lock` file: a live git or tool call holds it |
 
-If no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates, and remove them after Phase D, as [references/code.md](references/code.md) says.
+With `--safe-only`, Safe is limited to two groups with no keep label:
+
+- Local `maestro/*` branches checked out nowhere whose tips are ancestors of `origin/<main>` and that plain branch deletion accepts as merged.
+- Worktrees on `maestro/*` branches or with `qa-` or `review-` run names, with a `done` or `cancelled` ticket. Keep `prunable` entries.
+
+Put every other candidate under `Waiting`. Skip code candidates, even with `--code`. In interactive runs, if no cleanup candidate sorts Safe or Ask first, or with `--code`, also find and sort code candidates and remove them after Phase D, as [references/code.md](references/code.md) says.
 
 ## Phase C: Show the list
 
-Show every candidate by sort and class, with its labels, proof (the merge check, the ticket status, the status output), size from `du -sh` and last change date. For a `dirty` worktree, show `git -C <path> status --short`. Say how many `tmp.*` folders you own and how old the oldest is, so stale ones show up even before they qualify. For a class over 20 items, show its count, total size and first 10, and write the full list to a file in `$S`. With `--dry-run`, stop here.
+For `--safe-only`, show the Safe candidates with proof and report `Waiting` as counts by class with at most 10 paths in all. Otherwise, show candidates by sort and class, with labels, proof, size from `du -sh` and last change date. For a class over 20 items, show its count, total size and first 10, and write the full list to `$S`. Say how many `tmp.*` folders you own and how old the oldest is. When you show a worktree, include its server ledger lines and any status output that kept it. With `--dry-run`, stop here.
 
 ## Phase D: Remove
 
-1. Remove safe items now. Remove ask-first items only after the user says yes. List the rest under `Waiting`. Before each class, save the shared lists again. Before each removal, test the item's labels again with fresh per-item calls (its ticket on the board, `git -C <path> status --porcelain`) and skip it if its sort changed.
-2. Worktrees: `git worktree remove <path>`, never `--force`, then `git worktree prune`. Files and folders: `rm -r <path>` or `rmdir <path>`, one explicit path at a time, never a glob or `git clean`. Another session can act between your test and your command: if one fails because the item is gone, count it as removed by someone else; if it fails on a `.lock` file, skip the item, list it under `Kept`, and never delete the lock.
-3. Branches: `git branch -d` checks the current HEAD, and local `<main>` lags, so run it from a checkout of `origin/<main>`: `D=$(mktemp -d)`, `git worktree add --detach $D/main origin/<main>`, `git -C $D/main branch -d <branch>...` with every branch in one call, so the shared ref file is rewritten once, then `git worktree remove $D/main && rmdir $D`. Include the branch of each worktree removed in step 2 when that branch sorts Safe or got a yes. If `-d` refuses a squash-merged branch, `git branch -D <branch>`: the one `-D` this skill allows, an exception to **maestro-working-principles**, for no other branch. Report its sha, so `git branch <branch> <sha>` brings it back.
+1. Remove Safe items. Only in interactive runs, ask before removing Ask first items. List the rest under `Waiting`. Before each class, save the shared lists again. Before each removal, check the item's labels again with fresh per-item data and skip it if its sort changed.
+2. Worktrees: `git worktree remove <path>` without `--force`. Use `git worktree prune` only in interactive runs and only if every `prunable` entry passes the removal checks. Leave server ledgers and their processes alone. Files and folders: `rm -r <path>` or `rmdir <path>`, one explicit path at a time, never a glob or `git clean`. Skip paths that contain a listed worktree. If another session removed an item first, report that. If a `.lock` blocks removal, keep the item and the lock.
+3. Branches: `git branch -d` can check the current HEAD, and local `<main>` lags, so run it from a checkout of `origin/<main>`: `D=$(mktemp -d)`, `git worktree add --detach $D/main origin/<main>`, `git -C $D/main branch -d <branch>...` with every branch in one call, then `git worktree remove $D/main && rmdir $D`. Check the branch of each removed worktree against the same rules. In `--safe-only`, put any branch that `-d` refuses under `Waiting`. Only in interactive runs, if `-d` refuses a squash-merged branch, use `git branch -D <branch>`. This is the sole exception to the force-delete rule in **maestro-working-principles**. Report its sha so `git branch <branch> <sha>` brings it back.
 
 ```
 Removed:  <class>: <path> (<proof>)
 Kept:     <path>: <labels or reason>
-Waiting:  <ask-first items still waiting on the user>
+Waiting:  <items waiting, in the Phase C format>
 Freed:    <df -h . before> -> <after>
-Code:     <PR url | "skipped: cleanup found work" | "nothing unused">
+Code:     <PR url | "skipped: --safe-only" | "skipped: cleanup found work" | "nothing unused">
 ```
 
 **Reply:** the report above, filled in.

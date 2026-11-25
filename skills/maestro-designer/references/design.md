@@ -11,7 +11,7 @@ The screen tickets come from your spec. The draft PR never merges.
 
 ## Phase B: Frame
 
-1. Fetch main and read the agent notes there. Read any design rules file they name and check whether they name a dark theme. Read the code for the screens the ticket names and the screens next to them on main.
+1. Pick main as **maestro-working-principles** says. Fetch it and read the agent notes there. Read any design rules file they name and check whether they name a dark theme. Read the code for the screens the ticket names and the screens next to them on main.
 2. Find the app's look in that code: its colours, type, spacing and the components those screens use. Write down the few you'll reuse.
 3. Write the problem in a line or two: who has it, what they're trying to do, what happens if nothing is built.
 4. Breadboard it in text before you draw: each place (a page, dialog or panel) with its route or file, what a person can do there, and where each action goes. Walk the ticket's use case through it and fix what doesn't hold.
@@ -45,7 +45,7 @@ The screen tickets come from your spec. The draft PR never merges.
    ```
 
    Each criterion names one thing QA can check on the built screen at a width in px. Cover the pick's layout at each width, each state that changes it, each action in the breadboard, and each motion: what starts it, what moves, its ms, and what reduced motion shows.
-2. Run this skill's `scripts/design-pr.sh <id> <run folder> --title '<ticket title>'`, with bash, from the repo. It checks the spec, and a clip of the pick unless `Motion:` is `none`; pushes the spec, sheets, the pick's shots and every clip to branch `maestro/<id>`, opens or updates the draft PR, and writes the `Design spec:` note and the owner's card (`Escalation: design ready`) to the files its `spec=` and `card=` lines name. On `problem=` lines, fix the spec and run it again. On `stop=`, stop and reply `design: refused` with the reason. On any other failure, run it once more; it repeats nothing it already did.
+2. Run this skill's [design-pr.sh](../scripts/design-pr.sh) with bash from the repo. Pass the id and run folder, `--title` with the ticket title, and `--base` with the branch you chose in Phase B. It checks the spec and a clip of the pick unless `Motion:` is `none`. It pushes the spec, sheets, the pick's shots and every clip to branch `maestro/<id>`, opens or updates the draft PR, and writes the `Design spec:` note and the owner's card (`Escalation: design ready`) to the files its `spec=` and `card=` lines name. On `problem=` lines, fix the spec and run it again. On `stop=`, stop and reply `design: refused` with the reason. On any other failure, run it once more; it repeats nothing it already did.
 3. Post the spec note, then the card, on the ticket, skipping either if the ticket already has it for the same sha. Move the ticket to `blocked` and release your claim.
 
 **Reply:** the block in [SKILL.md](../SKILL.md) Phase B, `ready` with the PR and the `sha=` it printed.

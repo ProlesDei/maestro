@@ -35,8 +35,9 @@ if [ "${1-}" = --qa ]; then
 	qa=1
 	shift
 fi
-[ $# -eq 1 ] || die 2 "usage: review-prep.sh [--qa] <PR number | maestro/<name>>"
+[ $# -ge 1 ] && [ $# -le 2 ] || die 2 "usage: review-prep.sh [--qa] <PR number | maestro/<name>> [base]"
 target=$1
+main=${2-}
 
 # 4.4: mapfile, and "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
@@ -51,12 +52,17 @@ empty=$(git hash-object -t tree /dev/null)
 git --attr-source="$empty" rev-parse --git-dir >/dev/null 2>&1 && attrs=(--attr-source="$empty")
 gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}" diff "$@"; }
 
-# The main branch, from the remote's default branch, never the PR's tree:
-# origin/HEAD when the clone has it, else GitHub's answer.
 mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
-main=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
-main=${main#origin/}
-[ -n "$main" ] || main=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || true)
+if [ -z "$main" ]; then
+	# The main branch, from the remote's default branch, never the PR's tree:
+	# origin/HEAD when the clone has it, else GitHub's answer.
+	main=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
+	main=${main#refs/remotes/origin/}
+	[ -n "$main" ] || main=$(git ls-remote --symref origin HEAD 2>/dev/null |
+		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	main=${main:-main}
+fi
+git check-ref-format "refs/heads/$main" || die 2 "invalid base branch: $main"
 
 # The root files agents read as rules, as main has them since the last
 # fetch; the main checkout's copy only where main has none.
@@ -172,7 +178,6 @@ branch=$(jq -r .headRefName <<<"$view")
 fork=$(jq -r .isCrossRepository <<<"$view")
 [[ $H =~ ^[0-9a-f]{40}$ ]] || die 1 "PR $pr has no head sha"
 [ -z "$want" ] || [ "$branch" = "$want" ] || die 1 "PR $pr is on $branch, not $want"
-[ -n "$main" ] || die 3 "no default branch on origin to review against"
 
 state=$(jq -r .state <<<"$view")
 base=$(jq -r .baseRefName <<<"$view")
