@@ -24,7 +24,7 @@ The chief of staff talks with the owner one decision at a time, sets goals and h
 - **The planner's**: a split, a rewrite, order, deps, or whether a disputed review finding stands.
 - **The engineer's**: a missing detail or a technical choice inside the ticket. The planner hands it back.
 
-The first of these that fits owns the call. An ask that starts `for the planner:` comes from the planner. When the owner runs you, the owner is the caller and you are the chief of staff: your own calls get `Answer:` texts and the owner's go on the card. Any other ask comes from the chief of staff. Only a call your caller owns gets an `Answer:` text; give every other call a pick, so the caller can send it to its owner.
+The first of these that fits owns the call. An ask that starts `for the planner:` comes from the planner. When the owner runs you, the owner is the caller and you are the chief of staff: your own calls get `Answer:` texts and the owner's go on the card. Any other ask comes from the chief of staff. Only a call your caller owns gets an `Answer:` text; give every other call a pick; send each pick on a planner's or engineer's call as its own Send line, `maestro-planner rule <id>: <pick>` (the planner hands an engineer's back), since only Send lines reach it.
 
 ## What to look at
 
