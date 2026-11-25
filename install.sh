@@ -173,7 +173,9 @@ if [ -f "$manifest" ]; then
   case $(head -n 1 "$manifest") in
     "format 1") cp "$manifest" "$prev" ;;
     format*) die "$manifest isn't format 1, so a newer Maestro placed it; run the install one-liner in INSTALL.md, which runs the newest installer" ;;
-    *) awk -F'\t' -v OFS='\t' '$1=="d"{$2=".maestro/skills/" $2} {print}' "$manifest" > "$prev" ;;
+    *)
+      if grep -v "^[dfl]$tab" "$manifest" | grep -q .; then die "$manifest isn't one Maestro wrote; move it aside first"; fi
+      awk -F'\t' -v OFS='\t' '$1=="d"{$2=".maestro/skills/" $2} {print}' "$manifest" > "$prev" ;;
   esac
   bad=$(awk -F'\t' '$1=="d"{p=$2} $1=="f"||$1=="l"{p=$3} $1!~/^[dfl]$/{next}
     (p ~ /(^|\/)\.\.(\/|$)/ || p !~ /^(\.maestro\/|\.(claude|agents)\/skills\/maestro-)./) && n++ < 20 {print "  " p}' "$prev")

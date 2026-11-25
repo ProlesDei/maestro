@@ -67,6 +67,9 @@ mkdir -p "$s/t/.claude/skills/maestro-planner" && echo x > "$s/t/.claude/skills/
 git -C "$s/t" add -A && commit
 refuses "foreign path clash" inst
 
+fresh && mkdir "$s/t/.maestro" && printf 'name: app\n' > "$s/t/.maestro/manifest" && git -C "$s/t" add -A && commit
+refuses "the team's own .maestro/manifest" inst
+
 fresh && git -C "$s/t" config core.symlinks false
 refuses "core.symlinks=false" inst
 
