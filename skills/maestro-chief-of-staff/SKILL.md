@@ -19,7 +19,7 @@ The chief of staff talks with the owner one decision at a time, sets goals and h
 
 ## Whose call
 
-- **The owner's** when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; trades speed for quality on work that matters; or is the yes a review asks for before it passes a change to dependencies, CI, hooks or agent settings. If any option on the table is one of these, the whole call is the owner's, unless the ask quotes a standing rule of the owner's that covers it; then it is the chief of staff's.
+- **The owner's** when it changes a goal, scope or priority they set; costs real money; is hard to undo (deleting data, a production deploy); speaks for them outside the team; trades speed for quality on work that matters; is the yes a review asks for before it passes a change to dependencies, CI, hooks or agent settings; is a taste call, such as approving a `Design:` scout; or is an outside step only a person can take (an escalation ending `owner's call`). If any option on the table is one of these, the whole call is the owner's, unless the ask quotes a standing rule of the owner's that covers it; then it is the chief of staff's.
 - **The chief of staff's** when it changes the goal, scope or priority it gave the planner, drops work the goal asked for, or costs far more time or money than the goal implies.
 - **The planner's**: a split, a rewrite, order, deps, or whether a disputed review finding stands.
 - **The engineer's**: a missing detail or a technical choice inside the ticket. The planner hands it back.
