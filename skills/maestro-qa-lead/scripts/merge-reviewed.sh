@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# QA has posted its verdict. Merge the tested head only while the PR and the
-# base are still what QA tested, and print the merge commit.
+# QA has posted its verdict. Merge the tested head and check the base.
 set -euo pipefail
 [[ $# == 4 ]] || { echo 'usage: merge-reviewed.sh pr head base tested_base' >&2; exit 2; }
 pr=$1 head=$2 base=$3 tested_base=$4
@@ -15,5 +14,12 @@ if jq -e '.state == "OPEN"' <<<"$view" >/dev/null; then
 	gh pr merge "$pr" --disable-auto >&2 || true
 	gh pr view "$pr" --json autoMergeRequest -q '"auto-merge off: \(.autoMergeRequest == null)"' >&2
 fi
-jq -er --arg base "$base" --arg head "$head" \
-	'select(.state == "MERGED" and .baseRefName == $base and .headRefOid == $head) | .mergeCommit.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<<"$view"
+merge=$(jq -er --arg base "$base" --arg head "$head" \
+	'select(.state == "MERGED" and .baseRefName == $base and .headRefOid == $head) | .mergeCommit.oid | select(type == "string" and test("^[0-9a-f]{40}$"))' <<<"$view")
+echo "$merge"
+git fetch -q origin "$merge"
+parent=$(git rev-parse --verify "$merge^1")
+if [[ $parent != "$tested_base" ]]; then
+	echo "merged $merge onto an untested base $parent" >&2
+	exit 4
+fi

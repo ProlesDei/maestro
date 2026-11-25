@@ -37,7 +37,7 @@ Pick the row that fits the request. For several, do them in table order and answ
 
 If no row fits, say what you can do and stop.
 
-Before a job's first ticket write, check open claims. Free a claim as **Claims** says if the board or launcher shows the worker's run ended, or 24 hours have passed since the latest claim, ticket comment, status change or commit on its branch. Return the ticket to its queue for the same stage and post who held the claim and why you freed it. Report any release you could not make safely.
+At the start of a job that writes tickets, check open claims. Free a claim as **Claims** says if the board or launcher shows the worker's run ended, or 24 hours have passed since the latest claim, ticket comment, status change or commit on its branch. Leave freed `blocked` tickets in place and return the others to their queue for the same stage. Post who held each claim and why you freed it. Report any release you could not make safely.
 
 ## Phase B: Check a plan
 
