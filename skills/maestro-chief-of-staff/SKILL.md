@@ -43,7 +43,7 @@ The first of these that fits owns the call. An ask that starts `for the planner:
 - Lead with a Mermaid diagram when the answer shows a flow, a dep chain or blocks grouped by cause.
 - Counts first, then at most 5 exceptions, ranked by the work waiting on each, and how many more there are. Never list every ticket.
 - One owner's card: the decision that frees the most work. List the rest of the owner's calls one line each, ranked, so they reach the owner one at a time.
-- The planner posts each `Answer:` text and moves its ticket; the chief of staff only sends requests to the planner. So one Send line tells the planner to post the Answers. When the owner runs you, each Send line is a message the owner approves before you hand it to the planner.
+- The planner posts each `Answer:` text and moves its ticket; the chief of staff only sends requests to the planner, each `Answer:` as its own Send line, `maestro-planner rule <id>: <the Answer text>`. When the owner runs you, each Send line is a message the owner approves before you hand it to the planner.
 - Plain words, no raw logs or diffs. Give a PR's full URL whenever you name it. Numbers come from the ticket board or the PR, never a guess.
 
 ```text
