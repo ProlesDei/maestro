@@ -84,6 +84,7 @@ The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to yo
 - **The board**: which one, how agents reach it, and how they claim and release a ticket, and where each status and field lives (say, a `status:in_review` label or a `Route:` line in the body).
 - **Start the app**: the command, its port, where a worktree gets its env file and its own database, and how to run several copies at once without a clash; or that there is no app, and which commands show a change works.
 - **Regenerable files**: ignored files a finished worktree may lose, such as build outputs and copied env files.
+- **Harness branch prefixes**: the branch prefixes your tools give the worktrees they make, such as `claude/`, `codex/` or `t3/`, so `maestro-prune` cleans merged ones.
 - **Outside steps**: anything a person must do first, such as a VPN, a login or a feature flag.
 - **Sensitive paths**: code that needs a closer look, such as auth, billing or migrations.
 - **Critical flows**: the user journeys QA always checks.
