@@ -126,6 +126,8 @@ Updating past the version that made the planner a product owner? Your outer laye
 
 Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Keep them out of formatters and pre-commit hooks, as Install says. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
 
+Review never sends an update back over what it finds in the files Maestro placed. It lists those findings as `upstream` follow-ups for you to raise with Maestro, and asks you before it passes one it rates a blocker.
+
 ## Uninstall
 
 ```bash
