@@ -11,14 +11,20 @@ die() {
 	printf 'prune-safe: %s\n' "$2" >&2
 	exit "$1"
 }
-usage='usage: prune-safe.sh [--dry-run] [--main <branch>] [<rebuildable path>...]'
-dry='' main=''
+usage='usage: prune-safe.sh [--dry-run] [--main <branch>] [--prefix <branch prefix>]... [<rebuildable path>...]'
+dry='' main='' prefixes=(maestro/)
 while [[ $# -gt 0 ]]; do
 	case $1 in
 		--dry-run) dry=1 ;;
 		--main)
 			[[ $# -ge 2 && -n $2 ]] || die 2 "$usage"
 			main=$2
+			shift
+			;;
+		--prefix)
+			[[ $# -ge 2 && -n $2 ]] || die 2 "$usage"
+			git check-ref-format "refs/heads/${2}x" || die 2 "bad branch prefix: $2"
+			prefixes+=("$2")
 			shift
 			;;
 		-*) die 2 "$usage" ;;
@@ -44,6 +50,15 @@ fi
 git check-ref-format "refs/heads/$main" || die 2 "bad main branch: $main"
 tip=$(git rev-parse -q --verify "refs/remotes/origin/$main^{commit}") ||
 	die 1 "no origin/$main after the fetch; pass --main"
+
+ours() {
+	local name=${1#refs/heads/} p
+	[[ $1 == refs/heads/* && $name != "$main" ]] || return 1
+	for p in "${prefixes[@]}"; do
+		[[ $name != "$p"* ]] || return 0
+	done
+	return 1
+}
 
 removed=0 kept_n=0 gone_n=0
 remove_line() {
@@ -102,7 +117,7 @@ check_worktree() {
 	local wt=$1 branch=$2 flags=$3 real head gd label err pr=''
 	if [[ -z $branch && ${wt##*/} =~ ^(qa|review)-pr-([1-9][0-9]*)- ]]; then
 		pr=${BASH_REMATCH[2]}
-	elif [[ $branch != refs/heads/maestro/* ]]; then
+	elif ! ours "$branch"; then
 		return 0
 	fi
 	[[ $flags != *' locked'* ]] || { kept "$wt" locked; return; }
@@ -157,6 +172,7 @@ done 3< <(git worktree list --porcelain && echo)
 
 checked=$(git worktree list --porcelain | sed -n 's/^branch //p')
 while read -r ref sha <&3; do
+	ours "$ref" || continue
 	name=${ref#refs/heads/}
 	if grep -qxF "$ref" <<<"$checked" && ! grep -qxF "$ref" <<<"$freed"; then continue; fi
 	git merge-base --is-ancestor "$sha" "$tip" || { kept "$name" unmerged; continue; }
@@ -169,7 +185,7 @@ while read -r ref sha <&3; do
 	else
 		kept "$name" "refused: $(head -n 1 <<<"$err")"
 	fi
-done 3< <(git for-each-ref --format='%(refname) %(objectname)' refs/heads/maestro/)
+done 3< <(git for-each-ref --format='%(refname) %(objectname)' refs/heads/)
 
 ev=$common/maestro/evidence
 if [[ -d $ev && ! -L $common/maestro && ! -L $ev ]] && compgen -G "$ev/pr-*" >/dev/null; then

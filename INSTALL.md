@@ -50,7 +50,7 @@ your-repo/
 
 | Ticket | Start |
 |---|---|
-| `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
+| `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model and effort its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
 | `in_review` with route `qa`, or whose latest `Review: GO at` names the PR's head with no `Rereview:` after it | `maestro-qa-lead <id>` |
 | any other `in_review` | `maestro-code-review <id>` |
 | `blocked`, once per `Escalation:` (a run counts once a card, a `joins` line, a Send line or an Answer names the ticket), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>`, naming each card still waiting on the owner, so one cause joins its card |
@@ -84,11 +84,13 @@ The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to yo
 - **The board**: which one, how agents reach it, and how they claim and release a ticket, and where each status and field lives (say, a `status:in_review` label or a `Route:` line in the body).
 - **Start the app**: the command, its port, where a worktree gets its env file and its own database, and how to run several copies at once without a clash; or that there is no app, and which commands show a change works.
 - **Regenerable files**: ignored files a finished worktree may lose, such as build outputs and copied env files.
+- **Harness branch prefixes**: the branch prefixes your tools give the worktrees they make, such as `claude/`, `codex/` or `t3/`, so `maestro-prune` cleans merged ones.
 - **Outside steps**: anything a person must do first, such as a VPN, a login or a feature flag.
 - **Sensitive paths**: code that needs a closer look, such as auth, billing or migrations.
 - **Critical flows**: the user journeys QA always checks.
 - **Browser tool**, if not `playwright-cli`.
 - **Who proves the work**, if engineers prove their own instead of QA.
+- **Models and effort**, if not the defaults: the model each `tier` runs on, and any effort other than high.
 
 ## Give sessions full permissions
 
@@ -125,6 +127,8 @@ It fetches Maestro's latest `main` (or `--ref`), replaces only what it placed, r
 Updating past the version that made the planner a product owner? Your outer layer now runs the sessions as **Running the sessions** says: it frees claims, including the ones older engineers kept on escalated tickets, and schedules `maestro-prune --safe-only` and `maestro-planner board`.
 
 Don't edit the files Maestro placed (`.maestro/manifest` lists them): the update stops until you undo the edit. Keep them out of formatters and pre-commit hooks, as Install says. Put your own skills straight in `.claude/skills/` and `.agents/skills/`, named without `maestro-`.
+
+Review never sends an update back over what it finds in the files Maestro placed. It lists those findings as `upstream` follow-ups for you to raise with Maestro, and asks you before it passes one it rates a blocker.
 
 ## Uninstall
 

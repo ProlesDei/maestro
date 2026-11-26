@@ -30,7 +30,7 @@ You split the work, launch the workers, check what they return, and write one re
    - its own worktree and branch: for a ticket, a worktree of its own on branch `maestro/<ticket-id>`, so QA and review find its PR; else `maestro/swarm-<tag>-<k>`, cut from one base sha, with `<tag>` a short slug and 4 random letters, so no other swarm or earlier run has the branch
    - done criteria and the proof to return: command, exit code, paths
    - the reply shape: `done`, `partial` or `blocked`; branch and sha; files; proof; open questions
-2. Launch them all in one message: use parallel subagents. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
+2. Launch them all in one message: use parallel subagents, each at the effort **Model and effort** in **maestro-working-principles** sets. Use the harness's worktree isolation only for slices that aren't tickets, since it names its own branch. If one drops out, go on with N-1 and say so.
 3. Find each worker's worktree path from the launch or Git's worktree list.
 
 ## Phase C: Check
