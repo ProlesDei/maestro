@@ -29,7 +29,7 @@ Follow the **maestro-working-principles** skill.
    | status | `todo` (ready) or `backlog` (not ready) | `todo` if every criterion can be checked |
    | parked | why a `backlog` ticket waits: `hold` (someone said wait), `deferred` (cut from this slice) or `unready` (a criterion can't be checked yet) | `unready` |
    | goal | slug of the goal it serves, so the board counts progress per goal | the goal you were given, else none |
-   | tier | how strong a model whoever starts the engineer picks: `junior` for a routine ticket (clear criteria, one area, easy to undo), else `senior` (security, money, data migrations, public APIs, concurrency, unclear scope) | your pick by that rule |
+   | tier | which model and effort whoever starts the engineer picks: `junior` for a routine ticket (clear criteria, one area, easy to undo), which may run at medium effort, else `senior` (security, money, data migrations, public APIs, concurrency, unclear scope), at high | your pick by that rule |
    | route | who checks the PR before QA merges it: `review`, or `qa` to skip review. Only the planner picks `qa`, and only when the change stays in one place, QA can see it work, and a revert puts users back where they were; never judge that by diff size. Say in the body what QA should try and why a revert is enough. Pick `review` when unsure, for lasting side effects or for any [tier 2 risk](../maestro-code-review/references/passes.md#pick-the-tier) | `review` |
    | role | who builds it: `engineer`, the one role that builds tickets. QA and review take only built tickets, so they are never a ticket's role; `designer` works only a `Design:` ticket, which **maestro-planner** ([SKILL.md](../maestro-planner/SKILL.md)) makes | `engineer` |
 

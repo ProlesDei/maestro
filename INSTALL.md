@@ -50,7 +50,7 @@ your-repo/
 
 | Ticket | Start |
 |---|---|
-| `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
+| `todo` with every dep `done` and no area shared with a claimed ticket, or `in_progress` with no claim | `maestro-software-engineer <id>` on the model and effort its `tier` names, or `maestro-designer design <id>` for a `Design:` scout |
 | `in_review` with route `qa`, or whose latest `Review: GO at` names the PR's head with no `Rereview:` after it | `maestro-qa-lead <id>` |
 | any other `in_review` | `maestro-code-review <id>` |
 | `blocked`, once per `Escalation:` (a run counts once a card, a `joins` line, a Send line or an Answer names the ticket), unless a card waiting on the owner names it | `maestro-chief-of-staff <id>`, naming each card still waiting on the owner, so one cause joins its card |
@@ -90,6 +90,7 @@ The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to yo
 - **Critical flows**: the user journeys QA always checks.
 - **Browser tool**, if not `playwright-cli`.
 - **Who proves the work**, if engineers prove their own instead of QA.
+- **Models and effort**, if not the defaults: the model each `tier` runs on, and any effort other than high.
 
 ## Give sessions full permissions
 
