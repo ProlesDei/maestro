@@ -69,9 +69,8 @@ in_use() {
 is_rebuildable() {
 	local path=${1%/} pat
 	for pat in "${rebuildable[@]}"; do
-		case $path in $pat) return 0 ;; esac
-	done
-	for pat in "${rebuildable[@]}"; do
+		pat=${pat%/} pat=${pat#./} pat=${pat#/}
+		case $path in $pat | $pat/*) return 0 ;; esac
 		case ${path##*/} in $pat) return 0 ;; esac
 	done
 	return 1
