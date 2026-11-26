@@ -112,6 +112,7 @@ check_worktree() {
 	head=$(git -C "$wt" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null) || { kept "$wt" unverified; return; }
 	if [[ -n $pr ]]; then
 		pr_done "$pr" || { kept "$wt" pr-open-or-unknown; return; }
+		[[ -n $(git for-each-ref --count=1 --contains "$head" refs/heads refs/remotes 2>/dev/null) ]] || { kept "$wt" unpushed; return; }
 	else
 		git merge-base --is-ancestor "$head" "$tip" || closed_pushed "${branch#refs/heads/}" "$head" || { kept "$wt" unmerged; return; }
 	fi
