@@ -4,7 +4,8 @@ set -euo pipefail
 
 rebuildable=(node_modules .venv venv target dist build out .next .turbo __pycache__
 	.pytest_cache .mypy_cache .ruff_cache .tox coverage htmlcov '*.egg-info' .coverage
-	'*.tsbuildinfo' next-env.d.ts)
+	'*.tsbuildinfo' next-env.d.ts test-results playwright-report blob-report .svelte-kit .nuxt .output
+	.gradle .parcel-cache .angular .eslintcache)
 
 die() {
 	printf 'prune-safe: %s\n' "$2" >&2
