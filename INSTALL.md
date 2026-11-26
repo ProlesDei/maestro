@@ -9,7 +9,7 @@ flowchart LR
   PR --> R[maestro-code-review] --> Q[maestro-qa-lead] --> M[Merged]
 ```
 
-`.maestro/` is the only copy. `.claude/skills/` and `.agents/skills/` hold symlinks into it. Your own files in `.maestro/`, such as mobile.dev Maestro flows, stay yours:
+`.maestro/` is the only copy. `.claude/skills/` and `.agents/skills/` hold symlinks into it. Your own files in `.maestro/`, such as mobile.dev Maestro flows, stay yours (if your mobile.dev config picks up flows from every subfolder, leave out `skills/`: its YAML files aren't flows):
 
 ```
 your-repo/
