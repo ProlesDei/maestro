@@ -60,7 +60,7 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 Majors, minors and nits never hold a GO.
 
 **ESCALATE** instead, and stop short of GO or NO-GO, when:
-- it would be GO but needs the owner's yes: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion); and `--approved` doesn't name `H`, nor did an `Answer:` give that yes at an earlier head in `H`'s history whose later changes by the author touch none of these (cite it);
+- it would be GO but needs the owner's yes: the diff changes dependencies, lockfiles, CI, hooks or agent settings, or does something a revert can't undo (a migration that drops or rewrites data, a deploy, a deletion); and `--approved` doesn't name `H`, nor did an `Answer:` give that yes at an earlier head in `H`'s history whose later changes by the author touch none of these, nor did one approve the exact package and version that the diff's dependency and lockfile changes add and nothing else (cite it);
 - a gate needs an outside step that isn't done (Phase A step 3);
 - every surviving blocker was raised in an earlier review `Kickback:` (not QA's), and either the author disputes it in the `Handoff:` since or review raised it at two different shas, and `--drop` names none of them: the planner settles a dispute, so a repeat Kickback would loop. List each with the author's answer and your evidence.
 
