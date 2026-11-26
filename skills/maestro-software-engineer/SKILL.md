@@ -1,6 +1,6 @@
 ---
 name: maestro-software-engineer
-description: "Plan, write and self-review code. Use for /maestro-software-engineer, 'make this change', 'implement X', 'fix the kickback on T-12', code design questions or before any code edit or refactor. Not for docs-only edits, writing skills, proving finished work or reviewing a PR."
+description: "Plan, write and self-review code. Use for /maestro-software-engineer, a Maestro ticket to build ('implement T-12', 'fix the kickback on T-12'), or code work on a `maestro/` branch. Not for a person's own edits outside Maestro, docs-only edits, docs-only edits, writing skills, proving finished work or reviewing a PR."
 ---
 
 # Software engineer
@@ -13,7 +13,7 @@ Follow the **maestro-working-principles** skill and its [build rules](../maestro
 
 ## Phase A: Get into a worktree, up to date
 
-1. Before you edit, claim the ticket if you have one, then add or reuse a worktree and read its trail as the [build rules](../maestro-working-principles/references/build.md) say. A design question with no code needs none.
+1. Before you edit, add or reuse a worktree, claim the ticket if you have one under the holder you make there, and read its trail as the [build rules](../maestro-working-principles/references/build.md) say. A design question with no code needs none.
 2. Check absolute paths from earlier in the session before you write. On a ticket, a file you must change outside its `areas`: add it to the ticket's areas on the ticket board and say why in the PR. Escalate only if another live claim holds it, naming that ticket.
 3. If merging main causes a conflict, read the main commit that touched each hunk and keep what both sides meant. Regenerate a generated file or lockfile instead of hand-merging it. If both can't hold, stop and ask. Commit the merge alone, then rerun the build.
 
@@ -53,4 +53,4 @@ Proof:     <the real run that shows each criterion, and what it prints>
 4. Number each item in the latest `Kickback:` comment, review's or QA's. Fix exactly what it asks and nothing more (a fix that grows the diff gets the growth reviewed too), answer it with evidence, or disagree in one or two sentences. Rerun the checks and the proof for each item you touched. Review can take your answer to its own finding, but an item in a `Kickback: QA fail` clears only on a new QA run: one you dispute and won't fix is a block, never a handoff, so escalate it as **maestro-working-principles** says and ask the planner for a retest.
 5. On a ticket, push, open or update the PR and hand off as **maestro-working-principles** says. A PR that won't open is a block, not a handoff.
 
-**Reply:** the ticket's status, the PR URL or why there is none, the plan, the worktree, branch and commits, the main sha you last merged, one line per criterion with its proof and result, each check with its exit code, what self-review found and fixed, each kickback item and what you did, and what you left out of scope.
+**Reply:** `Next: maestro-code-review <id>`, or `maestro-qa-lead <id>` on route `qa`, once you hand off, `maestro-chief-of-staff <id>` after an `Escalation:`, else `Next: none`; then the ticket's status, the PR URL or why there is none, the plan, the worktree, branch and commits, the main sha you last merged, one line per criterion with its proof and result, each check with its exit code, what self-review found and fixed, each kickback item and what you did, and what you left out of scope.

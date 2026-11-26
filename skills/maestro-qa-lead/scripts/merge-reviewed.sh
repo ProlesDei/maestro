@@ -2,9 +2,10 @@
 # QA has posted its verdict. Merge the tested head and check the base.
 # Exit 0: merged on the tested base, M on stdout; 1: the PR's head, base,
 # state or fork changed since QA; 2: usage; 3: the base moved since QA's
-# pass; 4: merged onto an untested base, M on stdout; 5: not merged
-# (queued, auto-merge or refused), with gh's reason and the auto-merge
-# state; 6: gh or git couldn't read the state, so reread the PR. Each but
+# pass and its new commits touch a file the PR changes; 4: merged onto
+# an untested base (main moved, touching none of the PR's files), M on
+# stdout; 5: not merged (queued, auto-merge or refused), with gh's reason
+# and the auto-merge state; 6: gh or git couldn't read the state, so reread the PR. Each but
 # 0 and 2 gives its reason in one stderr line.
 set -euo pipefail
 die() { echo "merge-reviewed: $2" >&2; exit "$1"; }
@@ -25,7 +26,15 @@ why=$(changed OPEN)
 [[ -z $why ]] || die 1 "PR changed since QA: $why"
 remote=$(git ls-remote origin "refs/heads/$base") || die 6 "not merged: git ls-remote origin failed"
 remote=${remote%%$'\t'*}
-[[ $remote == "$tested_base" ]] || die 3 "base $base moved since QA pass: ${remote:-gone}"
+if [[ $remote != "$tested_base" ]]; then
+	[[ -n $remote ]] || die 3 "base $base moved since QA pass: gone"
+	gd() { git -c diff.relative=false -c diff.external= diff --no-ext-diff --no-renames --name-only "$@"; }
+	git fetch -q origin "$remote" 2>/dev/null && git merge-base --is-ancestor "$tested_base" "$remote" &&
+		ours=$(gd "$tested_base...$head") && theirs=$(gd "$tested_base" "$remote") ||
+		die 3 "base $base moved since QA pass: $remote, and git couldn't compare it"
+	both=$(LC_ALL=C comm -12 <(LC_ALL=C sort <<<"$ours") <(LC_ALL=C sort <<<"$theirs") | sed -n 1,3p | paste -sd, -)
+	[[ -z $both ]] || die 3 "base $base moved since QA pass: $remote changes $both"
+fi
 out=$(gh pr merge "$pr" --merge --match-head-commit "$head" 2>&1) || true
 out=${out//$'\n'/ }
 view=$(gh pr view "$pr" --json "$fields") || die 6 "merge state unknown: gh couldn't read PR $pr: $out"
@@ -35,7 +44,10 @@ if [[ $(jq -r .state <<<"$view") != MERGED ]]; then
 	# A queued or auto-merge PR would merge a later push no one tested.
 	gh pr merge "$pr" --disable-auto >/dev/null 2>&1 || true
 	view=$(gh pr view "$pr" --json "$fields") || view='{"autoMergeRequest":"unknown"}'
-	die 5 "not merged: ${out:-gh said nothing}; auto-merge off: $(jq '.autoMergeRequest == null' <<<"$view")"
+	checks=$(gh pr checks "$pr" --required --json name,bucket 2>/dev/null) || true
+	red=$(jq -r '[.[]? | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' <<<"${checks:-[]}" 2>/dev/null) || red=''
+	wait=$(jq -r '[.[]? | select(.bucket == "pending") | .name] | join(", ")' <<<"${checks:-[]}" 2>/dev/null) || wait=''
+	die 5 "not merged: ${out:-gh said nothing}; auto-merge off: $(jq '.autoMergeRequest == null' <<<"$view")${red:+; required checks red: $red}${wait:+; required checks pending: $wait}"
 fi
 why=$(changed MERGED)
 [[ -z $why ]] || die 1 "PR changed since QA: $why"

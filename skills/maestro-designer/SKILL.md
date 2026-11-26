@@ -36,4 +36,5 @@ Directions: <letter: one line each>
 Criteria: <how many>; taste calls: <how many>
 Picks: <each call you made, one line> | none
 Open: <what you couldn't settle or check> | none
+Next: maestro-chief-of-staff <id> once the card is posted | none
 ```

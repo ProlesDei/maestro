@@ -42,6 +42,7 @@ main=${2-}
 
 # 4.4: "${a[@]}" of an empty array under set -u.
 ((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404)) || die 1 "needs bash 4.4 or later (macOS: brew install bash)"
+[[ $(git version) =~ ([0-9]+)\.([0-9]+) ]] && ((BASH_REMATCH[1] * 100 + BASH_REMATCH[2] >= 238)) || die 1 "needs git 2.38 or later"
 # Paths as written, not quoted. Attributes from an empty tree and no
 # global attributes file, so a -diff in the PR's or the checkout's
 # .gitattributes, or the user's, hides no code from the counts or the
@@ -57,11 +58,12 @@ gd() { git -c core.quotePath=false -c core.attributesFile=/dev/null "${attrs[@]}
 mainwt=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 if [ -z "$main" ]; then
 	# The main branch, from the remote's default branch, never the PR's tree:
-	# origin/HEAD when the clone has it, else GitHub's answer.
-	main=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
-	main=${main#refs/remotes/origin/}
-	[ -n "$main" ] || main=$(git ls-remote --symref origin HEAD 2>/dev/null |
+	# GitHub's answer, else origin/HEAD, which goes stale when the default
+	# branch is renamed.
+	main=$(git ls-remote --symref origin HEAD 2>/dev/null |
 		sed -n 's@^ref: refs/heads/\(.*\)[[:space:]]HEAD$@\1@p' || true)
+	[ -n "$main" ] || main=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null || true)
+	main=${main#refs/remotes/origin/}
 	main=${main:-main}
 fi
 git check-ref-format "refs/heads/$main" || die 2 "invalid base branch: $main"
@@ -169,6 +171,12 @@ maestro/*)
 '#'[0-9]* | [0-9]*)
 	pr=${target#'#'}
 	[[ $pr =~ ^[0-9]+$ ]] || die 2 "$target is no PR number"
+	if ! gh pr view "$pr" --json number >/dev/null 2>&1; then
+		want=maestro/$pr
+		pr=$(gh api "repos/{owner}/{repo}/pulls?head={owner}:$want&state=all&per_page=1" --jq '.[0].number // empty') ||
+			die 1 "gh couldn't read PR $target or list the PRs of $want"
+		[ -n "$pr" ] || die 3 "no PR from $want"
+	fi
 	;;
 *) die 2 "want a PR number or maestro/<name>, not $target" ;;
 esac
@@ -337,7 +345,7 @@ lines=$n_lines nfiles=$n_files binary=$n_binary tier2=$n_tier2
 verdict='startswith("Review:") or (startswith("Kickback:") and (startswith("Kickback: QA fail") | not))'
 me=$(gh api user --jq .login 2>/dev/null) && [ -n "$me" ] || die 1 "gh couldn't read its own login"
 firsts=$(gh api --paginate "repos/{owner}/{repo}/issues/$pr/comments" | jq -r --arg me "$me" \
-	'.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or ($me != "" and .user.login == $me)) | .body | split("\n") | map(select(test("\\S"))) | .[0] // ""') ||
+	'.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR" or ($me != "" and .user.login == $me)) | .body | split("\n") | map(select(test("\\S") and (test("^\\s*```") | not))) | (.[0] // "") | sub("^[\\s*_#`]+"; "")') ||
 	die 1 "gh couldn't read PR $pr's comments"
 # sha_after <line> <text>: the full sha right after the first <text> in
 # the line, or nothing.
@@ -353,6 +361,8 @@ if [ -n "$qa" ]; then
 	rlast=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	review_go=
 	[[ $rlast != "Review: GO at "* ]] || review_go=$(sha_after "$rlast" "Review: GO at ")
+	review_tier='' re='\), tier ([0-2])(,|$)'
+	[[ -z $review_go || ! $rlast =~ $re ]] || review_tier=${BASH_REMATCH[1]}
 	# QA's own latest verdict. Only a fail that tested is a base for a
 	# retest: a pass or a "not tested:" checked nothing to carry over.
 	inc=retest by="QA's fail" why="no earlier QA verdict" K=""
@@ -431,6 +441,7 @@ fi
 	echo "tier2_paths=$tier2"
 	if [ -n "$qa" ]; then
 		echo "review_go=${review_go:-none}"
+		echo "review_tier=${review_tier:-none}"
 		echo "qa_last=$qa_last"
 		echo "qa_last_at=${qa_at:-none}"
 		echo "qa_last_main=${qa_main:-none}"
