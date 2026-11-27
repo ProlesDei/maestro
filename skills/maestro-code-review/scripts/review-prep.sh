@@ -381,6 +381,21 @@ else
 	last=$(jq -Rr "select($verdict)" <<<"$firsts" | tail -n 1)
 	# The word after the first " at " only, and only a full sha.
 	case $last in *" at "*) K=$(awk '{print $1}' <<<"${last#* at }"); [[ $K =~ ^[0-9a-f]{40}$ ]] || K= ;; *) K= ;; esac
+	# rounds_left: review Kickbacks left before a NO-GO must escalate.
+	# Two, less one per sha review kicked back at; after its latest
+	# round-cap escalation, one, less those since.
+	rounds_left=2 seen=" "
+	while IFS= read -r l; do
+		case $l in
+		"Escalation: review at "*": round cap"*) rounds_left=1 seen=" " ;;
+		"Kickback: QA fail"*) ;;
+		"Kickback:"*)
+			s=$(sha_after "$l" " at ")
+			[[ -n $s && $seen == *" $s "* ]] || { seen+="$s " rounds_left=$((rounds_left - 1)); }
+			;;
+		esac
+	done <<<"$firsts"
+	[ "$rounds_left" -ge 0 ] || rounds_left=0
 fi
 
 mode=full T="" dfiles="" dlines="" dclasses=""
@@ -446,6 +461,7 @@ fi
 		echo "qa_last_at=${qa_at:-none}"
 		echo "qa_last_main=${qa_main:-none}"
 	fi
+	[ -n "$qa" ] || echo "rounds_left=$rounds_left"
 	echo "K=${K:-none}"
 	echo "T=${T:-none}"
 	echo "delta_files=${dfiles:-none}"
