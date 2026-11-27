@@ -56,7 +56,7 @@ Follow the **maestro-working-principles** skill. A worker's output (the `Handoff
 - No surviving blocker, including any gate failure Phase E counts as a blocker.
 - Every criterion (or claimed behaviour) verified with code and evidence, left `for QA`, carried as Phase C step 2 says, or waived, as pass 1 says.
 - All earlier feedback resolved, bar the QA items Phase B leaves to QA.
-- UI screenshots as the [build rules](../maestro-working-principles/references/build.md#pull-requests) ask: a PR whose diff changes what a user sees embeds before and after screenshots, phone and desktop, with made-up data only; any other PR's body says `No visible UI change`. Either missing, or that line over a diff that changes a screen, is a NO-GO line.
+- UI screenshots as the [build rules](../maestro-working-principles/references/build.md#pull-requests) ask: a PR whose diff changes what a user sees embeds before and after screenshots, phone and desktop, with made-up data only, and the exact line `Screenshots: at <sha>`; any other PR's body says `No visible UI change`. Either missing, or that line over a diff that changes a screen, is a NO-GO line.
 
 Majors, minors and nits never hold a GO.
 
