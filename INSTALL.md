@@ -89,7 +89,7 @@ The skills read your repo's `AGENTS.md` or `CLAUDE.md` for what's specific to yo
 - **Sensitive paths**: code that needs a closer look, such as auth, billing or migrations.
 - **Critical flows**: the user journeys QA always checks.
 - **Browser tool**, if not `playwright-cli`.
-- **Screenshots**: where PR screenshots go so the PR page shows them, and how to load made-up data for them. Every PR with a visible UI change embeds before and after shots, phone and desktop; every other PR says `No visible UI change`.
+- **Screenshots**: where PR screenshots go so the PR page shows them (else one orphan `maestro-shots/<branch>` branch per PR, deleted after merge), and how to load made-up data for them. Every PR with a visible UI change embeds before and after shots, phone and desktop; every other PR says `No visible UI change`.
 - **Who proves the work**, if engineers prove their own instead of QA.
 - **Models and effort**, if not the defaults: the model each `tier` runs on, and any effort other than high.
 
