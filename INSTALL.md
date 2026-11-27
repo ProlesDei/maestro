@@ -108,7 +108,7 @@ Call each skill by name: `/maestro-planner` in Claude Code, `$maestro-planner` i
 
 1. `maestro-planner <goal>`: writes ordered tickets on the board and names the ones that can start now.
 2. `maestro-software-engineer <ticket id>`: claims the ticket, builds it in its own worktree, opens a PR and moves the ticket to `in_review`. `maestro-swarm` runs several at once.
-3. `maestro-code-review <ticket id>`: reviews the PR in a fresh session and posts its verdict.
+3. `maestro-code-review <ticket id>`: reviews the PR in a fresh session and posts its verdict. A single session that runs review in-process, itself or in a subagent, still posts it as a PR comment: later reviews read it from there.
 4. `maestro-qa-lead <ticket id>`: tests the PR in the running app, merges it if it passes and marks the ticket `done`.
 
 `maestro-chief-of-staff` checks facts and weighs calls for you along the way; it doesn't start work. [skills/README.md](skills/README.md) lists every skill.
