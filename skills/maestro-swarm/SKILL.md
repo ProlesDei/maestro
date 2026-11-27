@@ -1,8 +1,7 @@
 ---
 name: maestro-swarm
-description: "Run N parallel workers on slices of one job or on rival approaches to one problem, rerun every proof they return, and write one report. Use for /maestro-swarm, 'swarm this', 'fan this out', 'race these approaches', or a batch of Maestro tickets to run at once."
+description: "Run N parallel workers on slices inside one task, on a batch of Maestro tickets or on rival approaches to one problem, rerun every proof they return, and write one report. Use for /maestro-swarm, 'swarm this', 'fan this out', 'race these approaches', a task whose slices need their own branches, or a batch of tickets to run at once. Not for a one-file change, a quick lookup or parts that write the same file."
 argument-hint: "<task> [--n 3] [--race] [--slices a,b,c]"
-disable-model-invocation: true
 ---
 
 # Swarm
